@@ -5,6 +5,9 @@
 - 📫 How to reach me https://twitter.com/gilbert_algordo  ...
 - 🏆 Check out Gilbert Algordo on Strava
 https://www.strava.com/athletes/49978652
+- 📷 https://instagram.com/gilbert_algordo 
+
+
 <!---
 gilbertalgordo/gilbertalgordo is a ✨ special ✨ repository because its `README.md` (this file) appears on your GitHub profile.
 You can click the Preview link to take a look at your changes.
