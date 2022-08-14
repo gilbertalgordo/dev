@@ -6,7 +6,9 @@
 - 🏆 Check out Gilbert Algordo on Strava
 https://www.strava.com/athletes/49978652
 - 📷 https://instagram.com/gilbert_algordo 
-
+- 🗺 See what I've posted to Google Maps
+Level 6 Local Guide
+https://maps.app.goo.gl/VR34LhVFqZJKHSTa6
 
 <!---
 gilbertalgordo/gilbertalgordo is a ✨ special ✨ repository because its `README.md` (this file) appears on your GitHub profile.
