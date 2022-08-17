@@ -10,7 +10,7 @@ https://www.strava.com/athletes/49978652
 Level 6 Local Guide
 https://maps.app.goo.gl/VR34LhVFqZJKHSTa6
 - 💸 My Gpay https://pay.google.com/gp/w/home/paymentmethods?hl=en_US
-- 🛡 wiki https://commons.wikimedia.org/wiki/User:Gilbert_Algordo
+- 🛡 wiki commons https://commons.wikimedia.org/wiki/User:Gilbert_Algordo
 - 🛡 meta wiki https://meta.wikimedia.org/wiki/User:Gilbert_Algordo
 <!---
 gilbertalgordo/gilbertalgordo is a ✨ special ✨ repository because its `README.md` (this file) appears on your GitHub profile.
