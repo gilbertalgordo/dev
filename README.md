@@ -10,7 +10,7 @@ https://www.strava.com/athletes/49978652
 Level 6 Local Guide
 https://maps.app.goo.gl/VR34LhVFqZJKHSTa6
 
-- 🕊 wiki homepage https://en.wikipedia.org/w/index.php?title=Special:Homepage&source=personaltoolslink&namespace=0
+- ⚜ https://xtools.wmflabs.org/globalcontribs/Gilbert%20Algordo
 
 
 
