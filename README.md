@@ -11,7 +11,7 @@ Level 6 Local Guide
 https://maps.app.goo.gl/VR34LhVFqZJKHSTa6
 
 - ⚜ https://xtools.wmflabs.org/globalcontribs/Gilbert%20Algordo
-
+- ▶️ https://youtube.com/c/GilbertAlgordo
 
 
 <!---
