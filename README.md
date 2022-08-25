@@ -33,3 +33,7 @@ You can click the Preview link to take a look at your changes.
 <a href="http://www.w3.org/html/logo/">
 <img src="http://www.w3.org/html/logo/badge/html5-badge-h-connectivity-css3-device-graphics-multimedia-performance-semantics-storage.png" width="357" height="64" alt="HTML5 Powered with Connectivity / Realtime, CSS3 / Styling, Device Access, Graphics, 3D & Effects, Multimedia, Performance & Integration, Semantics, and Offline & Storage" title="HTML5 Powered with Connectivity / Realtime, CSS3 / Styling, Device Access, Graphics, 3D & Effects, Multimedia, Performance & Integration, Semantics, and Offline & Storage">
 </a>
+
+
+<div class="badge-base LI-profile-badge" data-locale="en_US" data-size="medium" data-theme="dark" data-type="VERTICAL" data-vanity="gilbert-algordo-b35b95249" data-version="v1"><a class="badge-base__link LI-simple-link" href="https://ph.linkedin.com/in/gilbert-algordo-b35b95249?trk=profile-badge">Gilbert Algordo</a></div>
+              
