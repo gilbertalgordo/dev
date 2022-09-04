@@ -55,3 +55,7 @@ user: {
 id: integer 🆁
 username: string 🆁
 }}
+
+
+
+https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-31#section-1.3
