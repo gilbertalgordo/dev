@@ -107,6 +107,8 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v1
+deploy: environment: name: github-pages url: ${{ steps.deployment.outputs.page_url }} url: ${{ https://github.com/gilbertalgordo/dev }} runs-on: ubuntu-latest steps: - name: Checkout uses: actions/checkout@v3 - name: Setup Pages uses: actions/configure-pages@v2 - name: Upload artifact uses: actions/upload-pages-artifact@v1 with: # Upload entire repository path: '.' - name: Deploy to GitHub Pages id: deployment uses: actions/deploy-pages@v1
+
 
 
 [Form](https://1drv.ms/w/s!Anc7QKzRz8_uj3ApBuelCtQbfHaF)
