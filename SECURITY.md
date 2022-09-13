@@ -108,6 +108,10 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v1
 
+# Create the runner and start the configuration experience
+$ ./config.sh --url https://github.com/gilbertalgordo/dev --token AQROVYAQSNZXMGPRLHTLEODDEAN3C# Last step, run it!
+$ ./run.sh
+
 
 <!-- Google tag (gtag.js) -->
 
