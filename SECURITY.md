@@ -96,6 +96,8 @@ deploy: environment: name: github-pages url: ${{ steps.deployment.outputs.page_u
 
 tar xzf ./actions-runner-osx-x64-2.296.2.tar.gz
 
+<iframe src="https://snowflake.torproject.org/embed.html" width="320" height="240" frameborder="0" scrolling="no"></iframe>
+
 
 <!-- Google tag (gtag.js) -->
 
