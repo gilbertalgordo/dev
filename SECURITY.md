@@ -100,6 +100,8 @@ tar xzf ./actions-runner-osx-x64-2.296.2.tar.gz
 
 https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:compose/material/
 
+
+https://my.nextdns.io/4e92b3/security
 content://com.cloudflare.onedotonedotonedotone/logs/console_log_1.txt
 
 
