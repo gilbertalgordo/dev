@@ -114,4 +114,6 @@ content://com.cloudflare.onedotonedotonedotone/logs/console_log_1.txt
 
 [![OSSAR](https://github.com/gilbertalgordo/samples/actions/workflows/ossar.yml/badge.svg)](https://github.com/gilbertalgordo/samples/actions/workflows/ossar.yml)
 
+[![PSScriptAnalyzer](https://github.com/gilbertalgordo/glorious-happiness/actions/workflows/powershell.yml/badge.svg)](https://github.com/gilbertalgordo/glorious-happiness/actions/workflows/powershell.yml)
+
 https://gist.github.com/gilbertalgordo
