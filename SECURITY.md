@@ -110,10 +110,6 @@ content://com.cloudflare.onedotonedotonedotone/logs/console_log_1.txt
 
 [![PSScriptAnalyzer](https://github.com/gilbertalgordo/dev/actions/workflows/powershell.yml/badge.svg?branch=main)](https://github.com/gilbertalgordo/dev/actions/workflows/powershell.yml)
 
-[![PSScriptAnalyzer](https://github.com/webrtc-org/tools/actions/workflows/powershell.yml/badge.svg)](https://github.com/webrtc-org/tools/actions/workflows/powershell.yml)
-
-[![OSSAR](https://github.com/gilbertalgordo/samples/actions/workflows/ossar.yml/badge.svg)](https://github.com/gilbertalgordo/samples/actions/workflows/ossar.yml)
-
-[![PSScriptAnalyzer](https://github.com/gilbertalgordo/glorious-happiness/actions/workflows/powershell.yml/badge.svg)](https://github.com/gilbertalgordo/glorious-happiness/actions/workflows/powershell.yml)
+[![Codespaces Prebuilds](https://github.com/gilbertalgordo/dev/actions/workflows/codespaces/create_codespaces_prebuilds/badge.svg)](https://github.com/gilbertalgordo/dev/actions/workflows/codespaces/create_codespaces_prebuilds)
 
 https://gist.github.com/gilbertalgordo
