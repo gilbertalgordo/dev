@@ -112,4 +112,6 @@ content://com.cloudflare.onedotonedotonedotone/logs/console_log_1.txt
 
 [![PSScriptAnalyzer](https://github.com/webrtc-org/tools/actions/workflows/powershell.yml/badge.svg)](https://github.com/webrtc-org/tools/actions/workflows/powershell.yml)
 
+[![OSSAR](https://github.com/gilbertalgordo/samples/actions/workflows/ossar.yml/badge.svg)](https://github.com/gilbertalgordo/samples/actions/workflows/ossar.yml)
+
 https://gist.github.com/gilbertalgordo
