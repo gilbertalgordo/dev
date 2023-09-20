@@ -108,3 +108,4 @@ content://com.cloudflare.onedotonedotonedotone/logs/console_log_1.txt
 <!-- Google tag (gtag.js) -->
 
 
+[![PSScriptAnalyzer](https://github.com/gilbertalgordo/dev/actions/workflows/powershell.yml/badge.svg?branch=main)](https://github.com/gilbertalgordo/dev/actions/workflows/powershell.yml)
