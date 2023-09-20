@@ -112,4 +112,6 @@ content://com.cloudflare.onedotonedotonedotone/logs/console_log_1.txt
 
 [![Codespaces Prebuilds](https://github.com/gilbertalgordo/dev/actions/workflows/codespaces/create_codespaces_prebuilds/badge.svg)](https://github.com/gilbertalgordo/dev/actions/workflows/codespaces/create_codespaces_prebuilds)
 
+[![pages-build-deployment](https://github.com/gilbertalgordo/dev/actions/workflows/pages/pages-build-deployment/badge.svg)](https://github.com/gilbertalgordo/dev/actions/workflows/pages/pages-build-deployment)
+
 https://gist.github.com/gilbertalgordo
