@@ -115,3 +115,5 @@ content://com.cloudflare.onedotonedotonedotone/logs/console_log_1.txt
 [![pages-build-deployment](https://github.com/gilbertalgordo/dev/actions/workflows/pages/pages-build-deployment/badge.svg)](https://github.com/gilbertalgordo/dev/actions/workflows/pages/pages-build-deployment)
 
 https://gist.github.com/gilbertalgordo
+# Pay Transparency
+https://acrobat.adobe.com/link/track?uri=urn:aaid:scds:US:3904d473-0113-3d87-82e8-1c8faf4c8a8d
