@@ -15,3 +15,5 @@ https://github.com/users/gilbertalgordo/achievements/quickdraw
 # My Page
 https://gilbertalgordo.github.io/dev/
 (https://gilbertalgordo.github.io/gilbertalgordo/)
+# Atlassian 
+https://gilbertalgordo.atlassian.net
