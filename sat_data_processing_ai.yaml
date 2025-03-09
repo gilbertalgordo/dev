@@ -1,0 +1,35 @@
+import cv2
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+from qiskit import QuantumCircuit, Aer, transpile, assemble
+from qiskit_machine_learning.algorithms import QSVM
+
+class SatelliteImageProcessor:
+    def __init__(self):
+        self.model = QSVM()
+
+    def preprocess_image(self, image_path):
+        image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+        resized_image = cv2.resize(image, (32, 32))
+        return resized_image.flatten()
+
+    def train_model(self, images, labels):
+        images = np.array([self.preprocess_image(img) for img in images])
+        x_train, x_test, y_train, y_test = train_test_split(images, labels, test_size=0.2)
+        self.model.fit(x_train, y_train)
+        predictions = self.model.predict(x_test)
+        accuracy = accuracy_score(y_test, predictions)
+        print("Training Accuracy:", accuracy)
+
+    def classify_image(self, image_path):
+        image = self.preprocess_image(image_path)
+        return self.model.predict([image])
+
+# Example usage
+processor = SatelliteImageProcessor()
+images = ['image1.jpg', 'image2.jpg', 'image3.jpg']  # Example image paths
+labels = [0, 1, 0]  # Example labels
+processor.train_model(images, labels)
+classification = processor.classify_image('test_image.jpg')
+print("Classified as:", classification)
