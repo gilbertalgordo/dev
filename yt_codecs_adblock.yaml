@@ -1,0 +1,245 @@
+import React, { useState, useRef, useEffect } from 'react';
+import ReactPlayer from 'react-player/lazy'; // Lazy load for performance
+import AdBlockDetector from './AdBlockDetector'; // Custom AdBlock detection component
+import './YouTubeMobileCodec.css'; // Separate CSS file for styling
+
+const YouTubeMobileCodec = ({ videoId }) => {
+  const [playing, setPlaying] = useState(false);
+  const [controls, setControls] = useState(false);
+  const [muted, setMuted] = useState(true);
+  const [volume, setVolume] = useState(0.5);
+  const [played, setPlayed] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const playerRef = useRef(null);
+  const [adBlocked, setAdBlocked] = useState(false);
+  const [adOverlayVisible, setAdOverlayVisible] = useState(false); // For custom ad overlay
+
+  useEffect(() => {
+    const adBlockStatus = async () => {
+      const isBlocked = await AdBlockDetector.detect();
+      setAdBlocked(isBlocked);
+    };
+
+    adBlockStatus();
+  }, []);
+
+  const handlePlayPause = () => {
+    setPlaying(!playing);
+    setControls(true);
+  };
+
+  const handleVolumeChange = (e) => {
+    setVolume(parseFloat(e.target.value));
+  };
+
+  const handleProgress = (state) => {
+    setPlayed(state.played);
+  };
+
+  const handleDuration = (duration) => {
+    setDuration(duration);
+  };
+
+  const handleSeekChange = (e) => {
+    setPlayed(parseFloat(e.target.value));
+    if (playerRef.current) {
+      playerRef.current.seekTo(parseFloat(e.target.value));
+    }
+  };
+
+  const handleMute = () => {
+    setMuted(!muted);
+  };
+
+  const formatTime = (seconds) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.floor(seconds % 60);
+    return `${minutes}:${remainingSeconds < 10 ? '0' : ''}${remainingSeconds}`;
+  };
+
+  const handleAdBlockDetected = () => {
+      // Logic for handling ad block detection.
+      // E.g., show a message, disable playback, or show a custom ad overlay.
+      setAdOverlayVisible(true); // Show custom ad overlay
+
+      //Example to replace the video with a static image or a message:
+      //setVideoURL("/static/adblock_message.png");
+      //setPlaying(false);
+  };
+
+  const handleAdOverlayClose = () => {
+    setAdOverlayVisible(false);
+  };
+
+  return (
+    <div className="youtube-mobile-codec">
+      {adBlocked && handleAdBlockDetected()}
+      <div className="player-wrapper">
+
+        <ReactPlayer
+          ref={playerRef}
+          url={`https://www.youtube.com/watch?v=${videoId}`}
+          playing={playing}
+          controls={false} // Use custom controls
+          muted={muted}
+          volume={volume}
+          onProgress={handleProgress}
+          onDuration={handleDuration}
+          width="100%"
+          height="100%"
+          config={{
+            youtube: {
+              playerVars: { modestbranding: 1, fs: 0 }, // Mobile-friendly settings
+            },
+          }}
+        />
+
+        {controls && (
+          <div className="controls">
+            <button className="play-pause" onClick={handlePlayPause}>
+              {playing ? 'Pause' : 'Play'}
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={duration}
+              step="any"
+              value={played}
+              onChange={handleSeekChange}
+              className="progress-bar"
+            />
+            <div className="time-display">
+              {formatTime(played * duration)} / {formatTime(duration)}
+            </div>
+            <button className="mute-button" onClick={handleMute}>
+              {muted ? 'Unmute' : 'Mute'}
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step="any"
+              value={volume}
+              onChange={handleVolumeChange}
+              className="volume-slider"
+            />
+          </div>
+        )}
+        <div className="video-overlay" onClick={handlePlayPause}></div>
+      </div>
+      {adOverlayVisible && (
+        <div className="ad-overlay">
+          <div className="ad-content">
+            <h2>Ad Block Detected</h2>
+            <p>Please disable your ad blocker to view this content.</p>
+            <button onClick={handleAdOverlayClose}>Close</button>
+            {/* Add custom ad content or messages here */}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default YouTubeMobileCodec;
+
+//AdBlockDetector.js (Example)
+const AdBlockDetector = {
+  detect: async () => {
+    try {
+      const testAd = document.createElement('div');
+      testAd.innerHTML = '&nbsp;';
+      testAd.className = 'adsbox';
+      document.body.appendChild(testAd);
+      window.setTimeout(() => {
+        if (testAd.offsetHeight === 0) {
+          document.body.removeChild(testAd);
+          return true;
+        } else {
+          testAd.style.display = 'none';
+          document.body.removeChild(testAd);
+          return false;
+        }
+      }, 100);
+    } catch (e) {
+      return false;
+    }
+  },
+};
+
+export default AdBlockDetector;
+
+//YouTubeMobileCodec.css
+.youtube-mobile-codec {
+  width: 100%;
+  max-width: 600px; /* Adjust as needed */
+  margin: 0 auto;
+  position: relative;
+}
+
+.player-wrapper {
+  position: relative;
+  padding-top: 56.25%; /* 16:9 aspect ratio */
+}
+
+.player-wrapper > div {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.controls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  background-color: rgba(0, 0, 0, 0.7);
+  padding: 10px;
+  display: flex;
+  align-items: center;
+}
+
+.controls button {
+  padding: 5px 10px;
+  margin-right: 10px;
+}
+
+.progress-bar {
+  flex-grow: 1;
+  margin-right: 10px;
+}
+
+.time-display {
+  color: white;
+  margin-right: 10px;
+}
+
+.volume-slider {
+  width: 80px;
+}
+.video-overlay{
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+}
+.ad-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.8);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.ad-content {
+    background-color: white;
+    padding: 20px;
+    border-radius: 5px;
+    text-align: center;
+}
