@@ -1,0 +1,40 @@
+import numpy as np
+from scipy.spatial.transform import Rotation as R
+
+class SatelliteControlSystem:
+    def __init__(self):
+        self.quaternion = np.array([1, 0, 0, 0])
+        self.robotic_arm = RoboticArm()
+
+    def set_orientation(self, quaternion):
+        self.quaternion = quaternion
+
+    def get_orientation(self):
+        return self.quaternion
+
+    def adjust_orientation(self, target_orientation):
+        current_orientation = R.from_quat(self.quaternion).as_euler('xyz', degrees=True)
+        target_orientation_euler = R.from_quat(target_orientation).as_euler('xyz', degrees=True)
+        adjustment_vector = target_orientation_euler - current_orientation
+        adjustment_rotation = R.from_euler('xyz', adjustment_vector, degrees=True)
+        new_orientation = R.from_quat(self.quaternion) * adjustment_rotation
+        self.quaternion = new_orientation.as_quat()
+
+    def control_robotic_arm(self, target_position):
+        self.robotic_arm.move_to(target_position)
+
+class RoboticArm:
+    def __init__(self):
+        self.position = np.array([0, 0, 0])
+
+    def move_to(self, target_position):
+        self.position = target_position
+        print(f"Moving robotic arm to {self.position}")
+
+# Example usage
+satellite = SatelliteControlSystem()
+satellite.set_orientation([0.7071, 0, 0.7071, 0])
+target_orientation = [1, 0, 0, 0]
+satellite.adjust_orientation(target_orientation)
+print("Current Orientation (Quaternion):", satellite.get_orientation())
+satellite.control_robotic_arm([1, 1, 1])
