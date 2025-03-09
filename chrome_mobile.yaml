@@ -1,0 +1,60 @@
+import React, { useState, useEffect, useRef } from 'react';
+
+function MobileAdBlockDetector() {
+  const [adBlocked, setAdBlocked] = useState(false);
+  const adRef = useRef(null);
+
+  useEffect(() => {
+    const checkAdBlock = () => {
+      if (!adRef.current) {
+        return;
+      }
+
+      const ad = adRef.current;
+
+      if (
+        ad.offsetParent === null ||
+        ad.style.display === 'none' ||
+        ad.style.visibility === 'hidden' ||
+        ad.offsetHeight === 0 ||
+        ad.offsetWidth === 0
+      ) {
+        setAdBlocked(true);
+      } else {
+        setAdBlocked(false);
+      }
+    };
+
+    const adElement = document.createElement('div');
+    adElement.style.position = 'absolute';
+    adElement.style.top = '-1000px';
+    adElement.style.left = '-1000px';
+    adElement.style.width = '1px';
+    adElement.style.height = '1px';
+    adElement.className = 'adsbox'; // common adblocker class
+    adRef.current = adElement;
+    document.body.appendChild(adElement);
+
+    checkAdBlock();
+    const intervalId = setInterval(checkAdBlock, 100);
+
+    return () => {
+      clearInterval(intervalId);
+      if (adRef.current && adRef.current.parentNode) {
+        adRef.current.parentNode.removeChild(adRef.current);
+      }
+    };
+  }, []);
+
+  return (
+    <div>
+      {adBlocked ? (
+        <p>AdBlocker Detected (Mobile). Please consider disabling it.</p>
+      ) : (
+        <p>AdBlocker not detected (Mobile).</p>
+      )}
+    </div>
+  );
+}
+
+export default MobileAdBlockDetector;
