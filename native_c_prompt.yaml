@@ -1,0 +1,130 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { View, TextInput, Button, Text, ScrollView, StyleSheet, Platform, KeyboardAvoidingView } from 'react-native';
+
+export default function CPrompt() {
+  const [command, setCommand] = useState('');
+  const [output, setOutput] = useState([]);
+  const scrollViewRef = useRef();
+
+  const handleCommand = () => {
+    // Simulate command execution (replace with actual logic)
+    const simulatedOutput = simulateCommandExecution(command);
+    setOutput([...output, { command, result: simulatedOutput }]);
+    setCommand('');
+
+    // Scroll to the bottom after adding new output
+    if (scrollViewRef.current) {
+        setTimeout(() => { // Delay to let rendering finish.
+            scrollViewRef.current.scrollToEnd({ animated: true });
+        }, 100)
+    }
+  };
+
+  const simulateCommandExecution = (cmd) => {
+    // Replace this with your actual command execution logic.
+    // This is just a placeholder.
+    if (cmd.trim() === '') {
+      return '';
+    }
+    const parts = cmd.trim().split(' ');
+    const commandName = parts[0];
+
+    switch (commandName) {
+      case 'echo':
+        return parts.slice(1).join(' ');
+      case 'date':
+        return new Date().toString();
+      case 'clear':
+        setOutput([]);
+        return '';
+      case 'help':
+        return "Available commands: echo, date, clear, help. You can also type anything else to get a simulated result";
+      default:
+        return `Simulated result for: ${cmd}`;
+    }
+  };
+
+  useEffect(() => {
+    // Scroll to the bottom on initial render
+    if (scrollViewRef.current) {
+        setTimeout(() => { // Delay to let rendering finish.
+            scrollViewRef.current.scrollToEnd({ animated: true });
+        }, 100)
+    }
+  }, []);
+
+  return (
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0} // Adjust as needed
+    >
+      <ScrollView
+        style={styles.outputContainer}
+        ref={scrollViewRef}
+        onContentSizeChange={() => {
+          if (scrollViewRef.current) {
+              setTimeout(() => { // Delay to let rendering finish.
+                  scrollViewRef.current.scrollToEnd({ animated: true });
+              }, 100)
+          }
+        }}
+      >
+        {output.map((item, index) => (
+          <View key={index} style={styles.outputItem}>
+            <Text style={styles.commandText}>&gt; {item.command}</Text>
+            <Text style={styles.resultText}>{item.result}</Text>
+          </View>
+        ))}
+      </ScrollView>
+
+      <View style={styles.inputContainer}>
+        <TextInput
+          style={styles.input}
+          value={command}
+          onChangeText={setCommand}
+          placeholder="Enter command"
+          onSubmitEditing={handleCommand}
+        />
+        <Button title="Enter" onPress={handleCommand} />
+      </View>
+    </KeyboardAvoidingView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#000',
+    padding: 10,
+  },
+  outputContainer: {
+    flex: 1,
+    backgroundColor: '#1E1E1E',
+    marginBottom: 10,
+    padding: 8,
+  },
+  outputItem: {
+    marginBottom: 5,
+  },
+  commandText: {
+    color: '#00FF00',
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
+  resultText: {
+    color: '#FFFFFF',
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  input: {
+    flex: 1,
+    backgroundColor: '#333',
+    color: '#FFF',
+    padding: 8,
+    marginRight: 10,
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
+});
