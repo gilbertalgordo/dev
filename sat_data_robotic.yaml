@@ -1,0 +1,24 @@
+import cv2
+import numpy as np
+import tensorflow as tf
+
+class SatelliteImageProcessor:
+    def __init__(self):
+        self.model = tf.keras.applications.MobileNetV2(weights='imagenet', include_top=True)
+
+    def preprocess_image(self, image_path):
+        image = cv2.imread(image_path)
+        image_resized = cv2.resize(image, (224, 224))
+        image_normalized = image_resized / 255.0
+        return np.expand_dims(image_normalized, axis=0)
+
+    def identify_objects(self, image_path):
+        preprocessed_image = self.preprocess_image(image_path)
+        predictions = self.model.predict(preprocessed_image)
+        decoded_predictions = tf.keras.applications.mobilenet_v2.decode_predictions(predictions, top=3)[0]
+        return [(obj[1], obj[2]) for obj in decoded_predictions]
+
+# Example usage
+processor = SatelliteImageProcessor()
+objects = processor.identify_objects('space_image.jpg')
+print("Identified objects:", objects)
