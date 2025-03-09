@@ -1,0 +1,40 @@
+import numpy as np
+
+class KalmanFilter:
+    def __init__(self, initial_state, initial_uncertainty, process_noise, measurement_noise):
+        self.state = initial_state
+        self.uncertainty = initial_uncertainty
+        self.process_noise = process_noise
+        self.measurement_noise = measurement_noise
+
+    def predict(self):
+        self.state = self.state
+        self.uncertainty = self.uncertainty + self.process_noise
+
+    def update(self, measurement):
+        kalman_gain = self.uncertainty / (self.uncertainty + self.measurement_noise)
+        self.state = self.state + kalman_gain * (measurement - self.state)
+        self.uncertainty = (1 - kalman_gain) * self.uncertainty
+
+class SatelliteNavigationSystem:
+    def __init__(self):
+        initial_state = np.array([0.0, 0.0, 0.0])  # lat, lon, alt
+        initial_uncertainty = np.eye(3)
+        process_noise = np.eye(3) * 0.1
+        measurement_noise = np.eye(3) * 0.5
+        self.kalman_filter = KalmanFilter(initial_state, initial_uncertainty, process_noise, measurement_noise)
+
+    def update_position(self, lat, lon, alt):
+        self.kalman_filter.predict()
+        self.kalman_filter.update(np.array([lat, lon, alt]))
+
+    def get_position(self):
+        return self.kalman_filter.state
+
+# Example usage
+satnav = SatelliteNavigationSystem()
+satnav.update_position(37.7749, -122.4194, 550)
+for _ in range(5):
+    lat, lon, alt = satnav.get_position()
+    satnav.update_position(lat + np.random.uniform(-0.0001, 0.0001), lon + np.random.uniform(-0.0001, 0.0001), alt + np.random.uniform(-0.1, 0.1))
+    print("Current Position (Lat, Lon, Alt):", satnav.get_position())
