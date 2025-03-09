@@ -1,0 +1,24 @@
+import socket
+from cryptography.fernet import Fernet
+
+class SatelliteCommunication:
+    def __init__(self, host, port, key):
+        self.server_address = (host, port)
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.cipher = Fernet(key)
+
+    def send_data(self, data):
+        encrypted_data = self.cipher.encrypt(data.encode())
+        self.socket.sendto(encrypted_data, self.server_address)
+
+    def receive_data(self):
+        data, _ = self.socket.recvfrom(1024)
+        decrypted_data = self.cipher.decrypt(data)
+        return decrypted_data.decode()
+
+# Example usage
+key = Fernet.generate_key()
+satellite_comm = SatelliteCommunication('localhost', 5000, key)
+satellite_comm.send_data('Telemetry data: battery status = 80%')
+received = satellite_comm.receive_data()
+print("Received:", received)
