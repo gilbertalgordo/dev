@@ -1,0 +1,50 @@
+import numpy as np
+from scipy.spatial.transform import Rotation as R
+
+class PIDController:
+    def __init__(self, kp, ki, kd):
+        self.kp = kp
+        self.ki = ki
+        self.kd = kd
+        self.previous_error = 0
+        self.integral = 0
+
+    def compute(self, setpoint, measured_value):
+        error = setpoint - measured_value
+        self.integral += error
+        derivative = error - self.previous_error
+        output = self.kp * error + self.ki * self.integral + self.kd * derivative
+        self.previous_error = error
+        return output
+
+class SatelliteControlSystem:
+    def __init__(self):
+        self.quaternion = np.array([1, 0, 0, 0])
+        self.pid_roll = PIDController(1.0, 0.1, 0.05)
+        self.pid_pitch = PIDController(1.0, 0.1, 0.05)
+        self.pid_yaw = PIDController(1.0, 0.1, 0.05)
+
+    def set_orientation(self, quaternion):
+        self.quaternion = quaternion
+
+    def get_orientation(self):
+        return self.quaternion
+
+    def adjust_orientation(self, target_orientation):
+        current_orientation = R.from_quat(self.quaternion).as_euler('xyz', degrees=True)
+        target_orientation_euler = R.from_quat(target_orientation).as_euler('xyz', degrees=True)
+        roll_adjust = self.pid_roll.compute(target_orientation_euler[0], current_orientation[0])
+        pitch_adjust = self.pid_pitch.compute(target_orientation_euler[1], current_orientation[1])
+        yaw_adjust = self.pid_yaw.compute(target_orientation_euler[2], current_orientation[2])
+        adjustment_vector = np.array([roll_adjust, pitch_adjust, yaw_adjust])
+        adjustment_rotation = R.from_euler('xyz', adjustment_vector, degrees=True)
+        new_orientation = R.from_quat(self.quaternion) * adjustment_rotation
+        self.quaternion = new_orientation.as_quat()
+
+# Example usage
+satellite = SatelliteControlSystem()
+satellite.set_orientation([0.7071, 0, 0.7071, 0])
+target_orientation = [1, 0, 0, 0]
+for _ in range(10):
+    satellite.adjust_orientation(target_orientation)
+    print("Current Orientation (Quaternion):", satellite.get_orientation())
