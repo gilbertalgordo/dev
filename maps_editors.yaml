@@ -1,0 +1,171 @@
+import React, { useState, useRef, useEffect } from 'react';
+import mapboxgl from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
+
+// Replace with your Mapbox access token
+mapboxgl.accessToken = 'YOUR_MAPBOX_ACCESS_TOKEN';
+
+const MapExtension = () => {
+  const mapContainer = useRef(null);
+  const map = useRef(null);
+  const [lng, setLng] = useState(-70.9);
+  const [lat, setLat] = useState(42.35);
+  const [zoom, setZoom] = useState(9);
+  const [editableFeature, setEditableFeature] = useState(null);
+  const [gpsLocation, setGpsLocation] = useState(null);
+
+  useEffect(() => {
+    if (map.current) return; // prevent map from initializing more than once
+
+    map.current = new mapboxgl.Map({
+      container: mapContainer.current,
+      style: 'mapbox://styles/mapbox/streets-v11',
+      center: [lng, lat],
+      zoom: zoom,
+    });
+
+    map.current.on('move', () => {
+      setLng(map.current.getCenter().lng.toFixed(4));
+      setLat(map.current.getCenter().lat.toFixed(4));
+      setZoom(map.current.getZoom().toFixed(2));
+    });
+
+    // GPS Location Tracking
+    if ('geolocation' in navigator) {
+      navigator.geolocation.watchPosition(
+        (position) => {
+          const { latitude, longitude } = position.coords;
+          setGpsLocation({ latitude, longitude });
+
+          if(map.current){
+              map.current.getSource('gps').setData({
+                  type: 'FeatureCollection',
+                  features: [{
+                      type: 'Feature',
+                      geometry: {
+                          type: 'Point',
+                          coordinates: [longitude, latitude]
+                      }
+                  }]
+              });
+          }
+        },
+        (error) => {
+          console.error('Error getting GPS location:', error);
+        }
+      );
+    } else {
+      console.error('Geolocation is not available in this browser.');
+    }
+
+    map.current.on('load', () => {
+      map.current.addSource('editable', {
+        type: 'geojson',
+        data: {
+          type: 'FeatureCollection',
+          features: [],
+        },
+      });
+
+      map.current.addLayer({
+        id: 'editable-layer',
+        type: 'line',
+        source: 'editable',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round',
+        },
+        paint: {
+          'line-color': '#888',
+          'line-width': 8,
+        },
+      });
+
+      map.current.addSource('gps', {
+          type: 'geojson',
+          data: {
+              type: 'FeatureCollection',
+              features: []
+          }
+      });
+      map.current.addLayer({
+          id: 'gps-layer',
+          type: 'circle',
+          source: 'gps',
+          paint: {
+              'circle-radius': 8,
+              'circle-color': '#007cbf'
+          }
+      });
+    });
+
+    // Edit Feature functionality
+    map.current.on('click', 'editable-layer', (e) => {
+      setEditableFeature(e.features[0]);
+    });
+
+    map.current.on('click', (e) => {
+      if (editableFeature) {
+        const updatedCoordinates = [...editableFeature.geometry.coordinates, [e.lngLat.lng, e.lngLat.lat]];
+        const updatedFeature = {
+          ...editableFeature,
+          geometry: {
+            ...editableFeature.geometry,
+            coordinates: updatedCoordinates,
+          },
+        };
+        setEditableFeature(updatedFeature);
+        map.current.getSource('editable').setData({
+          type: 'FeatureCollection',
+          features: [updatedFeature],
+        });
+      }
+    });
+
+  }, []);
+
+  const startEditing = () => {
+    setEditableFeature({
+      type: 'Feature',
+      geometry: {
+        type: 'LineString',
+        coordinates: [],
+      },
+    });
+    map.current.getSource('editable').setData({
+      type: 'FeatureCollection',
+      features: [],
+    });
+  };
+
+  const stopEditing = () => {
+    setEditableFeature(null);
+  };
+
+  const clearEditing = () => {
+    setEditableFeature(null);
+    map.current.getSource('editable').setData({
+      type: 'FeatureCollection',
+      features: [],
+    });
+  }
+
+  return (
+    <div>
+      <div className="sidebar">
+        Longitude: {lng} | Latitude: {lat} | Zoom: {zoom}
+        {gpsLocation && (
+          <div>
+            GPS: {gpsLocation.latitude.toFixed(4)}, {gpsLocation.longitude.toFixed(4)}
+          </div>
+        )}
+        <button onClick={startEditing}>Start Editing</button>
+        <button onClick={stopEditing} disabled={!editableFeature}>Stop Editing</button>
+        <button onClick={clearEditing} disabled={!editableFeature}>Clear Editing</button>
+      </div>
+      <div ref={mapContainer} className="map-container" style={{ height: '500px', width: '100%' }} />
+    </div>
+  );
+};
+
+export default MapExtension;
