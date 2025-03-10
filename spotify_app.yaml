@@ -1,0 +1,167 @@
+import React, { useState, useEffect, useRef } from 'react';
+
+function SpotifyApp() {
+  const [currentTrack, setCurrentTrack] = useState(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const audioRef = useRef(null);
+  const [volume, setVolume] = useState(0.5);
+  const [progress, setProgress] = useState(0);
+  const [duration, setDuration] = useState(0);
+
+  // Mock track data (replace with actual Spotify API integration)
+  const tracks = [
+    {
+      id: 1,
+      title: 'Sample Track 1',
+      artist: 'Sample Artist 1',
+      url: 'sample_track1.mp3', // Replace with your audio file URL
+      codec: 'audio/mpeg', // Example codec
+    },
+    {
+      id: 2,
+      title: 'Sample Track 2',
+      artist: 'Sample Artist 2',
+      url: 'sample_track2.ogg', // Replace with your audio file URL
+      codec: 'audio/ogg', // Example codec
+    },
+    // ... more tracks
+  ];
+
+  useEffect(() => {
+    if (currentTrack && audioRef.current) {
+      audioRef.current.src = currentTrack.url;
+      audioRef.current.type = currentTrack.codec; // Set the codec
+      audioRef.current.load();
+
+      if (isPlaying) {
+        audioRef.current.play().catch(error => console.error("Playback error:", error));
+      }
+
+    }
+  }, [currentTrack, isPlaying]);
+
+  useEffect(() => {
+    if (audioRef.current) {
+        audioRef.current.volume = volume;
+    }
+  }, [volume])
+
+  const handlePlayPause = () => {
+    if (currentTrack) {
+      if (isPlaying) {
+        audioRef.current.pause();
+      } else {
+        audioRef.current.play().catch(error => console.error("Playback error:", error));
+      }
+      setIsPlaying(!isPlaying);
+    } else {
+        if(tracks.length > 0){
+          setCurrentTrack(tracks[0]);
+          setIsPlaying(true);
+        }
+    }
+  };
+
+  const handleNext = () => {
+    if (tracks.length > 0 && currentTrack) {
+      const currentIndex = tracks.findIndex((track) => track.id === currentTrack.id);
+      if (currentIndex < tracks.length - 1) {
+        setCurrentTrack(tracks[currentIndex + 1]);
+      }
+    }
+  };
+
+  const handlePrevious = () => {
+    if (tracks.length > 0 && currentTrack) {
+      const currentIndex = tracks.findIndex((track) => track.id === currentTrack.id);
+      if (currentIndex > 0) {
+        setCurrentTrack(tracks[currentIndex - 1]);
+      }
+    }
+  };
+
+  const handleVolumeChange = (e) => {
+    setVolume(parseFloat(e.target.value));
+  };
+
+  const handleTimeUpdate = () => {
+    if (audioRef.current) {
+      setProgress(audioRef.current.currentTime);
+      setDuration(audioRef.current.duration || 0);
+    }
+  };
+
+  const handleSeek = (e) => {
+    if (audioRef.current) {
+      const seekTime = parseFloat(e.target.value);
+      audioRef.current.currentTime = seekTime;
+      setProgress(seekTime);
+    }
+  };
+
+  // Adblock (very basic example, needs more robust implementation)
+  const checkForAds = () => {
+    // In a real app, you'd use a more sophisticated method to detect ads.
+    // This example just checks for a specific class or ID.
+    const adElements = document.querySelectorAll('.ad, #ad'); // Example ad selectors
+    adElements.forEach((ad) => {
+      ad.style.display = 'none'; // Hide ad elements
+    });
+  };
+
+  useEffect(() => {
+    checkForAds(); // Run adblock on component mount
+    const intervalId = setInterval(checkForAds, 5000); // Check for ads every 5 seconds
+    return () => clearInterval(intervalId); // Cleanup interval
+  }, []);
+
+  const formatTime = (time) => {
+    const minutes = Math.floor(time / 60);
+    const seconds = Math.floor(time % 60);
+    return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+  };
+
+  return (
+    <div>
+      {currentTrack && (
+        <div>
+          <h2>{currentTrack.title}</h2>
+          <p>{currentTrack.artist}</p>
+        </div>
+      )}
+      <audio
+        ref={audioRef}
+        onTimeUpdate={handleTimeUpdate}
+        onEnded={handleNext}
+      />
+      <div>
+        <button onClick={handlePrevious}>Previous</button>
+        <button onClick={handlePlayPause}>{isPlaying ? 'Pause' : 'Play'}</button>
+        <button onClick={handleNext}>Next</button>
+      </div>
+      <div>
+        <input
+          type="range"
+          min="0"
+          max={duration}
+          value={progress}
+          onChange={handleSeek}
+        />
+        <p>{formatTime(progress)} / {formatTime(duration)}</p>
+      </div>
+      <div>
+        <label htmlFor="volume">Volume:</label>
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.01"
+          value={volume}
+          onChange={handleVolumeChange}
+        />
+      </div>
+    </div>
+  );
+}
+
+export default SpotifyApp;
