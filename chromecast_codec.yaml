@@ -1,0 +1,107 @@
+import React, { useState, useEffect, useRef } from 'react';
+
+function ChromecastPlayer({ videoUrl, adUrl }) {
+  const [cast, setCast] = useState(null);
+  const [session, setSession] = useState(null);
+  const [player, setPlayer] = useState(null);
+  const [playerController, setPlayerController] = useState(null);
+  const videoRef = useRef(null);
+
+  useEffect(() => {
+    window.__onGCastApiAvailable = (isAvailable) => {
+      if (isAvailable) {
+        initializeCastApi();
+      }
+    };
+
+    const script = document.createElement('script');
+    script.src = '//www.gstatic.com/cv/js/sender/cast_sender.js?loadCastFramework=1';
+    script.async = true;
+    document.body.appendChild(script);
+
+    return () => {
+      document.body.removeChild(script);
+      window.__onGCastApiAvailable = undefined;
+    };
+  }, []);
+
+  const initializeCastApi = () => {
+    const castFramework = window.cast.framework;
+    const context = castFramework.CastContext.getInstance();
+    context.setOptions({
+      receiverApplicationId: chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+      autoJoinPolicy: chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED,
+    });
+    setCast(castFramework);
+
+    context.addEventListener(
+      castFramework.CastContextEventType.SESSION_STATE_CHANGED,
+      (event) => {
+        if (event.sessionState === castFramework.SessionState.SESSION_STARTED) {
+          setSession(context.getCurrentSession());
+          loadMedia();
+        } else if (event.sessionState === castFramework.SessionState.SESSION_ENDED) {
+          setSession(null);
+          setPlayer(null);
+          setPlayerController(null);
+        }
+      }
+    );
+  };
+
+  const castMedia = () => {
+    const castFramework = window.cast.framework;
+    const context = castFramework.CastContext.getInstance();
+    context.requestSession();
+  };
+
+  const loadMedia = () => {
+    if (!session) return;
+
+    const mediaInfo = new chrome.cast.media.MediaInfo(videoUrl, 'video/mp4'); // Adjust MIME type as needed
+    mediaInfo.metadata = new chrome.cast.media.GenericMediaMetadata();
+    mediaInfo.metadata.metadataType = chrome.cast.media.MetadataType.GENERIC;
+    mediaInfo.metadata.title = 'My Video';
+
+    const request = new chrome.cast.media.LoadRequest(mediaInfo);
+    session.loadMedia(request).then(
+      () => {
+        const castSession = cast.framework.CastContext.getInstance().getCurrentSession();
+        const remotePlayer = new cast.framework.RemotePlayer();
+        const remotePlayerController = new cast.framework.RemotePlayerController(remotePlayer);
+
+        remotePlayerController.loadBinding(remotePlayer);
+        setPlayer(remotePlayer);
+        setPlayerController(remotePlayerController);
+
+        // Ad insertion simulation (replace with real ad blocking logic)
+        // This is a basic placeholder; robust ad-blocking requires more complex client-side/server-side logic.
+        if (adUrl) {
+          // Simulate skipping an ad. In a real scenario, you'd prevent the ad from loading or use a server-side solution.
+          console.log("Ad Block Simulation: Skipping ad");
+        }
+      },
+      (errorCode) => {
+        console.error('Error loading media: ', errorCode);
+      }
+    );
+  };
+
+  const stopCasting = () => {
+    if (session) {
+      session.endSession(true);
+    }
+  };
+
+  return (
+    <div>
+      <button onClick={session ? stopCasting : castMedia}>
+        {session ? 'Stop Casting' : 'Cast'}
+      </button>
+      {/* Optional: Add a local video element for fallback or debugging */}
+      {/* <video ref={videoRef} controls src={videoUrl} /> */}
+    </div>
+  );
+}
+
+export default ChromecastPlayer;
