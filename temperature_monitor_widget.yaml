@@ -1,0 +1,104 @@
+import React, { useState, useEffect } from 'react';
+
+// Simulated Quantum/AI Temperature Prediction (Replace with actual API calls)
+const predictTemperature = async (deviceId) => {
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const baseTemp = 35 + (deviceId.charCodeAt(0) % 8) * 2;
+  const randomVariation = Math.random() * 3 - 1.5;
+  return baseTemp + randomVariation;
+};
+
+// Simulated Sensor Data (Replace with actual hardware/API calls)
+const getSensorTemperature = async (deviceId) => {
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  const predictedTemp = await predictTemperature(deviceId);
+  const sensorNoise = Math.random() * 1.5 - 0.75;
+  return predictedTemp + sensorNoise;
+};
+
+function TemperatureWidget({ deviceId }) {
+  const [sensorTemp, setSensorTemp] = useState(null);
+  const [predictedTemp, setPredictedTemp] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const [sensor, prediction] = await Promise.all([
+          getSensorTemperature(deviceId),
+          predictTemperature(deviceId),
+        ]);
+        setSensorTemp(sensor);
+        setPredictedTemp(prediction);
+      } catch (err) {
+        setError(err);
+        console.error('Error fetching temperature data:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+
+    const intervalId = setInterval(fetchData, 1500); // Faster polling for widget
+
+    return () => clearInterval(intervalId);
+  }, [deviceId]);
+
+  if (loading) {
+    return <div style={widgetStyle}>Loading...</div>;
+  }
+
+  if (error) {
+    return <div style={widgetStyle}>Error</div>;
+  }
+
+  const tempDiff = sensorTemp - predictedTemp;
+  const alertLevel = Math.abs(tempDiff) > 2 ? 'high' : Math.abs(tempDiff) > 1 ? 'medium' : 'low';
+  const alertColor = alertLevel === 'high' ? 'red' : alertLevel === 'medium' ? 'orange' : 'inherit';
+
+  return (
+    <div style={widgetStyle}>
+      <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>{deviceId} Temperature</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: '0.8em', color: 'gray' }}>Sensor:</div>
+          <div>{sensorTemp ? sensorTemp.toFixed(1) : 'N/A'} °C</div>
+        </div>
+        <div>
+          <div style={{ fontSize: '0.8em', color: 'gray' }}>AI:</div>
+          <div>{predictedTemp ? predictedTemp.toFixed(1) : 'N/A'} °C</div>
+        </div>
+      </div>
+      <div style={{ marginTop: '5px', fontSize: '0.9em' }}>
+        Diff: <span style={{ color: alertColor }}>{tempDiff ? tempDiff.toFixed(1) : 'N/A'} °C</span>
+      </div>
+    </div>
+  );
+}
+
+const widgetStyle = {
+  border: '1px solid #ddd',
+  padding: '10px',
+  borderRadius: '5px',
+  width: '200px', // Adjust widget width
+  fontFamily: 'sans-serif',
+  fontSize: '1em',
+};
+
+function App() {
+  const devices = ['Phone', 'Watch', 'Tablet'];
+
+  return (
+    <div style={{ display: 'flex', gap: '10px', padding: '20px' }}>
+      {devices.map((deviceId) => (
+        <TemperatureWidget key={deviceId} deviceId={deviceId} />
+      ))}
+    </div>
+  );
+}
+
+export default App;
