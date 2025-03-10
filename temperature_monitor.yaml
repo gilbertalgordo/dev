@@ -1,0 +1,105 @@
+import React, { useState, useEffect } from 'react';
+
+// Simulated Quantum/AI Temperature Prediction (Replace with actual API calls)
+const predictTemperature = async (deviceId) => {
+  // Simulate asynchronous AI/Quantum prediction with a delay
+  await new Promise((resolve) => setTimeout(resolve, 500));
+
+  // Simulate a prediction based on device ID and a bit of "randomness"
+  const baseTemperature = 30 + (deviceId.charCodeAt(0) % 10) * 2; // Simulate base temp varying by device
+  const randomVariation = Math.random() * 5 - 2.5; // Small random fluctuation
+  const predictedTemp = baseTemperature + randomVariation;
+
+  return predictedTemp;
+};
+
+// Simulated Sensor Data (Replace with actual hardware/API calls)
+const getSensorTemperature = async (deviceId) => {
+  // Simulate sensor reading with a delay
+  await new Promise((resolve) => setTimeout(resolve, 200));
+
+  // Simulate sensor data with some variation around the predicted value
+  const predictedTemp = await predictTemperature(deviceId);
+  const sensorNoise = Math.random() * 2 - 1; // Small random sensor noise
+  const sensorTemp = predictedTemp + sensorNoise;
+
+  return sensorTemp;
+};
+
+function DeviceTemperatureMonitor({ deviceId }) {
+  const [sensorTemp, setSensorTemp] = useState(null);
+  const [predictedTemp, setPredictedTemp] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const [sensor, prediction] = await Promise.all([
+          getSensorTemperature(deviceId),
+          predictTemperature(deviceId),
+        ]);
+        setSensorTemp(sensor);
+        setPredictedTemp(prediction);
+      } catch (err) {
+        setError(err);
+        console.error('Error fetching temperature data:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+
+    const intervalId = setInterval(fetchData, 2000); // Poll every 2 seconds
+
+    return () => clearInterval(intervalId); // Cleanup interval on unmount
+  }, [deviceId]);
+
+  if (loading) {
+    return <div>Loading temperature data...</div>;
+  }
+
+  if (error) {
+    return <div>Error: {error.message || 'Failed to fetch data'}</div>;
+  }
+
+  const tempDiff = sensorTemp - predictedTemp;
+  const alertLevel = Math.abs(tempDiff) > 3 ? 'high' : Math.abs(tempDiff) > 1 ? 'medium' : 'low';
+  const alertColor = alertLevel === 'high' ? 'red' : alertLevel === 'medium' ? 'orange' : 'green';
+
+  return (
+    <div>
+      <h2>Device Temperature Monitor ({deviceId})</h2>
+      <p>
+        <strong>Sensor Temperature:</strong> {sensorTemp ? sensorTemp.toFixed(2) : 'N/A'} °C
+      </p>
+      <p>
+        <strong>AI/Quantum Predicted Temperature:</strong> {predictedTemp ? predictedTemp.toFixed(2) : 'N/A'} °C
+      </p>
+      <p>
+        <strong>Temperature Difference:</strong> {tempDiff ? tempDiff.toFixed(2) : 'N/A'} °C
+      </p>
+      <p>
+        <strong>Alert Level:</strong> <span style={{ color: alertColor }}>{alertLevel}</span>
+      </p>
+    </div>
+  );
+}
+
+function App() {
+  const devices = ['PhoneA', 'LaptopB', 'TabletC']; // Example devices
+
+  return (
+    <div>
+      <h1>Device Temperature Monitoring System</h1>
+      {devices.map((deviceId) => (
+        <DeviceTemperatureMonitor key={deviceId} deviceId={deviceId} />
+      ))}
+    </div>
+  );
+}
+
+export default App;
