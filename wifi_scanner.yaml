@@ -1,0 +1,194 @@
+import React, { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Platform, PermissionsAndroid } from 'react-native';
+import * as Network from 'expo-network'; // Using expo network for simplicity. You'll need expo installed.
+
+// Placeholder for advanced quantum AI logic (replace with actual implementation)
+const analyzeNetwork = async (network) => {
+  // Simulate AI analysis (replace with real AI/ML calls)
+  await new Promise(resolve => setTimeout(resolve, 500)); // Simulate processing
+
+  const analysis = {
+    suspicious: Math.random() < 0.2,
+    adverts: Math.random() < 0.5,
+    malware: Math.random() < 0.1,
+  };
+
+  return { ...network, analysis };
+};
+
+const scanWifi = async () => {
+  try {
+    if (Platform.OS === 'android') {
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+        {
+          title: 'Location permission is required for WiFi connections',
+          message:
+            'This app needs location permission as this is required  ' +
+            'to scan for wifi networks.',
+          buttonNegative: 'DENY',
+          buttonPositive: 'ALLOW',
+        },
+      );
+      if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+        console.log('Location permission denied');
+        return [];
+      }
+    }
+
+    const networks = await Network.getWifiNetworksAsync();
+    if (!networks) {
+      return [];
+    }
+
+    const analyzedNetworks = await Promise.all(networks.map(analyzeNetwork));
+    return analyzedNetworks;
+  } catch (error) {
+    console.error('Error scanning WiFi:', error);
+    return [];
+  }
+};
+
+const WifiScannerWidgetMobile = () => {
+  const [networks, setNetworks] = useState([]);
+  const [scanning, setScanning] = useState(false);
+  const [blockedAds, setBlockedAds] = useState(0);
+  const [blockedMalware, setBlockedMalware] = useState(0);
+  const [blockedSpyware, setBlockedSpyware] = useState(0);
+  const [showDetails, setShowDetails] = useState(false);
+
+  useEffect(() => {
+    handleScan(); // Auto-scan on component mount
+    const interval = setInterval(handleScan, 15000); // Auto-scan every 15 seconds
+
+    return () => clearInterval(interval); // Cleanup interval on unmount
+  }, []);
+
+  const handleScan = async () => {
+    setScanning(true);
+    setNetworks([]);
+    setBlockedAds(0);
+    setBlockedMalware(0);
+    setBlockedSpyware(0);
+
+    try {
+      const scannedNetworks = await scanWifi();
+      setNetworks(scannedNetworks);
+    } catch (error) {
+      console.error('Error scanning WiFi:', error);
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  useEffect(() => {
+    if (networks.length > 0) {
+      let adCount = 0;
+      let malwareCount = 0;
+      let spyCount = 0;
+
+      networks.forEach((network) => {
+        if (network.analysis && network.analysis.adverts) {
+          adCount++;
+        }
+        if (network.analysis && network.analysis.malware) {
+          malwareCount++;
+        }
+        if (network.analysis && network.analysis.suspicious) {
+          spyCount++;
+        }
+      });
+
+      setBlockedAds(adCount);
+      setBlockedMalware(malwareCount);
+      setBlockedSpyware(spyCount);
+    }
+  }, [networks]);
+
+  const toggleDetails = () => {
+    setShowDetails(!showDetails);
+  };
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>WiFi Security</Text>
+
+      {scanning && <Text style={styles.scanningText}>Scanning...</Text>}
+
+      <View style={styles.summary}>
+        <Text>Ads: {blockedAds} | Malware: {blockedMalware} | Spy: {blockedSpyware}</Text>
+        <TouchableOpacity onPress={toggleDetails}>
+          <Text style={styles.detailsButton}>{showDetails ? 'Hide Details' : 'Show Details'}</Text>
+        </TouchableOpacity>
+      </View>
+
+      {showDetails && networks.length > 0 && (
+        <ScrollView style={styles.details}>
+          {networks.map((network, index) => (
+            <View key={index} style={styles.networkItem}>
+              <Text>{network.ssid} ({network.security})</Text>
+              {network.analysis && (
+                <View style={styles.analysis}>
+                  {network.analysis.suspicious && <Text style={styles.spy}>Spy</Text>}
+                  {network.analysis.adverts && <Text style={styles.ads}>Ads</Text>}
+                  {network.analysis.malware && <Text style={styles.malware}>Malware</Text>}
+                </View>
+              )}
+            </View>
+          ))}
+        </ScrollView>
+      )}
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  // ... (same styles as before)
+  container: {
+    padding: 20,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  scanningText: {
+    marginBottom: 10,
+  },
+  summary: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  detailsButton: {
+    color: '#007bff',
+  },
+  details: {
+    maxHeight: 200,
+  },
+  networkItem: {
+    padding: 5,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  analysis: {
+    flexDirection: 'row',
+  },
+  spy: {
+    color: 'red',
+    marginRight: 5,
+  },
+  ads: {
+    color: 'orange',
+    marginRight: 5,
+  },
+  malware: {
+    color: 'red',
+    marginRight: 5,
+  },
+});
+
+export default WifiScannerWidgetMobile;
