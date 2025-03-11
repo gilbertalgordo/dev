@@ -1,0 +1,107 @@
+import React, { useState, useRef, useEffect } from 'react';
+import axios from 'axios';
+import AdBlockComponent from './AdBlockComponent'; // Create this component
+import FastLoadComponent from './FastLoadComponent'; // Create this component
+import './YoutubeDownloader.css'; // Create this CSS file
+
+function YoutubeDownloader() {
+  const [youtubeUrl, setYoutubeUrl] = useState('');
+  const [downloadLinks, setDownloadLinks] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const downloadLinkRef = useRef(null);
+
+  const handleInputChange = (event) => {
+    setYoutubeUrl(event.target.value);
+    setDownloadLinks([]);
+    setError(null);
+  };
+
+  const handleDownload = async () => {
+    setLoading(true);
+    setError(null);
+    setDownloadLinks([]);
+
+    try {
+      // Basic URL validation (improve as needed)
+      if (!youtubeUrl.includes('youtube.com') && !youtubeUrl.includes('youtu.be')) {
+        setError('Invalid YouTube URL');
+        setLoading(false);
+        return;
+      }
+
+      // Simulate a backend call (replace with your actual API endpoint)
+      const response = await axios.get(
+        `/api/download?url=${encodeURIComponent(youtubeUrl)}` // Replace with your backend endpoint.
+      );
+
+      if (response.data && response.data.links) {
+        setDownloadLinks(response.data.links);
+      } else {
+        setError('Failed to fetch download links.');
+      }
+    } catch (err) {
+      console.error('Download error:', err);
+      setError('An error occurred while processing your request.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCopyLink = () => {
+    if (downloadLinkRef.current) {
+      downloadLinkRef.current.select();
+      document.execCommand('copy');
+    }
+  };
+
+  useEffect(() => {
+    // any initialization or cleanup here
+  }, []);
+
+  return (
+    <div className="youtube-downloader-container">
+      <AdBlockComponent />
+      <FastLoadComponent />
+      <h1>YouTube Mobile Download Helper</h1>
+      <div className="input-container">
+        <input
+          type="text"
+          placeholder="Enter YouTube URL"
+          value={youtubeUrl}
+          onChange={handleInputChange}
+        />
+        <button onClick={handleDownload} disabled={loading}>
+          {loading ? 'Loading...' : 'Get Download Links'}
+        </button>
+      </div>
+
+      {error && <p className="error">{error}</p>}
+
+      {downloadLinks.length > 0 && (
+        <div className="download-links">
+          <h2>Download Links:</h2>
+          <ul>
+            {downloadLinks.map((link, index) => (
+              <li key={index}>
+                <a href={link.url} download={link.quality}>
+                  {link.quality} - {link.format}
+                </a>
+                <input
+                  type="text"
+                  value={link.url}
+                  ref={downloadLinkRef}
+                  readOnly
+                  style={{ display: 'none' }}
+                />
+                <button onClick={handleCopyLink}>Copy Link</button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default YoutubeDownloader;
