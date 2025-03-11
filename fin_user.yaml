@@ -1,0 +1,67 @@
+import sqlite3
+import hashlib
+
+def register_user(username, password, email):
+    hashed_password = hashlib.sha256(password.encode()).hexdigest()
+    conn = sqlite3.connect('gilbert_financial_ownership.db')
+    cursor = conn.cursor()
+    try:
+        cursor.execute('INSERT INTO users (username, password, email) VALUES (?, ?, ?)', (username, hashed_password, email))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        return "Username already exists"
+    conn.close()
+    return "User registered successfully"
+
+def login_user(username, password):
+    hashed_password = hashlib.sha256(password.encode()).hexdigest()
+    conn = sqlite3.connect('gilbert_financial_ownership.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT id FROM users WHERE username=? AND password=?', (username, hashed_password))
+    user = cursor.fetchone()
+    conn.close()
+    if user:
+        return user[0]  # Return user ID for session management
+    else:
+        return None
+
+def add_transaction(user_id, amount, transaction_type, description):
+    conn = sqlite3.connect('gilbert_financial_ownership.db')
+    cursor = conn.cursor()
+    cursor.execute('INSERT INTO transactions (user_id, amount, type, description) VALUES (?, ?, ?, ?)', (user_id, amount, transaction_type, description))
+    cursor.execute('UPDATE users SET balance = balance + ? WHERE id = ?', (amount if transaction_type == 'credit' else -amount, user_id))
+    conn.commit()
+    conn.close()
+    return "Transaction added successfully"
+
+def check_balance(user_id):
+    conn = sqlite3.connect('gilbert_financial_ownership.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT balance FROM users WHERE id=?', (user_id,))
+    balance = cursor.fetchone()
+    conn.close()
+    return balance[0] if balance else 0.0
+
+def view_transactions(user_id):
+    conn = sqlite3.connect('gilbert_financial_ownership.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT amount, type, description, timestamp FROM transactions WHERE user_id=? ORDER BY timestamp DESC', (user_id,))
+    transactions = cursor.fetchall()
+    conn.close()
+    return transactions
+
+def add_ownership(user_id, asset_name, asset_value):
+    conn = sqlite3.connect('gilbert_financial_ownership.db')
+    cursor = conn.cursor()
+    cursor.execute('INSERT INTO ownership (user_id, asset_name, asset_value) VALUES (?, ?, ?)', (user_id, asset_name, asset_value))
+    conn.commit()
+    conn.close()
+    return "Ownership record added successfully"
+
+def view_ownership(user_id):
+    conn = sqlite3.connect('gilbert_financial_ownership.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT asset_name, asset_value, timestamp FROM ownership WHERE user_id=? ORDER BY timestamp DESC', (user_id,))
+    ownerships = cursor.fetchall()
+    conn.close()
+    return ownerships
