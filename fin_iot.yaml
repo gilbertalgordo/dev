@@ -1,0 +1,31 @@
+import random
+import time
+import paho.mqtt.client as mqtt
+
+BROKER = 'broker.emqx.io'
+TOPIC = 'finance/iot/data'
+
+def generate_iot_data():
+    return {
+        'transaction_volume': random.randint(1000, 5000),
+        'fraud_alert': random.choice([True, False])
+    }
+
+def on_connect(client, userdata, flags, rc):
+    print("Connected with result code " + str(rc))
+
+client = mqtt.Client()
+client.on_connect = on_connect
+
+client.connect(BROKER, 1883, 60)
+client.loop_start()
+
+try:
+    while True:
+        data = generate_iot_data()
+        client.publish(TOPIC, str(data))
+        print(f"Published: {data}")
+        time.sleep(5)
+except KeyboardInterrupt:
+    client.loop_stop()
+    client.disconnect()
