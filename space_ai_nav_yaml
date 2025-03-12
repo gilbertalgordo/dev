@@ -1,0 +1,55 @@
+import heapq
+
+class Node:
+    def __init__(self, x, y, cost=0, parent=None):
+        self.x = x
+        self.y = y
+        self.cost = cost
+        self.parent = parent
+
+    def __lt__(self, other):
+        return self.cost < other.cost
+
+def a_star(start, goal, grid):
+    open_list = []
+    closed_list = set()
+    heapq.heappush(open_list, (0, start))
+
+    while open_list:
+        _, current = heapq.heappop(open_list)
+        
+        if (current.x, current.y) in closed_list:
+            continue
+
+        closed_list.add((current.x, current.y))
+
+        if current.x == goal.x and current.y == goal.y:
+            path = []
+            while current:
+                path.append((current.x, current.y))
+                current = current.parent
+            return path[::-1]
+
+        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            x, y = current.x + dx, current.y + dy
+            if 0 <= x < len(grid) and 0 <= y < len(grid[0]) and grid[x][y] == 0:
+                neighbor = Node(x, y, current.cost + 1, current)
+                heapq.heappush(open_list, (neighbor.cost + heuristic(neighbor, goal), neighbor))
+
+    return []
+
+def heuristic(a, b):
+    return abs(a.x - b.x) + abs(a.y - b.y)
+
+if __name__ == "__main__":
+    grid = [
+        [0, 1, 0, 0, 0],
+        [0, 1, 0, 1, 0],
+        [0, 0, 0, 1, 0],
+        [0, 1, 0, 0, 0],
+        [0, 0, 0, 1, 0]
+    ]
+    start = Node(0, 0)
+    goal = Node(4, 4)
+    path = a_star(start, goal, grid)
+    print("Path:", path)
