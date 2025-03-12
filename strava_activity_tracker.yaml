@@ -1,0 +1,167 @@
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+
+// Placeholder for Quantum AI activity analysis
+const QuantumAI = {
+  analyzeActivity: (activityData) => {
+    // Simulate complex AI analysis
+    const simulatedInsights = {
+      optimalPacing: Math.random() * 5 + ' min/km',
+      muscleStrain: Math.random() * 80 + '%',
+      recoveryScore: Math.random() * 100,
+    };
+    return simulatedInsights;
+  },
+};
+
+// Placeholder for Advanced GPS with Anti-Spy features
+const AdvancedGPS = {
+  getLocation: async () => {
+    // Simulate fetching GPS data with anti-spy measures
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        const latitude = Math.random() * 180 - 90;
+        const longitude = Math.random() * 360 - 180;
+        resolve({ latitude, longitude, accuracy: Math.random() * 10 });
+      }, 1000); // Simulate GPS fetch delay
+    });
+  },
+};
+
+const StravaAdvancedTracker = () => {
+  const [activities, setActivities] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [gpsData, setGpsData] = useState(null);
+  const [aiInsights, setAiInsights] = useState(null);
+
+  const stravaAccessToken = localStorage.getItem('stravaAccessToken'); // Store token securely in production!
+  const stravaClientId = 'YOUR_STRAVA_CLIENT_ID'; // Replace with your Strava Client ID
+  const stravaClientSecret = 'YOUR_STRAVA_CLIENT_SECRET'; // Replace with your Strava Client Secret
+  const stravaRefreshToken = localStorage.getItem('stravaRefreshToken'); // store refresh token.
+
+  // Function to refresh Strava Access Token
+  const refreshStravaToken = async () => {
+      try {
+          const response = await axios.post(
+              'https://www.strava.com/oauth/token',
+              new URLSearchParams({
+                  client_id: stravaClientId,
+                  client_secret: stravaClientSecret,
+                  refresh_token: stravaRefreshToken,
+                  grant_type: 'refresh_token',
+              })
+          );
+          const newAccessToken = response.data.access_token;
+          const newRefreshToken = response.data.refresh_token;
+
+          localStorage.setItem('stravaAccessToken', newAccessToken);
+          localStorage.setItem('stravaRefreshToken',newRefreshToken);
+          return newAccessToken;
+      } catch (error) {
+          console.error('Error refreshing token:', error);
+          return null;
+      }
+  };
+
+  useEffect(() => {
+    const fetchActivities = async () => {
+      setLoading(true);
+      if (!stravaAccessToken) {
+          // Handle no access token (e.g., redirect to login)
+          setLoading(false);
+          return;
+      }
+
+      try {
+          const response = await axios.get(
+              'https://www.strava.com/api/v3/athlete/activities',
+              {
+                  headers: { Authorization: `Bearer ${stravaAccessToken}` },
+              }
+          );
+          setActivities(response.data);
+      } catch (error) {
+          if (error.response && error.response.status === 401) {
+              const newAccessToken = await refreshStravaToken();
+              if(newAccessToken){
+                  try{
+                      const response = await axios.get(
+                          'https://www.strava.com/api/v3/athlete/activities',
+                          {
+                              headers: { Authorization: `Bearer ${newAccessToken}` },
+                          }
+                      );
+                      setActivities(response.data);
+                  }catch(e){
+                      console.error("Error fetching activities after token refresh", e);
+                  }
+              }
+          } else {
+              console.error('Error fetching activities:', error);
+          }
+      } finally {
+          setLoading(false);
+      }
+    };
+
+    fetchActivities();
+  }, [stravaAccessToken]);
+
+  useEffect(() => {
+    const fetchGps = async () => {
+      const location = await AdvancedGPS.getLocation();
+      setGpsData(location);
+    };
+
+    fetchGps();
+
+    // Simulate real-time GPS updates (e.g., every 5 seconds)
+    const intervalId = setInterval(fetchGps, 5000);
+
+    return () => clearInterval(intervalId); // Cleanup interval on unmount
+  }, []);
+
+  useEffect(() => {
+    if (activities.length > 0) {
+      const latestActivity = activities[0];
+      const insights = QuantumAI.analyzeActivity(latestActivity);
+      setAiInsights(insights);
+    }
+  }, [activities]);
+
+  if (loading) {
+    return <div>Loading...</div>;
+  }
+
+  return (
+    <div>
+      <h1>Strava Advanced Activity Tracker</h1>
+      {gpsData && (
+        <div>
+          <h2>Current Location</h2>
+          <p>Latitude: {gpsData.latitude}</p>
+          <p>Longitude: {gpsData.longitude}</p>
+          <p>Accuracy: {gpsData.accuracy}</p>
+        </div>
+      )}
+      {aiInsights && (
+        <div>
+          <h2>Quantum AI Insights</h2>
+          <p>Optimal Pacing: {aiInsights.optimalPacing}</p>
+          <p>Muscle Strain: {aiInsights.muscleStrain}</p>
+          <p>Recovery Score: {aiInsights.recoveryScore}</p>
+        </div>
+      )}
+      <h2>Activities</h2>
+      <ul>
+        {activities.map((activity) => (
+          <li key={activity.id}>
+            {activity.name} - {activity.distance / 1000} km
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+};
+
+export default StravaAdvancedTracker;
