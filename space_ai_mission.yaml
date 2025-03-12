@@ -1,0 +1,45 @@
+from ortools.sat.python import cp_model
+
+class MissionPlanner:
+    def __init__(self, num_tasks, num_astronauts, task_durations, task_dependencies):
+        self.num_tasks = num_tasks
+        self.num_astronauts = num_astronauts
+        self.task_durations = task_durations
+        self.task_dependencies = task_dependencies
+
+    def plan_missions(self):
+        model = cp_model.CpModel()
+        
+        # Variables
+        start_times = [model.NewIntVar(0, sum(self.task_durations), f'start_{i}') for i in range(self.num_tasks)]
+        end_times = [model.NewIntVar(0, sum(self.task_durations), f'end_{i}') for i in range(self.num_tasks)]
+        astronauts = [model.NewIntVar(0, self.num_astronauts - 1, f'astronaut_{i}') for i in range(self.num_tasks)]
+        
+        # Constraints
+        for i in range(self.num_tasks):
+            model.Add(end_times[i] == start_times[i] + self.task_durations[i])
+        for i, deps in enumerate(self.task_dependencies):
+            for dep in deps:
+                model.Add(start_times[i] >= end_times[dep])
+        
+        # Objective
+        model.Minimize(max(end_times))
+        
+        # Solve
+        solver = cp_model.CpSolver()
+        status = solver.Solve(model)
+        
+        if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
+            for i in range(self.num_tasks):
+                print(f'Task {i} starts at {solver.Value(start_times[i])}, ends at {solver.Value(end_times[i])}, assigned to astronaut {solver.Value(astronauts[i])}')
+        else:
+            print('No solution found.')
+
+if __name__ == "__main__":
+    num_tasks = 5
+    num_astronauts = 2
+    task_durations = [3, 2, 1, 4, 2]
+    task_dependencies = [[], [0], [1], [0], [2, 3]]
+    
+    planner = MissionPlanner(num_tasks, num_astronauts, task_durations, task_dependencies)
+    planner.plan_missions()
