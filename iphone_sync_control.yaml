@@ -1,0 +1,82 @@
+import React, { useState, useEffect, useRef } from 'react';
+
+// Mock data and functions for demonstration. Replace with your actual sync logic.
+const mockSyncData = {
+  items: [
+    { id: 1, name: 'Item 1', synced: false },
+    { id: 2, name: 'Item 2', synced: true },
+    { id: 3, name: 'Item 3', synced: false },
+  ],
+};
+
+const simulateSync = (items, setSyncedItems) => {
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      const updatedItems = items.map((item) => ({
+        ...item,
+        synced: Math.random() > 0.5, // Simulate random sync status
+      }));
+      setSyncedItems(updatedItems);
+      resolve(updatedItems);
+    }, 2000); // Simulate network delay
+  });
+};
+
+function SyncControl() {
+  const [syncedItems, setSyncedItems] = useState(mockSyncData.items);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const intervalId = useRef(null); // Use useRef to store interval ID
+
+  const handleSync = async () => {
+    setIsSyncing(true);
+    await simulateSync(syncedItems, setSyncedItems);
+    setIsSyncing(false);
+  };
+
+  const startAutoSync = () => {
+    if (intervalId.current) { // Prevent multiple intervals
+      clearInterval(intervalId.current);
+    }
+    intervalId.current = setInterval(handleSync, 10000); // Auto sync every 10 seconds
+  };
+
+   const stopAutoSync = () => {
+    if (intervalId.current) {
+      clearInterval(intervalId.current);
+      intervalId.current = null;
+    }
+   }
+
+  useEffect(() => {
+    startAutoSync(); // Start auto sync on component mount
+    return () => stopAutoSync(); // Clean up auto sync on component unmount
+  }, []); // Run only once on mount and unmount.
+
+  const renderSyncStatus = (item) => {
+    if (item.synced) {
+      return <span style={{ color: 'green' }}>Synced</span>;
+    } else {
+      return <span style={{ color: 'red' }}>Not Synced</span>;
+    }
+  };
+
+  return (
+    <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>
+      <h1>Advanced Sync Control</h1>
+      <button onClick={handleSync} disabled={isSyncing}>
+        {isSyncing ? 'Syncing...' : 'Sync Now'}
+      </button>
+      <button onClick={startAutoSync}>Start Auto Sync</button>
+      <button onClick={stopAutoSync}>Stop Auto Sync</button>
+      <ul>
+        {syncedItems.map((item) => (
+          <li key={item.id}>
+            {item.name} - {renderSyncStatus(item)}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export default SyncControl;
