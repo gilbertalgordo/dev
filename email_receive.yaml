@@ -1,0 +1,28 @@
+import imaplib
+import email
+
+def read_emails(email_address, password):
+    mail = imaplib.IMAP4_SSL('imap.gmail.com')
+    mail.login(email_address, password)
+    mail.select('inbox')
+
+    status, data = mail.search(None, 'ALL')
+    mail_ids = data[0]
+    id_list = mail_ids.split()
+
+    for num in id_list:
+        status, data = mail.fetch(num, '(RFC822)')
+        raw_email = data[0][1]
+        msg = email.message_from_bytes(raw_email)
+        print('From:', msg['From'])
+        print('Subject:', msg['Subject'])
+        print('Body:', msg.get_payload(decode=True).decode())
+
+    mail.close()
+    mail.logout()
+
+# Example usage:
+email_address = 'your_email@gmail.com'
+password = 'your_password'
+
+read_emails(email_address, password)
