@@ -1,0 +1,33 @@
+from googleapiclient.discovery import build
+from google.oauth2 import service_account
+
+SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
+SERVICE_ACCOUNT_FILE = 'credentials.json'  # Path to your service account credentials file
+USER_ID = 'me'
+
+def create_filter(criteria, action):
+    credentials = service_account.Credentials.from_service_account_file(
+        SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+
+    service = build('gmail', 'v1', credentials=credentials)
+
+    filter_body = {
+        'criteria': criteria,
+        'action': action
+    }
+
+    created_filter = service.users().settings().filters().create(userId=USER_ID, body=filter_body).execute()
+    print(f"Filter created with ID: {created_filter['id']}")
+
+# Example usage:
+criteria = {
+    'from': 'example@gmail.com',
+    'hasAttachment': True
+}
+
+action = {
+    'addLabelIds': ['Label_1'],
+    'removeLabelIds': ['INBOX']
+}
+
+create_filter(criteria, action)
