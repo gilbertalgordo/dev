@@ -1,0 +1,117 @@
+import React, { useEffect } from 'react';
+import { View, Text, Alert, AppState } from 'react-native';
+import DeviceInfo from 'react-native-device-info';
+
+const AntiSpy = () => {
+  useEffect(() => {
+    const checkSecurity = async () => {
+      const isEmulator = await DeviceInfo.isEmulator();
+      const isJailBroken = await DeviceInfo.isJailBroken();
+      if (isEmulator || isJailBroken) {
+        Alert.alert("Security Alert", "Untrusted environment detected!");
+      }
+    };
+
+    checkSecurity();
+    
+    const handleAppStateChange = (nextAppState) => {
+      if (nextAppState === 'active') {
+        checkSecurity();
+      }
+    };
+
+    AppState.addEventListener('change', handleAppStateChange);
+    
+    return () => {
+      AppState.removeEventListener('change', handleAppStateChange);
+    };
+  }, []);
+
+  return (
+    <View>
+      <Text>Security Monitoring Active</Text>
+    </View>
+  );
+};
+
+export default AntiSpy;
+
+
+import React from 'react';
+import { View } from 'react-native';
+import { WebView } from 'react-native-webview';
+
+const INSTAGRAM_URL = "https://www.instagram.com";
+
+const INJECTED_JAVASCRIPT = `
+  (function() {
+    const adSelectors = ['.ad', 'div[role="banner"]', 'div[role="dialog"]'];
+    adSelectors.forEach(selector => {
+      let elements = document.querySelectorAll(selector);
+      elements.forEach(el => el.remove());
+    });
+  })();
+`;
+
+const AdBlockWebView = () => {
+  return (
+    <View style={{ flex: 1 }}>
+      <WebView 
+        source={{ uri: INSTAGRAM_URL }} 
+        injectedJavaScript={INJECTED_JAVASCRIPT}
+        javaScriptEnabled
+      />
+    </View>
+  );
+};
+
+export default AdBlockWebView;
+
+
+import React, { useState, useEffect } from 'react';
+import { View, Text } from 'react-native';
+import axios from 'axios';
+
+const QuantumAI = () => {
+  const [result, setResult] = useState('');
+
+  useEffect(() => {
+    const fetchAIData = async () => {
+      try {
+        const response = await axios.get('https://quantum-ai-api.com/predict');
+        setResult(response.data.message);
+      } catch (error) {
+        setResult('AI Model Offline');
+      }
+    };
+
+    fetchAIData();
+  }, []);
+
+  return (
+    <View>
+      <Text>Quantum AI Analysis: {result}</Text>
+    </View>
+  );
+};
+
+export default QuantumAI;
+
+
+import React from 'react';
+import { SafeAreaView } from 'react-native';
+import AntiSpy from './AntiSpy';
+import AdBlockWebView from './AdBlockWebView';
+import QuantumAI from './QuantumAI';
+
+const App = () => {
+  return (
+    <SafeAreaView style={{ flex: 1 }}>
+      <AntiSpy />
+      <AdBlockWebView />
+      <QuantumAI />
+    </SafeAreaView>
+  );
+};
+
+export default App;
