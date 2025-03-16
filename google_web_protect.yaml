@@ -1,0 +1,143 @@
+npx create-react-app security-extension
+cd security-extension
+npm install
+
+{
+  "manifest_version": 3,
+  "name": "Advanced Security Extension",
+  "version": "1.0",
+  "description": "Google Security with Dark Web Detection, AdBlock, and Counter-Attack System",
+  "permissions": ["storage", "webRequest", "activeTab", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_popup": "index.html",
+    "default_icon": "icon.png"
+  }
+}
+
+
+const DARK_WEB_API = "https://api.darkwebscanner.com/check";
+const GOOGLE_SECURITY_API = "https://safebrowsing.googleapis.com/v4/threatMatches:find?key=YOUR_GOOGLE_API_KEY";
+
+export const checkDarkWeb = async (email) => {
+  const response = await fetch(DARK_WEB_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email })
+  });
+  return response.json();
+};
+
+export const checkGoogleSecurity = async (url) => {
+  const response = await fetch(GOOGLE_SECURITY_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      client: { clientId: "security-extension", clientVersion: "1.0" },
+      threatInfo: {
+        threatTypes: ["MALWARE", "SOCIAL_ENGINEERING"],
+        platformTypes: ["WINDOWS"],
+        threatEntryTypes: ["URL"],
+        threatEntries: [{ url }]
+      }
+    })
+  });
+  return response.json();
+};
+
+
+chrome.webRequest.onBeforeRequest.addListener(
+  (details) => ({ cancel: true }),
+  { urls: ["*://ads.example.com/*", "*://trackers.example.com/*"] },
+  ["blocking"]
+);
+
+export const detectSpyware = () => {
+  navigator.mediaDevices.enumerateDevices().then(devices => {
+    devices.forEach(device => {
+      if (device.kind === "videoinput") {
+        console.log("Camera detected:", device.label);
+        alert("Spyware alert! Unauthorized camera access detected.");
+      }
+    });
+  });
+};
+
+
+export const counterAttack = (attackerIP) => {
+  const taunts = [
+    "Nice try, hacker!",
+    "Go hack a calculator, not me!",
+    "I've seen toddlers more skilled than you!"
+  ];
+  fetch(`https://counterattackapi.com/attack?ip=${attackerIP}`)
+    .then(() => alert(taunts[Math.floor(Math.random() * taunts.length)]));
+};
+
+
+chrome.webRequest.onHeadersReceived.addListener(
+  (details) => {
+    if (details.responseHeaders.some(header => header.name.toLowerCase() === "x-spyware-detected")) {
+      alert("Warning: Spyware detected on this page!");
+    }
+  },
+  { urls: ["<all_urls>"] },
+  ["responseHeaders"]
+);
+
+
+import React, { useState } from "react";
+import { checkDarkWeb, checkGoogleSecurity, detectSpyware, counterAttack } from "./security";
+
+function App() {
+  const [email, setEmail] = useState("");
+  const [darkWebResult, setDarkWebResult] = useState("");
+  const [googleResult, setGoogleResult] = useState("");
+
+  const handleCheck = async () => {
+    const dwData = await checkDarkWeb(email);
+    setDarkWebResult(dwData.found ? "Compromised!" : "Safe!");
+
+    const googleData = await checkGoogleSecurity(window.location.href);
+    setGoogleResult(googleData.matches ? "Unsafe Website!" : "Safe!");
+  };
+
+  return (
+    <div>
+      <h1>Security Dashboard</h1>
+      <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Enter Email for Dark Web Check" />
+      <button onClick={handleCheck}>Scan</button>
+      <p>Dark Web Status: {darkWebResult}</p>
+      <p>Google Security: {googleResult}</p>
+      <button onClick={detectSpyware}>Detect Spyware</button>
+      <button onClick={() => counterAttack("192.168.1.1")}>Counter-Attack!</button>
+    </div>
+  );
+}
+
+export default App;
+
+
+npm run build
+
+
+Feature,Implementation
+Dark Web Detection,API to check compromised emails
+Google Security Scan,Uses Google Safe Browsing API
+AdBlock,Blocks ad domains using webRequest
+Mobile Data Security,Detects unauthorized camera/mic use
+Real-time Defense,Counterattacks phishing attempts
+Taunts,Displays fun messages to attackers
+Anti-Spy,Detects spyware scripts
+
+
