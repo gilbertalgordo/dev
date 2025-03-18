@@ -1,0 +1,82 @@
+import time
+import threading
+
+class SpaceDrone:
+    def __init__(self, id):
+        self.id = id
+        self.position = (0, 0, 0)  # Initial position (x, y, z)
+        self.destination = None
+        self.obstacle_detected = False
+        self.communication_channel = None
+
+    def navigate_to(self, destination):
+        self.destination = destination
+        print(f"Space Drone {self.id}: Navigating to {destination}")
+
+    def detect_obstacle(self):
+        # Simulated obstacle detection
+        time.sleep(2)
+        self.obstacle_detected = True
+        print(f"Space Drone {self.id}: Obstacle detected!")
+
+    def avoid_obstacle(self):
+        if self.obstacle_detected:
+            print(f"Space Drone {self.id}: Avoiding obstacle...")
+            # Code for obstacle avoidance algorithm
+            self.obstacle_detected = False
+
+    def reach_destination(self):
+        if self.destination:
+            print(f"Space Drone {self.id}: Reached destination {self.destination}")
+            self.position = self.destination
+            self.destination = None
+
+    def send_message(self, message):
+        if self.communication_channel:
+            self.communication_channel.send_message(self.id, message)
+
+class CommunicationSystem:
+    def __init__(self):
+        self.space_drones = []
+
+    def add_space_drone(self, space_drone):
+        self.space_drones.append(space_drone)
+        space_drone.communication_channel = self
+
+    def send_message(self, drone_id, message):
+        for space_drone in self.space_drones:
+            if space_drone.id == drone_id:
+                print(f"Sending message to Space Drone {drone_id}: {message}")
+                # Code for sending message to drone
+
+def autonomous_navigation(space_drone, destination):
+    space_drone.navigate_to(destination)
+    while space_drone.position != destination:
+        space_drone.avoid_obstacle()
+        time.sleep(1)
+    space_drone.reach_destination()
+
+# Create space drones
+space_drone1 = SpaceDrone(1)
+space_drone2 = SpaceDrone(2)
+
+# Create communication system
+comm_system = CommunicationSystem()
+comm_system.add_space_drone(space_drone1)
+comm_system.add_space_drone(space_drone2)
+
+# Autonomous navigation threads
+nav_thread1 = threading.Thread(target=autonomous_navigation, args=(space_drone1, (100, 200, 300)))  # Destination in (x, y, z)
+nav_thread2 = threading.Thread(target=autonomous_navigation, args=(space_drone2, (500, 600, 700)))  # Destination in (x, y, z)
+
+# Start navigation
+nav_thread1.start()
+nav_thread2.start()
+
+# Wait for navigation threads to finish
+nav_thread1.join()
+nav_thread2.join()
+
+# Send messages
+space_drone1.send_message("Conducting mineral survey on asteroid")
+space_drone2.send_message("Exploring Martian surface for signs of life")
