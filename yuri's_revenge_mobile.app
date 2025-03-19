@@ -1,0 +1,85 @@
+import React, { useState, useEffect, useRef } from 'react';
+
+function YuriRevengeMobile() {
+  const [gameUrl, setGameUrl] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const iframeRef = useRef(null);
+
+  useEffect(() => {
+    async function fetchGameData() {
+      try {
+        // Simulated API call for game URL and patch info.
+        // In a real application, replace with your actual backend API.
+        const response = await fetch('/api/game-data'); // Replace with your API endpoint
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+
+        // Simulate patch application. In a real scenario, you'd handle file downloads and patching.
+        if (data.patchUrl) {
+          console.log('Patch available, simulating download and application:', data.patchUrl);
+          // Simulate patch application.
+          // In a real scenario, you'd have more complex logic here.
+          // Example: download, verify, apply, restart.
+
+          // Simulating a delay for patch application.
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          console.log('Patch applied (simulated).');
+        }
+
+        setGameUrl(data.gameUrl);
+        setLoading(false);
+      } catch (err) {
+        setError(err.message);
+        setLoading(false);
+      }
+    }
+
+    fetchGameData();
+  }, []);
+
+  useEffect(() => {
+    if (iframeRef.current) {
+      // Simulate adblocking. In a real scenario, you'd use a more robust adblocker.
+      iframeRef.current.onload = () => {
+        try {
+          // This is a very basic adblock simulation. More complex adblock techniques would be necessary
+          // for a real world application.
+          const ads = iframeRef.current.contentDocument.querySelectorAll('.ad, [id*="ad"], [class*="ad"]');
+          ads.forEach(ad => {
+            ad.style.display = 'none';
+          });
+          console.log("Adblocking simulated.");
+
+        } catch (e) {
+          console.log("Error during adblocking simulation:", e);
+        }
+      };
+    }
+  }, [gameUrl]);
+
+  if (loading) {
+    return <div>Loading Yuri's Revenge...</div>;
+  }
+
+  if (error) {
+    return <div>Error: {error}</div>;
+  }
+
+  return (
+    <div>
+      <iframe
+        ref={iframeRef}
+        src={gameUrl}
+        width="100%"
+        height="100%"
+        style={{ border: 'none' }}
+        title="Yuri's Revenge"
+      />
+    </div>
+  );
+}
+
+export default YuriRevengeMobile;
