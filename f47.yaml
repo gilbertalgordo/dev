@@ -1,0 +1,172 @@
+import React, { useState, useEffect } from 'react';
+
+const AdvancedF47Boeing = () => {
+  const [flightData, setFlightData] = useState({
+    altitude: 0,
+    speed: 0,
+    heading: 0,
+    fuelLevel: 100,
+    engineStatus: 'OFF',
+    weaponSystems: {
+      missiles: 0,
+      bombs: 0,
+      gunAmmo: 0,
+    },
+    targetLock: null,
+    navigation: {
+      latitude: 0,
+      longitude: 0,
+      waypoints: [],
+    },
+    sensors: {
+      radar: 'OFF',
+      infrared: 'OFF',
+      lidar: 'OFF',
+    },
+  });
+
+  const [simulationRunning, setSimulationRunning] = useState(false);
+  const [targetList, setTargetList] = useState([]);
+  const [selectedTarget, setSelectedTarget] = useState(null);
+
+  useEffect(() => {
+    let intervalId;
+
+    if (simulationRunning) {
+      intervalId = setInterval(() => {
+        setFlightData((prevData) => {
+          // Simulate flight dynamics (simplified)
+          let newAltitude = prevData.altitude + (Math.random() - 0.5) * 10;
+          let newSpeed = prevData.speed + (Math.random() - 0.5) * 5;
+          let newHeading = prevData.heading + (Math.random() - 0.5) * 2;
+          let newFuelLevel = Math.max(0, prevData.fuelLevel - 0.1); // Fuel consumption
+
+          // Simulate sensor data (random for now)
+          const newSensors = {
+            radar: Math.random() > 0.5 ? 'ON' : 'OFF',
+            infrared: Math.random() > 0.5 ? 'ON' : 'OFF',
+            lidar: Math.random() > 0.5 ? 'ON' : 'OFF',
+          };
+
+          //Simulate Navigation
+          const newLatitude = prevData.navigation.latitude + (Math.random() - 0.5) * 0.01;
+          const newLongitude = prevData.navigation.longitude + (Math.random() - 0.5) * 0.01;
+
+          return {
+            ...prevData,
+            altitude: newAltitude,
+            speed: newSpeed,
+            heading: newHeading,
+            fuelLevel: newFuelLevel,
+            sensors: newSensors,
+            navigation: {
+              ...prevData.navigation,
+              latitude: newLatitude,
+              longitude: newLongitude,
+            }
+          };
+        });
+
+        // Simulate target detection (random for now)
+        if (Math.random() > 0.9) {
+          setTargetList((prevTargets) => [
+            ...prevTargets,
+            {
+              id: Date.now(),
+              latitude: flightData.navigation.latitude + (Math.random() - 0.5) * 0.1,
+              longitude: flightData.navigation.longitude + (Math.random() - 0.5) * 0.1,
+              type: Math.random() > 0.5 ? 'Enemy Aircraft' : 'Ground Target',
+            },
+          ]);
+        }
+      }, 100); // Update every 100ms
+    } else {
+      clearInterval(intervalId);
+    }
+
+    return () => clearInterval(intervalId);
+  }, [simulationRunning, flightData.navigation.latitude, flightData.navigation.longitude]);
+
+  const handleStartSimulation = () => {
+    setSimulationRunning(true);
+    setFlightData((prevData) => ({ ...prevData, engineStatus: 'ON' }));
+  };
+
+  const handleStopSimulation = () => {
+    setSimulationRunning(false);
+    setFlightData((prevData) => ({ ...prevData, engineStatus: 'OFF' }));
+  };
+
+  const handleFireMissile = () => {
+    if (selectedTarget && flightData.weaponSystems.missiles > 0) {
+      setFlightData((prevData) => ({
+        ...prevData,
+        weaponSystems: {
+          ...prevData.weaponSystems,
+          missiles: prevData.weaponSystems.missiles - 1,
+        },
+      }));
+      setTargetList((prevTargets) => prevTargets.filter((target) => target.id !== selectedTarget.id));
+      setSelectedTarget(null);
+    }
+  };
+
+  const handleTargetSelect = (target) => {
+    setSelectedTarget(target);
+    setFlightData((prevData) => ({ ...prevData, targetLock: target }));
+  };
+
+  return (
+    <div>
+      <h1>Advanced F47 Boeing Simulation</h1>
+      <div>
+        <button onClick={simulationRunning ? handleStopSimulation : handleStartSimulation}>
+          {simulationRunning ? 'Stop Simulation' : 'Start Simulation'}
+        </button>
+      </div>
+
+      <div>
+        <h2>Flight Data</h2>
+        <p>Altitude: {flightData.altitude.toFixed(2)}</p>
+        <p>Speed: {flightData.speed.toFixed(2)}</p>
+        <p>Heading: {flightData.heading.toFixed(2)}</p>
+        <p>Fuel Level: {flightData.fuelLevel.toFixed(2)}</p>
+        <p>Engine Status: {flightData.engineStatus}</p>
+      </div>
+
+      <div>
+        <h2>Weapon Systems</h2>
+        <p>Missiles: {flightData.weaponSystems.missiles}</p>
+        <p>Bombs: {flightData.weaponSystems.bombs}</p>
+        <p>Gun Ammo: {flightData.weaponSystems.gunAmmo}</p>
+        {selectedTarget && <button onClick={handleFireMissile}>Fire Missile</button>}
+      </div>
+
+      <div>
+        <h2>Navigation</h2>
+        <p>Latitude: {flightData.navigation.latitude.toFixed(4)}</p>
+        <p>Longitude: {flightData.navigation.longitude.toFixed(4)}</p>
+      </div>
+
+      <div>
+        <h2>Sensors</h2>
+        <p>Radar: {flightData.sensors.radar}</p>
+        <p>Infrared: {flightData.sensors.infrared}</p>
+        <p>Lidar: {flightData.sensors.lidar}</p>
+      </div>
+
+      <div>
+        <h2>Targets</h2>
+        <ul>
+          {targetList.map((target) => (
+            <li key={target.id} onClick={() => handleTargetSelect(target)}>
+              {target.type} - Lat: {target.latitude.toFixed(4)}, Lon: {target.longitude.toFixed(4)}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+};
+
+export default AdvancedF47Boeing;
