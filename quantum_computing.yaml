@@ -1,0 +1,71 @@
+pip install qiskit matplotlib
+
+
+# Import necessary libraries
+from qiskit import QuantumCircuit, Aer, transpile, execute, IBMQ
+from qiskit.visualization import plot_histogram
+import matplotlib.pyplot as plt
+from qiskit.providers.ibmq import least_busy
+from qiskit.tools.monitor import job_monitor
+import numpy as np
+
+# Load IBMQ account (replace 'YOUR_API_TOKEN' with your actual API token)
+IBMQ.save_account('YOUR_API_TOKEN', overwrite=True)
+IBMQ.load_account()
+
+# Get the provider and list available backends
+provider = IBMQ.get_provider(hub='ibm-q')
+backend = least_busy(provider.backends(filters=lambda x: x.configuration().n_qubits >= 3 and
+                                                not x.configuration().simulator and x.status().operational==True))
+
+print(f"Running on current least busy device: {backend}")
+
+# Number of qubits in the counting register
+n_count = 3
+
+# Create the quantum and classical registers
+qc = QuantumCircuit(n_count + 1, n_count)
+
+# Apply Hadamard gates to the counting register
+for q in range(n_count):
+    qc.h(q)
+
+# Apply the controlled-U operations
+theta = 1/3  # Example eigenvalue phase
+for q in range(n_count):
+    qc.cp(2 * np.pi * theta * 2**q, q, n_count)
+
+# Apply the inverse QFT
+def qft_dagger(qc, n):
+    """n-qubit inverse QFT on the first n qubits in the circuit."""
+    for qubit in range(n//2):
+        qc.swap(qubit, n-qubit-1)
+    for j in range(n):
+        for m in range(j):
+            qc.cp(-np.pi/float(2**(j-m)), m, j)
+        qc.h(j)
+
+qft_dagger(qc, n_count)
+
+# Measure the counting register
+qc.measure(range(n_count), range(n_count))
+
+# Transpile the circuit for the backend
+compiled_circuit = transpile(qc, backend)
+
+# Execute the circuit on the chosen backend
+job = execute(compiled_circuit, backend, shots=2048)
+
+# Monitor the job status
+job_monitor(job)
+
+# Get the results from the job
+result = job.result()
+
+# Get the counts (how many times each result was measured)
+counts = result.get_counts(qc)
+
+# Print the counts and plot the histogram
+print("\nTotal count for each state are:", counts)
+plot_histogram(counts)
+plt.show()
