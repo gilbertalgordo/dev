@@ -144,3 +144,103 @@ const AdvancedStealthApache = () => {
 };
 
 export default AdvancedStealthApache;
+
+
+import React, { useRef, useEffect } from 'react';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
+
+const StealthApache = () => {
+  const mountRef = useRef(null);
+
+  useEffect(() => {
+    // Scene setup
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    mountRef.current.appendChild(renderer.domElement);
+
+    // Camera position
+    camera.position.z = 10;
+
+    // Orbit controls
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+
+    // Helicopter geometry (simplified)
+    const helicopterGeometry = new THREE.BoxGeometry(2, 0.5, 4);
+    const helicopterMaterial = new THREE.MeshPhongMaterial({ color: 0x222222 });
+    const helicopter = new THREE.Mesh(helicopterGeometry, helicopterMaterial);
+    scene.add(helicopter);
+
+    // Rotor blades
+    const rotorGeometry = new THREE.BoxGeometry(0.1, 0.1, 3);
+    const rotorMaterial = new THREE.MeshBasicMaterial({ color: 0x333333 });
+    const mainRotor = new THREE.Mesh(rotorGeometry, rotorMaterial);
+    mainRotor.position.y = 0.7;
+    helicopter.add(mainRotor);
+
+    const tailRotor = new THREE.Mesh(rotorGeometry, rotorMaterial);
+    tailRotor.position.x = -1.1;
+    tailRotor.position.y = 0.2;
+    tailRotor.rotation.y = Math.PI / 2;
+    helicopter.add(tailRotor);
+
+    // Lazer canon
+    const laserGeometry = new THREE.CylinderGeometry(0.05, 0.05, 1, 32);
+    const laserMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+    const laserCanon = new THREE.Mesh(laserGeometry, laserMaterial);
+    laserCanon.position.x = 1.2;
+    laserCanon.position.y = -0.2;
+    laserCanon.rotation.z = Math.PI / 2;
+    helicopter.add(laserCanon);
+
+    // Electric Shockwave
+    const shockwaveGeometry = new THREE.TorusGeometry(3, 0.1, 16, 100);
+    const shockwaveMaterial = new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: true });
+    const shockwave = new THREE.Mesh(shockwaveGeometry, shockwaveMaterial);
+    scene.add(shockwave);
+
+    // Lights
+    const ambientLight = new THREE.AmbientLight(0x404040);
+    scene.add(ambientLight);
+
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+    directionalLight.position.set(1, 1, 1);
+    scene.add(directionalLight);
+
+    // Animation loop
+    const animate = () => {
+      requestAnimationFrame(animate);
+
+      mainRotor.rotation.y += 0.3;
+      tailRotor.rotation.z += 0.5;
+      shockwave.rotation.y += 0.01;
+
+      controls.update();
+      renderer.render(scene, camera);
+    };
+
+    animate();
+
+    // Resize handler
+    const handleResize = () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    };
+
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      mountRef.current.removeChild(renderer.domElement);
+    };
+  }, []);
+
+  return <div ref={mountRef} style={{ width: '100vw', height: '100vh' }} />;
+};
+
+export default StealthApache;
