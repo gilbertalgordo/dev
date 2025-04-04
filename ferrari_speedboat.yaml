@@ -1,0 +1,181 @@
+import React, { useState, useEffect } from 'react';
+
+function SpeedboatDashboard() {
+  // State variables to hold boat data
+  const [speed, setSpeed] = useState(0);
+  const [rpm, setRpm] = useState(0);
+  const [batteryLevel, setBatteryLevel] = useState(100);
+  const [fuelLevel, setFuelLevel] = useState(100);
+  const [hybridMode, setHybridMode] = useState('Auto'); // Auto, Electric, Combustion
+  const [engineTemp, setEngineTemp] = useState(80);
+  const [waterTemp, setWaterTemp] = useState(25);
+  const [location, setLocation] = useState({ latitude: null, longitude: null });
+  const [systemStatus, setSystemStatus] = useState('Nominal'); // Nominal, Warning, Error
+
+  // Function to simulate data updates (replace with actual API calls)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSpeed(prevSpeed => Math.max(0, Math.min(120, prevSpeed + (Math.random() * 10 - 5))));
+      setRpm(prevRpm => Math.max(0, Math.min(8000, prevRpm + (Math.random() * 500 - 250))));
+      setBatteryLevel(prevLevel => Math.max(0, Math.min(100, prevLevel - (hybridMode === 'Electric' ? Math.random() * 2 : Math.random() * 0.5))));
+      setFuelLevel(prevLevel => Math.max(0, Math.min(100, prevLevel - (hybridMode === 'Combustion' ? Math.random() * 1 : Math.random() * 0.2))));
+      setEngineTemp(prevTemp => Math.max(60, Math.min(110, prevTemp + (Math.random() * 5 - 2.5))));
+      setWaterTemp(prevTemp => Math.max(10, Math.min(35, prevTemp + (Math.random() * 2 - 1))));
+      setLocation({
+        latitude: 14.35 + Math.random() * 0.01 - 0.005,
+        longitude: 121.05 + Math.random() * 0.01 - 0.005,
+      });
+
+      // Simulate system status changes
+      if (engineTemp > 105 || batteryLevel < 10 || fuelLevel < 5) {
+        setSystemStatus('Warning');
+      } else if (engineTemp > 115) {
+        setSystemStatus('Error');
+      } else {
+        setSystemStatus('Nominal');
+      }
+    }, 2000); // Update every 2 seconds
+
+    return () => clearInterval(interval); // Cleanup on unmount
+  }, [hybridMode]);
+
+  // Function to handle hybrid mode changes
+  const handleHybridModeChange = (event) => {
+    setHybridMode(event.target.value);
+  };
+
+  return (
+    <div className="speedboat-dashboard" style={dashboardStyle}>
+      <h1 style={headingStyle}>Ferrari Hybrid Speedboat - Advanced Telemetry</h1>
+
+      <div style={dataSectionStyle}>
+        <div style={dataItemStyle}>
+          <strong>Speed:</strong> {speed} knots
+        </div>
+        <div style={dataItemStyle}>
+          <strong>RPM:</strong> {rpm}
+        </div>
+        <div style={dataItemStyle}>
+          <strong>Battery Level:</strong> {batteryLevel}%
+        </div>
+        <div style={dataItemStyle}>
+          <strong>Fuel Level:</strong> {fuelLevel}%
+        </div>
+      </div>
+
+      <div style={controlSectionStyle}>
+        <label htmlFor="hybridMode" style={labelStyle}>Hybrid Mode:</label>
+        <select id="hybridMode" value={hybridMode} onChange={handleHybridModeChange} style={selectStyle}>
+          <option value="Auto">Auto</option>
+          <option value="Electric">Electric</option>
+          <option value="Combustion">Combustion</option>
+        </select>
+      </div>
+
+      <div style={dataSectionStyle}>
+        <div style={dataItemStyle}>
+          <strong>Engine Temperature:</strong> {engineTemp}°C
+        </div>
+        <div style={dataItemStyle}>
+          <strong>Water Temperature:</strong> {waterTemp}°C
+        </div>
+        {location.latitude && (
+          <div style={dataItemStyle}>
+            <strong>Location:</strong> {location.latitude.toFixed(4)}, {location.longitude.toFixed(4)}
+          </div>
+        )}
+        <div style={dataItemStyle}>
+          <strong>System Status:</strong> <span style={statusStyle(systemStatus)}>{systemStatus}</span>
+        </div>
+      </div>
+
+      {systemStatus === 'Warning' && (
+        <div style={warningStyle}>
+          <strong>Warning:</strong> Check engine temperature, battery, and fuel levels.
+        </div>
+      )}
+      {systemStatus === 'Error' && (
+        <div style={errorStyle}>
+          <strong>Error:</strong> System malfunction detected. Please take immediate action.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Styles (can be moved to a separate CSS file)
+const dashboardStyle = {
+  fontFamily: 'Arial, sans-serif',
+  padding: '20px',
+  backgroundColor: '#f4f4f4',
+  borderRadius: '8px',
+  boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+};
+
+const headingStyle = {
+  color: '#cc0000', // Ferrari red
+  textAlign: 'center',
+  marginBottom: '20px',
+};
+
+const dataSectionStyle = {
+  display: 'grid',
+  gridTemplateColumns: 'auto auto',
+  gap: '15px',
+  marginBottom: '15px',
+  padding: '15px',
+  backgroundColor: '#fff',
+  borderRadius: '5px',
+  boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
+};
+
+const dataItemStyle = {
+  fontSize: '16px',
+  color: '#333',
+};
+
+const controlSectionStyle = {
+  marginBottom: '20px',
+  padding: '15px',
+  backgroundColor: '#fff',
+  borderRadius: '5px',
+  boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
+  display: 'flex',
+  alignItems: 'center',
+};
+
+const labelStyle = {
+  marginRight: '10px',
+  fontSize: '16px',
+  color: '#555',
+};
+
+const selectStyle = {
+  padding: '8px',
+  fontSize: '16px',
+  borderRadius: '4px',
+  borderColor: '#ccc',
+};
+
+const statusStyle = (status) => ({
+  color: status === 'Nominal' ? 'green' : status === 'Warning' ? 'orange' : 'red',
+  fontWeight: 'bold',
+});
+
+const warningStyle = {
+  backgroundColor: '#ffe0b2',
+  color: '#d84315',
+  padding: '10px',
+  borderRadius: '5px',
+  marginBottom: '10px',
+};
+
+const errorStyle = {
+  backgroundColor: '#ffcdd2',
+  color: '#c62828',
+  padding: '10px',
+  borderRadius: '5px',
+  marginBottom: '10px',
+};
+
+export default SpeedboatDashboard;
