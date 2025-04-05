@@ -1,0 +1,135 @@
+import React, { useState, useEffect } from 'react';
+
+const initialState = {
+  mode: 'Combat',
+  isTransformed: false,
+  quantumAIStatus: 'Idle',
+  health: 100,
+  isDamaged: false,
+  weapons: ['Plasma Cannon', 'Quantum Saber', 'Hyper Beam Rifle'],
+  skills: ['Cloak Mode', 'EMP Burst', 'Quantum Teleport'],
+};
+
+export default function GundamSystem() {
+  const [gundam, setGundam] = useState(initialState);
+
+  // Auto-repair mechanism
+  useEffect(() => {
+    if (gundam.isDamaged && gundam.health < 100) {
+      const repairInterval = setInterval(() => {
+        setGundam(prev => {
+          const newHealth = Math.min(prev.health + 5, 100);
+          return {
+            ...prev,
+            health: newHealth,
+            isDamaged: newHealth < 100,
+          };
+        });
+      }, 1000); // repairs 5 health every second
+
+      return () => clearInterval(repairInterval);
+    }
+  }, [gundam.isDamaged, gundam.health]);
+
+  const activateQuantumAI = () => {
+    setGundam(prev => ({ ...prev, quantumAIStatus: 'Analyzing Combat Data...' }));
+    setTimeout(() => {
+      setGundam(prev => ({ ...prev, quantumAIStatus: 'Engaged in Tactical Mode' }));
+    }, 2000);
+  };
+
+  const toggleTransform = () => {
+    setGundam(prev => ({
+      ...prev,
+      isTransformed: !prev.isTransformed,
+      mode: prev.isTransformed ? 'Combat' : 'Vehicle',
+    }));
+  };
+
+  const fireWeapon = (weapon) => {
+    damageGundam(); // simulate kickback
+    alert(`${weapon} has been fired!`);
+  };
+
+  const useSkill = (skill) => {
+    alert(`${skill} skill activated!`);
+  };
+
+  const damageGundam = () => {
+    const damage = Math.floor(Math.random() * 20) + 5; // 5–25 damage
+    setGundam(prev => {
+      const newHealth = Math.max(prev.health - damage, 0);
+      return {
+        ...prev,
+        health: newHealth,
+        isDamaged: newHealth < 100,
+      };
+    });
+  };
+
+  return (
+    <div style={styles.panel}>
+      <h2>Advanced Gundam Control Panel</h2>
+      <p><strong>Mode:</strong> {gundam.mode}</p>
+      <p><strong>Transformation:</strong> {gundam.isTransformed ? 'Vehicle Form' : 'Gundam Form'}</p>
+      <p><strong>Quantum AI:</strong> {gundam.quantumAIStatus}</p>
+      <p><strong>Health:</strong> {gundam.health}%</p>
+      {gundam.health < 100 && <p style={{ color: 'red' }}>Auto-repair active...</p>}
+
+      <div style={styles.buttons}>
+        <button onClick={activateQuantumAI}>Activate Quantum AI</button>
+        <button onClick={toggleTransform}>
+          {gundam.isTransformed ? 'Revert to Gundam' : 'Transform to Vehicle'}
+        </button>
+      </div>
+
+      <h3>Super Weapons</h3>
+      <div style={styles.buttons}>
+        {gundam.weapons.map((weapon, idx) => (
+          <button key={idx} onClick={() => fireWeapon(weapon)}>
+            Fire {weapon}
+          </button>
+        ))}
+      </div>
+
+      <h3>Advanced Skills</h3>
+      <div style={styles.buttons}>
+        {gundam.skills.map((skill, idx) => (
+          <button key={idx} onClick={() => useSkill(skill)}>
+            Use {skill}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const styles = {
+  panel: {
+    padding: 20,
+    fontFamily: 'monospace',
+    background: '#111',
+    color: '#0f0',
+    minHeight: '100vh',
+  },
+  buttons: {
+    display: 'flex',
+    gap: '10px',
+    flexWrap: 'wrap',
+    marginBottom: '1rem',
+  },
+};
+
+
+import React from 'react';
+import GundamSystem from './GundamSystem';
+
+function App() {
+  return (
+    <div>
+      <GundamSystem />
+    </div>
+  );
+}
+
+export default App;
