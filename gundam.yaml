@@ -1,0 +1,315 @@
+import React, { useState, useEffect } from 'react';
+
+// Define types (optional but recommended)
+interface Weapon {
+  name: string;
+  description: string;
+  powerLevel: number;
+  specialEffects?: string[];
+}
+
+interface Skill {
+  name: string;
+  description: string;
+  cooldown: number;
+  activationEffect?: string;
+  passive?: boolean;
+  passiveEffect?: (gundamState: GundamState) => GundamState;
+}
+
+interface Transformation {
+  name: string;
+  model: string;
+  abilities?: string[];
+}
+
+interface GundamState {
+  model: string;
+  health: number;
+  maxHealth: number;
+  energy: number;
+  maxEnergy: number;
+  weapons: Weapon[];
+  skills: Skill[];
+  activeSkills: string[];
+  transformations: Transformation[];
+  currentTransformation: string | null;
+  aiLevel: number;
+  aiMode: string;
+  repairRate: number;
+}
+
+const initialGundamState: GundamState = {
+  model: "RX-ADVANCE-002",
+  health: 1200,
+  maxHealth: 1200,
+  energy: 600,
+  maxEnergy: 600,
+  weapons: [
+    {
+      name: "Quantum Annihilator Cannon",
+      description: "A devastating cannon that fires a focused beam of anti-matter infused quantum energy.",
+      powerLevel: 200,
+      specialEffects: ["Matter Disintegration", "Dimensional Rift (Minor)"]
+    },
+    {
+      name: "Photon Blade Array",
+      description: "An array of highly focused photon blades capable of extreme precision cutting.",
+      powerLevel: 110,
+      specialEffects: ["Molecular Severing", "Energy Absorption (Minor)"]
+    },
+    {
+      name: "Graviton Missile Swarm",
+      description: "A swarm of intelligent missiles that manipulate gravity for enhanced tracking and impact.",
+      powerLevel: 75,
+      specialEffects: ["Gravity Well", "Target Immobilization"]
+    }
+  ],
+  skills: [
+    {
+      name: "Quantum Field Barrier",
+      description: "Generates a powerful quantum field that absorbs and redirects incoming energy.",
+      cooldown: 25,
+      activationEffect: "A shimmering, multi-layered barrier appears."
+    },
+    {
+      name: "Temporal Acceleration",
+      description: "Temporarily accelerates the Gundam's local time frame, granting incredible speed.",
+      cooldown: 30,
+      activationEffect: "Visual trails and a sense of extreme speed."
+    },
+    {
+      name: "Super Quantum Overdrive",
+      description: "Unleashes the full potential of the quantum AI, significantly boosting all systems.",
+      cooldown: 60,
+      activationEffect: "Gundam emits intense quantum energy and glows brightly."
+    },
+    {
+      name: "Auto-Repair System",
+      description: "Passively repairs minor damages over time.",
+      cooldown: 0,
+      passive: true,
+      passiveEffect: (state) => {
+        if (state.health < state.maxHealth) {
+          return { ...state, health: Math.min(state.health + state.repairRate, state.maxHealth) };
+        }
+        return state;
+      }
+    }
+  ],
+  activeSkills: [],
+  transformations: [
+    {
+      name: "High-Speed Interceptor Mode",
+      model: "RX-ADVANCE-002/F",
+      abilities: ["Supersonic Flight", "Enhanced Evasion", "Rapid-Fire Laser Cannons"]
+    },
+    {
+      name: "Mobile Assault Tank Mode",
+      model: "RX-ADVANCE-002/V",
+      abilities: ["Heavy Armor Plating", "Siege Cannon Deployment", "Enhanced Ground Maneuverability"]
+    }
+  ],
+  currentTransformation: null,
+  aiLevel: 12, // Even more advanced Super Quantum AI
+  aiMode: "Adaptive Combat",
+  repairRate: 5 // Health points repaired per second
+};
+
+const AdvancedGundam = () => {
+  const [gundam, setGundam] = useState(initialGundamState);
+  const [messageLog, setMessageLog] = useState<string[]>([]);
+
+  // Auto-Repair passive skill effect
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setGundam(prevState => {
+        const repairSkill = prevState.skills.find(skill => skill.name === "Auto-Repair System");
+        if (repairSkill?.passive && repairSkill.passiveEffect) {
+          return repairSkill.passiveEffect(prevState);
+        }
+        return prevState;
+      });
+    }, 1000); // Check and repair every 1 second
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Function to handle weapon usage
+  const useWeapon = (weaponName: string) => {
+    const weapon = gundam.weapons.find(w => w.name === weaponName);
+    if (weapon && gundam.energy >= weapon.powerLevel / 3) { // Adjusted energy cost
+      setMessageLog([...messageLog, `Used ${weapon.name}! Power Level: ${weapon.powerLevel}`]);
+      setGundam(prevState => ({ ...prevState, energy: prevState.energy - weapon.powerLevel / 3 }));
+      aiProcessCommand(`Analyze target vulnerabilities after using ${weapon.name}`);
+    } else {
+      setMessageLog([...messageLog, `Cannot use ${weaponName}. Insufficient energy or weapon not found.`]);
+    }
+  };
+
+  // Function to activate a skill
+  const activateSkill = (skillName: string) => {
+    const skill = gundam.skills.find(s => s.name === skillName && !s.passive);
+    if (skill && !gundam.activeSkills.includes(skillName) && gundam.energy >= 50) { // Example energy cost for skills
+      setMessageLog([...messageLog, `Activated skill: ${skill.name}. ${skill.activationEffect || ''}`]);
+      setGundam(prevState => ({ ...prevState, activeSkills: [...prevState.activeSkills, skillName], energy: prevState.energy - 50 }));
+      setTimeout(() => {
+        setGundam(prevState => ({
+          ...prevState,
+          activeSkills: prevState.activeSkills.filter(s => s !== skillName)
+        }));
+        setMessageLog([...messageLog, `Skill ${skill.name} cooldown finished.`]);
+      }, skill.cooldown * 1000);
+      aiProcessCommand(`Evaluate tactical advantage gained from ${skill.name}`);
+    } else if (gundam.activeSkills.includes(skillName)) {
+      setMessageLog([...messageLog, `Skill ${skillName} is already active or on cooldown.`]);
+    } else if (!skill) {
+      setMessageLog([...messageLog, `Skill ${skillName} not found or is passive.`]);
+    } else {
+      setMessageLog([...messageLog, `Cannot activate ${skillName}. Insufficient energy.`]);
+    }
+  };
+
+  // Function to transform
+  const transform = (transformationName: string) => {
+    const transformation = gundam.transformations.find(t => t.name === transformationName);
+    if (transformation && gundam.currentTransformation !== transformationName && gundam.energy >= 100) { // Energy cost for transformation
+      setMessageLog([...messageLog, `Transforming to ${transformation.name} (${transformation.model})!`]);
+      setGundam(prevState => ({ ...prevState, currentTransformation: transformationName, model: transformation.model, energy: prevState.energy - 100 }));
+      aiProcessCommand(`Calibrate systems for ${transformation.name} mode.`);
+    } else if (gundam.currentTransformation === transformationName) {
+      setMessageLog([...messageLog, `Already in ${transformationName}.`]);
+    } else if (!transformation) {
+      setMessageLog([...messageLog, `Transformation ${transformationName} not available.`]);
+    } else {
+      setMessageLog([...messageLog, `Cannot transform. Insufficient energy.`]);
+    }
+  };
+
+  // Function to revert transformation
+  const revertTransform = () => {
+    if (gundam.currentTransformation && gundam.energy >= 50) { // Energy cost for reverting
+      setMessageLog([...messageLog, `Reverting from ${gundam.currentTransformation} to base form.`]);
+      setGundam(prevState => ({ ...prevState, currentTransformation: null, model: initialGundamState.model, energy: prevState.energy - 50 }));
+      aiProcessCommand("Revert system calibrations.");
+    } else if (!gundam.currentTransformation) {
+      setMessageLog([...messageLog, `Not currently transformed.`]);
+    } else {
+      setMessageLog([...messageLog, `Cannot revert. Insufficient energy.`]);
+    }
+  };
+
+  // Super Quantum AI Processing (Simulated and slightly more advanced)
+  const aiProcessCommand = (command: string) => {
+    setMessageLog([...messageLog, `AI (${gundam.aiMode}, Level ${gundam.aiLevel}): Processing command - "${command}"`]);
+    if (command.includes("analyze target vulnerabilities")) {
+      const weapon = command.split("after using ")[1];
+      setMessageLog([...messageLog, `AI: Analyzing vulnerabilities after ${weapon}... Recommending follow-up with Photon Blade Array for optimal damage.`]);
+    } else if (command.includes("evaluate tactical advantage")) {
+      const skill = command.split("from ")[1];
+      setMessageLog([...messageLog, `AI: Evaluating ${skill}... Estimated tactical advantage increased by 37%.`]);
+    } else if (command.includes("calibrate systems for")) {
+      const mode = command.split("for ")[1];
+      setMessageLog([...messageLog, `AI: Calibrating systems for ${mode}... Weapon targeting and mobility parameters optimized.`]);
+    } else if (command.includes("revert system calibrations")) {
+      setMessageLog([...messageLog, `AI: Reverting system calibrations to standard configuration.`]);
+    } else if (command.includes("assess current threat level")) {
+      setMessageLog([...messageLog, `AI: Assessing current threat level... Minimal to moderate. Recommending maintaining Adaptive Combat mode.`]);
+    } else {
+      setMessageLog([...messageLog, `AI: Command received and acknowledged.`]);
+    }
+  };
+
+  // Example AI interaction (more proactive)
+  useEffect(() => {
+    if (gundam.health < gundam.maxHealth * 0.5 && gundam.aiMode === "Adaptive Combat" && !gundam.activeSkills.includes("Quantum Field Barrier")) {
+      aiProcessCommand("Threat level elevated. Deploying Quantum Field Barrier.");
+      activateSkill("Quantum Field Barrier");
+    }
+    if (gundam.energy < gundam.maxEnergy * 0.2 && gundam.currentTransformation) {
+      aiProcessCommand("Low energy detected. Recommending reverting to base form to conserve resources.");
+    }
+    if (gundam.currentTransformation === "High-Speed Interceptor Mode") {
+      aiProcessCommand("Assess current threat level in aerial configuration.");
+    }
+  }, [gundam.health, gundam.energy, gundam.aiMode, gundam.currentTransformation, gundam.activeSkills]);
+
+  return (
+    <div>
+      <h1>Advanced Gundam: {gundam.model}</h1>
+      <p>Health: {gundam.health} / {gundam.maxHealth}</p>
+      <p>Energy: {gundam.energy} / {gundam.maxEnergy}</p>
+      <p>AI Level: {gundam.aiLevel}</p>
+      <p>AI Mode: {gundam.aiMode}</p>
+      <p>Repair Rate: {gundam.repairRate} HP/s</p>
+
+      <h2>Weapons</h2>
+      <ul>
+        {gundam.weapons.map((weapon, index) => (
+          <li key={index}>
+            {weapon.name} - {weapon.description} (Power: {weapon.powerLevel})
+            <button onClick={() => useWeapon(weapon.name)} disabled={gundam.energy < weapon.powerLevel / 3}>
+              Use
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      <h2>Skills</h2>
+      <ul>
+        {gundam.skills
+          .filter(skill => !skill.passive)
+          .map((skill, index) => (
+            <li key={index}>
+              {skill.name} - {skill.description} (Cooldown: {skill.cooldown}s, Cost: 50 Energy)
+              <button
+                onClick={() => activateSkill(skill.name)}
+                disabled={gundam.activeSkills.includes(skill.name) || gundam.energy < 50}
+              >
+                {gundam.activeSkills.includes(skill.name) ? 'Active/Cooldown' : 'Activate'}
+              </button>
+            </li>
+          ))}
+        {gundam.skills
+          .filter(skill => skill.passive)
+          .map((skill, index) => (
+            <li key={index} style={{ fontStyle: 'italic', color: 'gray' }}>
+              {skill.name} - {skill.description} (Passive)
+            </li>
+          ))}
+      </ul>
+
+      <h2>Transformations</h2>
+      <p>Current Form: {gundam.currentTransformation || 'Base Form'}</p>
+      <ul>
+        {gundam.transformations.map((transform, index) => (
+          <li key={index}>
+            {transform.name} ({transform.model}) - Cost: 100 Energy
+            <button
+              onClick={() => transform(transform.name)}
+              disabled={gundam.currentTransformation === transform.name || gundam.energy < 100}
+            >
+              Transform
+            </button>
+          </li>
+        ))}
+        {gundam.currentTransformation && (
+          <li>
+            <button onClick={revertTransform} disabled={gundam.energy < 50}>
+              Revert Transformation (Cost: 50 Energy)
+            </button>
+          </li>
+        )}
+      </ul>
+
+      <h2>AI Log</h2>
+      <div style={{ border: '1px solid #ccc', padding: '10px', maxHeight: '200px', overflowY: 'auto' }}>
+        {messageLog.map((msg, index) => (
+          <p key={index}>{msg}</p>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+export default AdvancedGundam;
