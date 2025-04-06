@@ -1,0 +1,178 @@
+import React, { useState } from 'react';
+
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error("Caught an error:", error, errorInfo);
+    // Log the error to a service
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return <h1>Something went wrong. We are trying to fix it.</h1>;
+    }
+    return this.props.children;
+  }
+}
+
+function MyComponent() {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+
+  // Simulate fetching data that might have issues
+  const fetchData = () => {
+    setTimeout(() => {
+      const random = Math.random();
+      if (random < 0.5) {
+        setData({ value: "Valid Data" });
+      } else if (random < 0.8) {
+        setData({ value: undefined }); // Simulate invalid data
+      } else {
+        setError(new Error("Failed to fetch data"));
+      }
+    }, 1000);
+  };
+
+  React.useEffect(() => {
+    fetchData();
+  }, []);
+
+  if (error) {
+    return <div>Error: {error.message}</div>;
+  }
+
+  if (data && data.value === undefined) {
+    // Attempt to "repair" the UI by providing a default value
+    return <div>Data is invalid, displaying default: N/A</div>;
+  }
+
+  return <div>Data: {data ? data.value : "Loading..."}</div>;
+}
+
+function App() {
+  return (
+    <ErrorBoundary>
+      <MyComponent />
+    </ErrorBoundary>
+  );
+}
+
+export default App;
+
+
+// In your service worker (e.g., service-worker.js)
+
+const CACHE_NAME = 'my-app-cache-v1';
+const urlsToCache = [
+  '/',
+  '/index.html',
+  '/static/js/main.bundle.js', // Adjust based on your build
+  '/static/css/main.css',     // Adjust based on your build
+];
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(urlsToCache))
+  );
+});
+
+self.addEventListener('fetch', (event) => {
+  event.respondWith(
+    caches.match(event.request)
+      .then((response) => {
+        if (response) {
+          return response;
+        }
+        return fetch(event.request);
+      })
+  );
+});
+
+self.addEventListener('activate', (event) => {
+  const cacheWhitelist = [CACHE_NAME];
+  event.waitUntil(
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames.map((cacheName) => {
+          if (cacheWhitelist.indexOf(cacheName) === -1) {
+            return caches.delete(cacheName);
+          }
+        })
+      );
+    })
+  );
+});
+
+// In your React app (e.g., index.js)
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/service-worker.js')
+      .then((registration) => {
+        console.log('Service Worker registered with scope:', registration.scope);
+
+        registration.addEventListener('updatefound', () => {
+          const installingWorker = registration.installing;
+          if (installingWorker == null) {
+            return;
+          }
+          installingWorker.onstatechange = () => {
+            if (installingWorker.state === 'installed') {
+              if (navigator.serviceWorker.controller) {
+                console.log('New content is available; please refresh.');
+                // You can display a notification to the user here
+              } else {
+                console.log('Content is cached for offline use.');
+              }
+            }
+          };
+        });
+      })
+      .catch((error) => {
+        console.error('Error registering service worker:', error);
+      });
+  });
+}
+
+
+// Example of using fetch with extra security headers (can be configured globally)
+const fetchDataSecurely = async (url) => {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'",
+        'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options': 'DENY',
+        'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload',
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error("Error fetching data:", error);
+    throw error;
+  }
+};
+
+function MySecureComponent() {
+  const [data, setData] = useState(null);
+
+  useEffect(() => {
+    fetchDataSecurely('https://api.example.com/secure-data')
+      .then(setData)
+      .catch(() => setData(null));
+  }, []);
+
+  return <div>{data ? JSON.stringify(data) : 'Loading secure data...'}</div>;
+}
