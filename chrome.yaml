@@ -1,0 +1,135 @@
+import React, { useState } from 'react';
+
+function MyApp() {
+  const [data, setData] = useState('');
+  const [error, setError] = useState(null);
+
+  const fetchData = async () => {
+    try {
+      const response = await fetch('/api/data'); // Replace with your API endpoint
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const result = await response.json();
+      setData(result.value);
+      setError(null);
+    } catch (err) {
+      console.error("Error fetching data:", err);
+      setError("Failed to load data. Trying again...");
+      // Attempt to refetch after a delay
+      setTimeout(fetchData, 3000);
+    }
+  };
+
+  React.useEffect(() => {
+    fetchData();
+  }, []);
+
+  return (
+    <div>
+      <h1>My Application</h1>
+      {error && <p style={{ color: 'red' }}>{error}</p>}
+      {data ? <p>Data: {data}</p> : <p>Loading data...</p>}
+      {/* More UI components */}
+    </div>
+  );
+}
+
+export default MyApp;
+
+
+// In your service worker (service-worker.js)
+
+const CACHE_NAME = 'my-app-cache-v1';
+const urlsToCache = [
+  '/',
+  '/index.html',
+  '/static/js/main.bundle.js',
+  '/static/css/main.css',
+];
+
+self.addEventListener('install', (event) => {
+  // ... (caching logic as shown in the previous response)
+});
+
+self.addEventListener('fetch', (event) => {
+  // ... (cache-first strategy with network fallback)
+});
+
+self.addEventListener('activate', (event) => {
+  // ... (cleaning up old caches)
+});
+
+// In your React app (e.g., index.js)
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/service-worker.js')
+      .then((registration) => {
+        console.log('Service Worker registered with scope:', registration.scope);
+
+        registration.addEventListener('updatefound', () => {
+          const installingWorker = registration.installing;
+          if (installingWorker == null) {
+            return;
+          }
+          installingWorker.onstatechange = () => {
+            if (installingWorker.state === 'installed') {
+              if (navigator.serviceWorker.controller) {
+                console.log('New content is available; please refresh.');
+                // Optionally, display a UI notification to the user
+                const shouldReload = window.confirm("A new version of the app is available. Reload now?");
+                if (shouldReload) {
+                  window.location.reload();
+                }
+              } else {
+                console.log('Content is cached for offline use.');
+              }
+            }
+          };
+        });
+      })
+      .catch((error) => {
+        console.error('Error registering service worker:', error);
+      });
+  });
+}
+
+
+
+import React, { useEffect } from 'react';
+
+function MyApp() {
+  useEffect(() => {
+    // Example of trying to block known tracking domains (very basic and limited)
+    const trackingDomains = [
+      'google-analytics.com',
+      'facebook.net',
+      'doubleclick.net',
+      // Add more tracking domains
+    ];
+
+    const originalFetch = window.fetch;
+    window.fetch = async (...args) => {
+      const url = new URL(args[0]);
+      if (trackingDomains.some(domain => url.hostname.includes(domain))) {
+        console.warn(`Blocked request to tracking domain: ${url.href}`);
+        return new Response(null, { status: 403, statusText: 'Blocked by Antispy' });
+      }
+      return originalFetch(...args);
+    };
+
+    // Clean up the overridden fetch when the component unmounts
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, []);
+
+  return (
+    <div>
+      <h1>My Privacy-Focused App</h1>
+      {/* Your application content */}
+    </div>
+  );
+}
+
+export default MyApp;
