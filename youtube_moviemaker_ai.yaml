@@ -1,0 +1,405 @@
+// src/App.js
+import React from 'react';
+import VideoCreatorStudio from './components/VideoCreatorStudio';
+import './App.css'; // Main styles
+
+function App() {
+  // Add context providers here if needed for global state (e.g., user auth)
+  return (
+    <div className="App">
+      <header className="App-header">
+        {/* Could include user login/profile if integrating YouTube API */}
+        <h1>YouTube AI Video Movie Maker</h1>
+      </header>
+      <main>
+        <VideoCreatorStudio />
+      </main>
+      <footer className="App-footer">
+        {/* Privacy Policy is key for "Antispy" transparency */}
+        <p>&copy; {new Date().getFullYear()} Your AI Studio | <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a> | <a href="/terms" target="_blank" rel="noopener noreferrer">Terms of Service</a></p>
+      </footer>
+    </div>
+  );
+}
+
+export default App;
+
+//-------------------------------------------------
+
+// src/components/VideoCreatorStudio.js
+import React, { useState, useCallback } from 'react';
+
+// Import child components
+import ScriptAndInputPanel from './ScriptAndInputPanel';
+import MediaAssetPanel from './MediaAssetPanel';
+import SceneTimeline from './SceneTimeline'; // More advanced component for movie making
+import PreviewPlayer from './PreviewPlayer';
+import SettingsAndExportPanel from './SettingsAndExportPanel';
+import ApiStatusIndicator from './ApiStatusIndicator'; // To show progress
+
+// Import API service
+import { generateAiVideoAPI } from '../services/aiVideoApi'; // Assume this exists
+
+function VideoCreatorStudio() {
+  // State Management
+  const [script, setScript] = useState('');
+  const [mediaAssets, setMediaAssets] = useState([]); // User uploaded images, clips, audio
+  const [sceneData, setSceneData] = useState([
+    // Example scene structure - this would be complex
+    // { id: 1, type: 'title', text: 'My Awesome Video', duration: 3 },
+    // { id: 2, type: 'content', scriptPortion: '...', visualPrompt: '...', voice: '...', duration: 10 },
+  ]);
+  const [videoSettings, setVideoSettings] = useState({
+    aspectRatio: '16:9', // YouTube Default
+    resolution: '1080p',
+    aiStyle: 'informative', // Example AI style setting
+    voiceStyle: 'professional_male',
+    // Add more settings relevant to AI generation
+  });
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generationStatus, setGenerationStatus] = useState(''); // e.g., "Generating Scene 1/5", "Rendering..."
+  const [error, setError] = useState(null);
+
+  // --- Callbacks ---
+  const handleScriptChange = useCallback((newScript) => setScript(newScript), []);
+  const handleAssetsChange = useCallback((newAssets) => setMediaAssets(newAssets), []); // Needs upload logic
+  const handleSceneUpdate = useCallback((newScenes) => setSceneData(newScenes), []); // Needs timeline logic
+  const handleSettingsChange = useCallback((newSettings) => {
+    setVideoSettings(prev => ({ ...prev, ...newSettings }));
+  }, []);
+
+  const handleGenerateVideo = useCallback(async () => {
+    setIsGenerating(true);
+    setError(null);
+    setPreviewUrl(null);
+    setGenerationStatus('Starting generation...');
+
+    // ** CRITICAL: Prepare data for Backend **
+    // This needs to package the script, scene structure, asset references, and settings
+    const payload = {
+      script, // Or structured scene data derived from script/timeline
+      scenes: sceneData, // Detailed instructions per scene
+      assets: mediaAssets.map(asset => asset.backendId), // IDs referencing uploaded files on server
+      settings: videoSettings,
+    };
+
+    // --- Adblock & Antispy Considerations ---
+    // 1. Ensure `generateAiVideoAPI` uses HTTPS.
+    // 2. No third-party ad SDKs loaded here.
+    // 3. Minimize tracking within this component.
+    // 4. Backend MUST handle data securely & privately.
+
+    try {
+        // ** API Call **
+        // This could be a long process. The API might return immediately
+        // with a job ID, requiring polling or websockets for status updates.
+        const response = await generateAiVideoAPI(payload, (statusUpdate) => {
+            // Optional callback for progress updates from the API service
+            setGenerationStatus(statusUpdate);
+        });
+
+        if (response.success && response.videoUrl) {
+            setPreviewUrl(response.videoUrl);
+            setGenerationStatus('Video ready!');
+        } else if (response.success && response.jobId) {
+            // Need to implement polling or websocket listener for job completion
+            setGenerationStatus(`Processing job: ${response.jobId}. Waiting for completion...`);
+            // TODO: Implement status checking logic here
+            console.warn("Polling/WebSocket logic for job status not implemented.");
+
+        } else {
+            throw new Error(response.message || 'Failed to start video generation.');
+        }
+    } catch (err) {
+        console.error("Video Generation Error:", err);
+        setError(err.message || 'An unexpected error occurred during generation.');
+        setGenerationStatus('Generation failed.');
+    } finally {
+        // May not set to false immediately if polling
+        // setIsGenerating(false);
+        // Instead, set based on final job status
+    }
+  }, [script, sceneData, mediaAssets, videoSettings]); // Dependencies
+
+
+  // --- UI Structure ---
+  return (
+    <div className="video-creator-studio">
+      <div className="studio-panels left-panels">
+        <ScriptAndInputPanel script={script} onScriptChange={handleScriptChange} />
+        <MediaAssetPanel assets={mediaAssets} onAssetsChange={handleAssetsChange} />
+        {/* Timeline might be below script/assets or in a central area */}
+      </div>
+
+      <div className="studio-panels center-panel">
+        {/* Timeline is complex - requires drag/drop, scene manipulation */}
+        <SceneTimeline scenes={sceneData} onSceneUpdate={handleSceneUpdate} />
+        <PreviewPlayer videoUrl={previewUrl} isLoading={isGenerating && !previewUrl} />
+        <ApiStatusIndicator status={generationStatus} error={error} />
+      </div>
+
+      <div className="studio-panels right-panels">
+        <SettingsAndExportPanel
+          settings={videoSettings}
+          onSettingsChange={handleSettingsChange}
+          onGenerate={handleGenerateVideo}
+          isGenerating={isGenerating}
+          // Pass necessary props for potential YouTube upload feature
+        />
+      </div>
+    </div>
+  );
+}
+
+export default VideoCreatorStudio;
+
+
+//-------------------------------------------------
+// src/components/ScriptAndInputPanel.js (Conceptual)
+import React from 'react';
+
+function ScriptAndInputPanel({ script, onScriptChange }) {
+  return (
+    <div className="panel script-panel">
+      <h4>Script / Text Input</h4>
+      <textarea
+        placeholder="Enter your full video script here. You can break it down into scenes later using the timeline, or the AI can attempt to segment it."
+        value={script}
+        onChange={(e) => onScriptChange(e.target.value)}
+        rows={10}
+      />
+      {/* Could add features like importing script files */}
+    </div>
+  );
+}
+
+export default ScriptAndInputPanel;
+
+//-------------------------------------------------
+// src/components/MediaAssetPanel.js (Conceptual)
+import React from 'react';
+
+function MediaAssetPanel({ assets, onAssetsChange }) {
+  const handleFileUpload = (event) => {
+    // ** TODO: Implement actual file upload logic **
+    // - Get files from event.target.files
+    // - Upload each file to a secure backend endpoint (returns an ID/URL)
+    // - Update the parent state via onAssetsChange with file info (name, type, backendId, maybe thumbnail)
+    console.warn("File upload logic not implemented.");
+  };
+
+  return (
+    <div className="panel media-panel">
+      <h4>Media Assets</h4>
+      <input type="file" multiple onChange={handleFileUpload} accept="image/*,video/*,audio/*" />
+      <div className="asset-list">
+        {assets.length === 0 && <p>Upload images, video clips, or audio files.</p>}
+        {assets.map(asset => (
+          <div key={asset.id /* Use backend ID */}> {/* Display asset info/thumbnail */}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+export default MediaAssetPanel;
+
+
+//-------------------------------------------------
+// src/components/SceneTimeline.js (Highly Conceptual - Complex Component)
+import React from 'react';
+// Likely needs a drag-and-drop library (e.g., react-beautiful-dnd)
+
+function SceneTimeline({ scenes, onSceneUpdate }) {
+  // ** TODO: Implement complex timeline logic **
+  // - Display scenes visually
+  // - Allow drag-and-drop reordering
+  // - Allow adding/deleting scenes
+  // - Allow editing scene details (text segment, visual prompt, asset association, duration)
+  // - Calculate total duration
+
+  return (
+    <div className="panel timeline-panel">
+      <h4>Timeline / Scenes</h4>
+      <div className="timeline-controls">
+         {/* Buttons to add different scene types */}
+         <button>Add Scene</button>
+      </div>
+      <div className="timeline-track">
+        {/* Render scenes here */}
+        {scenes.length === 0 && <p>Add scenes to build your video.</p>}
+        {scenes.map(scene => (
+           <div key={scene.id} className="scene-block"> {/* Make these draggable/editable */}
+              {/* Display scene summary */}
+           </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+export default SceneTimeline;
+
+//-------------------------------------------------
+// src/components/PreviewPlayer.js (Similar to before)
+import React from 'react';
+
+function PreviewPlayer({ videoUrl, isLoading }) {
+ return (
+    <div className="panel preview-panel">
+      <h4>Preview</h4>
+      {isLoading && <div className="loading-indicator">Generating video preview...</div>}
+      {!isLoading && videoUrl && (
+        <video controls key={videoUrl} /* Use key to force reload on new URL */ width="100%">
+          <source src={videoUrl} type="video/mp4" /> {/* Adjust type if needed */}
+          Your browser does not support the video tag.
+        </video>
+      )}
+      {!isLoading && !videoUrl && (
+        <div className="placeholder">Video preview will appear here after generation.</div>
+      )}
+    </div>
+  );
+}
+export default PreviewPlayer;
+
+//-------------------------------------------------
+// src/components/SettingsAndExportPanel.js (Conceptual)
+import React from 'react';
+
+function SettingsAndExportPanel({ settings, onSettingsChange, onGenerate, isGenerating /*, onYouTubeUpload */ }) {
+    const handleChange = (e) => {
+        const { name, value } = e.target;
+        onSettingsChange({ [name]: value });
+    };
+
+    return (
+        <div className="panel settings-export-panel">
+            <h4>Settings</h4>
+            <label>Aspect Ratio:</label>
+            <select name="aspectRatio" value={settings.aspectRatio} onChange={handleChange}>
+                <option value="16:9">16:9 (YouTube Standard)</option>
+                <option value="9:16">9:16 (YouTube Shorts)</option>
+                <option value="1:1">1:1 (Square)</option>
+            </select>
+
+            <label>Resolution:</label>
+             <select name="resolution" value={settings.resolution} onChange={handleChange}>
+                <option value="720p">720p</option>
+                <option value="1080p">1080p (Full HD)</option>
+                <option value="1440p">1440p (2K)</option>
+                <option value="2160p">2160p (4K)</option>
+            </select>
+
+             <label>AI Style:</label>
+             <select name="aiStyle" value={settings.aiStyle} onChange={handleChange}>
+                 {/* Populate with styles offered by your AI backend */}
+                <option value="informative">Informative/Explainer</option>
+                <option value="cinematic">Cinematic</option>
+                <option value="documentary">Documentary</option>
+                <option value="vlog">Vlog Style</option>
+             </select>
+
+             <label>Voice Style:</label>
+              <select name="voiceStyle" value={settings.voiceStyle} onChange={handleChange}>
+                 {/* Populate with voices from your TTS AI backend */}
+                <option value="professional_male">Professional Male</option>
+                <option value="friendly_female">Friendly Female</option>
+                <option value="energetic_male">Energetic Male</option>
+             </select>
+             {/* Add more settings */}
+
+            <h4>Actions</h4>
+             <button onClick={onGenerate} disabled={isGenerating}>
+                {isGenerating ? 'Generating...' : 'Generate Video'}
+            </button>
+
+             {/* Optional: YouTube Upload Button - Requires API Integration */}
+             {/* <button onClick={onYouTubeUpload} disabled={isGenerating || !previewUrl}>
+                Upload to YouTube
+             </button> */}
+        </div>
+    );
+}
+
+export default SettingsAndExportPanel;
+
+//-------------------------------------------------
+// src/components/ApiStatusIndicator.js
+import React from 'react';
+
+function ApiStatusIndicator({ status, error }) {
+  if (error) {
+    return <div className="status-indicator error">Error: {error}</div>;
+  }
+  if (status) {
+    return <div className="status-indicator info">{status}</div>;
+  }
+  return null; // No status to show
+}
+export default ApiStatusIndicator;
+
+
+//-------------------------------------------------
+// src/services/aiVideoApi.js (Placeholder)
+
+const API_BASE_URL = '/api'; // Your backend endpoint base
+
+// Placeholder for the main generation call
+export const generateAiVideoAPI = async (payload, onProgressUpdate) => {
+  try {
+    // ** IMPORTANT: Use HTTPS for the actual API_BASE_URL **
+    const response = await fetch(`${API_BASE_URL}/youtube-movie`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            // Add Auth headers if required
+        },
+        body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+        // Extract detailed error from backend if possible
+        let errorMsg = `API Error: ${response.status}`;
+        try {
+            const errorData = await response.json();
+            errorMsg = errorData.message || errorMsg;
+        } catch(e) { /* ignore JSON parse error */ }
+        throw new Error(errorMsg);
+    }
+
+     // ** Backend Considerations ("Antispy"/Security) **
+     // - Backend MUST validate inputs rigorously.
+     // - Securely handle API keys for AI services.
+     // - Store/process user uploaded assets securely (e.g., private S3 buckets).
+     // - Implement proper job queuing & status tracking for long AI tasks.
+     // - Delete temporary user data after processing/expiry.
+     // - Log minimally and anonymize where possible.
+
+    // Simulate progress updates or job ID return
+    // Real implementation depends heavily on backend architecture
+    const result = await response.json();
+    // Example: Backend returns a job ID immediately
+    // if (result.jobId) {
+    //     // Simulate polling or pass to a WebSocket handler
+    //     setTimeout(() => onProgressUpdate?.("Processing Scene 1..."), 2000);
+    //     return { success: true, jobId: result.jobId };
+    // }
+    // Example: Backend returns final URL directly (for short tasks)
+     if (result.videoUrl) {
+         return { success: true, videoUrl: result.videoUrl };
+     }
+
+     // Fallback error
+     return { success: false, message: "Unexpected API response format." };
+
+  } catch (error) {
+      console.error('generateAiVideoAPI failed:', error);
+      return { success: false, message: error.message || 'Network error or server is unreachable.' };
+  }
+};
+
+// You would likely need other API functions:
+// - `uploadAssetAPI(file)`
+// - `checkJobStatusAPI(jobId)`
+// - `getYoutubeUploadAuthURL()`
+// - `finalizeYoutubeUploadAPI(videoId, metadata)`
