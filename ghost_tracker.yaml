@@ -1,0 +1,393 @@
+npx create-react-app ghost-tracker-app
+cd ghost-tracker-app
+
+
+
+import { useState, useEffect } from 'react';
+
+// Custom hook to simulate sensor readings
+const useSimulatedSensors = (interval = 2000) => {
+  const [sensorData, setSensorData] = useState({
+    emf: 0, // Electro-Magnetic Field
+    temp: 20, // Temperature in Celsius
+    audioLevel: 10, // Ambient audio level
+    motion: false, // Motion detection
+  });
+
+  useEffect(() => {
+    const simulate = () => {
+      setSensorData({
+        emf: parseFloat((Math.random() * 10).toFixed(2)), // 0.00 - 10.00 mG (milliGauss) - example range
+        temp: parseFloat((10 + Math.random() * 15).toFixed(1)), // 10.0 - 25.0 °C
+        audioLevel: Math.floor(Math.random() * 100), // 0 - 99 dB (decibels) - example range
+        motion: Math.random() > 0.9, // 10% chance of detecting motion
+      });
+    };
+
+    const intervalId = setInterval(simulate, interval);
+
+    // Initial simulation run
+    simulate();
+
+    // Cleanup interval on component unmount
+    return () => clearInterval(intervalId);
+  }, [interval]);
+
+  return sensorData;
+};
+
+export default useSimulatedSensors;
+
+
+
+import React from 'react';
+import './SensorDisplay.css'; // We'll add basic CSS later
+
+const SensorDisplay = ({ data }) => {
+  return (
+    <div className="sensor-display-container">
+      <h2>Live Sensor Readings</h2>
+      <div className="sensor-grid">
+        <div className="sensor-item">
+          <span className="sensor-label">EMF:</span>
+          <span className="sensor-value">{data.emf} mG</span>
+        </div>
+        <div className="sensor-item">
+          <span className="sensor-label">Temperature:</span>
+          <span className="sensor-value">{data.temp} °C</span>
+        </div>
+        <div className="sensor-item">
+          <span className="sensor-label">Audio Level:</span>
+          <span className="sensor-value">{data.audioLevel} dB</span>
+        </div>
+        <div className="sensor-item">
+          <span className="sensor-label">Motion:</span>
+          <span className={`sensor-value ${data.motion ? 'detected' : ''}`}>
+            {data.motion ? 'Detected' : 'None'}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default SensorDisplay;
+
+
+
+import React, { useState, useEffect } from 'react';
+import './ActivityIdentifier.css';
+
+// Simple rules to identify "paranormal activity" from simulated data
+const identifyActivity = (data) => {
+  if (data.emf > 7.5 && data.temp < 15) {
+    return { level: 'High', message: 'High EMF Spike + Cold Spot Detected! Possible entity.' };
+  }
+  if (data.audioLevel > 85) {
+    return { level: 'Medium', message: 'Unusual Audio Spike (Possible EVP?).' };
+  }
+  if (data.motion && data.emf > 5) {
+     return { level: 'Medium', message: 'Motion Detected with Elevated EMF.' };
+  }
+  if (data.emf > 6) {
+    return { level: 'Low', message: 'Elevated EMF readings.' };
+  }
+  if (data.temp < 16) {
+      return { level: 'Low', message: 'Noticeable Temperature Drop.'};
+  }
+
+  return { level: 'None', message: 'Environment appears stable.' };
+};
+
+const ActivityIdentifier = ({ sensorData }) => {
+  const [activity, setActivity] = useState({ level: 'None', message: 'Initializing...' });
+
+  useEffect(() => {
+    // Update activity identification when sensor data changes
+    setActivity(identifyActivity(sensorData));
+  }, [sensorData]); // Dependency array ensures this runs when sensorData changes
+
+  return (
+    <div className={`activity-identifier-container level-${activity.level.toLowerCase()}`}>
+      <h2>Paranormal Activity Analysis</h2>
+      <p><strong>Status:</strong> {activity.level}</p>
+      <p><strong>Log:</strong> {activity.message}</p>
+    </div>
+  );
+};
+
+export default ActivityIdentifier;
+
+
+
+import React, { useState } from 'react';
+import './FeatureDashboard.css';
+
+// This component ONLY simulates the status display
+const FeatureDashboard = () => {
+  // Simulate toggling - in reality, these would be complex systems
+  const [adblockEnabled, setAdblockEnabled] = useState(true);
+  const [antispyEnabled, setAntispyEnabled] = useState(true);
+  const [quantumAiProcessing, setQuantumAiProcessing] = useState(true);
+
+  return (
+    <div className="feature-dashboard-container">
+      <h2>System Status</h2>
+      <div className="feature-grid">
+        <div className="feature-item">
+          <span className="feature-label">AdBlock Engine:</span>
+          <span className={`feature-status ${adblockEnabled ? 'active' : 'inactive'}`}>
+            {adblockEnabled ? 'Active' : 'Inactive'}
+          </span>
+          {/* In a real app, a button might try to toggle this, but its effect is limited */}
+        </div>
+        <div className="feature-item">
+          <span className="feature-label">AntiSpy Shield:</span>
+          <span className={`feature-status ${antispyEnabled ? 'active' : 'inactive'}`}>
+            {antispyEnabled ? 'Active' : 'Inactive'}
+          </span>
+        </div>
+        <div className="feature-item">
+          <span className="feature-label">Quantum AI Analysis:</span>
+          <span className={`feature-status ${quantumAiProcessing ? 'active' : 'inactive'}`}>
+            {quantumAiProcessing ? 'Processing' : 'Idle'}
+          </span>
+          <small>(Simulated Analysis)</small>
+        </div>
+      </div>
+       <p className="disclaimer">
+          Note: AdBlock and AntiSpy features within this web app are illustrative.
+          Effective protection requires browser extensions or system-level tools.
+          Quantum AI is simulated.
+        </p>
+    </div>
+  );
+};
+
+export default FeatureDashboard;
+
+
+
+
+import React from 'react';
+import './App.css';
+import SensorDisplay from './components/SensorDisplay';
+import ActivityIdentifier from './components/ActivityIdentifier';
+import FeatureDashboard from './components/FeatureDashboard';
+import useSimulatedSensors from './hooks/useSimulatedSensors'; // Import the custom hook
+
+function App() {
+  // Use the custom hook to get simulated sensor data
+  // Update interval set to 1.5 seconds (1500 ms)
+  const sensorData = useSimulatedSensors(1500);
+
+  return (
+    <div className="App">
+      <header className="App-header">
+        <h1>Ghost Tracker Pro</h1>
+        <p>Paranormal Research Interface</p>
+      </header>
+      <main className="App-main">
+        <FeatureDashboard />
+        <SensorDisplay data={sensorData} />
+        <ActivityIdentifier sensorData={sensorData} />
+      </main>
+      <footer className="App-footer">
+        <p>(Conceptual Simulation - For Entertainment Purposes Only)</p>
+        <p>Current time: {new Date().toLocaleString()}</p>
+      </footer>
+    </div>
+  );
+}
+
+export default App;
+
+
+
+.App {
+  text-align: center;
+  font-family: sans-serif;
+  background-color: #1a1a2e; /* Dark background */
+  color: #e0e0e0; /* Light text */
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.App-header {
+  background-color: #0f0f1a;
+  padding: 20px;
+  border-bottom: 1px solid #4a4a7f;
+}
+
+.App-header h1 {
+  margin: 0;
+  color: #9a7fdd; /* Purple accent */
+}
+
+.App-main {
+  padding: 20px;
+  flex-grow: 1; /* Allows main content to fill space */
+  display: flex;
+  flex-direction: column;
+  gap: 20px; /* Space between components */
+}
+
+.App-footer {
+  padding: 10px;
+  font-size: 0.8em;
+  color: #aaa;
+  border-top: 1px solid #4a4a7f;
+  margin-top: 20px;
+}
+
+/* Basic container styling */
+.sensor-display-container,
+.activity-identifier-container,
+.feature-dashboard-container {
+  border: 1px solid #4a4a7f; /* Border */
+  border-radius: 8px;
+  padding: 15px;
+  background-color: #2a2a4e; /* Slightly lighter background */
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+}
+
+h2 {
+  color: #bface2; /* Lighter purple for headings */
+  margin-top: 0;
+  border-bottom: 1px solid #4a4a7f;
+  padding-bottom: 5px;
+  margin-bottom: 15px;
+}
+
+
+
+.sensor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); /* Responsive grid */
+  gap: 15px; /* Space between grid items */
+}
+
+.sensor-item {
+  background-color: #3a3a6e; /* Darker item background */
+  padding: 10px;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.sensor-label {
+  display: block;
+  font-size: 0.9em;
+  color: #ccc;
+  margin-bottom: 5px;
+}
+
+.sensor-value {
+  font-size: 1.2em;
+  font-weight: bold;
+  color: #fff; /* White value */
+}
+
+.sensor-value.detected {
+  color: #ff6b6b; /* Red color for detected motion */
+}
+
+
+
+.activity-identifier-container {
+  transition: background-color 0.5s ease; /* Smooth transition on level change */
+}
+
+/* Different background colors based on activity level */
+.activity-identifier-container.level-none {
+  background-color: #2a2a4e; /* Default */
+}
+.activity-identifier-container.level-low {
+  background-color: #4a4a7f; /* Slightly different for low */
+   border: 1px solid #7f7fbf;
+}
+.activity-identifier-container.level-medium {
+  background-color: #7f7fbf; /* More noticeable for medium */
+   border: 1px solid #bface2;
+   color: #fff;
+}
+.activity-identifier-container.level-high {
+  background-color: #9a7fdd; /* Strong color for high */
+  border: 1px solid #fff;
+  color: #000; /* Dark text on light background */
+}
+.activity-identifier-container.level-high h2 {
+  color: #1a1a2e;
+}
+
+
+.activity-identifier-container p {
+  margin: 5px 0;
+}
+
+.activity-identifier-container strong {
+  color: inherit; /* Inherit color from parent */
+}
+
+
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+.feature-item {
+  background-color: #3a3a6e;
+  padding: 8px 12px;
+  border-radius: 4px;
+  display: flex;
+  justify-content: space-between; /* Pushes status to the right */
+  align-items: center;
+}
+
+.feature-label {
+  color: #ccc;
+  font-size: 0.9em;
+}
+
+.feature-status {
+  font-weight: bold;
+  padding: 3px 8px;
+  border-radius: 12px; /* Pill shape */
+  font-size: 0.85em;
+}
+
+.feature-status.active {
+  background-color: #4caf50; /* Green */
+  color: white;
+}
+
+.feature-status.inactive {
+  background-color: #f44336; /* Red */
+  color: white;
+}
+
+.feature-item small {
+    display: block; /* Ensure small text is on its own line if needed */
+    width: 100%; /* Take full width if needed */
+    text-align: right; /* Align it if desired */
+    font-size: 0.8em;
+    color: #aaa;
+    margin-left: 10px; /* Space from status */
+}
+
+.disclaimer {
+    font-size: 0.8em;
+    color: #aaa;
+    margin-top: 10px;
+    font-style: italic;
+    border-top: 1px dashed #4a4a7f;
+    padding-top: 10px;
+}
+
+
+npm start
+
+
