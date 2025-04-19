@@ -1,0 +1,130 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Reactor parameters
+D = 1.0    # Diffusion coefficient
+Sigma_a = 0.01  # Absorption cross-section
+source = 1.0  # Neutron source term
+
+# Spatial grid
+length = 10.0  # Reactor length
+num_points = 100
+dx = length / num_points
+x = np.linspace(0, length, num_points)
+
+# Initialize neutron flux
+phi = np.zeros(num_points)
+
+# Boundary conditions
+phi[0] = phi[-1] = 0
+
+# Iterative solution for neutron diffusion equation
+for _ in range(1000):
+    phi_new = phi.copy()
+    for i in range(1, num_points-1):
+        phi_new[i] = (D * (phi[i+1] + phi[i-1]) + source * dx**2) / (2*D + Sigma_a * dx**2)
+    phi = phi_new
+
+# Plot the neutron flux
+plt.plot(x, phi)
+plt.xlabel('Position in Reactor (m)')
+plt.ylabel('Neutron Flux')
+plt.title('Neutron Flux Distribution in Reactor Core')
+plt.show()
+
+class PIDController:
+    def __init__(self, Kp, Ki, Kd, setpoint):
+        self.Kp = Kp
+        self.Ki = Ki
+        self.Kd = Kd
+        self.setpoint = setpoint
+        self.previous_error = 0
+        self.integral = 0
+
+    def compute(self, measured_value):
+        error = self.setpoint - measured_value
+        self.integral += error
+        derivative = error - self.previous_error
+        self.previous_error = error
+        output = self.Kp * error + self.Ki * self.integral + self.Kd * derivative
+        return output
+
+# Example usage
+desired_power = 1000  # Desired reactor power in MW
+pid = PIDController(Kp=1.0, Ki=0.1, Kd=0.05, setpoint=desired_power)
+
+# Simulate reactor power control
+time_steps = 100
+power = np.zeros(time_steps)
+control_signal = np.zeros(time_steps)
+measured_power = 800  # Initial power
+
+for t in range(time_steps):
+    control_signal[t] = pid.compute(measured_power)
+    measured_power += control_signal[t]  # Simplified reactor response
+    power[t] = measured_power
+
+# Plot the results
+plt.plot(power)
+plt.xlabel('Time Step')
+plt.ylabel('Reactor Power (MW)')
+plt.title('Reactor Power Control using PID Controller')
+plt.show()
+
+class SafetySystem:
+    def __init__(self, max_temp, max_pressure, max_power):
+        self.max_temp = max_temp
+        self.max_pressure = max_pressure
+        self.max_power = max_power
+
+    def check_safety(self, temperature, pressure, power):
+        if temperature > self.max_temp:
+            return "Emergency Shutdown: Temperature Exceeded!"
+        if pressure > self.max_pressure:
+            return "Emergency Shutdown: Pressure Exceeded!"
+        if power > self.max_power:
+            return "Emergency Shutdown: Power Exceeded!"
+        return "All Systems Normal"
+
+# Example usage
+safety_system = SafetySystem(max_temp=1000, max_pressure=200, max_power=1200)
+
+# Simulate safety checks
+temperature = 950
+pressure = 180
+power = 1100
+
+status = safety_system.check_safety(temperature, pressure, power)
+print(status)
+
+class DigitalTwin:
+    def __init__(self, initial_state):
+        self.state = initial_state
+
+    def update_state(self, new_data):
+        self.state = 0.9 * self.state + 0.1 * new_data  # Simple updating rule
+
+    def predict_future_state(self, time_steps):
+        predictions = []
+        for _ in range(time_steps):
+            self.state += 0.01 * self.state  # Simplified prediction model
+            predictions.append(self.state)
+        return predictions
+
+# Example usage
+initial_state = np.array([950, 180, 1100])  # Initial [temperature, pressure, power]
+digital_twin = DigitalTwin(initial_state)
+
+# Simulate updating and predicting
+new_data = np.array([960, 185, 1120])
+digital_twin.update_state(new_data)
+predictions = digital_twin.predict_future_state(10)
+
+# Plot predictions
+predictions = np.array(predictions)
+plt.plot(predictions)
+plt.xlabel('Future Time Steps')
+plt.ylabel('Predicted Values')
+plt.title('Predicted Future States using Digital Twin')
+plt.legend(['Temperature', 'Pressure', 'Power'])
+plt.show()
