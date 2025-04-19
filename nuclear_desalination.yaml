@@ -1,0 +1,91 @@
+class PIDController:
+    def __init__(self, Kp, Ki, Kd, setpoint):
+        self.Kp = Kp
+        self.Ki = Ki
+        self.Kd = Kd
+        self.setpoint = setpoint
+        self.previous_error = 0
+        self.integral = 0
+
+    def compute(self, measured_value):
+        error = self.setpoint - measured_value
+        self.integral += error
+        derivative = error - self.previous_error
+        self.previous_error = error
+        output = self.Kp * error + self.Ki * self.integral + self.Kd * derivative
+        return output
+
+# Example usage for reactor power control
+desired_power = 5  # Desired reactor power output in MW
+pid_power = PIDController(Kp=1.0, Ki=0.1, Kd=0.05, setpoint=desired_power)
+
+# Example usage for reactor temperature control
+desired_temp = 300  # Desired reactor temperature in °C
+pid_temp = PIDController(Kp=0.5, Ki=0.05, Kd=0.01, setpoint=desired_temp)
+
+# Simulate reactor control
+time_steps = 100
+power_output = np.zeros(time_steps)
+temperature = np.zeros(time_steps)
+measured_power = 4  # Initial reactor power output
+measured_temp = 250  # Initial reactor temperature
+
+for t in range(time_steps):
+    power_output[t] = measured_power + pid_power.compute(measured_power)
+    temperature[t] = measured_temp + pid_temp.compute(measured_temp)
+    measured_power = power_output[t]  # Simplified reactor response
+    measured_temp = temperature[t]  # Simplified reactor response
+
+# Plot the results
+plt.plot(power_output, label='Reactor Power Output (MW)')
+plt.plot(temperature, label='Reactor Temperature (°C)')
+plt.xlabel('Time Step')
+plt.ylabel('Value')
+plt.title('Reactor Power and Temperature Control using PID Controller')
+plt.legend()
+plt.show()
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Desalination parameters
+initial_salt_concentration = 35  # Initial salt concentration in g/L
+recovery_ratio = 0.5  # Recovery ratio (percentage of freshwater obtained)
+
+# Time steps for simulation
+time_steps = 100
+salt_concentration = np.zeros(time_steps)
+salt_concentration[0] = initial_salt_concentration
+
+# Reverse osmosis simulation
+for t in range(1, time_steps):
+    salt_concentration[t] = salt_concentration[t-1] * (1 - recovery_ratio)
+
+# Plot the results
+plt.plot(salt_concentration)
+plt.xlabel('Time Step')
+plt.ylabel('Salt Concentration (g/L)')
+plt.title('Salt Concentration over Time in Reverse Osmosis Desalination')
+plt.show()
+
+class SafetySystem:
+    def __init__(self, max_radiation, max_temp):
+        self.max_radiation = max_radiation
+        self.max_temp = max_temp
+
+    def check_safety(self, radiation_level, temperature):
+        if radiation_level > self.max_radiation:
+            return "Emergency Shutdown: Radiation Level Exceeded!"
+        if temperature > self.max_temp:
+            return "Emergency Shutdown: Temperature Exceeded!"
+        return "All Systems Normal"
+
+# Example usage
+safety_system = SafetySystem(max_radiation=2, max_temp=350)
+
+# Simulate monitoring
+radiation_level = 1.5
+temperature = 300
+
+status = safety_system.check_safety(radiation_level, temperature)
+print(status)
