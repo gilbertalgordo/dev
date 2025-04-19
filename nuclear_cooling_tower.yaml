@@ -1,0 +1,67 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Cooling tower parameters
+air_flow_rate = 100.0  # Air flow rate in kg/s
+water_flow_rate = 50.0  # Water flow rate in kg/s
+initial_water_temp = 40.0  # Initial water temperature in °C
+ambient_air_temp = 25.0  # Ambient air temperature in °C
+heat_transfer_coefficient = 0.8  # Heat transfer coefficient
+
+# Time steps for simulation
+time_steps = 100
+water_temp = np.zeros(time_steps)
+water_temp[0] = initial_water_temp
+
+# Cooling tower simulation
+for t in range(1, time_steps):
+    heat_transfer = heat_transfer_coefficient * air_flow_rate * (water_temp[t-1] - ambient_air_temp)
+    water_temp[t] = water_temp[t-1] - heat_transfer / (water_flow_rate * 4.186)  # 4.186 kJ/kg°C is the specific heat of water
+
+# Plot the results
+plt.plot(water_temp)
+plt.xlabel('Time Step')
+plt.ylabel('Water Temperature (°C)')
+plt.title('Water Temperature in Cooling Tower over Time')
+plt.show()
+
+class PIDController:
+    def __init__(self, Kp, Ki, Kd, setpoint):
+        self.Kp = Kp
+        self.Ki = Ki
+        self.Kd = Kd
+        self.setpoint = setpoint
+        self.previous_error = 0
+        self.integral = 0
+
+    def compute(self, measured_value):
+        error = self.setpoint - measured_value
+        self.integral += error
+        derivative = error - self.previous_error
+        self.previous_error = error
+        output = self.Kp * error + self.Ki * self.integral + self.Kd * derivative
+        return output
+
+# Example usage
+desired_temp = 30  # Desired water temperature in °C
+pid = PIDController(Kp=1.0, Ki=0.1, Kd=0.05, setpoint=desired_temp)
+
+# Simulate cooling tower control
+time_steps = 100
+water_temp = np.zeros(time_steps)
+fan_speed = np.zeros(time_steps)
+measured_temp = 40  # Initial water temperature
+
+for t in range(time_steps):
+    fan_speed[t] = pid.compute(measured_temp)
+    heat_transfer = fan_speed[t] * (measured_temp - ambient_air_temp) * 0.8
+    measured_temp -= heat_transfer / (water_flow_rate * 4.186)
+    water_temp[t] = measured_temp
+
+# Plot the results
+plt.plot(water_temp)
+plt.xlabel('Time Step')
+plt.ylabel('Water Temperature (°C)')
+plt.title('Water Temperature Control using PID Controller')
+plt.show()
+
