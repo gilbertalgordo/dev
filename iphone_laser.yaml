@@ -1,0 +1,86 @@
+import React, { useState } from 'react';
+import { View, TouchableOpacity, StyleSheet, Text, Image, Animated } from 'react-native';
+import { Audio } from 'expo-av';
+
+export default function LaserApp() {
+  const [beamAnim] = useState(new Animated.Value(0));
+
+  const playLaserSound = async () => {
+    const { sound } = await Audio.Sound.createAsync(
+      require('./assets/laser.mp3') // you'll need to add a laser sound here
+    );
+    await sound.playAsync();
+  };
+
+  const fireLaser = () => {
+    Animated.sequence([
+      Animated.timing(beamAnim, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+      Animated.timing(beamAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    playLaserSound();
+  };
+
+  const beamStyle = {
+    opacity: beamAnim,
+    transform: [
+      {
+        scaleY: beamAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0.1, 1],
+        }),
+      },
+    ],
+  };
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>iPhone Laser Simulator</Text>
+      <TouchableOpacity onPress={fireLaser} style={styles.button}>
+        <Text style={styles.buttonText}>FIRE</Text>
+      </TouchableOpacity>
+      <Animated.View style={[styles.laserBeam, beamStyle]} />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  title: {
+    color: '#0f0',
+    fontSize: 24,
+    marginBottom: 30,
+  },
+  button: {
+    padding: 20,
+    backgroundColor: '#111',
+    borderWidth: 2,
+    borderColor: '#0f0',
+    borderRadius: 10,
+    marginBottom: 50,
+  },
+  buttonText: {
+    color: '#0f0',
+    fontSize: 18,
+  },
+  laserBeam: {
+    width: 4,
+    height: 300,
+    backgroundColor: 'red',
+    position: 'absolute',
+    top: '40%',
+  },
+});
