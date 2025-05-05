@@ -1,0 +1,1049 @@
+import React, { useState, useEffect } from 'react';
+
+function CodenameBubblegumApplock() {
+  const [detectedMalware, setDetectedMalware] = useState([]);
+  const [adBlockEnabled, setAdBlockEnabled] = useState(false);
+  const [antiSpyEnabled, setAntiSpyEnabled] = useState(false);
+  const [autoDeleteEnabled, setAutoDeleteEnabled] = useState(true); // Default to auto-delete on
+  const [isAppLocked, setIsAppLocked] = useState(false);
+  const [password, setPassword] = useState('');
+  const [isPasswordSet, setIsPasswordSet] = useState(false);
+  const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
+  const [incorrectPassword, setIncorrectPassword] = useState(false);
+
+  useEffect(() => {
+    // Simulate malware detection (replace with actual detection logic)
+    const simulateMalwareDetection = () => {
+      const random = Math.random();
+      if (random < 0.2) { // 20% chance of "detecting" malware
+        const newMalware = {
+          id: Date.now(),
+          name: `SuspiciousFile-${Date.now()}`,
+          location: `/path/to/suspicious/${Date.now()}.exe`,
+          type: Math.random() < 0.5 ? 'Trojan' : 'Adware',
+        };
+        setDetectedMalware((prevMalware) => [...prevMalware, newMalware]);
+      }
+    };
+
+    const detectionInterval = setInterval(simulateMalwareDetection, 5000); // Check every 5 seconds
+
+    return () => clearInterval(detectionInterval); // Cleanup interval
+  }, []);
+
+  useEffect(() => {
+    if (autoDeleteEnabled && detectedMalware.length > 0) {
+      // Simulate auto-deletion (replace with actual deletion logic)
+      const deletedMalware = detectedMalware.slice(0, 1); // Delete the first detected one for simplicity
+      setDetectedMalware((prevMalware) => prevMalware.slice(1));
+
+      console.log('Auto-deleted:', deletedMalware[0]); // Log the deleted malware
+    }
+  }, [detectedMalware, autoDeleteEnabled]);
+
+  useEffect(() => {
+    // Check if a password is set on component mount (e.g., from local storage)
+    const storedPassword = localStorage.getItem('appLockPassword');
+    if (storedPassword) {
+      setPassword(storedPassword);
+      setIsPasswordSet(true);
+      setShowPasswordPrompt(true); // Show prompt on first load if password exists
+      setIsAppLocked(true);
+    } else {
+      setShowPasswordPrompt(true); // Show password setup prompt if no password
+    }
+  }, []);
+
+  const handlePasswordChange = (event) => {
+    setPassword(event.target.value);
+  };
+
+  const handleSetPassword = () => {
+    if (password.length >= 4) {
+      localStorage.setItem('appLockPassword', password);
+      setIsPasswordSet(true);
+      setShowPasswordPrompt(false);
+      setIsAppLocked(false); // Unlock after setting password
+      setIncorrectPassword(false);
+    } else {
+      alert('Password must be at least 4 characters long.');
+    }
+  };
+
+  const handleUnlockApp = () => {
+    const storedPassword = localStorage.getItem('appLockPassword');
+    if (password === storedPassword) {
+      setIsAppLocked(false);
+      setShowPasswordPrompt(false);
+      setIncorrectPassword(false);
+    } else {
+      setIncorrectPassword(true);
+    }
+  };
+
+  const toggleAdBlock = () => {
+    setAdBlockEnabled((prev) => !prev);
+    // Add adblock implementation here (e.g., modifying fetch requests, filtering DOM)
+    console.log(`AdBlock: ${adBlockEnabled ? 'Disabled' : 'Enabled'}`);
+  };
+
+  const toggleAntiSpy = () => {
+    setAntiSpyEnabled((prev) => !prev);
+    // Add antispy implementation here (e.g., blocking tracking scripts, modifying headers)
+    console.log(`AntiSpy: ${antiSpyEnabled ? 'Disabled' : 'Enabled'}`);
+  };
+
+  const toggleAutoDelete = () => {
+    setAutoDeleteEnabled((prev) => !prev);
+    console.log(`Auto-Delete: ${autoDeleteEnabled ? 'Disabled' : 'Enabled'}`);
+  };
+
+  const toggleAppLock = () => {
+    if (isPasswordSet) {
+      setIsAppLocked((prev) => !prev);
+      setShowPasswordPrompt(!isAppLocked);
+    } else {
+      setShowPasswordPrompt(true); // Show password setup if not set
+    }
+  };
+
+  const deleteMalware = (id) => {
+    setDetectedMalware((prevMalware) => prevMalware.filter((item) => item.id !== id));
+  };
+
+  if (showPasswordPrompt) {
+    return (
+      <div>
+        <h1>Codename Bubblegum Applock</h1>
+        <h2>{isPasswordSet ? 'Unlock App' : 'Set App Password'}</h2>
+        <input
+          type="password"
+          value={password}
+          onChange={handlePasswordChange}
+          placeholder="Enter Password"
+        />
+        <button onClick={isPasswordSet ? handleUnlockApp : handleSetPassword}>
+          {isPasswordSet ? 'Unlock' : 'Set Password'}
+        </button>
+        {incorrectPassword && <p style={{ color: 'red' }}>Incorrect password.</p>}
+      </div>
+    );
+  }
+
+  if (isAppLocked) {
+    return (
+      <div>
+        <h1>Codename Bubblegum Applock</h1>
+        <h2>App Locked</h2>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <h1>Codename Bubblegum Applock</h1>
+      <div>
+        <button onClick={toggleAppLock}>
+          {isAppLocked ? 'Unlock App' : 'Lock App'}
+        </button>
+        <button onClick={toggleAdBlock}>
+          {adBlockEnabled ? 'Disable AdBlock' : 'Enable AdBlock'}
+        </button>
+        <button onClick={toggleAntiSpy}>
+          {antiSpyEnabled ? 'Disable AntiSpy' : 'Enable AntiSpy'}
+        </button>
+        <button onClick={toggleAutoDelete}>
+          {autoDeleteEnabled ? 'Disable Auto-Delete' : 'Enable Auto-Delete'}
+        </button>
+      </div>
+
+      <h2>Detected Malware:</h2>
+      <ul>
+        {detectedMalware.map((malware) => (
+          <li key={malware.id}>
+            {malware.name} ({malware.type}) - {malware.location}
+            <button onClick={() => deleteMalware(malware.id)}>Delete</button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export default CodenameBubblegumApplock;
+
+
+
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Container,
+  Typography,
+  Button,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemSecondaryAction,
+  IconButton,
+  TextField,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  FormControlLabel,
+  Switch,
+  Alert,
+  Box,
+  LinearProgress,
+} from '@mui/material';
+import DeleteIcon from '@mui/icons-material/Delete';
+import BlockIcon from '@mui/icons-material/Block';
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
+
+function CodenameBubblegumLoop() {
+  const [detectedMalware, setDetectedMalware] = useState([]);
+  const [adBlockEnabled, setAdBlockEnabled] = useState(false);
+  const [antiSpyEnabled, setAntiSpyEnabled] = useState(false);
+  const [autoDeleteEnabled, setAutoDeleteEnabled] = useState(true);
+  const detectionIntervalRef = useRef(null);
+  const deletionIntervalRef = useRef(null);
+  const [isDetecting, setIsDetecting] = useState(false);
+
+  const simulateMalwareDetection = () => {
+    const random = Math.random();
+    if (random < 0.3) { // Increased chance for demonstration
+      const newMalware = {
+        id: Date.now(),
+        name: `SuspiciousProcess-${Date.now()}`,
+        location: `/temp/malware/${Date.now()}.tmp`,
+        type: Math.random() < 0.5 ? 'Worm' : 'Spyware',
+      };
+      setDetectedMalware((prevMalware) => [...prevMalware, newMalware]);
+      console.log('Malware Detected:', newMalware.name);
+    }
+  };
+
+  const autoDeleteMalware = () => {
+    if (autoDeleteEnabled && detectedMalware.length > 0) {
+      const oldestMalware = detectedMalware[0];
+      setDetectedMalware((prevMalware) => prevMalware.slice(1));
+      console.log('Auto-deleted:', oldestMalware.name);
+    }
+  };
+
+  useEffect(() => {
+    // Start detection loop
+    const startDetectionLoop = () => {
+      setIsDetecting(true);
+      detectionIntervalRef.current = setInterval(simulateMalwareDetection, 3000); // Detect every 3 seconds
+    };
+
+    // Stop detection loop
+    const stopDetectionLoop = () => {
+      setIsDetecting(false);
+      clearInterval(detectionIntervalRef.current);
+    };
+
+    startDetectionLoop(); // Start on component mount
+
+    return () => {
+      stopDetectionLoop(); // Cleanup on unmount
+      clearInterval(deletionIntervalRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    // Start auto-delete loop when autoDelete is enabled and malware is present
+    if (autoDeleteEnabled) {
+      deletionIntervalRef.current = setInterval(autoDeleteMalware, 5000); // Attempt delete every 5 seconds
+    } else {
+      clearInterval(deletionIntervalRef.current);
+    }
+    return () => clearInterval(deletionIntervalRef.current);
+  }, [autoDeleteEnabled, detectedMalware]);
+
+  const toggleAdBlock = () => {
+    setAdBlockEnabled((prev) => !prev);
+    console.log(`AdBlock: ${adBlockEnabled ? 'Disabled' : 'Enabled'}`);
+    // Implement ad blocking logic here
+  };
+
+  const toggleAntiSpy = () => {
+    setAntiSpyEnabled((prev) => !prev);
+    console.log(`AntiSpy: ${antiSpyEnabled ? 'Disabled' : 'Enabled'}`);
+    // Implement anti-spy logic here
+  };
+
+  const toggleAutoDelete = () => {
+    setAutoDeleteEnabled((prev) => !prev);
+    console.log(`Auto-Delete: ${autoDeleteEnabled ? 'Disabled' : 'Enabled'}`);
+  };
+
+  const deleteMalware = (id) => {
+    setDetectedMalware((prevMalware) => prevMalware.filter((item) => item.id !== id));
+  };
+
+  return (
+    <Container maxWidth="md">
+      <Typography variant="h4" component="h1" gutterBottom>
+        Codename Bubblegum Loop
+      </Typography>
+
+      <Box sx={{ mb: 2 }}>
+        <Button
+          variant="contained"
+          color={adBlockEnabled ? 'secondary' : 'primary'}
+          startIcon={<BlockIcon />}
+          onClick={toggleAdBlock}
+          sx={{ mr: 2 }}
+        >
+          {adBlockEnabled ? 'Disable AdBlock' : 'Enable AdBlock'}
+        </Button>
+
+        <Button
+          variant="contained"
+          color={antiSpyEnabled ? 'secondary' : 'primary'}
+          startIcon={<VisibilityOffIcon />}
+          onClick={toggleAntiSpy}
+          sx={{ mr: 2 }}
+        >
+          {antiSpyEnabled ? 'Disable AntiSpy' : 'Enable AntiSpy'}
+        </Button>
+
+        <FormControlLabel
+          control={
+            <Switch
+              checked={autoDeleteEnabled}
+              onChange={toggleAutoDelete}
+              name="autoDelete"
+              color="primary"
+            />
+          }
+          label={autoDeleteEnabled ? 'Auto-Delete Enabled' : 'Auto-Delete Disabled'}
+        />
+      </Box>
+
+      <Typography variant="h6" component="h2" mt={3} gutterBottom>
+        Detected Malware ({detectedMalware.length}):
+      </Typography>
+      {isDetecting && <LinearProgress sx={{ mb: 1 }} />}
+      <List>
+        {detectedMalware.map((malware) => (
+          <ListItem key={malware.id}>
+            <ListItemText
+              primary={malware.name}
+              secondary={`${malware.type} - ${malware.location}`}
+            />
+            <ListItemSecondaryAction>
+              <IconButton
+                edge="end"
+                aria-label="delete"
+                onClick={() => deleteMalware(malware.id)}
+              >
+                <DeleteIcon />
+              </IconButton>
+            </ListItemSecondaryAction>
+          </ListItem>
+        ))}
+        {detectedMalware.length === 0 && (
+          <ListItem>
+            <ListItemText primary="No malware detected." />
+          </ListItem>
+        )}
+      </List>
+    </Container>
+  );
+}
+
+export default CodenameBubblegumLoop;
+
+
+
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Container,
+  Typography,
+  Button,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemSecondaryAction,
+  IconButton,
+  FormControlLabel,
+  Switch,
+  Box,
+  LinearProgress,
+  Snackbar,
+  Alert,
+} from '@mui/material';
+import DeleteIcon from '@mui/icons-material/Delete';
+import BlockIcon from '@mui/icons-material/Block';
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
+import SecurityIcon from '@mui/icons-material/Security';
+
+function CodenameBubblegumEnableZone() {
+  const [detectedMalware, setDetectedMalware] = useState([]);
+  const [adBlockEnabled, setAdBlockEnabled] = useState(false);
+  const [antiSpyEnabled, setAntiSpyEnabled] = useState(false);
+  const [autoDeleteEnabled, setAutoDeleteEnabled] = useState(true);
+  const detectionIntervalRef = useRef(null);
+  const deletionIntervalRef = useRef(null);
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [enabledZones, setEnabledZones] = useState([]); // Array to hold enabled zones
+  const [snackbarOpen, setSnackbarOpen] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [snackbarSeverity, setSnackbarSeverity] = useState('info');
+
+  const zones = ['Network', 'Browser', 'System', 'Applications']; // Example zones
+
+  const showSnackbar = (message, severity = 'info') => {
+    setSnackbarMessage(message);
+    setSnackbarSeverity(severity);
+    setSnackbarOpen(true);
+  };
+
+  const handleCloseSnackbar = (event, reason) => {
+    if (reason === 'clickaway') {
+      return;
+    }
+    setSnackbarOpen(false);
+  };
+
+  const simulateMalwareDetection = (zone) => {
+    const random = Math.random();
+    if (random < 0.15) { // Reduced chance
+      const newMalware = {
+        id: Date.now(),
+        name: `SuspiciousActivity-${Date.now()}`,
+        location: `/${zone.toLowerCase()}/potential-threat-${Date.now()}`,
+        type: Math.random() < 0.5 ? 'Rootkit' : 'Keylogger',
+        zone: zone,
+      };
+      setDetectedMalware((prevMalware) => [...prevMalware, newMalware]);
+      console.log(`[${zone}] Malware Detected:`, newMalware.name);
+      showSnackbar(`[${zone}] Potential threat detected: ${newMalware.name}`, 'warning');
+    }
+  };
+
+  useEffect(() => {
+    const startDetectionLoops = () => {
+      setIsDetecting(true);
+      zones.forEach((zone) => {
+        if (enabledZones.includes(zone)) {
+          setInterval(() => simulateMalwareDetection(zone), 5000); // Check each enabled zone
+        }
+      });
+    };
+
+    const stopDetectionLoops = () => {
+      setIsDetecting(false);
+      // Clearing intervals here would be complex as they are set dynamically per zone.
+      // A more robust approach might involve storing interval IDs.
+    };
+
+    startDetectionLoops();
+
+    return () => {
+      stopDetectionLoops();
+      clearInterval(deletionIntervalRef.current);
+    };
+  }, [enabledZones]); // Re-run effect when enabledZones change
+
+  useEffect(() => {
+    if (autoDeleteEnabled) {
+      deletionIntervalRef.current = setInterval(() => {
+        if (detectedMalware.length > 0) {
+          const oldestMalware = detectedMalware[0];
+          setDetectedMalware((prevMalware) => prevMalware.slice(1));
+          console.log('Auto-deleted:', oldestMalware.name);
+          showSnackbar(`Auto-deleted threat: ${oldestMalware.name}`, 'info');
+        }
+      }, 7000);
+    } else {
+      clearInterval(deletionIntervalRef.current);
+    }
+    return () => clearInterval(deletionIntervalRef.current);
+  }, [autoDeleteEnabled, detectedMalware]);
+
+  const toggleAdBlock = () => {
+    setAdBlockEnabled((prev) => !prev);
+    console.log(`AdBlock: ${adBlockEnabled ? 'Disabled' : 'Enabled'}`);
+    showSnackbar(`AdBlock ${adBlockEnabled ? 'disabled' : 'enabled'}`);
+    // Implement ad blocking logic
+  };
+
+  const toggleAntiSpy = () => {
+    setAntiSpyEnabled((prev) => !prev);
+    console.log(`AntiSpy: ${antiSpyEnabled ? 'Disabled' : 'Enabled'}`);
+    showSnackbar(`AntiSpy ${antiSpyEnabled ? 'disabled' : 'enabled'}`);
+    // Implement anti-spy logic
+  };
+
+  const toggleAutoDelete = () => {
+    setAutoDeleteEnabled((prev) => !prev);
+    console.log(`Auto-Delete: ${autoDeleteEnabled ? 'Disabled' : 'Enabled'}`);
+    showSnackbar(`Auto-Delete ${autoDeleteEnabled ? 'disabled' : 'enabled'}`);
+  };
+
+  const deleteMalware = (id) => {
+    const deletedItem = detectedMalware.find((item) => item.id === id);
+    setDetectedMalware((prevMalware) => prevMalware.filter((item) => item.id !== id));
+    if (deletedItem) {
+      showSnackbar(`Manually deleted: ${deletedItem.name}`, 'success');
+    }
+  };
+
+  const handleZoneToggle = (zone) => {
+    setEnabledZones((prevZones) => {
+      if (prevZones.includes(zone)) {
+        return prevZones.filter((z) => z !== zone);
+      } else {
+        return [...prevZones, zone];
+      }
+    });
+    showSnackbar(`${zone} monitoring ${enabledZones.includes(zone) ? 'disabled' : 'enabled'}`);
+  };
+
+  return (
+    <Container maxWidth="md">
+      <Typography variant="h4" component="h1" gutterBottom>
+        Codename Bubblegum Enable Zone <SecurityIcon />
+      </Typography>
+
+      <Box sx={{ mb: 2 }}>
+        <FormControlLabel
+          control={<Switch checked={adBlockEnabled} onChange={toggleAdBlock} color="primary" />}
+          label="AdBlock"
+        />
+        <FormControlLabel
+          control={<Switch checked={antiSpyEnabled} onChange={toggleAntiSpy} color="primary" />}
+          label="AntiSpy"
+        />
+        <FormControlLabel
+          control={<Switch checked={autoDeleteEnabled} onChange={toggleAutoDelete} color="primary" />}
+          label="Auto-Delete"
+        />
+      </Box>
+
+      <Typography variant="h6" component="h2" mt={3} gutterBottom>
+        Enabled Monitoring Zones:
+      </Typography>
+      <Box sx={{ mb: 2 }}>
+        {zones.map((zone) => (
+          <FormControlLabel
+            key={zone}
+            control={
+              <Switch
+                checked={enabledZones.includes(zone)}
+                onChange={() => handleZoneToggle(zone)}
+                color="secondary"
+              />
+            }
+            label={zone}
+          />
+        ))}
+      </Box>
+
+      <Typography variant="h6" component="h2" mt={3} gutterBottom>
+        Detected Malware ({detectedMalware.length}):
+      </Typography>
+      {isDetecting && <LinearProgress sx={{ mb: 1 }} />}
+      <List>
+        {detectedMalware.map((malware) => (
+          <ListItem key={malware.id}>
+            <ListItemText
+              primary={malware.name}
+              secondary={`${malware.type} - ${malware.location} (${malware.zone})`}
+            />
+            <ListItemSecondaryAction>
+              <IconButton
+                edge="end"
+                aria-label="delete"
+                onClick={() => deleteMalware(malware.id)}
+              >
+                <DeleteIcon />
+              </IconButton>
+            </ListItemSecondaryAction>
+          </ListItem>
+        ))}
+        {detectedMalware.length === 0 && (
+          <ListItem>
+            <ListItemText primary="No threats detected in enabled zones." />
+          </ListItem>
+        )}
+      </List>
+
+      <Snackbar
+        open={snackbarOpen}
+        autoHideDuration={3000}
+        onClose={handleCloseSnackbar}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert onClose={handleCloseSnackbar} severity={snackbarSeverity} sx={{ width: '100%' }}>
+          {snackbarMessage}
+        </Alert>
+      </Snackbar>
+    </Container>
+  );
+}
+
+export default CodenameBubblegumEnableZone;
+
+
+
+
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Container,
+  Typography,
+  Button,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemSecondaryAction,
+  IconButton,
+  FormControlLabel,
+  Switch,
+  Box,
+  LinearProgress,
+  Snackbar,
+  Alert,
+  Paper,
+} from '@mui/material';
+import DeleteIcon from '@mui/icons-material/Delete';
+import BlockIcon from '@mui/icons-material/Block';
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
+import SecurityIcon from '@mui/icons-material/Security';
+import Timeline from '@mui/lab/Timeline';
+import TimelineItem from '@mui/lab/TimelineItem';
+import TimelineSeparator from '@mui/lab/TimelineSeparator';
+import TimelineConnector from '@mui/lab/TimelineConnector';
+import TimelineContent from '@mui/lab/TimelineContent';
+import TimelineDot from '@mui/lab/TimelineDot';
+import LaptopIcon from '@mui/icons-material/Laptop';
+import AdUnitsIcon from '@mui/icons-material/AdUnits';
+import SpywareIcon from '@mui/icons-material/Spyware';
+import AutoDeleteIcon from '@mui/icons-material/AutoDelete';
+
+function CodenameBubblegumDiagram() {
+  const [detectedMalware, setDetectedMalware] = useState([]);
+  const [adBlockEnabled, setAdBlockEnabled] = useState(false);
+  const [antiSpyEnabled, setAntiSpyEnabled] = useState(false);
+  const [autoDeleteEnabled, setAutoDeleteEnabled] = useState(true);
+  const detectionIntervalRef = useRef(null);
+  const deletionIntervalRef = useRef(null);
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [events, setEvents] = useState([]);
+  const [snackbarOpen, setSnackbarOpen] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [snackbarSeverity, setSnackbarSeverity] = useState('info');
+
+  const showSnackbar = (message, severity = 'info') => {
+    setSnackbarMessage(message);
+    setSnackbarSeverity(severity);
+    setSnackbarOpen(true);
+  };
+
+  const handleCloseSnackbar = (event, reason) => {
+    if (reason === 'clickaway') {
+      return;
+    }
+    setSnackbarOpen(false);
+  };
+
+  const simulateMalwareDetection = () => {
+    const random = Math.random();
+    if (random < 0.2) {
+      const newMalware = {
+        id: Date.now(),
+        name: `Threat-${Date.now()}`,
+        location: `/system/temp/${Date.now()}.exe`,
+        type: Math.random() < 0.5 ? 'Virus' : 'Trojan',
+      };
+      setDetectedMalware((prevMalware) => [...prevMalware, newMalware]);
+      setEvents((prevEvents) => [
+        ...prevEvents,
+        { type: 'detection', message: `Detected: ${newMalware.name}`, timestamp: new Date() },
+      ]);
+      showSnackbar(`Detected: ${newMalware.name}`, 'warning');
+    }
+  };
+
+  useEffect(() => {
+    const startDetectionLoop = () => {
+      setIsDetecting(true);
+      detectionIntervalRef.current = setInterval(simulateMalwareDetection, 4000);
+    };
+
+    const stopDetectionLoop = () => {
+      setIsDetecting(false);
+      clearInterval(detectionIntervalRef.current);
+    };
+
+    startDetectionLoop();
+
+    return () => {
+      stopDetectionLoop();
+      clearInterval(deletionIntervalRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (autoDeleteEnabled) {
+      deletionIntervalRef.current = setInterval(() => {
+        if (detectedMalware.length > 0) {
+          const oldestMalware = detectedMalware[0];
+          setDetectedMalware((prevMalware) => prevMalware.slice(1));
+          setEvents((prevEvents) => [
+            ...prevEvents,
+            { type: 'auto-delete', message: `Auto-deleted: ${oldestMalware.name}`, timestamp: new Date() },
+          ]);
+          showSnackbar(`Auto-deleted: ${oldestMalware.name}`, 'info');
+        }
+      }, 6000);
+    } else {
+      clearInterval(deletionIntervalRef.current);
+    }
+    return () => clearInterval(deletionIntervalRef.current);
+  }, [autoDeleteEnabled, detectedMalware]);
+
+  const toggleAdBlock = () => {
+    setAdBlockEnabled((prev) => !prev);
+    setEvents((prevEvents) => [
+      ...prevEvents,
+      { type: 'feature-toggle', message: `AdBlock ${prev ? 'disabled' : 'enabled'}`, timestamp: new Date() },
+    ]);
+    showSnackbar(`AdBlock ${adBlockEnabled ? 'disabled' : 'enabled'}`);
+  };
+
+  const toggleAntiSpy = () => {
+    setAntiSpyEnabled((prev) => !prev);
+    setEvents((prevEvents) => [
+      ...prevEvents,
+      { type: 'feature-toggle', message: `AntiSpy ${prev ? 'disabled' : 'enabled'}`, timestamp: new Date() },
+    ]);
+    showSnackbar(`AntiSpy ${antiSpyEnabled ? 'disabled' : 'enabled'}`);
+  };
+
+  const toggleAutoDelete = () => {
+    setAutoDeleteEnabled((prev) => !prev);
+    setEvents((prevEvents) => [
+      ...prevEvents,
+      { type: 'feature-toggle', message: `Auto-Delete ${prev ? 'disabled' : 'enabled'}`, timestamp: new Date() },
+    ]);
+    showSnackbar(`Auto-Delete ${autoDeleteEnabled ? 'disabled' : 'enabled'}`);
+  };
+
+  const deleteMalware = (id) => {
+    const deletedItem = detectedMalware.find((item) => item.id === id);
+    setDetectedMalware((prevMalware) => prevMalware.filter((item) => item.id !== id));
+    if (deletedItem) {
+      setEvents((prevEvents) => [
+        ...prevEvents,
+        { type: 'manual-delete', message: `Manually deleted: ${deletedItem.name}`, timestamp: new Date() },
+      ]);
+      showSnackbar(`Manually deleted: ${deletedItem.name}`, 'success');
+    }
+  };
+
+  return (
+    <Container maxWidth="md">
+      <Typography variant="h4" component="h1" gutterBottom>
+        Codename Bubblegum Diagram <SecurityIcon />
+      </Typography>
+
+      <Box sx={{ mb: 2 }}>
+        <FormControlLabel
+          control={<Switch checked={adBlockEnabled} onChange={toggleAdBlock} color="primary" />}
+          label="AdBlock"
+        />
+        <FormControlLabel
+          control={<Switch checked={antiSpyEnabled} onChange={toggleAntiSpy} color="primary" />}
+          label="AntiSpy"
+        />
+        <FormControlLabel
+          control={<Switch checked={autoDeleteEnabled} onChange={toggleAutoDelete} color="primary" />}
+          label="Auto-Delete"
+        />
+      </Box>
+
+      <Typography variant="h6" component="h2" mt={3} gutterBottom>
+        Detected Malware ({detectedMalware.length}):
+      </Typography>
+      {isDetecting && <LinearProgress sx={{ mb: 1 }} />}
+      <List>
+        {detectedMalware.map((malware) => (
+          <ListItem key={malware.id}>
+            <ListItemText primary={malware.name} secondary={malware.type} />
+            <ListItemSecondaryAction>
+              <IconButton
+                edge="end"
+                aria-label="delete"
+                onClick={() => deleteMalware(malware.id)}
+              >
+                <DeleteIcon />
+              </IconButton>
+            </ListItemSecondaryAction>
+          </ListItem>
+        ))}
+        {detectedMalware.length === 0 && (
+          <ListItem>
+            <ListItemText primary="No threats detected." />
+          </ListItem>
+        )}
+      </List>
+
+      <Typography variant="h6" component="h2" mt={3} gutterBottom>
+        Activity Diagram:
+      </Typography>
+      <Paper elevation={3} sx={{ p: 2 }}>
+        <Timeline>
+          {events.map((event, index) => (
+            <TimelineItem key={index}>
+              <TimelineSeparator>
+                <TimelineDot
+                  color={
+                    event.type === 'detection'
+                      ? 'warning'
+                      : event.type === 'auto-delete'
+                      ? 'info'
+                      : event.type === 'manual-delete'
+                      ? 'success'
+                      : 'primary'
+                  }
+                  sx={{ boxShadow: 'none' }}
+                >
+                  {event.type === 'detection' ? <LaptopIcon /> : event.type === 'auto-delete' ? <AutoDeleteIcon /> : event.type === 'manual-delete' ? <DeleteIcon /> : event.type === 'feature-toggle' && event.message.includes('AdBlock') ? <AdUnitsIcon /> : event.type === 'feature-toggle' && event.message.includes('AntiSpy') ? <SpywareIcon /> : <SecurityIcon />}
+                </TimelineDot>
+                {index < events.length - 1 && <TimelineConnector />}
+              </TimelineSeparator>
+              <TimelineContent>
+                <Typography variant="subtitle2">{event.message}</Typography>
+                <Typography variant="caption">{event.timestamp.toLocaleTimeString()}</Typography>
+              </TimelineContent>
+            </TimelineItem>
+          ))}
+          {events.length === 0 && (
+            <TimelineItem>
+              <TimelineSeparator>
+                <TimelineDot color="grey" sx={{ boxShadow: 'none' }} />
+              </TimelineSeparator>
+              <TimelineContent>
+                <Typography variant="body2" color="textSecondary">
+                  No activity recorded yet.
+                </Typography>
+              </TimelineContent>
+            </TimelineItem>
+          )}
+        </Timeline>
+      </Paper>
+
+      <Snackbar
+        open={snackbarOpen}
+        autoHideDuration={3000}
+        onClose={handleCloseSnackbar}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert onClose={handleCloseSnackbar} severity={snackbarSeverity} sx={{ width: '100%' }}>
+          {snackbarMessage}
+        </Alert>
+      </Snackbar>
+    </Container>
+  );
+}
+
+export default CodenameBubblegumDiagram;
+
+
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Container,
+  Typography,
+  Button,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemSecondaryAction,
+  IconButton,
+  FormControlLabel,
+  Switch,
+  Box,
+  LinearProgress,
+  Snackbar,
+  Alert,
+  Paper,
+  Link,
+  Tooltip,
+} from '@mui/material';
+import DeleteIcon from '@mui/icons-material/Delete';
+import BlockIcon from '@mui/icons-material/Block';
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
+import SecurityIcon from '@mui/icons-material/Security';
+import DeveloperBoardIcon from '@mui/icons-material/DeveloperBoard';
+
+function CodenameBubblegum() {
+  const [detectedMalware, setDetectedMalware] = useState([]);
+  const [adBlockEnabled, setAdBlockEnabled] = useState(false);
+  const [antiSpyEnabled, setAntiSpyEnabled] = useState(false);
+  const [autoDeleteEnabled, setAutoDeleteEnabled] = useState(true);
+  const detectionIntervalRef = useRef(null);
+  const deletionIntervalRef = useRef(null);
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [snackbarOpen, setSnackbarOpen] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [snackbarSeverity, setSnackbarSeverity] = useState('info');
+
+  const showSnackbar = (message, severity = 'info') => {
+    setSnackbarMessage(message);
+    setSnackbarSeverity(severity);
+    setSnackbarOpen(true);
+  };
+
+  const handleCloseSnackbar = (event, reason) => {
+    if (reason === 'clickaway') {
+      return;
+    }
+    setSnackbarOpen(false);
+  };
+
+  const simulateMalwareDetection = () => {
+    const random = Math.random();
+    if (random < 0.25) {
+      const newMalware = {
+        id: Date.now(),
+        name: `SuspiciousProcess-${Date.now()}`,
+        location: `/tmp/infected/${Date.now()}.bin`,
+        type: Math.random() < 0.5 ? 'Ransomware' : 'Botnet',
+      };
+      setDetectedMalware((prevMalware) => [...prevMalware, newMalware]);
+      showSnackbar(`Detected potential threat: ${newMalware.name}`, 'warning');
+    }
+  };
+
+  useEffect(() => {
+    const startDetectionLoop = () => {
+      setIsDetecting(true);
+      detectionIntervalRef.current = setInterval(simulateMalwareDetection, 5000);
+    };
+
+    const stopDetectionLoop = () => {
+      setIsDetecting(false);
+      clearInterval(detectionIntervalRef.current);
+    };
+
+    startDetectionLoop();
+
+    return () => {
+      stopDetectionLoop();
+      clearInterval(deletionIntervalRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (autoDeleteEnabled) {
+      deletionIntervalRef.current = setInterval(() => {
+        if (detectedMalware.length > 0) {
+          const oldestMalware = detectedMalware[0];
+          setDetectedMalware((prevMalware) => prevMalware.slice(1));
+          showSnackbar(`Auto-deleted: ${oldestMalware.name}`, 'info');
+        }
+      }, 7000);
+    } else {
+      clearInterval(deletionIntervalRef.current);
+    }
+    return () => clearInterval(deletionIntervalRef.current);
+  }, [autoDeleteEnabled, detectedMalware]);
+
+  const toggleAdBlock = () => {
+    setAdBlockEnabled((prev) => !prev);
+    showSnackbar(`AdBlock ${adBlockEnabled ? 'disabled' : 'enabled'}`);
+    // Implement ad blocking logic here (e.g., modifying fetch requests)
+  };
+
+  const toggleAntiSpy = () => {
+    setAntiSpyEnabled((prev) => !prev);
+    showSnackbar(`AntiSpy ${antiSpyEnabled ? 'disabled' : 'enabled'}`);
+    // Implement anti-spy logic here (e.g., blocking tracking scripts)
+  };
+
+  const toggleAutoDelete = () => {
+    setAutoDeleteEnabled((prev) => !prev);
+    showSnackbar(`Auto-Delete ${autoDeleteEnabled ? 'disabled' : 'enabled'}`);
+  };
+
+  const deleteMalware = (id) => {
+    const deletedItem = detectedMalware.find((item) => item.id === id);
+    setDetectedMalware((prevMalware) => prevMalware.filter((item) => item.id !== id));
+    if (deletedItem) {
+      showSnackbar(`Manually deleted: ${deletedItem.name}`, 'success');
+    }
+  };
+
+  return (
+    <Container maxWidth="md">
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+        <Typography variant="h4" component="h1" gutterBottom sx={{ flexGrow: 1 }}>
+          Codename Bubblegum <SecurityIcon />
+        </Typography>
+        <Tooltip title="Developed by Gilbert Algordo">
+          <Link href="https://g.dev/gilbert_algordo" target="_blank" rel="noopener noreferrer">
+            <DeveloperBoardIcon color="primary" fontSize="large" />
+          </Link>
+        </Tooltip>
+      </Box>
+
+      <Box sx={{ mb: 2 }}>
+        <FormControlLabel
+          control={<Switch checked={adBlockEnabled} onChange={toggleAdBlock} color="primary" />}
+          label="AdBlock"
+        />
+        <FormControlLabel
+          control={<Switch checked={antiSpyEnabled} onChange={toggleAntiSpy} color="primary" />}
+          label="AntiSpy"
+        />
+        <FormControlLabel
+          control={<Switch checked={autoDeleteEnabled} onChange={toggleAutoDelete} color="primary" />}
+          label="Auto-Delete"
+        />
+      </Box>
+
+      <Typography variant="h6" component="h2" mt={3} gutterBottom>
+        Detected Malware ({detectedMalware.length}):
+      </Typography>
+      {isDetecting && <LinearProgress sx={{ mb: 1 }} />}
+      <List>
+        {detectedMalware.map((malware) => (
+          <ListItem key={malware.id}>
+            <ListItemText primary={malware.name} secondary={malware.type} />
+            <ListItemSecondaryAction>
+              <IconButton
+                edge="end"
+                aria-label="delete"
+                onClick={() => deleteMalware(malware.id)}
+              >
+                <DeleteIcon />
+              </IconButton>
+            </ListItemSecondaryAction>
+          </ListItem>
+        ))}
+        {detectedMalware.length === 0 && (
+          <ListItem>
+            <ListItemText primary="No threats detected." />
+          </ListItem>
+        )}
+      </List>
+
+      <Snackbar
+        open={snackbarOpen}
+        autoHideDuration={3000}
+        onClose={handleCloseSnackbar}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert onClose={handleCloseSnackbar} severity={snackbarSeverity} sx={{ width: '100%' }}>
+          {snackbarMessage}
+        </Alert>
+      </Snackbar>
+    </Container>
+  );
+}
+
+export default CodenameBubblegum;
