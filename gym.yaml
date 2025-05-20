@@ -1,0 +1,943 @@
+// App.js
+import React from 'react';
+import { NavigationContainer } from '@react-navigation/native';
+import { createStackNavigator } from '@react-navigation/stack';
+import HomeScreen from './screens/HomeScreen';
+import WorkoutScreen from './screens/WorkoutScreen';
+import ProfileScreen from './screens/ProfileScreen';
+
+const Stack = createStackNavigator();
+
+export default function App() {
+  return (
+    <NavigationContainer>
+      <Stack.Navigator initialRouteName="Home">
+        <Stack.Screen name="Home" component={HomeScreen} />
+        <Stack.Screen name="Workout" component={WorkoutScreen} />
+        <Stack.Screen name="Profile" component={ProfileScreen} />
+      </Stack.Navigator>
+    </NavigationContainer>
+  );
+}
+
+
+// server.js
+const express = require('express');
+const bodyParser = require('body-parser');
+const jwt = require('jsonwebtoken');
+const app = express();
+
+app.use(bodyParser.json());
+
+const users = [{ id: 1, username: 'user1', password: 'pass1' }];
+
+app.post('/login', (req, res) => {
+  const { username, password } = req.body;
+  const user = users.find(u => u.username === username && u.password === password);
+  if (user) {
+    const token = jwt.sign({ id: user.id }, 'secretkey');
+    res.json({ token });
+  } else {
+    res.status(401).json({ error: 'Invalid credentials' });
+  }
+});
+
+app.listen(3000, () => {
+  console.log('Server running on port 3000');
+});
+
+// SmartEquipment.ino
+#include <SPI.h>
+#include <RFID.h>
+
+RFID rfid(10, 9); // RFID module pins
+
+void setup() {
+  Serial.begin(9600);
+  SPI.begin();
+  rfid.init();
+}
+
+void loop() {
+  if (rfid.isCard()) {
+    if (rfid.readCardSerial()) {
+      Serial.print("Card UID: ");
+      Serial.print(rfid.serNum[0], DEC);
+      Serial.print(rfid.serNum[1], DEC);
+      Serial.print(rfid.serNum[2], DEC);
+      Serial.print(rfid.serNum[3], DEC);
+      Serial.println();
+    }
+    rfid.halt();
+  }
+}
+
+
+
+# performance_tracking.py
+import pandas as pd
+from datetime import datetime
+
+# Sample data
+data = {
+    'user_id': [1, 2, 1, 2],
+    'workout_date': [datetime(2023, 6, 1), datetime(2023, 6, 1), datetime(2023, 6, 2), datetime(2023, 6, 2)],
+    'workout_type': ['cardio', 'strength', 'cardio', 'strength'],
+    'duration': [30, 45, 35, 50],
+    'calories_burned': [300, 450, 350, 500]
+}
+
+df = pd.DataFrame(data)
+
+# Calculate total calories burned per user
+total_calories = df.groupby('user_id')['calories_burned'].sum().reset_index()
+print(total_calories)
+
+
+// firebaseConfig.js
+import firebase from 'firebase/app';
+import 'firebase/auth';
+import 'firebase/database';
+
+const firebaseConfig = {
+  apiKey: "your-api-key",
+  authDomain: "your-auth-domain",
+  databaseURL: "your-database-url",
+  projectId: "your-project-id",
+  storageBucket: "your-storage-bucket",
+  messagingSenderId: "your-messaging-sender-id",
+  appId: "your-app-id"
+};
+
+firebase.initializeApp(firebaseConfig);
+
+export const auth = firebase.auth();
+export const database = firebase.database();
+
+
+// Dashboard.js
+import React, { useEffect, useState } from 'react';
+import { database } from './firebaseConfig';
+
+const Dashboard = () => {
+  const [users, setUsers] = useState([]);
+
+  useEffect(() => {
+    const usersRef = database.ref('users');
+    usersRef.on('value', (snapshot) => {
+      const data = snapshot.val();
+      setUsers(Object.values(data));
+    });
+  }, []);
+
+  return (
+    <div>
+      <h1>User Dashboard</h1>
+      <ul>
+        {users.map((user, index) => (
+          <li key={index}>{user.name}: {user.total_calories} calories burned</li>
+        ))}
+      </ul>
+    </div>
+  );
+};
+
+export default Dashboard;
+
+
+# maintenance_alerts.py
+from twilio.rest import Client
+
+# Twilio credentials
+account_sid = 'your_account_sid'
+auth_token = 'your_auth_token'
+client = Client(account_sid, auth_token)
+
+# Function to send maintenance alert
+def send_alert(equipment_id, issue):
+    message = client.messages.create(
+        body=f"Maintenance required for equipment {equipment_id}: {issue}",
+        from_='+1234567890',
+        to='+0987654321'
+    )
+    print(f"Alert sent: {message.sid}")
+
+# Example usage
+send_alert('Treadmill_01', 'Belt needs replacement')
+
+
+#include <WiFi.h>
+#include <PubSubClient.h>
+
+const char* ssid = "your-ssid";
+const char* password = "your-password";
+const char* mqttServer = "mqtt-server";
+const int mqttPort = 1883;
+const char* mqttUser = "mqtt-user";
+const char* mqttPassword = "mqtt-password";
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+const int sensorPin = A0;
+
+void setup_wifi() {
+  delay(10);
+  Serial.println("Connecting to WiFi...");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("WiFi connected");
+}
+
+void reconnect() {
+  while (!client.connected()) {
+    Serial.println("Connecting to MQTT...");
+    if (client.connect("ESP8266Client", mqttUser, mqttPassword )) {
+      Serial.println("connected");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      delay(5000);
+    }
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  setup_wifi();
+  client.setServer(mqttServer, mqttPort);
+}
+
+void loop() {
+  if (!client.connected()) {
+    reconnect();
+  }
+  client.loop();
+
+  int sensorValue = analogRead(sensorPin);
+  Serial.println(sensorValue);
+
+  client.publish("sensors/sensor1", String(sensorValue).c_str());
+  delay(1000);
+}
+
+
+from picamera import PiCamera
+from time import sleep
+
+camera = PiCamera()
+
+camera.start_preview()
+sleep(5)
+camera.capture('/home/pi/image.jpg')
+camera.stop_preview()
+
+
+import RPi.GPIO as GPIO
+from mfrc522 import SimpleMFRC522
+
+reader = SimpleMFRC522()
+
+try:
+    print("Hold a tag near the reader")
+    id, text = reader.read()
+    print("Tag ID:", id)
+    print("Tag Text:", text)
+finally:
+    GPIO.cleanup()
+
+
+#include <SoftwareSerial.h>
+
+SoftwareSerial BTserial(10, 11); // RX, TX
+
+void setup() {
+  Serial.begin(9600);
+  BTserial.begin(9600);
+}
+
+void loop() {
+  if (BTserial.available()) {
+    char command = BTserial.read();
+    if (command == '1') {
+      digitalWrite(LED_BUILTIN, HIGH);
+      BTserial.println("LED ON");
+    } else if (command == '0') {
+      digitalWrite(LED_BUILTIN, LOW);
+      BTserial.println("LED OFF");
+    }
+  }
+}
+
+
+#include <ESP8266WiFi.h>
+#include <DHT.h>
+
+#define DHTPIN D4
+#define DHTTYPE DHT11
+
+const char* ssid = "your-ssid";
+const char* password = "your-password";
+
+const char* host = "api.thingspeak.com";
+const char* apiKey = "your-api-key";
+
+DHT dht(DHTPIN, DHTTYPE);
+
+void setup() {
+  Serial.begin(115200);
+  delay(10);
+  dht.begin();
+  connectWiFi();
+}
+
+void connectWiFi() {
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("WiFi connected");
+}
+
+void loop() {
+  float humidity = dht.readHumidity();
+  float temperature = dht.readTemperature();
+
+  if (isnan(humidity) || isnan(temperature)) {
+    Serial.println("Failed to read from DHT sensor!");
+    return;
+  }
+
+  Serial.print("Humidity: ");
+  Serial.print(humidity);
+  Serial.print(" %\t Temperature: ");
+  Serial.print(temperature);
+  Serial.println(" *C");
+
+  sendDataToThingspeak(temperature, humidity);
+
+  delay(2000);
+}
+
+void sendDataToThingspeak(float temperature, float humidity) {
+  WiFiClient client;
+  if (!client.connect(host, 80)) {
+    Serial.println("Connection failed");
+    return;
+  }
+
+  String url = "/update?api_key=";
+  url += apiKey;
+  url += "&field1=";
+  url += String(temperature);
+  url += "&field2=";
+  url += String(humidity);
+
+  client.print(String("GET ") + url + " HTTP/1.1\r\n" +
+               "Host: " + host + "\r\n" +
+               "Connection: close\r\n\r\n");
+
+  Serial.println("Sending data to Thingspeak");
+  delay(500);
+
+  while (client.available()) {
+    String line = client.readStringUntil('\r');
+    Serial.print(line);
+  }
+}
+
+
+# Import necessary libraries
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+
+# Sample data (features can be heart rate, age, fitness level, etc.)
+data = {
+    'Age': [25, 30, 35, 40, 45, 50],
+    'Fitness Level': [7, 6, 5, 4, 3, 2],
+    'Preferred Activity': ['Cardio', 'Strength', 'Cardio', 'Strength', 'Cardio', 'Strength']
+}
+
+# Convert data to DataFrame
+df = pd.DataFrame(data)
+
+# Convert categorical variable into numerical
+df['Preferred Activity'] = df['Preferred Activity'].map({'Cardio': 0, 'Strength': 1})
+
+# Split data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(df[['Age', 'Fitness Level']], df['Preferred Activity'], test_size=0.2, random_state=42)
+
+# Train RandomForestClassifier
+model = RandomForestClassifier()
+model.fit(X_train, y_train)
+
+# Predict activity preference
+age = 35
+fitness_level = 5
+activity = model.predict([[age, fitness_level]])
+print("Recommended activity:", "Cardio" if activity == 0 else "Strength")
+
+
+# AI algorithm for providing feedback during workouts
+def virtual_trainer_feedback(user_data):
+    # Example: analyzing squat form
+    if user_data['squat_depth'] < 90:
+        return "Squat deeper for better results."
+    elif user_data['knee_alignment'] == 'Valgus':
+        return "Correct knee alignment to prevent injury."
+    else:
+        return "Great job! Keep it up!"
+
+# Example usage
+user_data = {
+    'squat_depth': 85,
+    'knee_alignment': 'Valgus'
+}
+feedback = virtual_trainer_feedback(user_data)
+print("Feedback:", feedback)
+
+
+import cv2
+
+# Load pre-trained model for activity recognition
+model = cv2.dnn.readNet('activity_recognition_model.weights', 'activity_recognition_model.cfg')
+
+def recognize_activity(frame):
+    # Preprocess frame
+    blob = cv2.dnn.blobFromImage(frame, 1.0, (224, 224), (104, 117, 123))
+
+    # Pass frame through the network
+    model.setInput(blob)
+    output = model.forward()
+
+    # Get predicted activity
+    activity = output.argmax()
+    return activity
+
+# Example usage
+frame = cv2.imread('workout_frame.jpg')
+activity = recognize_activity(frame)
+print("Predicted activity:", activity)
+
+
+using UnityEngine;
+
+public class VRWorkoutEnvironment : MonoBehaviour
+{
+    public GameObject user;
+
+    void Start()
+    {
+        // Load virtual environment based on user preferences
+        LoadEnvironment(user.preferences);
+    }
+
+    void LoadEnvironment(UserPreferences preferences)
+    {
+        // Example: Load beach environment for cardio workout
+        if (preferences.activity == Activity.Cardio)
+        {
+            Instantiate(Resources.Load("BeachEnvironment"));
+        }
+        // Example: Load gym environment for strength workout
+        else if (preferences.activity == Activity.Strength)
+        {
+            Instantiate(Resources.Load("GymEnvironment"));
+        }
+    }
+}
+
+
+[Power Supply] --> [Main Control Panel] --> [Equipment Control Panels]
+
+Main Control Panel:
+- PLC (Programmable Logic Controller)
+- HMI (Human-Machine Interface)
+- Network Switch
+
+Equipment Control Panels:
+1. Treadmill:
+   - Speed Controller --> PLC
+   - Incline Controller --> PLC
+   - Emergency Stop --> Main Control Panel
+
+2. Exercise Bikes:
+   - Resistance Controller --> PLC
+   - RPM Sensor --> PLC
+
+3. Strength Machines:
+   - Weight Stack --> Load Cell Amplifier --> PLC
+   - Safety Lock --> PLC
+
+4. Group Exercise Area:
+   - Audio System --> Audio Amplifier --> HMI (Controlled by Gym Staff)
+
+5. Cardio Theater:
+   - Display Screens --> Media Player --> HMI (Controlled by Gym Staff)
+
+6. Lighting System:
+   - LED Lights --> Dimmer Modules --> PLC (Controlled by Time Schedule or Motion Sensors)
+
+7. HVAC System:
+   - Air Conditioning Units --> Thermostats --> PLC (Controlled by Temperature Sensors)
+
+8. Access Control:
+   - RFID Readers --> Access Controller --> Main Control Panel
+
+9. Security System:
+   - CCTV Cameras --> DVR/NVR --> Main Control Panel
+   - Alarm System --> Main Control Panel
+
+10. Networking:
+    - Wi-Fi Access Points --> Network Switch
+
+11. Maintenance and Monitoring:
+    - Equipment Health Sensors --> PLC --> Maintenance Dashboard (HMI)
+
+12. Emergency Shutdown:
+    - Emergency Stop Buttons --> Main Control Panel
+
+13. Energy Monitoring:
+    - Power Meters --> PLC --> Energy Monitoring Dashboard (HMI)
+
+
++---------------------------+
+|        Power Supply       |
++------------+--------------+
+             |
+             v
++------------+--------------+
+|   Main Control Panel      |
+| +-----------------------+ |
+| | PLC                   | |
+| | HMI                   | |
+| | Network Switch        | |
+| +-----------------------+ |
++------------+--------------+
+             |
+             v
++------------+--------------+
+|  Equipment Control Panels |
+|                           |
+| +--------+  +-----------+ |
+| |Treadmill|  |Exercise   | |
+| |        |  |Bikes      | |
+| +--------+  +-----------+ |
+|                           |
+| +--------+  +-----------+ |
+| |Strength |  |Group      | |
+| |Machines |  |Exercise   | |
+| +--------+  +-----------+ |
+|                           |
+| +--------+  +-----------+ |
+| |Cardio   |  |Lighting   | |
+| |Theater  |  |System     | |
+| +--------+  +-----------+ |
+|                           |
+| +--------+  +-----------+ |
+| |HVAC     |  |Access     | |
+| |System   |  |Control    | |
+| +--------+  +-----------+ |
+|                           |
+| +--------+  +-----------+ |
+| |Security |  |Networking | |
+| |System   |  |           | |
+| +--------+  +-----------+ |
+|                           |
+| +--------+  +-----------+ |
+| |Maint.   |  |Emergency  | |
+| |Monitor. |  |Shutdown   | |
+| +--------+  +-----------+ |
+|                           |
+| +--------+  +-----------+ |
+| |Energy   |  |           | |
+| |Monitor. |  |           | |
+| +--------+  +-----------+ |
++------------+--------------+
+
+
++-------------------+
+| Treadmill Control |
++-------------------+
+|                   |
+| +---------------+ |
+| | Speed Control | |
+| +---------------+ |
+|                   |
+| +---------------+ |
+| | Incline Ctrl  | |
+| +---------------+ |
+|                   |
+| +---------------+ |
+| | Emergency Stop| |
+| +---------------+ |
+|                   |
++-------------------+
+
+
++------------------------+
+|        Network         |
++------------------------+
+|                        |
+| +-------------------+  |
+| | Network Switch    |  |
+| +-------------------+  |
+|                        |
+| +-------------------+  |
+| | Wi-Fi Access Point|  |
+| +-------------------+  |
+|                        |
++------------------------+
+
+
++----------------------+
+|      Start           |
++----------+-----------+
+           |
+           v
++----------+-----------+
+|   Equipment Check    |
++----------+-----------+
+           |
+           v
++----------+-----------+
+|  User Authentication |
++----------+-----------+
+           |
+           v
++----------+-----------+
+|  Equipment Usage     |
++----------+-----------+
+           |
+           v
++----------+-----------+
+|  Maintenance Alerts  |
++----------+-----------+
+           |
+           v
++----------+-----------+
+|  Energy Monitoring   |
++----------+-----------+
+           |
+           v
++----------+-----------+
+| Emergency Handling   |
++----------+-----------+
+           |
+           v
++----------+-----------+
+|      End             |
++----------------------+
+
+
+import paho.mqtt.client as mqtt
+
+# MQTT settings
+broker = "mqtt.example.com"
+port = 1883
+topic = "gym/sensors/#"
+
+# Callback for when a message is received
+def on_message(client, userdata, message):
+    sensor_data = str(message.payload.decode("utf-8"))
+    print(f"Received message on {message.topic}: {sensor_data}")
+    process_sensor_data(sensor_data)
+
+def process_sensor_data(data):
+    # Process and store sensor data
+    print(f"Processing data: {data}")
+
+# MQTT client setup
+client = mqtt.Client()
+client.connect(broker, port)
+client.subscribe(topic)
+client.on_message = on_message
+
+# Start MQTT loop
+client.loop_start()
+
+
+import tensorflow as tf
+import numpy as np
+
+# Load a pre-trained model
+model = tf.keras.models.load_model('path_to_your_model.h5')
+
+def predict_user_behavior(sensor_data):
+    # Convert sensor data to input format
+    input_data = np.array(sensor_data).reshape((1, -1))
+    prediction = model.predict(input_data)
+    return prediction
+
+# Example usage
+sensor_data_example = [1, 2, 3, 4, 5]  # Example sensor data
+prediction = predict_user_behavior(sensor_data_example)
+print(f"Prediction: {prediction}")
+
+
+from qiskit import QuantumCircuit, transpile, Aer, execute
+
+def run_quantum_task():
+    # Create a quantum circuit
+    qc = QuantumCircuit(2)
+    qc.h(0)
+    qc.cx(0, 1)
+    qc.measure_all()
+
+    # Execute the circuit on a simulator
+    simulator = Aer.get_backend('qasm_simulator')
+    compiled_circuit = transpile(qc, simulator)
+    job = execute(compiled_circuit, simulator)
+    result = job.result()
+
+    counts = result.get_counts(qc)
+    print(f"Quantum result: {counts}")
+
+# Example usage
+run_quantum_task()
+
+
+def control_equipment(equipment_id, command):
+    topic = f"gym/equipment/{equipment_id}/control"
+    client.publish(topic, command)
+    print(f"Sent command to {equipment_id}: {command}")
+
+# Example usage
+control_equipment("treadmill1", "start")
+
+
+import time
+
+def main_control_loop():
+    while True:
+        # Collect sensor data
+        sensor_data = collect_sensor_data()
+        
+        # Predict user behavior
+        prediction = predict_user_behavior(sensor_data)
+        
+        # Optimize using quantum computing if needed
+        if need_quantum_computation(prediction):
+            run_quantum_task()
+        
+        # Control equipment based on predictions
+        control_equipment_based_on_prediction(prediction)
+        
+        # Loop delay
+        time.sleep(1)  # Adjust as needed for real-time control
+
+def collect_sensor_data():
+    # Simulate sensor data collection
+    return [1, 2, 3, 4, 5]
+
+def need_quantum_computation(prediction):
+    # Determine if quantum computation is needed
+    return prediction[0] > 0.5
+
+def control_equipment_based_on_prediction(prediction):
+    # Simulate equipment control based on prediction
+    if prediction[0] > 0.5:
+        control_equipment("treadmill1", "start")
+    else:
+        control_equipment("treadmill1", "stop")
+
+# Start the control loop
+main_control_loop()
+
+
++-----------------------+
+|      User Interface   |
+| +-------------------+ |
+| | Web/App Interface | |
+| +-------------------+ |
++-----------------------+
+          |
+          v
++-----------------------+
+|   Network & Cloud     |
+| +-------------------+ |
+| | IoT Hub           | |
+| | AI/ML Models      | |
+| | Quantum Backend   | |
+| +-------------------+ |
++-----------------------+
+          |
+          v
++-----------------------+
+|  Main Control Panel   |
+| +-------------------+ |
+| | PLC               | |
+| | HMI               | |
+| | Network Switch    | |
+| +-------------------+ |
++-----------------------+
+          |
+          v
++-------------------------------+
+|   Equipment Control Panels    |
+| +-----------+   +-----------+ |
+| | Treadmill |   | Exercise  | |
+| | Control   |   | Bike Ctrl | |
+| +-----------+   +-----------+ |
+| +-----------+   +-----------+ |
+| | Strength  |   | Lighting  | |
+| | Machine   |   | Control   | |
+| +-----------+   +-----------+ |
+| +-----------+   +-----------+ |
+| | HVAC Ctrl |   | Security  | |
+| +-----------+   | Control   | |
+|                 +-----------+ |
++-------------------------------+
+
+
++--------------------+
+|  IoT Sensors       |
+| +----------------+ |
+| | Treadmill      | |
+| | Speed Sensor   | |
+| +----------------+ |
+| +----------------+ |
+| | Bike RPM       | |
+| | Sensor         | |
+| +----------------+ |
+| +----------------+ |
+| | Temp & Humidity| |
+| | Sensors        | |
+| +----------------+ |
++--------------------+
+          |
+          v
++-----------------------+
+|  IoT Hub (MQTT)       |
+| +-------------------+ |
+| | Data Collection   | |
+| +-------------------+ |
++-----------------------+
+          |
+          v
++-----------------------+
+|   Cloud Storage       |
+| +-------------------+ |
+| | Data Processing   | |
+| +-------------------+ |
++-----------------------+
+
+
++-----------------------+
+|   Data Processing     |
+| +-------------------+ |
+| | Data Ingestion    | |
+| +-------------------+ |
++-----------------------+
+          |
+          v
++-----------------------+
+|     AI/ML Models      |
+| +-------------------+ |
+| | Predictive Models | |
+| | Personalization   | |
+| +-------------------+ |
++-----------------------+
+          |
+          v
++-----------------------+
+| Quantum Computing     |
+| +-------------------+ |
+| | Optimization      | |
+| | Advanced Analysis | |
+| +-------------------+ |
++-----------------------+
+
+
++------------------------+
+| Main Control Panel     |
+| +--------------------+ |
+| | PLC                | |
+| | HMI                | |
+| +--------------------+ |
++------------------------+
+          |
+          v
++-----------------------+
+| Equipment Control     |
+| +-------------------+ |
+| | Treadmill Control | |
+| +-------------------+ |
+| +-------------------+ |
+| | Bike Control      | |
+| +-------------------+ |
+| +-------------------+ |
+| | Strength Machine  | |
+| +-------------------+ |
++-----------------------+
+
+
++----------------------+
+|      Start           |
++----------+-----------+
+           |
+           v
++----------+-----------+
+| Data Collection      |
+| (IoT Sensors)        |
++----------+-----------+
+           |
+           v
++----------+-----------+
+| Data Processing      |
+| (Cloud)              |
++----------+-----------+
+           |
+           v
++----------+-----------+
+| AI Predictions       |
+| (AI/ML Models)       |
++----------+-----------+
+           |
+           v
++----------+-----------+
+| Quantum Optimization |
+| (Quantum Computing)  |
++----------+-----------+
+           |
+           v
++----------+-----------+
+| Control Execution    |
+| (Control Systems)    |
++----------+-----------+
+           |
+           v
++----------+-----------+
+| User Interaction     |
+| (Web/App Interface)  |
++----------+-----------+
+           |
+           v
++----------+-----------+
+| Maintenance Alerts   |
+| (AI/ML Models)       |
++----------+-----------+
+           |
+           v
++----------+-----------+
+| Energy Monitoring    |
+| (Control Systems)    |
++----------+-----------+
+           |
+           v
++----------+-----------+
+| Emergency Handling   |
+| (Control Systems)    |
++----------+-----------+
+           |
+           v
++----------+-----------+
+|      End             |
++----------------------+
