@@ -1,0 +1,58 @@
+import React, { useState, useEffect } from 'react';
+
+function BatteryStatus() {
+  const [batteryLevel, setBatteryLevel] = useState(null);
+  const [isCharging, setIsCharging] = useState(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    // Check if Battery Status API is supported
+    if ('getBattery' in navigator) {
+      navigator.getBattery().then((battery) => {
+        const updateBatteryStatus = () => {
+          setBatteryLevel(battery.level * 100); // Level is 0-1, convert to percentage
+          setIsCharging(battery.charging);
+        };
+
+        // Initial update
+        updateBatteryStatus();
+
+        // Listen for changes
+        battery.addEventListener('levelchange', updateBatteryStatus);
+        battery.addEventListener('chargingchange', updateBatteryStatus);
+
+        // Cleanup event listeners on component unmount
+        return () => {
+          battery.removeEventListener('levelchange', updateBatteryStatus);
+          battery.removeEventListener('chargingchange', updateBatteryStatus);
+        };
+      }).catch((e) => {
+        console.error("Failed to get battery information:", e);
+        setError("Could not access battery information. Browser might not support it or permission denied.");
+      });
+    } else {
+      setError("Battery Status API not supported in this browser.");
+    }
+  }, []);
+
+  if (error) {
+    return <div style={{ color: 'red' }}>{error}</div>;
+  }
+
+  if (batteryLevel === null) {
+    return <div>Loading battery information...</div>;
+  }
+
+  return (
+    <div>
+      <h2>Device Battery Status (Web Browser)</h2>
+      <p>Charge Level: {batteryLevel.toFixed(0)}%</p>
+      <p>Charging: {isCharging ? 'Yes' : 'No'}</p>
+      <p style={{ fontSize: '0.8em', color: '#666' }}>
+        *Note: This shows the battery status of the device running this web browser, not your iPhone's internal battery health settings.*
+      </p>
+    </div>
+  );
+}
+
+export default BatteryStatus;
