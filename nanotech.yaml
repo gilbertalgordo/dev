@@ -1,0 +1,319 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Parameters
+grid_size = 100
+num_atoms = 1000
+deposit_prob = 0.01
+
+# Initialize grid
+grid = np.zeros((grid_size, grid_size))
+
+# Function to deposit an atom
+def deposit_atom(grid):
+    x = np.random.randint(0, grid_size)
+    y = np.random.randint(0, grid_size)
+    if np.random.rand() < deposit_prob:
+        grid[x, y] = 1
+
+# Simulate deposition process
+for _ in range(num_atoms):
+    deposit_atom(grid)
+
+# Visualize the result
+plt.imshow(grid, cmap='Greys', interpolation='nearest')
+plt.title('Atom Deposition Simulation')
+plt.show()
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Parameters
+num_particles = 50
+time_steps = 1000
+dt = 0.01
+sigma = 1.0
+epsilon = 1.0
+box_size = 10.0
+
+# Initialize particle positions and velocities
+positions = np.random.rand(num_particles, 3) * box_size
+velocities = np.random.randn(num_particles, 3)
+
+# Lennard-Jones potential
+def lj_potential(r):
+    r6 = r**6
+    r12 = r6 * r6
+    return 4 * epsilon * (r12 - r6)
+
+# Force calculation
+def calculate_forces(positions):
+    forces = np.zeros_like(positions)
+    for i in range(num_particles):
+        for j in range(i + 1, num_particles):
+            r = positions[i] - positions[j]
+            r = r - box_size * np.round(r / box_size)  # Periodic boundary conditions
+            dist = np.linalg.norm(r)
+            if dist < 2.5 * sigma:  # Cutoff distance
+                force = -24 * epsilon * (2 * (sigma / dist)**13 - (sigma / dist)**7) * r / dist**2
+                forces[i] += force
+                forces[j] -= force
+    return forces
+
+# Time integration (Verlet algorithm)
+for t in range(time_steps):
+    forces = calculate_forces(positions)
+    positions += velocities * dt + 0.5 * forces * dt**2
+    new_forces = calculate_forces(positions)
+    velocities += 0.5 * (forces + new_forces) * dt
+
+# Visualization
+fig = plt.figure()
+ax = fig.add_subplot(111, projection='3d')
+ax.scatter(positions[:, 0], positions[:, 1], positions[:, 2])
+plt.title('Molecular Dynamics Simulation')
+plt.show()
+
+
+% Load TEM image
+image = imread('tem_image.jpg');
+gray_image = rgb2gray(image);
+
+% Thresholding
+bw_image = imbinarize(gray_image);
+
+% Remove small objects
+bw_image = bwareaopen(bw_image, 50);
+
+% Label connected components
+[labeled_image, num_objects] = bwlabel(bw_image);
+
+% Measure properties of nanoparticles
+stats = regionprops(labeled_image, 'Area', 'Centroid');
+
+% Display results
+imshow(bw_image);
+hold on;
+for k = 1:num_objects
+    plot(stats(k).Centroid(1), stats(k).Centroid(2), 'r*');
+    text(stats(k).Centroid(1), stats(k).Centroid(2), num2str(k), 'Color', 'yellow');
+end
+hold off;
+title(['Number of nanoparticles: ', num2str(num_objects)]);
+
+
+% Parameters
+num_particles = 5;
+num_steps = 100;
+dt = 0.1;
+trap_strength = 1.0;
+initial_positions = rand(num_particles, 2) * 10;
+trap_position = [5, 5];
+
+% Initialize positions
+positions = initial_positions;
+
+% Simulation loop
+for step = 1:num_steps
+    for i = 1:num_particles
+        % Force due to optical trap
+        force = -trap_strength * (positions(i, :) - trap_position);
+        
+        % Update position
+        positions(i, :) = positions(i, :) + force * dt;
+    end
+    
+    % Visualization
+    plot(positions(:, 1), positions(:, 2), 'bo');
+    hold on;
+    plot(trap_position(1), trap_position(2), 'r*', 'MarkerSize', 10);
+    hold off;
+    xlim([0, 10]);
+    ylim([0, 10]);
+    title(['Step ', num2str(step)]);
+    drawnow;
+end
+
+
+import numpy as np
+from deap import base, creator, tools, algorithms
+
+# Define the problem
+def fabrication_fitness(individual):
+    # Example fitness function (to be replaced with actual fabrication optimization logic)
+    param1, param2, param3 = individual
+    return (np.sin(param1) * np.cos(param2) + param3,)
+
+# Genetic Algorithm setup
+creator.create("FitnessMax", base.Fitness, weights=(1.0,))
+creator.create("Individual", list, fitness=creator.FitnessMax)
+
+toolbox = base.Toolbox()
+toolbox.register("attr_float", np.random.uniform, -10, 10)
+toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_float, n=3)
+toolbox.register("population", tools.initRepeat, list, toolbox.individual)
+
+toolbox.register("mate", tools.cxBlend, alpha=0.5)
+toolbox.register("mutate", tools.mutGaussian, mu=0, sigma=1, indpb=0.2)
+toolbox.register("select", tools.selTournament, tournsize=3)
+toolbox.register("evaluate", fabrication_fitness)
+
+# Genetic Algorithm execution
+population = toolbox.population(n=100)
+ngen = 40
+cxpb = 0.5
+mutpb = 0.2
+
+result_population, logbook = algorithms.eaSimple(population, toolbox, cxpb, mutpb, ngen, verbose=True)
+
+# Best solution
+best_individual = tools.selBest(result_population, k=1)[0]
+print(f'Best Parameters: {best_individual}, Fitness: {best_individual.fitness.values}')
+
+
+import numpy as np
+from qiskit import Aer, QuantumCircuit, transpile, assemble, execute
+
+# Quantum simulation function
+def quantum_force_calculation():
+    qc = QuantumCircuit(2)
+    qc.h(0)
+    qc.cx(0, 1)
+    qc.measure_all()
+
+    simulator = Aer.get_backend('qasm_simulator')
+    transpiled_qc = transpile(qc, simulator)
+    qobj = assemble(transpiled_qc)
+    result = execute(qc, backend=simulator, shots=1000).result()
+    counts = result.get_counts()
+    return counts.get('00', 0) / 1000  # Simplified force based on quantum result
+
+# Parameters
+num_particles = 50
+time_steps = 100
+dt = 0.01
+positions = np.random.rand(num_particles, 3) * 10
+velocities = np.random.randn(num_particles, 3)
+
+# Simulation loop
+for t in range(time_steps):
+    forces = np.zeros_like(positions)
+    for i in range(num_particles):
+        for j in range(i + 1, num_particles):
+            r = positions[i] - positions[j]
+            dist = np.linalg.norm(r)
+            quantum_force = quantum_force_calculation()
+            force = quantum_force * r / dist**2
+            forces[i] += force
+            forces[j] -= force
+
+    velocities += forces * dt
+    positions += velocities * dt
+
+print("Simulation complete. Final positions:", positions)
+
+
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras import layers, models
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelBinarizer
+
+# Load and preprocess data (replace with actual TEM image dataset)
+def load_data():
+    # Placeholder for loading actual data
+    num_samples = 1000
+    img_size = (64, 64)
+    num_classes = 3
+    X = np.random.rand(num_samples, *img_size, 1)
+    y = np.random.randint(0, num_classes, num_samples)
+    return X, y
+
+X, y = load_data()
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+lb = LabelBinarizer()
+y_train = lb.fit_transform(y_train)
+y_test = lb.transform(y_test)
+
+# Define CNN model
+model = models.Sequential([
+    layers.Conv2D(32, (3, 3), activation='relu', input_shape=(64, 64, 1)),
+    layers.MaxPooling2D((2, 2)),
+    layers.Conv2D(64, (3, 3), activation='relu'),
+    layers.MaxPooling2D((2, 2)),
+    layers.Conv2D(64, (3, 3), activation='relu'),
+    layers.Flatten(),
+    layers.Dense(64, activation='relu'),
+    layers.Dense(3, activation='softmax')
+])
+
+model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+
+# Train model
+history = model.fit(X_train, y_train, epochs=10, validation_data=(X_test, y_test))
+
+# Evaluate model
+test_loss, test_acc = model.evaluate(X_test, y_test)
+print(f'Test accuracy: {test_acc}')
+
+# Visualize training history
+plt.plot(history.history['accuracy'], label='accuracy')
+plt.plot(history.history['val_accuracy'], label='val_accuracy')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.legend(loc='lower right')
+plt.show()
+
+
+import numpy as np
+from qiskit import Aer, QuantumCircuit, transpile, assemble, execute
+from sklearn.neural_network import MLPRegressor
+
+# Quantum optimization function
+def quantum_optimization():
+    qc = QuantumCircuit(3)
+    qc.h([0, 1, 2])
+    qc.measure_all()
+
+    simulator = Aer.get_backend('qasm_simulator')
+    transpiled_qc = transpile(qc, simulator)
+    qobj = assemble(transpiled_qc)
+    result = execute(qc, backend=simulator, shots=1000).result()
+    counts = result.get_counts()
+    return counts.get('000', 0) / 1000  # Simplified optimization result
+
+# Train AI model for nanomanipulation
+def train_nanomanipulation_model():
+    X = np.random.rand(100, 3)
+    y = np.random.rand(100, 2)
+    model = MLPRegressor(hidden_layer_sizes=(50,), max_iter=500)
+    model.fit(X, y)
+    return model
+
+# Initialize
+model = train_nanomanipulation_model()
+num_particles = 5
+positions = np.random.rand(num_particles, 2) * 10
+
+# Simulation loop
+for t in range(100):
+    for i in range(num_particles):
+        quantum_result = quantum_optimization()
+        ai_input = np.array([positions[i, 0], positions[i, 1], quantum_result])
+        new_position = model.predict(ai_input.reshape(1, -1))
+        positions[i] = new_position
+
+    # Visualization (simplified)
+    plt.scatter(positions[:, 0], positions[:, 1], c='blue')
+    plt.xlim(0, 10)
+    plt.ylim(0, 10)
+    plt.title(f'Step {t}')
+    plt.draw()
+    plt.pause(0.01)
+    plt.clf()
+
+print("Nanomanipulation complete. Final positions:", positions)
+
+
