@@ -1,0 +1,702 @@
+// src/utils/batterySimulator.js
+const MAX_CAPACITY = 2000; // mAh
+const NOMINAL_VOLTAGE = 3.7; // Volts
+const TEMP_OPTIMAL_RANGE = { min: 20, max: 30 }; // Celsius
+
+let currentCapacity = MAX_CAPACITY;
+let stateOfCharge = 100; // %
+let stateOfHealth = 100; // %
+let temperature = 25; // Celsius
+let voltage = NOMINAL_VOLTAGE;
+let current = 0; // Amps (positive for charging, negative for discharging)
+let cycleCount = 0;
+
+export const getBatteryData = () => {
+  // Simulate degradation over time and cycles
+  if (cycleCount > 500 && stateOfHealth > 70) {
+    stateOfHealth -= 0.01; // Gradual degradation after many cycles
+  } else if (Math.random() < 0.005) { // Small chance of random degradation
+    stateOfHealth -= 0.001;
+  }
+
+  // Simulate charge/discharge based on 'current'
+  currentCapacity += current * 0.1; // Small arbitrary step for simulation
+  if (currentCapacity > MAX_CAPACITY * (stateOfHealth / 100)) {
+    currentCapacity = MAX_CAPACITY * (stateOfHealth / 100);
+    current = -Math.abs(current); // If over capacity, start discharging
+  } else if (currentCapacity < 0) {
+    currentCapacity = 0;
+    current = Math.abs(current); // If fully discharged, start charging
+  }
+
+  stateOfCharge = (currentCapacity / (MAX_CAPACITY * (stateOfHealth / 100))) * 100;
+  voltage = NOMINAL_VOLTAGE * (stateOfCharge / 100) * (stateOfHealth / 100) + (Math.random() - 0.5) * 0.1; // Voltage fluctuates
+  temperature = TEMP_OPTIMAL_RANGE.min + (stateOfCharge / 100) * (TEMP_OPTIMAL_RANGE.max - TEMP_OPTIMAL_RANGE.min) + (Math.random() - 0.5) * 2; // Temp fluctuates with SoC
+
+  // Simulate charging/discharging current
+  if (Math.random() < 0.2) { // 20% chance to switch current direction or magnitude
+    if (current > 0) { // Currently charging
+      current = -(Math.random() * 0.5 + 0.1); // Switch to discharging
+      cycleCount += 0.5; // Count half a cycle for charge/discharge
+    } else { // Currently discharging or idle
+      current = (Math.random() * 0.5 + 0.1); // Switch to charging
+      cycleCount += 0.5; // Count half a cycle for charge/discharge
+    }
+  }
+
+  return {
+    stateOfCharge: Math.max(0, Math.min(100, stateOfCharge)),
+    stateOfHealth: Math.max(0, Math.min(100, stateOfHealth)),
+    voltage: parseFloat(voltage.toFixed(2)),
+    current: parseFloat(current.toFixed(2)),
+    temperature: parseFloat(temperature.toFixed(2)),
+    cycleCount: Math.floor(cycleCount),
+    timestamp: new Date().toLocaleTimeString(),
+  };
+};
+
+
+// src/App.js
+import React, { useState, useEffect } from 'react';
+import { getBatteryData } from './utils/batterySimulator';
+import BatteryGauge from './components/BatteryGauge';
+import RealtimeChart from './components/RealtimeChart';
+import BatteryInfoCard from './components/BatteryInfoCard';
+import CircuitryDiagram from './components/CircuitryDiagram';
+import LifecycleManager from './components/LifecycleManager';
+import './App.css'; // For basic styling
+
+function App() {
+  const [batteryData, setBatteryData] = useState(getBatteryData());
+  const [chartData, setChartData] = useState({
+    labels: [],
+    soc: [],
+    soh: [],
+    voltage: [],
+    temperature: []
+  });
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const newData = getBatteryData();
+      setBatteryData(newData);
+
+      setChartData(prevChartData => {
+        const newLabels = [...prevChartData.labels, newData.timestamp].slice(-20); // Keep last 20 points
+        const newSoC = [...prevChartData.soc, newData.stateOfCharge].slice(-20);
+        const newSoH = [...prevChartData.soh, newData.stateOfHealth].slice(-20);
+        const newVoltage = [...prevChartData.voltage, newData.voltage].slice(-20);
+        const newTemperature = [...prevChartData.temperature, newData.temperature].slice(-20);
+
+        return {
+          labels: newLabels,
+          soc: newSoC,
+          soh: newSoH,
+          voltage: newVoltage,
+          temperature: newTemperature
+        };
+      });
+    }, 1000); // Update every 1 second
+
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="dashboard-container">
+      <h1>Lithium Battery Monitoring Dashboard</h1>
+
+      <div className="main-metrics">
+        <BatteryGauge level={batteryData.stateOfCharge} label="State of Charge" />
+        <BatteryGauge level={batteryData.stateOfHealth} label="State of Health" isSoH={true} />
+        <BatteryInfoCard
+          title="Current Status"
+          info={{
+            Voltage: `${batteryData.voltage} V`,
+            Current: `${batteryData.current} A`,
+            Temperature: `${batteryData.temperature} °C`,
+            'Cycle Count': batteryData.cycleCount
+          }}
+        />
+      </div>
+
+      <div className="charts-section">
+        <RealtimeChart
+          title="State of Charge (%)"
+          labels={chartData.labels}
+          data={chartData.soc}
+          borderColor="rgb(75, 192, 192)"
+          backgroundColor="rgba(75, 192, 192, 0.2)"
+        />
+        <RealtimeChart
+          title="State of Health (%)"
+          labels={chartData.labels}
+          data={chartData.soh}
+          borderColor="rgb(255, 99, 132)"
+          backgroundColor="rgba(255, 99, 132, 0.2)"
+        />
+        <RealtimeChart
+          title="Voltage (V)"
+          labels={chartData.labels}
+          data={chartData.voltage}
+          borderColor="rgb(53, 162, 235)"
+          backgroundColor="rgba(53, 162, 235, 0.2)"
+        />
+        <RealtimeChart
+          title="Temperature (°C)"
+          labels={chartData.labels}
+          data={chartData.temperature}
+          borderColor="rgb(255, 206, 86)"
+          backgroundColor="rgba(255, 206, 86, 0.2)"
+        />
+      </div>
+
+      <div className="circuitry-and-lifecycle">
+        <CircuitryDiagram batteryData={batteryData} />
+        <LifecycleManager batteryData={batteryData} />
+      </div>
+    </div>
+  );
+}
+
+export default App;
+
+
+// src/components/BatteryGauge.js
+import React from 'react';
+import './BatteryGauge.css';
+
+function BatteryGauge({ level, label, isSoH = false }) {
+  const fillHeight = `${level}%`;
+  const fillColor = level > 80 ? '#4CAF50' : level > 20 ? '#FFC107' : '#F44336';
+  const displayLevel = isSoH ? `${Math.round(level)}%` : `${Math.round(level)}%`;
+
+  return (
+    <div className="battery-gauge-container">
+      <h3>{label}</h3>
+      <div className="battery-gauge">
+        <div className="battery-fill" style={{ height: fillHeight, backgroundColor: fillColor }}></div>
+        <div className="battery-level-text">{displayLevel}</div>
+      </div>
+    </div>
+  );
+}
+
+export default BatteryGauge;
+
+
+
+// src/components/RealtimeChart.js
+import React from 'react';
+import { Line } from 'react-chartjs-2';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+} from 'chart.js';
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend
+);
+
+function RealtimeChart({ title, labels, data, borderColor, backgroundColor }) {
+  const chartData = {
+    labels,
+    datasets: [
+      {
+        label: title,
+        data,
+        borderColor,
+        backgroundColor,
+        tension: 0.1,
+        pointRadius: 0, // Hide points for smoother real-time feel
+      },
+    ],
+  };
+
+  const options = {
+    responsive: true,
+    animation: {
+      duration: 0 // Disable animation for real-time updates
+    },
+    plugins: {
+      legend: {
+        display: false,
+      },
+      title: {
+        display: true,
+        text: title,
+      },
+    },
+    scales: {
+      x: {
+        display: false, // Hide x-axis labels for continuous flow
+      },
+      y: {
+        min: 0,
+        max: 100, // Assuming percentage for SoC/SoH, adjust for Voltage/Temp
+      },
+    },
+  };
+
+  // Adjust y-axis max for Voltage and Temperature
+  if (title.includes('Voltage')) {
+    options.scales.y.min = 2.5; // Min voltage for a lithium cell
+    options.scales.y.max = 4.2; // Max voltage for a lithium cell
+  } else if (title.includes('Temperature')) {
+    options.scales.y.min = 0;
+    options.scales.y.max = 50;
+  }
+
+
+  return (
+    <div className="chart-container">
+      <Line data={chartData} options={options} />
+    </div>
+  );
+}
+
+export default RealtimeChart;
+
+
+
+// src/components/BatteryInfoCard.js
+import React from 'react';
+import './BatteryInfoCard.css';
+
+function BatteryInfoCard({ title, info }) {
+  return (
+    <div className="info-card">
+      <h3>{title}</h3>
+      <ul>
+        {Object.entries(info).map(([key, value]) => (
+          <li key={key}>
+            <strong>{key}:</strong> {value}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export default BatteryInfoCard;
+
+
+
+// src/components/CircuitryDiagram.js
+import React from 'react';
+import './CircuitryDiagram.css';
+
+function CircuitryDiagram({ batteryData }) {
+  const { voltage, current, temperature, stateOfCharge } = batteryData;
+
+  const getIndicatorColor = (value, min, max, optimalMin = min, optimalMax = max) => {
+    if (value < optimalMin || value > optimalMax) {
+      return 'red'; // Out of optimal range
+    }
+    return 'green'; // Within optimal range
+  };
+
+  return (
+    <div className="circuitry-diagram-container">
+      <h3>Simulated Battery Circuitry</h3>
+      <div className="circuit-box">
+        <div className="battery-icon" style={{ backgroundColor: stateOfCharge > 20 ? 'lightgreen' : 'salmon' }}>
+          🔋
+        </div>
+        <div className="component resistor">R</div>
+        <div className="component load">💡</div>
+        <div className="component bms">BMS</div>
+
+        <div className="connection connection-battery-resistor"></div>
+        <div className="connection connection-resistor-load"></div>
+        <div className="connection connection-load-bms"></div>
+        <div className="connection connection-bms-battery"></div>
+
+        <div className="data-point voltage-display" style={{ color: getIndicatorColor(voltage, 3.0, 4.2, 3.7, 4.0) }}>
+          V: {voltage}V
+        </div>
+        <div className="data-point current-display" style={{ color: getIndicatorColor(Math.abs(current), 0.1, 1.0, 0.2, 0.8) }}>
+          I: {current}A
+        </div>
+        <div className="data-point temp-display" style={{ color: getIndicatorColor(temperature, 0, 50, 20, 30) }}>
+          T: {temperature}°C
+        </div>
+      </div>
+      <p className="circuitry-note">
+        (Simplified visual representation of battery, load, and BMS. Green indicates optimal range, Red indicates caution.)
+      </p>
+    </div>
+  );
+}
+
+export default CircuitryDiagram;
+
+
+
+// src/components/LifecycleManager.js
+import React from 'react';
+import './LifecycleManager.css';
+
+function LifecycleManager({ batteryData }) {
+  const { stateOfCharge, stateOfHealth, temperature, cycleCount } = batteryData;
+
+  // Basic "optimization" rules
+  const recommendation = [];
+  if (stateOfCharge < 20 && cycleCount > 100) {
+    recommendation.push("Consider a slow charge to prolong life.");
+  }
+  if (stateOfHealth < 80) {
+    recommendation.push("Battery degrading. Plan for eventual replacement or re-purposing.");
+  }
+  if (temperature > 35) {
+    recommendation.push("High temperature detected! Reduce load or provide cooling.");
+  } else if (temperature < 10) {
+    recommendation.push("Low temperature detected! Consider warming for optimal performance.");
+  }
+  if (stateOfCharge > 95 && current > 0) {
+    recommendation.push("Battery nearing full charge. Consider stopping charging to reduce stress.");
+  }
+
+  return (
+    <div className="lifecycle-manager-container">
+      <h3>Lifecycle Management & Optimization</h3>
+      <p>
+        While "infinity lifecycle" isn't possible, smart management can significantly extend battery life.
+      </p>
+      <h4>Current Recommendations:</h4>
+      {recommendation.length > 0 ? (
+        <ul>
+          {recommendation.map((rec, index) => (
+            <li key={index}>{rec}</li>
+          ))}
+        </ul>
+      ) : (
+        <p>Battery operating within optimal parameters. Keep up the good work!</p>
+      )}
+      <div className="optimization-tips">
+        <h4>General Optimization Tips:</h4>
+        <ul>
+          <li>Avoid extreme charging/discharging (below 20% or above 80%).</li>
+          <li>Keep battery temperature within optimal range (20-30°C).</li>
+          <li>Minimize fast charging when possible.</li>
+          <li>Reduce deep discharge cycles.</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+export default LifecycleManager;
+
+
+
+/* src/App.css */
+body {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  padding: 20px;
+  background-color: #f4f7f6;
+  color: #333;
+}
+
+.dashboard-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  background-color: #fff;
+  padding: 30px;
+  border-radius: 10px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+h1 {
+  text-align: center;
+  color: #0056b3;
+  margin-bottom: 30px;
+}
+
+.main-metrics {
+  display: flex;
+  justify-content: space-around;
+  flex-wrap: wrap;
+  gap: 20px;
+  margin-bottom: 40px;
+}
+
+.charts-section {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+  margin-bottom: 40px;
+}
+
+.chart-container {
+  background-color: #f9f9f9;
+  padding: 15px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.circuitry-and-lifecycle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  justify-content: space-around;
+}
+
+
+
+/* src/components/BatteryGauge.css */
+.battery-gauge-container {
+  text-align: center;
+  margin: 10px;
+  padding: 15px;
+  background-color: #f9f9f9;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  min-width: 150px;
+}
+
+.battery-gauge {
+  width: 80px;
+  height: 150px;
+  border: 3px solid #333;
+  border-radius: 10px;
+  margin: 10px auto;
+  display: flex;
+  flex-direction: column-reverse;
+  overflow: hidden;
+  position: relative;
+}
+
+.battery-gauge::before {
+  content: '';
+  width: 30px;
+  height: 10px;
+  background-color: #333;
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-radius: 3px 3px 0 0;
+}
+
+.battery-fill {
+  width: 100%;
+  transition: height 0.5s ease-out, background-color 0.5s ease-out;
+}
+
+.battery-level-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 1.2em;
+  font-weight: bold;
+  color: #333; /* Adjust color for visibility */
+  text-shadow: 1px 1px 2px rgba(255, 255, 255, 0.7);
+}
+
+
+
+/* src/components/BatteryInfoCard.css */
+.info-card {
+  background-color: #f9f9f9;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  min-width: 250px;
+  text-align: left;
+}
+
+.info-card h3 {
+  margin-top: 0;
+  color: #007bff;
+}
+
+.info-card ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.info-card li {
+  margin-bottom: 8px;
+  font-size: 1.1em;
+}
+
+.info-card li strong {
+  color: #555;
+}
+
+
+
+/* src/components/CircuitryDiagram.css */
+.circuitry-diagram-container {
+  background-color: #f9f9f9;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  text-align: center;
+  flex: 1;
+  min-width: 300px;
+}
+
+.circuit-box {
+  border: 2px dashed #ccc;
+  padding: 30px;
+  margin: 20px auto;
+  position: relative;
+  width: 80%;
+  max-width: 400px;
+  height: 200px;
+}
+
+.battery-icon, .component {
+  position: absolute;
+  padding: 10px;
+  border: 1px solid #666;
+  border-radius: 5px;
+  background-color: #eee;
+  font-weight: bold;
+}
+
+.battery-icon {
+  top: 50%;
+  left: 10%;
+  transform: translateY(-50%);
+  font-size: 2em;
+  border: none;
+  background-color: transparent; /* Color set by JS */
+}
+
+.resistor {
+  top: 10%;
+  left: 45%;
+}
+
+.load {
+  top: 70%;
+  left: 45%;
+  font-size: 2em;
+}
+
+.bms {
+  top: 50%;
+  right: 10%;
+  transform: translateY(-50%);
+  background-color: #cceeff;
+}
+
+.connection {
+  position: absolute;
+  background-color: #333;
+}
+
+.connection-battery-resistor {
+  width: 50px;
+  height: 2px;
+  top: calc(50% - 1px);
+  left: calc(10% + 50px); /* Adjust based on battery icon size */
+}
+.connection-resistor-load {
+  width: 2px;
+  height: 80px; /* Adjust height for vertical connection */
+  top: calc(10% + 40px);
+  left: calc(45% + 20px);
+}
+.connection-load-bms {
+  width: 50px;
+  height: 2px;
+  top: calc(70% + 20px);
+  right: calc(10% + 50px); /* Adjust based on load size */
+}
+.connection-bms-battery {
+  width: 2px;
+  height: 80px; /* Adjust height */
+  top: calc(50% - 40px);
+  right: calc(10% + 20px);
+}
+/* More complex connections would need SVG or specific positioning */
+
+.data-point {
+  position: absolute;
+  font-size: 0.9em;
+  font-weight: bold;
+  background-color: rgba(255, 255, 255, 0.8);
+  padding: 3px 5px;
+  border-radius: 3px;
+  border: 1px solid #ccc;
+}
+.voltage-display { top: 20%; left: 30%; }
+.current-display { top: 60%; left: 30%; }
+.temp-display { top: 40%; right: 20%; }
+
+.circuitry-note {
+  font-style: italic;
+  font-size: 0.9em;
+  color: #666;
+  margin-top: 20px;
+}
+
+
+
+/* src/components/LifecycleManager.css */
+.lifecycle-manager-container {
+  background-color: #f9f9f9;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  flex: 1;
+  min-width: 300px;
+}
+
+.lifecycle-manager-container h3 {
+  color: #28a745;
+  margin-top: 0;
+}
+
+.lifecycle-manager-container h4 {
+  color: #007bff;
+  margin-top: 20px;
+}
+
+.lifecycle-manager-container ul {
+  list-style-type: disc;
+  margin-left: 20px;
+  padding: 0;
+}
+
+.lifecycle-manager-container li {
+  margin-bottom: 5px;
+}
+
+.optimization-tips {
+  margin-top: 30px;
+  border-top: 1px solid #eee;
+  padding-top: 20px;
+}
+
+
+
+npx create-react-app battery-dashboard
+cd battery-dashboard
+
+
+
+npm install react-chartjs-2 chart.js
+
+
+
+
+npm start
