@@ -1,0 +1,763 @@
+// src/contexts/KeepAliveContext.js
+import React, { createContext, useContext, useState, useRef } from 'react';
+
+const KeepAliveContext = createContext(null);
+
+export const KeepAliveProvider = ({ children }) => {
+  const componentStates = useRef({}); // Stores states of kept-alive components
+
+  const setComponentState = (id, state) => {
+    componentStates.current[id] = state;
+  };
+
+  const getComponentState = (id) => {
+    return componentStates.current[id];
+  };
+
+  const removeComponentState = (id) => {
+    delete componentStates.current[id];
+  };
+
+  const contextValue = {
+    setComponentState,
+    getComponentState,
+    removeComponentState,
+  };
+
+  return (
+    <KeepAliveContext.Provider value={contextValue}>
+      {children}
+    </KeepAliveContext.Provider>
+  );
+};
+
+export const useKeepAlive = (id, initialState) => {
+  const { setComponentState, getComponentState, removeComponentState } = useContext(KeepAliveContext);
+  const [state, setState] = useState(() => getComponentState(id) || initialState);
+
+  // Save state when component unmounts or state changes
+  React.useEffect(() => {
+    setComponentState(id, state);
+    return () => {
+      // You might choose to remove state on unmount if it's not truly global
+      // removeComponentState(id);
+    };
+  }, [id, state, setComponentState, removeComponentState]);
+
+  return [state, setState];
+};
+
+
+
+// src/App.js
+import React, { useState } from 'react';
+import { KeepAliveProvider, useKeepAlive } from './contexts/KeepAliveContext';
+
+// A simple component that we want to "keep alive"
+const MyPersistentCounter = ({ componentId }) => {
+  const [count, setCount] = useKeepAlive(componentId, 0);
+
+  return (
+    <div>
+      <h3>Component: {componentId}</h3>
+      <p>Count: {count}</p>
+      <button onClick={() => setCount(prev => prev + 1)}>Increment</button>
+    </div>
+  );
+};
+
+function App() {
+  const [showCounter1, setShowCounter1] = useState(true);
+  const [showCounter2, setShowCounter2] = useState(true);
+
+  return (
+    <KeepAliveProvider>
+      <h1>Advanced Keep Alive App</h1>
+      <button onClick={() => setShowCounter1(!showCounter1)}>
+        Toggle Counter 1
+      </button>
+      <button onClick={() => setShowCounter2(!showCounter2)}>
+        Toggle Counter 2
+      </button>
+
+      {showCounter1 && <MyPersistentCounter componentId="counter1" />}
+      {showCounter2 && <MyPersistentCounter componentId="counter2" />}
+    </KeepAliveProvider>
+  );
+}
+
+export default App;
+
+
+Building an "advance keep alive app with anti-spy and adblock" in React involves several distinct challenges. There isn't a single "react code" that does all of this, as these features often involve client-side and potentially server-side logic, and some aspects are inherently difficult to implement perfectly due to the nature of browsers and user control.
+Here's a breakdown of how you might approach each of these features in a React application, along with illustrative code snippets and important considerations.
+Disclaimer: No client-side solution can guarantee 100% protection against sophisticated spyware or adblockers. These techniques aim to mitigate common issues and provide a better user experience, but advanced users or malicious actors may still bypass them.
+1. Advanced Keep Alive App
+"Keep alive" in React generally refers to preserving the state of components even when they are not actively rendered or are unmounted. This can be achieved through various strategies, including:
+ * State Management Libraries: Redux, Zustand, MobX, React Context API.
+ * Custom Hooks for Caching: Storing component state in a centralized place.
+ * Conditional Rendering (CSS display: none): Hiding components instead of unmounting them.
+ * Dedicated "Keep Alive" Libraries: Libraries like react-keep-alive or keepalive-for-react.
+Let's focus on a combination of using a state management library (React Context for simplicity) and a custom hook to illustrate advanced keep-alive.
+Example: Using React Context for Keep Alive
+This approach involves storing the component's state in a global context and re-injecting it when the component remounts.
+// src/contexts/KeepAliveContext.js
+import React, { createContext, useContext, useState, useRef } from 'react';
+
+const KeepAliveContext = createContext(null);
+
+export const KeepAliveProvider = ({ children }) => {
+  const componentStates = useRef({}); // Stores states of kept-alive components
+
+  const setComponentState = (id, state) => {
+    componentStates.current[id] = state;
+  };
+
+  const getComponentState = (id) => {
+    return componentStates.current[id];
+  };
+
+  const removeComponentState = (id) => {
+    delete componentStates.current[id];
+  };
+
+  const contextValue = {
+    setComponentState,
+    getComponentState,
+    removeComponentState,
+  };
+
+  return (
+    <KeepAliveContext.Provider value={contextValue}>
+      {children}
+    </KeepAliveContext.Provider>
+  );
+};
+
+export const useKeepAlive = (id, initialState) => {
+  const { setComponentState, getComponentState, removeComponentState } = useContext(KeepAliveContext);
+  const [state, setState] = useState(() => getComponentState(id) || initialState);
+
+  // Save state when component unmounts or state changes
+  React.useEffect(() => {
+    setComponentState(id, state);
+    return () => {
+      // You might choose to remove state on unmount if it's not truly global
+      // removeComponentState(id);
+    };
+  }, [id, state, setComponentState, removeComponentState]);
+
+  return [state, setState];
+};
+
+How to use useKeepAlive:
+// src/App.js
+import React, { useState } from 'react';
+import { KeepAliveProvider, useKeepAlive } from './contexts/KeepAliveContext';
+
+// A simple component that we want to "keep alive"
+const MyPersistentCounter = ({ componentId }) => {
+  const [count, setCount] = useKeepAlive(componentId, 0);
+
+  return (
+    <div>
+      <h3>Component: {componentId}</h3>
+      <p>Count: {count}</p>
+      <button onClick={() => setCount(prev => prev + 1)}>Increment</button>
+    </div>
+  );
+};
+
+function App() {
+  const [showCounter1, setShowCounter1] = useState(true);
+  const [showCounter2, setShowCounter2] = useState(true);
+
+  return (
+    <KeepAliveProvider>
+      <h1>Advanced Keep Alive App</h1>
+      <button onClick={() => setShowCounter1(!showCounter1)}>
+        Toggle Counter 1
+      </button>
+      <button onClick={() => setShowCounter2(!showCounter2)}>
+        Toggle Counter 2
+      </button>
+
+      {showCounter1 && <MyPersistentCounter componentId="counter1" />}
+      {showCounter2 && <MyPersistentCounter componentId="counter2" />}
+    </KeepAliveProvider>
+  );
+}
+
+export default App;
+
+Considerations for Keep Alive:
+ * Memory Usage: Storing states of unmounted components increases memory consumption. Be mindful of what you keep alive.
+ * State Freshness: If data changes frequently, you might need a strategy to refresh the kept-alive state (e.g., re-fetching data when the component becomes visible again).
+ * Complex Interactions: For deeply nested components or complex state, a full-fledged state management library like Redux might be more appropriate.
+ * display: none vs. Unmount/Mount: Using display: none (CSS) is simpler for keeping components alive visually, but the component still exists in the DOM and its lifecycle methods (like useEffect) still run. Unmounting/mounting with state preservation is more robust for true "keep alive" scenarios.
+2. Anti-Spy Features (Client-Side)
+Implementing robust anti-spy features on the client-side is challenging. Most "spyware" in a web context would be:
+ * Malicious scripts: Injected scripts trying to steal data (e.g., XSS attacks).
+ * Keyloggers: Scripts recording keystrokes.
+ * Clipboard hijacking: Scripts modifying clipboard content.
+ * Screen recording/screenshots: Users taking screenshots or recording their screen (hard to prevent client-side).
+Here are some client-side techniques you can implement in React to mitigate some of these risks:
+a. Content Security Policy (CSP)
+CSP is a crucial security layer that helps prevent cross-site scripting (XSS) and other code injection attacks. It's configured on the server, not directly in React code, but it's essential for a secure React app.
+Example (Server-side header):
+Content-Security-Policy: default-src 'self'; script-src 'self' https://trusted-cdn.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:;
+
+b. Input Sanitization (for User-Generated Content)
+If your app handles user-generated content, always sanitize it before rendering to prevent XSS.
+// Install DOMPurify: npm install dompurify
+import DOMPurify from 'dompurify';
+
+const UserComment = ({ comment }) => {
+  const sanitizedComment = DOMPurify.sanitize(comment);
+  return <div dangerouslySetInnerHTML={{ __html: sanitizedComment }} />;
+};
+
+// In your component
+<UserComment comment="<script>alert('malicious code')</script>Hello!" />
+
+c. Obfuscating Sensitive Data (Limited Protection)
+For highly sensitive data that must be displayed, you can consider temporary obfuscation, but this is easily bypassed by developer tools. It's more of a deterrent for casual observation.
+import React, { useState } from 'react';
+
+const SensitiveDataDisplay = ({ data }) => {
+  const [showData, setShowData] = useState(false);
+
+  return (
+    <div>
+      <button onClick={() => setShowData(!showData)}>
+        {showData ? 'Hide Data' : 'Show Data'}
+      </button>
+      {showData ? (
+        <p>Your Sensitive Data: {data}</p>
+      ) : (
+        <p>********</p>
+      )}
+    </div>
+  );
+};
+
+d. Detecting Keylogging/Clipboard Hijacking (Heuristic & Limited)
+Directly detecting these is extremely difficult and often relies on heuristic analysis of unusual event patterns, which can lead to false positives. Browsers heavily restrict access to these events for security reasons.
+One very basic and imperfect approach might be to monitor unexpected focus changes or rapid input. This is more about detecting unusual user behavior than actual malware.
+import React, { useEffect, useCallback } from 'react';
+
+const AntiSpyMonitor = () => {
+  const handleKeydown = useCallback((event) => {
+    // This is extremely simplistic and might not detect real keyloggers
+    // Real keyloggers operate at a lower level or exploit browser vulnerabilities.
+    // This example is more for demonstrating event listening.
+    console.log('Key pressed:', event.key);
+  }, []);
+
+  const handleCopy = useCallback((event) => {
+    console.log('User copied text.');
+    // You could potentially log this or warn the user about sensitive copy.
+    // Preventing copy is generally bad UX and difficult to enforce.
+  }, []);
+
+  useEffect(() => {
+    document.addEventListener('keydown', handleKeydown);
+    document.addEventListener('copy', handleCopy);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeydown);
+      document.removeEventListener('copy', handleCopy);
+    };
+  }, [handleKeydown, handleCopy]);
+
+  return null; // This component doesn't render anything, just provides functionality
+};
+
+// Use in your App.js
+// <AntiSpyMonitor />
+
+Stronger Anti-Spy Measures:
+ * Secure Backend: The most critical anti-spy measure is to never send sensitive user data directly to the client that isn't absolutely necessary. All authentication, critical business logic, and sensitive data storage should reside on a secure backend.
+ * HTTPS: Always use HTTPS to encrypt all communication.
+ * Regular Security Audits: Have your code reviewed for vulnerabilities.
+ * Third-Party Libraries: Be very cautious about third-party libraries; they can introduce vulnerabilities. Audit them for known issues.
+ * Web Application Firewall (WAF): A WAF sits in front of your application and filters malicious traffic.
+3. AdBlock Detection
+Adblock detection is a cat-and-mouse game. Adblockers constantly evolve to defeat detection methods. Common strategies include:
+ * Bait Elements: Creating a hidden div with a class name commonly targeted by adblockers (e.g., ads, banner). If its display property is none or its size is 0 after loading, an adblocker might be active.
+ * Fake Ad Scripts/Files: Trying to load a script or an image with a filename or URL path that adblockers commonly block (e.g., ads.js, ad_banner.png). If the resource fails to load, an adblocker is likely present.
+ * Mutation Observer: Monitoring the DOM for changes (like elements being removed or hidden) that are typical of adblockers.
+Example: AdBlock Detection with a Bait Element and useEffect
+import React, { useState, useEffect, useRef } from 'react';
+
+const AdBlockDetector = () => {
+  const [adBlockDetected, setAdBlockDetected] = useState(false);
+  const baitRef = useRef(null);
+
+  useEffect(() => {
+    const detectAdBlock = () => {
+      if (baitRef.current) {
+        // Method 1: Check if a bait element is hidden or removed
+        const baitElement = baitRef.current;
+        const isHidden = window.getComputedStyle(baitElement).display === 'none' ||
+                         window.getComputedStyle(baitElement).visibility === 'hidden' ||
+                         baitElement.offsetHeight === 0 ||
+                         baitElement.offsetWidth === 0;
+
+        // Method 2: Attempt to load a common ad script (more robust)
+        // This is a simple example; real adblockers might block based on content.
+        const testAdScript = document.createElement('script');
+        testAdScript.src = '/ads.js'; // A path that adblockers often target
+        testAdScript.onload = () => {
+          // If script loads, adblocker is likely not active for this path
+          // (This is a simplified check, actual detection needs more sophistication)
+          // console.log('Ad script loaded, adblock might be off.');
+          setAdBlockDetected(false); // Assume no adblock if script loads
+        };
+        testAdScript.onerror = () => {
+          // If script fails to load, adblocker might be active
+          console.log('Ad script failed to load, adblock might be active.');
+          setAdBlockDetected(true);
+        };
+
+        // Append the script to the body to trigger its loading
+        document.body.appendChild(testAdScript);
+
+        // Clean up the script element after a short delay
+        setTimeout(() => {
+          if (document.body.contains(testAdScript)) {
+            document.body.removeChild(testAdScript);
+          }
+        }, 100); // Give it a moment to try and load
+
+        // Combine with bait element check
+        if (isHidden) {
+          console.log('Bait element hidden, adblock detected via CSS.');
+          setAdBlockDetected(true);
+        }
+      }
+    };
+
+    // Run detection after component mounts
+    const timeoutId = setTimeout(detectAdBlock, 500); // Give browser time to render and adblocker to act
+
+    return () => clearTimeout(timeoutId);
+  }, []);
+
+  return (
+    <div>
+      <div ref={baitRef} className="ad-container" style={{ display: 'block', width: '1px', height: '1px', opacity: 0, overflow: 'hidden' }}>
+        {/* This div is a "bait" element for adblockers. Common class names are key. */}
+        <span>Advertisement content for detection</span>
+      </div>
+      {adBlockDetected ? (
+        <div style={{ color: 'red', marginTop: '20px' }}>
+          <p>Ad Blocker Detected! Please consider disabling it to support our content.</p>
+          {/* You can display a message, a modal, or restrict functionality */}
+        </div>
+      ) : (
+        <div style={{ color: 'green', marginTop: '20px' }}>
+          <p>No Ad Blocker Detected.</p>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// In your App.js
+// <AdBlockDetector />
+
+For the AdBlocker detection to work effectively using the bait element, you would need to add CSS rules that adblockers target to a global CSS file, for example, in src/index.css or src/App.css:
+/* src/App.css or global CSS */
+.ad-container {
+  /* Give it a class name that adblockers often target */
+  /* For example, if you use AdBlock Plus, it might block elements with "ad" or "banner" in their class name */
+}
+
+Considerations for AdBlock Detection:
+ * User Experience: Don't be overly aggressive. Nagging users incessantly can drive them away. Offer a polite message or alternative ways to support your content (e.g., subscriptions).
+ * False Positives: Some detection methods can trigger false positives (e.g., if a user has a custom CSS rule that hides elements).
+ * Evolving Adblockers: What works today might not work tomorrow. This requires continuous monitoring and updates.
+ * Bypassing: Savvy users can disable JavaScript or use specific browser extensions to bypass detection.
+ * Ethical Considerations: Respect user choice. Some users rely on adblockers for performance, privacy, or to avoid intrusive ads.
+Integrating into a Single App (App.js):
+// src/App.js
+import React, { useState } from 'react';
+import { KeepAliveProvider, useKeepAlive } from './contexts/KeepAliveContext';
+import AdBlockDetector from './components/AdBlockDetector';
+import AntiSpyMonitor from './components/AntiSpyMonitor'; // Assuming you put it in a file
+
+// A simple component that we want to "keep alive"
+const MyPersistentCounter = ({ componentId }) => {
+  const [count, setCount] = useKeepAlive(componentId, 0);
+
+  return (
+    <div style={{ border: '1px solid #ccc', padding: '10px', margin: '10px' }}>
+      <h3>Component: {componentId}</h3>
+      <p>Count: {count}</p>
+      <button onClick={() => setCount(prev => prev + 1)}>Increment</button>
+    </div>
+  );
+};
+
+// Example for sensitive data (illustrative only)
+const SensitiveInfoSection = () => {
+  const [password, setPassword] = useState('MySecretPassword123'); // NEVER hardcode passwords!
+  const [showPassword, setShowPassword] = useState(false);
+
+  return (
+    <div style={{ border: '1px solid #f0f0f0', padding: '10px', margin: '10px' }}>
+      <h4>Sensitive Information (Demo)</h4>
+      <p>
+        Password:{' '}
+        {showPassword ? password : '********'}
+      </p>
+      <button onClick={() => setShowPassword(!showPassword)}>
+        {showPassword ? 'Hide' : 'Show'} Password
+      </button>
+    </div>
+  );
+};
+
+
+function App() {
+  const [showCounter1, setShowCounter1] = useState(true);
+  const [showCounter2, setShowCounter2] = useState(true);
+
+  return (
+    <KeepAliveProvider>
+      <div style={{ fontFamily: 'Arial, sans-serif', maxWidth: '800px', margin: '20px auto' }}>
+        <h1>Advanced Keep Alive App with Anti-Spy & AdBlock Detection</h1>
+
+        <h2>Keep Alive Demo</h2>
+        <button onClick={() => setShowCounter1(!showCounter1)}>
+          Toggle Counter 1
+        </button>
+        <button onClick={() => setShowCounter2(!showCounter2)}>
+          Toggle Counter 2
+        </button>
+
+        {showCounter1 && <MyPersistentCounter componentId="counter1" />}
+        {showCounter2 && <MyPersistentCounter componentId="counter2" />}
+
+        <h2>Anti-Spy Features (Client-Side)</h2>
+        <p>
+          * Note: Robust anti-spy measures largely reside on the server-side
+          (HTTPS, secure backend, CSP). Client-side measures are limited.
+        </p>
+        <AntiSpyMonitor />
+        <SensitiveInfoSection /> {/* Example of data obfuscation */}
+        {/* Remember to sanitize any user-generated content */}
+
+        <h2>AdBlock Detection</h2>
+        <AdBlockDetector />
+      </div>
+    </KeepAliveProvider>
+  );
+}
+
+export default App;
+
+To run this code:
+ * Create a React App:
+   npx create-react-app my-advanced-app
+cd my-advanced-app
+
+ * Install Dependencies:
+   npm install dompurify # For sanitization
+# You might also consider 'react-keep-alive' or 'keepalive-for-react' for production-ready keep-alive
+
+ * Create Files:
+   * src/contexts/KeepAliveContext.js
+   * src/components/AdBlockDetector.js (copy the AdBlockDetector code here)
+   * src/components/AntiSpyMonitor.js (copy the AntiSpyMonitor code here)
+   * Modify src/App.js as shown above.
+ * Add CSS for AdBlock Bait (e.g., in src/App.css):
+   /* src/App.css */
+.ad-container {
+  /* Adblockers often target elements with specific class names */
+  /* This element is intentionally tiny and hidden to avoid impacting layout */
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  position: absolute;
+  left: -9999px; /* Move it off-screen */
+  top: -9999px;
+  /* Example class names that adblockers might target: */
+  /* ad, banner, advertisement, promo, doubleclick-ad, etc. */
+  /* You might need to experiment with these for your specific needs */
+}
+
+ * Start the app:
+   npm start
+
+This comprehensive example provides a starting point for building a more "advanced" React application with these features. Remember that security and resilience are ongoing processes, and these client-side techniques should always be complemented by robust server-side security measures.
+
+
+
+// Install DOMPurify: npm install dompurify
+import DOMPurify from 'dompurify';
+
+const UserComment = ({ comment }) => {
+  const sanitizedComment = DOMPurify.sanitize(comment);
+  return <div dangerouslySetInnerHTML={{ __html: sanitizedComment }} />;
+};
+
+// In your component
+<UserComment comment="<script>alert('malicious code')</script>Hello!" />
+
+
+
+import React, { useState } from 'react';
+
+const SensitiveDataDisplay = ({ data }) => {
+  const [showData, setShowData] = useState(false);
+
+  return (
+    <div>
+      <button onClick={() => setShowData(!showData)}>
+        {showData ? 'Hide Data' : 'Show Data'}
+      </button>
+      {showData ? (
+        <p>Your Sensitive Data: {data}</p>
+      ) : (
+        <p>********</p>
+      )}
+    </div>
+  );
+};
+
+
+
+import React, { useEffect, useCallback } from 'react';
+
+const AntiSpyMonitor = () => {
+  const handleKeydown = useCallback((event) => {
+    // This is extremely simplistic and might not detect real keyloggers
+    // Real keyloggers operate at a lower level or exploit browser vulnerabilities.
+    // This example is more for demonstrating event listening.
+    console.log('Key pressed:', event.key);
+  }, []);
+
+  const handleCopy = useCallback((event) => {
+    console.log('User copied text.');
+    // You could potentially log this or warn the user about sensitive copy.
+    // Preventing copy is generally bad UX and difficult to enforce.
+  }, []);
+
+  useEffect(() => {
+    document.addEventListener('keydown', handleKeydown);
+    document.addEventListener('copy', handleCopy);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeydown);
+      document.removeEventListener('copy', handleCopy);
+    };
+  }, [handleKeydown, handleCopy]);
+
+  return null; // This component doesn't render anything, just provides functionality
+};
+
+// Use in your App.js
+// <AntiSpyMonitor />
+
+
+
+import React, { useState, useEffect, useRef } from 'react';
+
+const AdBlockDetector = () => {
+  const [adBlockDetected, setAdBlockDetected] = useState(false);
+  const baitRef = useRef(null);
+
+  useEffect(() => {
+    const detectAdBlock = () => {
+      if (baitRef.current) {
+        // Method 1: Check if a bait element is hidden or removed
+        const baitElement = baitRef.current;
+        const isHidden = window.getComputedStyle(baitElement).display === 'none' ||
+                         window.getComputedStyle(baitElement).visibility === 'hidden' ||
+                         baitElement.offsetHeight === 0 ||
+                         baitElement.offsetWidth === 0;
+
+        // Method 2: Attempt to load a common ad script (more robust)
+        // This is a simple example; real adblockers might block based on content.
+        const testAdScript = document.createElement('script');
+        testAdScript.src = '/ads.js'; // A path that adblockers often target
+        testAdScript.onload = () => {
+          // If script loads, adblocker is likely not active for this path
+          // (This is a simplified check, actual detection needs more sophistication)
+          // console.log('Ad script loaded, adblock might be off.');
+          setAdBlockDetected(false); // Assume no adblock if script loads
+        };
+        testAdScript.onerror = () => {
+          // If script fails to load, adblocker might be active
+          console.log('Ad script failed to load, adblock might be active.');
+          setAdBlockDetected(true);
+        };
+
+        // Append the script to the body to trigger its loading
+        document.body.appendChild(testAdScript);
+
+        // Clean up the script element after a short delay
+        setTimeout(() => {
+          if (document.body.contains(testAdScript)) {
+            document.body.removeChild(testAdScript);
+          }
+        }, 100); // Give it a moment to try and load
+
+        // Combine with bait element check
+        if (isHidden) {
+          console.log('Bait element hidden, adblock detected via CSS.');
+          setAdBlockDetected(true);
+        }
+      }
+    };
+
+    // Run detection after component mounts
+    const timeoutId = setTimeout(detectAdBlock, 500); // Give browser time to render and adblocker to act
+
+    return () => clearTimeout(timeoutId);
+  }, []);
+
+  return (
+    <div>
+      <div ref={baitRef} className="ad-container" style={{ display: 'block', width: '1px', height: '1px', opacity: 0, overflow: 'hidden' }}>
+        {/* This div is a "bait" element for adblockers. Common class names are key. */}
+        <span>Advertisement content for detection</span>
+      </div>
+      {adBlockDetected ? (
+        <div style={{ color: 'red', marginTop: '20px' }}>
+          <p>Ad Blocker Detected! Please consider disabling it to support our content.</p>
+          {/* You can display a message, a modal, or restrict functionality */}
+        </div>
+      ) : (
+        <div style={{ color: 'green', marginTop: '20px' }}>
+          <p>No Ad Blocker Detected.</p>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// In your App.js
+// <AdBlockDetector />
+
+
+
+/* src/App.css or global CSS */
+.ad-container {
+  /* Give it a class name that adblockers often target */
+  /* For example, if you use AdBlock Plus, it might block elements with "ad" or "banner" in their class name */
+}
+
+
+
+// src/App.js
+import React, { useState } from 'react';
+import { KeepAliveProvider, useKeepAlive } from './contexts/KeepAliveContext';
+import AdBlockDetector from './components/AdBlockDetector';
+import AntiSpyMonitor from './components/AntiSpyMonitor'; // Assuming you put it in a file
+
+// A simple component that we want to "keep alive"
+const MyPersistentCounter = ({ componentId }) => {
+  const [count, setCount] = useKeepAlive(componentId, 0);
+
+  return (
+    <div style={{ border: '1px solid #ccc', padding: '10px', margin: '10px' }}>
+      <h3>Component: {componentId}</h3>
+      <p>Count: {count}</p>
+      <button onClick={() => setCount(prev => prev + 1)}>Increment</button>
+    </div>
+  );
+};
+
+// Example for sensitive data (illustrative only)
+const SensitiveInfoSection = () => {
+  const [password, setPassword] = useState('MySecretPassword123'); // NEVER hardcode passwords!
+  const [showPassword, setShowPassword] = useState(false);
+
+  return (
+    <div style={{ border: '1px solid #f0f0f0', padding: '10px', margin: '10px' }}>
+      <h4>Sensitive Information (Demo)</h4>
+      <p>
+        Password:{' '}
+        {showPassword ? password : '********'}
+      </p>
+      <button onClick={() => setShowPassword(!showPassword)}>
+        {showPassword ? 'Hide' : 'Show'} Password
+      </button>
+    </div>
+  );
+};
+
+
+function App() {
+  const [showCounter1, setShowCounter1] = useState(true);
+  const [showCounter2, setShowCounter2] = useState(true);
+
+  return (
+    <KeepAliveProvider>
+      <div style={{ fontFamily: 'Arial, sans-serif', maxWidth: '800px', margin: '20px auto' }}>
+        <h1>Advanced Keep Alive App with Anti-Spy & AdBlock Detection</h1>
+
+        <h2>Keep Alive Demo</h2>
+        <button onClick={() => setShowCounter1(!showCounter1)}>
+          Toggle Counter 1
+        </button>
+        <button onClick={() => setShowCounter2(!showCounter2)}>
+          Toggle Counter 2
+        </button>
+
+        {showCounter1 && <MyPersistentCounter componentId="counter1" />}
+        {showCounter2 && <MyPersistentCounter componentId="counter2" />}
+
+        <h2>Anti-Spy Features (Client-Side)</h2>
+        <p>
+          * Note: Robust anti-spy measures largely reside on the server-side
+          (HTTPS, secure backend, CSP). Client-side measures are limited.
+        </p>
+        <AntiSpyMonitor />
+        <SensitiveInfoSection /> {/* Example of data obfuscation */}
+        {/* Remember to sanitize any user-generated content */}
+
+        <h2>AdBlock Detection</h2>
+        <AdBlockDetector />
+      </div>
+    </KeepAliveProvider>
+  );
+}
+
+export default App;
+
+
+
+npx create-react-app my-advanced-app
+cd my-advanced-app
+
+
+
+npm install dompurify # For sanitization
+# You might also consider 'react-keep-alive' or 'keepalive-for-react' for production-ready keep-alive
+
+
+
+/* src/App.css */
+.ad-container {
+  /* Adblockers often target elements with specific class names */
+  /* This element is intentionally tiny and hidden to avoid impacting layout */
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  position: absolute;
+  left: -9999px; /* Move it off-screen */
+  top: -9999px;
+  /* Example class names that adblockers might target: */
+  /* ad, banner, advertisement, promo, doubleclick-ad, etc. */
+  /* You might need to experiment with these for your specific needs */
+}
+
+
+
+npm start
