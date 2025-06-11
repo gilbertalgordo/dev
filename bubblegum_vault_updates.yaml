@@ -1047,3 +1047,244 @@ function CodenameBubblegum() {
 }
 
 export default CodenameBubblegum;
+
+
+
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Container,
+  Typography,
+  Button,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemSecondaryAction,
+  IconButton,
+  FormControlLabel,
+  Switch,
+  Box,
+  LinearProgress,
+  Snackbar,
+  Alert,
+  Paper,
+  Link,
+  Tooltip,
+} from '@mui/material';
+import DeleteIcon from '@mui/icons-material/Delete';
+import BlockIcon from '@mui/icons-material/Block';
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
+import SecurityIcon from '@mui/icons-material/Security';
+import DeveloperBoardIcon from '@mui/icons-material/DeveloperBoard';
+import SmartToyIcon from '@mui/icons-material/SmartToy'; // Icon for AI concept
+
+function CodenameBubblegum() {
+  const [detectedMalware, setDetectedMalware] = useState([]);
+  const [adBlockEnabled, setAdBlockEnabled] = useState(false);
+  const [antiSpyEnabled, setAntiSpyEnabled] = useState(false);
+  const [autoDeleteEnabled, setAutoDeleteEnabled] = useState(true);
+  const detectionIntervalRef = useRef(null);
+  const deletionIntervalRef = useRef(null);
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [snackbarOpen, setSnackbarOpen] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [snackbarSeverity, setSnackbarSeverity] = useState('info');
+
+  const showSnackbar = (message, severity = 'info') => {
+    setSnackbarMessage(message);
+    setSnackbarSeverity(severity);
+    setSnackbarOpen(true);
+  };
+
+  const handleCloseSnackbar = (event, reason) => {
+    if (reason === 'clickaway') {
+      return;
+    }
+    setSnackbarOpen(false);
+  };
+
+  // Simulated malware detection
+  const simulateMalwareDetection = () => {
+    const random = Math.random();
+    if (random < 0.25) { // Increased chance for demonstration
+      const newMalware = {
+        id: Date.now(),
+        name: `Threat-${Date.now()}`,
+        location: `/simulated/path/${Date.now()}.exe`,
+        type: Math.random() < 0.5 ? 'Adware' : 'Spyware',
+      };
+      setDetectedMalware((prevMalware) => [...prevMalware, newMalware]);
+      showSnackbar(`Detected potential threat: ${newMalware.name}`, 'warning');
+    }
+  };
+
+  useEffect(() => {
+    // Start continuous malware detection loop
+    const startDetectionLoop = () => {
+      setIsDetecting(true);
+      detectionIntervalRef.current = setInterval(simulateMalwareDetection, 5000); // Check every 5 seconds
+    };
+
+    const stopDetectionLoop = () => {
+      setIsDetecting(false);
+      clearInterval(detectionIntervalRef.current);
+    };
+
+    startDetectionLoop();
+
+    // Cleanup on component unmount
+    return () => {
+      stopDetectionLoop();
+      clearInterval(deletionIntervalRef.current); // Ensure auto-delete loop is also cleared
+    };
+  }, []); // Empty dependency array means this runs once on mount and cleanup on unmount
+
+  useEffect(() => {
+    // Control auto-deletion loop based on autoDeleteEnabled state
+    if (autoDeleteEnabled) {
+      deletionIntervalRef.current = setInterval(() => {
+        if (detectedMalware.length > 0) {
+          const oldestMalware = detectedMalware[0];
+          setDetectedMalware((prevMalware) => prevMalware.slice(1)); // Remove the oldest
+          showSnackbar(`Auto-deleted: ${oldestMalware.name}`, 'info');
+        }
+      }, 7000); // Attempt auto-delete every 7 seconds
+    } else {
+      clearInterval(deletionIntervalRef.current); // Stop auto-delete if disabled
+    }
+    // Cleanup interval when autoDeleteEnabled changes or component unmounts
+    return () => clearInterval(deletionIntervalRef.current);
+  }, [autoDeleteEnabled, detectedMalware]); // Re-run when these dependencies change
+
+  const toggleAdBlock = () => {
+    setAdBlockEnabled((prev) => !prev);
+    showSnackbar(`AdBlock ${adBlockEnabled ? 'disabled' : 'enabled'}`);
+    // In a real application, this would trigger browser extension calls or network request modification.
+  };
+
+  const toggleAntiSpy = () => {
+    setAntiSpyEnabled((prev) => !prev);
+    showSnackbar(`AntiSpy ${antiSpyEnabled ? 'disabled' : 'enabled'}`);
+    // In a real application, this would trigger browser extension calls or content filtering.
+  };
+
+  const toggleAutoDelete = () => {
+    setAutoDeleteEnabled((prev) => !prev);
+    showSnackbar(`Auto-Delete ${autoDeleteEnabled ? 'disabled' : 'enabled'}`);
+  };
+
+  const deleteMalware = (id) => {
+    const deletedItem = detectedMalware.find((item) => item.id === id);
+    setDetectedMalware((prevMalware) => prevMalware.filter((item) => item.id !== id));
+    if (deletedItem) {
+      showSnackbar(`Manually deleted: ${deletedItem.name}`, 'success');
+    }
+  };
+
+  return (
+    <Container maxWidth="md">
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+        <Typography variant="h4" component="h1" sx={{ flexGrow: 1 }}>
+          Codename Bubblegum <SecurityIcon />
+        </Typography>
+        <Tooltip title="Developed by Gilbert Algordo">
+          <Link href="https://g.dev/gilbert_algordo" target="_blank" rel="noopener noreferrer">
+            <DeveloperBoardIcon color="primary" fontSize="large" />
+          </Link>
+        </Tooltip>
+      </Box>
+
+      {/* Section for core features */}
+      <Box sx={{ my: 3 }}>
+        <Typography variant="h6" gutterBottom>
+          Security Features:
+        </Typography>
+        <FormControlLabel
+          control={<Switch checked={adBlockEnabled} onChange={toggleAdBlock} color="primary" />}
+          label={adBlockEnabled ? "AdBlock: ON" : "AdBlock: OFF"}
+        />
+        <FormControlLabel
+          control={<Switch checked={antiSpyEnabled} onChange={toggleAntiSpy} color="primary" />}
+          label={antiSpyEnabled ? "AntiSpy: ON" : "AntiSpy: OFF"}
+        />
+        <FormControlLabel
+          control={<Switch checked={autoDeleteEnabled} onChange={toggleAutoDelete} color="primary" />}
+          label={autoDeleteEnabled ? "Auto-Delete: ON" : "Auto-Delete: OFF"}
+        />
+      </Box>
+
+      {/* Malware Detection & Vault */}
+      <Typography variant="h6" component="h2" mt={3} gutterBottom>
+        Detected Threats ({detectedMalware.length}):
+      </Typography>
+      {isDetecting && (
+        <Box sx={{ width: '100%', mb: 1 }}>
+          <LinearProgress />
+          <Typography variant="caption" color="textSecondary" sx={{ mt: 0.5 }}>
+            Scanning for threats...
+          </Typography>
+        </Box>
+      )}
+      <Paper elevation={2} sx={{ maxHeight: 300, overflow: 'auto', mb: 3 }}>
+        <List>
+          {detectedMalware.length > 0 ? (
+            detectedMalware.map((malware) => (
+              <ListItem key={malware.id} divider>
+                <ListItemText
+                  primary={malware.name}
+                  secondary={`Type: ${malware.type} | Location: ${malware.location}`}
+                />
+                <ListItemSecondaryAction>
+                  <IconButton
+                    edge="end"
+                    aria-label="delete"
+                    onClick={() => deleteMalware(malware.id)}
+                    color="error"
+                  >
+                    <DeleteIcon />
+                  </IconButton>
+                </ListItemSecondaryAction>
+              </ListItem>
+            ))
+          ) : (
+            <ListItem>
+              <ListItemText primary="No threats detected in the vault." secondary="Your system appears clean." />
+            </ListItem>
+          )}
+        </List>
+      </Paper>
+
+      {/* AI concept placeholder */}
+      <Box sx={{ my: 3, p: 2, border: '1px dashed grey', borderRadius: 2 }}>
+        <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+          <SmartToyIcon sx={{ mr: 1 }} /> AI-Powered Features (Concept):
+        </Typography>
+        <Typography variant="body2" color="textSecondary">
+          This section represents where advanced AI capabilities for threat analysis, predictive security,
+          or intelligent recommendations would reside in a full-fledged system.
+          **Please note:** Direct "jailbreaking" or deep system cleanup from a web browser
+          is not technically possible due to operating system security models.
+          AI in this context enhances analysis and user guidance, not direct device manipulation.
+        </Typography>
+        <Button variant="outlined" disabled sx={{ mt: 2 }}>
+          Run AI Scan (Simulated)
+        </Button>
+      </Box>
+
+      <Snackbar
+        open={snackbarOpen}
+        autoHideDuration={3000}
+        onClose={handleCloseSnackbar}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert onClose={handleCloseSnackbar} severity={snackbarSeverity} sx={{ width: '100%' }}>
+          {snackbarMessage}
+        </Alert>
+      </Snackbar>
+    </Container>
+  );
+}
+
+export default CodenameBubblegum;
+
+
+
