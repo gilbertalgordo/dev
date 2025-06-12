@@ -1,0 +1,976 @@
+Since you're asking for "engine thermal cooler" React codes, I'll assume you're looking for a user interface to monitor and potentially control an engine's cooling system. Similar to the CPU cooler, React itself won't directly interact with physical hardware. Instead, it will display data retrieved from a backend API that does interact with the engine's sensors and control mechanisms.
+The core concepts remain the same as the CPU cooler:
+ * State Management: useState for engine temperature, coolant level, fan status, oil temperature, etc.
+ * Lifecycle Effects: useEffect for fetching data (simulated or real API calls).
+ * Component Structure: Reusable components for displaying metrics, charts, and controls.
+ * Styling & Responsiveness: Using CSS for a good user experience on both mobile and desktop.
+ * Data Source (Simulated): We'll simulate data. In a real application, this would be an API from an Engine Control Unit (ECU) interface or a dedicated monitoring system.
+I'll provide a comprehensive, responsive dashboard example, very similar in structure to the CPU cooler but with engine-specific metrics.
+Key Metrics for an Engine Thermal Cooler Monitor:
+ * Engine Coolant Temperature (ECT): The most critical metric.
+ * Engine Oil Temperature (EOT): Important for lubrication and overall engine health.
+ * Coolant Level: Essential for effective cooling.
+ * Cooling Fan Status/Speed: Is it on? What speed?
+ * Thermostat Status: Open/Closed (less common for direct display, more for diagnostics).
+ * Coolant Pressure: Can indicate leaks or pump issues.
+React Code for Responsive Engine Thermal Cooler Monitor
+File Structure Recommendation:
+src/
+├── components/
+│   ├── EngineMetricCard.jsx
+│   ├── TemperatureChart.jsx
+│   ├── FanControlToggle.jsx
+│   └── EngineCoolerDashboard.jsx
+└── App.jsx
+└── index.css (for global styles and media queries)
+
+1. src/index.css (Global Styles for Responsiveness)
+This will be largely the same as the CPU example, providing basic resets, responsive grid, and card styles.
+/* Basic Reset & Global Styles */
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f0f2f5;
+  color: #333;
+}
+
+.app-container {
+  padding: 20px;
+  max-width: 1200px; /* Max width for desktop */
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+h1, h2, h3 {
+  color: #333;
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+/* Responsive layout for dashboard cards */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); /* 280px min width per card */
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+/* Mobile-first approach: Stack elements, then expand for desktop */
+@media (max-width: 768px) {
+  .app-container {
+    padding: 15px;
+  }
+
+  .dashboard-grid {
+    grid-template-columns: 1fr; /* Single column for small screens */
+    gap: 15px;
+  }
+
+  .section-card {
+    padding: 15px;
+  }
+
+  h1 {
+    font-size: 1.8em;
+  }
+}
+
+/* Section Card for grouping content */
+.section-card {
+  background-color: #fff;
+  border-radius: 10px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+  padding: 25px;
+  margin-bottom: 20px;
+  box-sizing: border-box;
+}
+
+2. src/components/EngineMetricCard.jsx
+A reusable component for displaying a single engine-related metric.
+import React from 'react';
+
+const EngineMetricCard = ({ title, value, unit, color, icon }) => (
+  <div style={{
+    backgroundColor: '#fff',
+    padding: '20px',
+    borderRadius: '10px',
+    textAlign: 'center',
+    boxShadow: '0 2px 10px rgba(0,0,0,0.05)',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '120px'
+  }}>
+    {icon && <span style={{ fontSize: '2em', marginBottom: '10px' }}>{icon}</span>}
+    <h3 style={{ margin: '0 0 8px 0', color: '#555', fontSize: '1.1em' }}>{title}</h3>
+    <p style={{
+      fontSize: '2.8em',
+      fontWeight: 'bold',
+      color: color || '#007bff',
+      margin: '0'
+    }}>
+      {value}{unit}
+    </p>
+  </div>
+);
+
+export default EngineMetricCard;
+
+3. src/components/TemperatureChart.jsx
+(Reusing the same TemperatureChart as CPU example, as it's generic for temperature history. You might rename it to EngineTemperatureChart or keep it generic if you reuse it for other temperature readings.)
+import React from 'react';
+
+const TemperatureChart = ({ history, title = 'Temperature History' }) => {
+  // Find max temperature to scale bars
+  const maxTemp = Math.max(...history.map(item => item.temp), 120); // Max 120 for engine temps
+
+  return (
+    <div className="section-card" style={{ textAlign: 'center' }}>
+      <h2>{title}</h2>
+      <div style={{
+        display: 'flex',
+        alignItems: 'flex-end',
+        justifyContent: 'space-around',
+        height: '150px',
+        padding: '10px 0',
+        borderBottom: '1px solid #eee',
+        marginBottom: '10px'
+      }}>
+        {history.map((data, index) => (
+          <div key={index} style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            margin: '0 5px',
+            width: `${100 / history.length - 2}%`, // Distribute bars
+            minWidth: '20px', /* Ensure bars are visible on mobile */
+          }}>
+            <div
+              style={{
+                height: `${(data.temp / maxTemp) * 100}%`,
+                width: '80%',
+                backgroundColor: data.temp > 105 ? '#dc3545' : data.temp > 95 ? '#ffc107' : '#28a745',
+                borderRadius: '3px',
+                transition: 'height 0.5s ease-out, background-color 0.5s ease'
+              }}
+            ></div>
+            <span style={{ fontSize: '0.8em', marginTop: '5px', color: '#666' }}>
+              {data.label}
+            </span>
+          </div>
+        ))}
+      </div>
+      <p style={{fontSize: '0.9em', color: '#777'}}>Showing last {history.length} updates</p>
+    </div>
+  );
+};
+
+export default TemperatureChart;
+
+4. src/components/FanControlToggle.jsx
+A simple toggle for an engine cooling fan (assuming it's an ON/OFF or AUTO/MANUAL control). For multi-speed fans, a slider would be more appropriate.
+import React, { useState } from 'react';
+
+const FanControlToggle = ({ initialFanState = 'Auto', onSetFanState }) => {
+  const [fanState, setFanState] = useState(initialFanState);
+  const [isLoading, setIsLoading] = useState(false);
+  const [message, setMessage] = useState('');
+
+  const toggleFanState = async () => {
+    const newState = fanState === 'Auto' ? 'On' : fanState === 'On' ? 'Off' : 'Auto';
+    setIsLoading(true);
+    setMessage('');
+    try {
+      // --- IMPORTANT: This is where you'd make your API call ---
+      // Example:
+      // const response = await fetch('/api/set-engine-fan', {
+      //   method: 'POST',
+      //   headers: { 'Content-Type': 'application/json' },
+      //   body: JSON.stringify({ state: newState }),
+      // });
+      // if (!response.ok) {
+      //   throw new Error('Failed to set fan state');
+      // }
+      // const data = await response.json();
+      // console.log('Fan state set:', data);
+
+      // Simulate API call delay
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      setFanState(newState); // Update UI state after "success"
+      onSetFanState(newState); // Notify parent component
+      setMessage(`Fan set to: ${newState}`);
+    } catch (error) {
+      console.error('Error setting fan state:', error);
+      setMessage(`Error: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const getButtonColor = (state) => {
+    switch (state) {
+      case 'On': return '#28a745'; // Green
+      case 'Off': return '#dc3545'; // Red
+      case 'Auto': return '#007bff'; // Blue
+      default: return '#6c757d';
+    }
+  };
+
+  return (
+    <div className="section-card" style={{ textAlign: 'center' }}>
+      <h2>Cooling Fan Control</h2>
+      <p style={{marginBottom: '20px', fontSize: '1.1em', color: '#555'}}>
+        Current Fan Mode: <span style={{fontWeight: 'bold', color: getButtonColor(fanState)}}>{fanState}</span>
+      </p>
+
+      <button
+        onClick={toggleFanState}
+        disabled={isLoading}
+        style={{
+          width: 'calc(90% - 20px)',
+          padding: '12px 20px',
+          backgroundColor: isLoading ? '#6c757d' : getButtonColor(fanState),
+          color: 'white',
+          border: 'none',
+          borderRadius: '6px',
+          fontSize: '1em',
+          cursor: isLoading ? 'not-allowed' : 'pointer',
+          transition: 'background-color 0.3s ease',
+          boxShadow: '0 2px 5px rgba(0,0,0,0.1)'
+        }}
+      >
+        {isLoading ? 'Applying...' : `Toggle to ${fanState === 'Auto' ? 'On' : fanState === 'On' ? 'Off' : 'Auto'}`}
+      </button>
+
+      {message && (
+        <p style={{
+          marginTop: '15px',
+          color: message.startsWith('Error') ? '#dc3545' : '#28a745',
+          fontWeight: 'bold',
+          fontSize: '0.9em'
+        }}>
+          {message}
+        </p>
+      )}
+    </div>
+  );
+};
+
+export default FanControlToggle;
+
+5. src/components/EngineCoolerDashboard.jsx (Main Dashboard Component)
+This component orchestrates all the smaller components and handles data fetching/simulation for engine metrics.
+import React, { useState, useEffect } from 'react';
+import EngineMetricCard from './EngineMetricCard';
+import TemperatureChart from './TemperatureChart'; // Reusing for Engine Coolant Temp history
+import FanControlToggle from './FanControlToggle';
+
+function EngineCoolerDashboard() {
+  const [coolantTemp, setCoolantTemp] = useState(90); // Celsius
+  const [oilTemp, setOilTemp] = useState(85); // Celsius
+  const [coolantLevel, setCoolantLevel] = useState('Optimal'); // Optimal, Low, Critical
+  const [fanStatus, setFanStatus] = useState('Auto'); // Auto, On, Off
+  const [engineStatus, setEngineStatus] = useState('Normal'); // Normal, Warm, Overheating, Low Coolant
+
+  const [coolantTempHistory, setCoolantTempHistory] = useState(
+    Array(10).fill({ temp: 90, label: '' }).map((_, i) => ({ temp: 90 + Math.random() * 5, label: `-${10 - i}m` }))
+  );
+
+  useEffect(() => {
+    // Simulate fetching real-time data
+    const interval = setInterval(() => {
+      // --- In a real application, make API calls here: ---
+      // fetch('/api/engine-data')
+      //   .then(response => response.json())
+      //   .then(data => {
+      //     setCoolantTemp(data.coolantTemperature);
+      //     setOilTemp(data.oilTemperature);
+      //     setCoolantLevel(data.coolantLevel);
+      //     setFanStatus(data.fanState); // Assuming fanState is reported by backend
+      //     // Update history
+      //     setCoolantTempHistory(prev => {
+      //       const newHistory = [...prev.slice(1), { temp: data.coolantTemperature, label: 'now' }];
+      //       return newHistory.map((item, index) => ({
+      //         ...item,
+      //         label: index === newHistory.length - 1 ? 'Now' : `-${newHistory.length - 1 - index}m`
+      //       }));
+      //     });
+      //   })
+      //   .catch(error => console.error('Error fetching engine data:', error));
+
+
+      // Simulated data logic
+      setCoolantTemp(prevTemp => {
+        const fluctuation = (Math.random() - 0.5) * 4; // -2 to 2
+        let newTemp = prevTemp + fluctuation;
+        return Math.round(Math.max(70, Math.min(newTemp, 115))); // Engine temps usually higher
+      });
+
+      setOilTemp(prevTemp => {
+        const fluctuation = (Math.random() - 0.5) * 3; // -1.5 to 1.5
+        let newTemp = prevTemp + fluctuation;
+        return Math.round(Math.max(60, Math.min(newTemp, 120)));
+      });
+
+      // Simulate coolant level changes (e.g., occasional 'Low')
+      setCoolantLevel(Math.random() > 0.95 ? 'Low' : Math.random() > 0.98 ? 'Critical' : 'Optimal');
+
+      // Update history every 5 seconds
+      setCoolantTempHistory(prev => {
+        const newHistory = [...prev.slice(1), { temp: coolantTemp, label: 'Now' }];
+        return newHistory.map((item, index) => ({
+          ...item,
+          label: index === newHistory.length - 1 ? 'Now' : `-${newHistory.length - 1 - index}m`
+        }));
+      });
+
+    }, 5000); // Update every 5 seconds
+
+    return () => clearInterval(interval);
+  }, [coolantTemp]); // Dependency on coolantTemp to update history properly
+
+  useEffect(() => {
+    // Determine overall engine status
+    if (coolantTemp > 105 || coolantLevel === 'Critical') {
+      setEngineStatus('Overheating');
+    } else if (coolantTemp > 98 || coolantLevel === 'Low') {
+      setEngineStatus('Warm');
+    } else {
+      setEngineStatus('Normal');
+    }
+  }, [coolantTemp, coolantLevel, fanStatus]); // Re-evaluate status
+
+  const getTempColor = (temp, type) => {
+    // Coolant temp thresholds
+    if (type === 'coolant') {
+      if (temp > 105) return '#dc3545'; // Red
+      if (temp > 98) return '#ffc107'; // Yellow
+      if (temp > 90) return '#fd7e14'; // Orange
+      return '#28a745'; // Green
+    }
+    // Oil temp thresholds
+    if (type === 'oil') {
+        if (temp > 110) return '#dc3545';
+        if (temp > 100) return '#ffc107';
+        return '#28a745';
+    }
+    return '#007bff';
+  };
+
+  const getLevelColor = (level) => {
+    switch (level) {
+      case 'Optimal': return '#28a745';
+      case 'Low': return '#ffc107';
+      case 'Critical': return '#dc3545';
+      default: return '#6c757d';
+    }
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'Normal': return '#28a745';
+      case 'Warm': return '#ffc107';
+      case 'Overheating': return '#dc3545';
+      default: return '#6c757d';
+    }
+  };
+
+  const handleSetFanState = (newState) => {
+    // This function will be called by FanControlToggle
+    console.log(`Command to set fan state to ${newState}`);
+    // For simulation, we'll just update the displayed fan state after a delay
+    setTimeout(() => setFanStatus(newState), 1600); // Match toggle's apply delay
+  };
+
+  return (
+    <div className="app-container">
+      <h1>Engine Cooling System Monitor</h1>
+
+      <div className="dashboard-grid">
+        <EngineMetricCard
+          title="Coolant Temp"
+          value={coolantTemp}
+          unit="°C"
+          color={getTempColor(coolantTemp, 'coolant')}
+          icon="🌡️"
+        />
+        <EngineMetricCard
+          title="Oil Temp"
+          value={oilTemp}
+          unit="°C"
+          color={getTempColor(oilTemp, 'oil')}
+          icon="💧"
+        />
+        <EngineMetricCard
+          title="Coolant Level"
+          value={coolantLevel}
+          unit=""
+          color={getLevelColor(coolantLevel)}
+          icon="🌊"
+        />
+        <EngineMetricCard
+          title="Cooling Fan"
+          value={fanStatus}
+          unit=""
+          color={fanStatus === 'On' ? '#28a745' : fanStatus === 'Off' ? '#dc3545' : '#007bff'}
+          icon="💨"
+        />
+      </div>
+
+      <TemperatureChart history={coolantTempHistory} title="Coolant Temperature History" />
+
+      <FanControlToggle initialFanState={fanStatus} onSetFanState={handleSetFanState} />
+
+      <div className="section-card" style={{ marginTop: '20px' }}>
+        <h2>System Alerts & Recommendations</h2>
+        {engineStatus === 'Overheating' && (
+          <p style={{ color: '#dc3545', fontWeight: 'bold' }}>
+            <span role="img" aria-label="alert">🚨</span> Critical: Engine overheating! Stop immediately and check coolant/radiator.
+          </p>
+        )}
+        {coolantTemp > 98 && engineStatus !== 'Overheating' && (
+          <p style={{ color: '#ffc107' }}>
+            <span role="img" aria-label="warning">⚠️</span> Coolant temperature is elevated. Monitor closely.
+          </p>
+        )}
+        {coolantLevel === 'Low' && (
+          <p style={{ color: '#ffc107' }}>
+            <span role="img" aria-label="warning">❗</span> Coolant level is low. Top up immediately.
+          </p>
+        )}
+        {coolantLevel === 'Critical' && (
+          <p style={{ color: '#dc3545', fontWeight: 'bold' }}>
+            <span role="img" aria-label="alert">❌</span> Coolant level critical! Risk of severe engine damage.
+          </p>
+        )}
+        {engineStatus === 'Normal' && (
+          <p style={{ color: '#28a745' }}>
+            <span role="img" aria-label="check">✅</span> Engine cooling system is operating normally.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default EngineCoolerDashboard;
+
+6. src/App.jsx
+import React from 'react';
+import EngineCoolerDashboard from './components/EngineCoolerDashboard';
+import './index.css'; // Import the global CSS
+
+function App() {
+  return (
+    <div className="App">
+      <EngineCoolerDashboard />
+    </div>
+  );
+}
+
+export default App;
+
+How to Run This Code:
+ * Create a React App:
+   If you don't have one, create a new React project:
+   npx create-react-app my-engine-monitor
+cd my-engine-monitor
+# OR (using Vite, which is faster)
+npm create vite@latest my-engine-monitor --template react
+cd my-engine-monitor
+npm install
+
+ * Organize Files:
+   Create the components directory inside src and place the .jsx files there as specified. Place index.css directly in src.
+ * Replace App.js or App.jsx with the content provided above.
+ * Start the Development Server:
+   npm start
+# OR
+npm run dev
+
+   Open your browser (usually http://localhost:3000 or http://localhost:5173).
+Key Considerations for a Real Engine Monitoring System:
+ * Hardware Interface: The biggest challenge. You need a way to read sensors (coolant temp, oil temp, level, fan status) and send commands (turn fan on/off) from the engine's ECU or dedicated sensors. This often involves:
+   * OBD-II (On-Board Diagnostics): For vehicle engines, OBD-II is the standard. You'd use an OBD-II adapter (like ELM327) connected to a small computer (Raspberry Pi, Arduino) that acts as a gateway, running a backend service to translate OBD-II data into an API.
+   * Direct Sensors: For industrial engines or custom setups, you might connect directly to analog/digital sensors via microcontrollers (Arduino, ESP32) which then send data over Wi-Fi/Ethernet to a backend.
+ * Backend API: Crucial for translating hardware data into JSON that your React app can consume, and for securely sending commands. This could be written in Python, Node.js, Go, etc.
+ * Safety Criticality: Engine cooling is critical. Any "control" features in a real system need extreme care, robust error handling, and security measures. User interfaces should generally prioritize monitoring and alerts over direct control, especially for remote access.
+ * Data Persistence: You might want to log historical data in a database for long-term analysis, troubleshooting, and predictive maintenance.
+ * Alarms and Notifications: Implement backend logic to send SMS, email, or push notifications when critical thresholds are crossed.
+ * Data Visualization Libraries: For more sophisticated charts (line charts, gauges, etc.), consider libraries like Recharts, Chart.js, or Nivo.
+This React code provides a solid, responsive starting point for visualizing and (conceptually) controlling an engine's thermal cooling system. Remember the backend is the key to making it functional with real-world data.
+
+
+
+/* Basic Reset & Global Styles */
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f0f2f5;
+  color: #333;
+}
+
+.app-container {
+  padding: 20px;
+  max-width: 1200px; /* Max width for desktop */
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+h1, h2, h3 {
+  color: #333;
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+/* Responsive layout for dashboard cards */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); /* 280px min width per card */
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+/* Mobile-first approach: Stack elements, then expand for desktop */
+@media (max-width: 768px) {
+  .app-container {
+    padding: 15px;
+  }
+
+  .dashboard-grid {
+    grid-template-columns: 1fr; /* Single column for small screens */
+    gap: 15px;
+  }
+
+  .section-card {
+    padding: 15px;
+  }
+
+  h1 {
+    font-size: 1.8em;
+  }
+}
+
+/* Section Card for grouping content */
+.section-card {
+  background-color: #fff;
+  border-radius: 10px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+  padding: 25px;
+  margin-bottom: 20px;
+  box-sizing: border-box;
+}
+
+
+
+import React from 'react';
+
+const EngineMetricCard = ({ title, value, unit, color, icon }) => (
+  <div style={{
+    backgroundColor: '#fff',
+    padding: '20px',
+    borderRadius: '10px',
+    textAlign: 'center',
+    boxShadow: '0 2px 10px rgba(0,0,0,0.05)',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '120px'
+  }}>
+    {icon && <span style={{ fontSize: '2em', marginBottom: '10px' }}>{icon}</span>}
+    <h3 style={{ margin: '0 0 8px 0', color: '#555', fontSize: '1.1em' }}>{title}</h3>
+    <p style={{
+      fontSize: '2.8em',
+      fontWeight: 'bold',
+      color: color || '#007bff',
+      margin: '0'
+    }}>
+      {value}{unit}
+    </p>
+  </div>
+);
+
+export default EngineMetricCard;
+
+
+
+import React from 'react';
+
+const TemperatureChart = ({ history, title = 'Temperature History' }) => {
+  // Find max temperature to scale bars
+  const maxTemp = Math.max(...history.map(item => item.temp), 120); // Max 120 for engine temps
+
+  return (
+    <div className="section-card" style={{ textAlign: 'center' }}>
+      <h2>{title}</h2>
+      <div style={{
+        display: 'flex',
+        alignItems: 'flex-end',
+        justifyContent: 'space-around',
+        height: '150px',
+        padding: '10px 0',
+        borderBottom: '1px solid #eee',
+        marginBottom: '10px'
+      }}>
+        {history.map((data, index) => (
+          <div key={index} style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            margin: '0 5px',
+            width: `${100 / history.length - 2}%`, // Distribute bars
+            minWidth: '20px', /* Ensure bars are visible on mobile */
+          }}>
+            <div
+              style={{
+                height: `${(data.temp / maxTemp) * 100}%`,
+                width: '80%',
+                backgroundColor: data.temp > 105 ? '#dc3545' : data.temp > 95 ? '#ffc107' : '#28a745',
+                borderRadius: '3px',
+                transition: 'height 0.5s ease-out, background-color 0.5s ease'
+              }}
+            ></div>
+            <span style={{ fontSize: '0.8em', marginTop: '5px', color: '#666' }}>
+              {data.label}
+            </span>
+          </div>
+        ))}
+      </div>
+      <p style={{fontSize: '0.9em', color: '#777'}}>Showing last {history.length} updates</p>
+    </div>
+  );
+};
+
+export default TemperatureChart;
+
+
+
+import React, { useState } from 'react';
+
+const FanControlToggle = ({ initialFanState = 'Auto', onSetFanState }) => {
+  const [fanState, setFanState] = useState(initialFanState);
+  const [isLoading, setIsLoading] = useState(false);
+  const [message, setMessage] = useState('');
+
+  const toggleFanState = async () => {
+    const newState = fanState === 'Auto' ? 'On' : fanState === 'On' ? 'Off' : 'Auto';
+    setIsLoading(true);
+    setMessage('');
+    try {
+      // --- IMPORTANT: This is where you'd make your API call ---
+      // Example:
+      // const response = await fetch('/api/set-engine-fan', {
+      //   method: 'POST',
+      //   headers: { 'Content-Type': 'application/json' },
+      //   body: JSON.stringify({ state: newState }),
+      // });
+      // if (!response.ok) {
+      //   throw new Error('Failed to set fan state');
+      // }
+      // const data = await response.json();
+      // console.log('Fan state set:', data);
+
+      // Simulate API call delay
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      setFanState(newState); // Update UI state after "success"
+      onSetFanState(newState); // Notify parent component
+      setMessage(`Fan set to: ${newState}`);
+    } catch (error) {
+      console.error('Error setting fan state:', error);
+      setMessage(`Error: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const getButtonColor = (state) => {
+    switch (state) {
+      case 'On': return '#28a745'; // Green
+      case 'Off': return '#dc3545'; // Red
+      case 'Auto': return '#007bff'; // Blue
+      default: return '#6c757d';
+    }
+  };
+
+  return (
+    <div className="section-card" style={{ textAlign: 'center' }}>
+      <h2>Cooling Fan Control</h2>
+      <p style={{marginBottom: '20px', fontSize: '1.1em', color: '#555'}}>
+        Current Fan Mode: <span style={{fontWeight: 'bold', color: getButtonColor(fanState)}}>{fanState}</span>
+      </p>
+
+      <button
+        onClick={toggleFanState}
+        disabled={isLoading}
+        style={{
+          width: 'calc(90% - 20px)',
+          padding: '12px 20px',
+          backgroundColor: isLoading ? '#6c757d' : getButtonColor(fanState),
+          color: 'white',
+          border: 'none',
+          borderRadius: '6px',
+          fontSize: '1em',
+          cursor: isLoading ? 'not-allowed' : 'pointer',
+          transition: 'background-color 0.3s ease',
+          boxShadow: '0 2px 5px rgba(0,0,0,0.1)'
+        }}
+      >
+        {isLoading ? 'Applying...' : `Toggle to ${fanState === 'Auto' ? 'On' : fanState === 'On' ? 'Off' : 'Auto'}`}
+      </button>
+
+      {message && (
+        <p style={{
+          marginTop: '15px',
+          color: message.startsWith('Error') ? '#dc3545' : '#28a745',
+          fontWeight: 'bold',
+          fontSize: '0.9em'
+        }}>
+          {message}
+        </p>
+      )}
+    </div>
+  );
+};
+
+export default FanControlToggle;
+
+
+
+import React, { useState, useEffect } from 'react';
+import EngineMetricCard from './EngineMetricCard';
+import TemperatureChart from './TemperatureChart'; // Reusing for Engine Coolant Temp history
+import FanControlToggle from './FanControlToggle';
+
+function EngineCoolerDashboard() {
+  const [coolantTemp, setCoolantTemp] = useState(90); // Celsius
+  const [oilTemp, setOilTemp] = useState(85); // Celsius
+  const [coolantLevel, setCoolantLevel] = useState('Optimal'); // Optimal, Low, Critical
+  const [fanStatus, setFanStatus] = useState('Auto'); // Auto, On, Off
+  const [engineStatus, setEngineStatus] = useState('Normal'); // Normal, Warm, Overheating, Low Coolant
+
+  const [coolantTempHistory, setCoolantTempHistory] = useState(
+    Array(10).fill({ temp: 90, label: '' }).map((_, i) => ({ temp: 90 + Math.random() * 5, label: `-${10 - i}m` }))
+  );
+
+  useEffect(() => {
+    // Simulate fetching real-time data
+    const interval = setInterval(() => {
+      // --- In a real application, make API calls here: ---
+      // fetch('/api/engine-data')
+      //   .then(response => response.json())
+      //   .then(data => {
+      //     setCoolantTemp(data.coolantTemperature);
+      //     setOilTemp(data.oilTemperature);
+      //     setCoolantLevel(data.coolantLevel);
+      //     setFanStatus(data.fanState); // Assuming fanState is reported by backend
+      //     // Update history
+      //     setCoolantTempHistory(prev => {
+      //       const newHistory = [...prev.slice(1), { temp: data.coolantTemperature, label: 'now' }];
+      //       return newHistory.map((item, index) => ({
+      //         ...item,
+      //         label: index === newHistory.length - 1 ? 'Now' : `-${newHistory.length - 1 - index}m`
+      //       }));
+      //     });
+      //   })
+      //   .catch(error => console.error('Error fetching engine data:', error));
+
+
+      // Simulated data logic
+      setCoolantTemp(prevTemp => {
+        const fluctuation = (Math.random() - 0.5) * 4; // -2 to 2
+        let newTemp = prevTemp + fluctuation;
+        return Math.round(Math.max(70, Math.min(newTemp, 115))); // Engine temps usually higher
+      });
+
+      setOilTemp(prevTemp => {
+        const fluctuation = (Math.random() - 0.5) * 3; // -1.5 to 1.5
+        let newTemp = prevTemp + fluctuation;
+        return Math.round(Math.max(60, Math.min(newTemp, 120)));
+      });
+
+      // Simulate coolant level changes (e.g., occasional 'Low')
+      setCoolantLevel(Math.random() > 0.95 ? 'Low' : Math.random() > 0.98 ? 'Critical' : 'Optimal');
+
+      // Update history every 5 seconds
+      setCoolantTempHistory(prev => {
+        const newHistory = [...prev.slice(1), { temp: coolantTemp, label: 'Now' }];
+        return newHistory.map((item, index) => ({
+          ...item,
+          label: index === newHistory.length - 1 ? 'Now' : `-${newHistory.length - 1 - index}m`
+        }));
+      });
+
+    }, 5000); // Update every 5 seconds
+
+    return () => clearInterval(interval);
+  }, [coolantTemp]); // Dependency on coolantTemp to update history properly
+
+  useEffect(() => {
+    // Determine overall engine status
+    if (coolantTemp > 105 || coolantLevel === 'Critical') {
+      setEngineStatus('Overheating');
+    } else if (coolantTemp > 98 || coolantLevel === 'Low') {
+      setEngineStatus('Warm');
+    } else {
+      setEngineStatus('Normal');
+    }
+  }, [coolantTemp, coolantLevel, fanStatus]); // Re-evaluate status
+
+  const getTempColor = (temp, type) => {
+    // Coolant temp thresholds
+    if (type === 'coolant') {
+      if (temp > 105) return '#dc3545'; // Red
+      if (temp > 98) return '#ffc107'; // Yellow
+      if (temp > 90) return '#fd7e14'; // Orange
+      return '#28a745'; // Green
+    }
+    // Oil temp thresholds
+    if (type === 'oil') {
+        if (temp > 110) return '#dc3545';
+        if (temp > 100) return '#ffc107';
+        return '#28a745';
+    }
+    return '#007bff';
+  };
+
+  const getLevelColor = (level) => {
+    switch (level) {
+      case 'Optimal': return '#28a745';
+      case 'Low': return '#ffc107';
+      case 'Critical': return '#dc3545';
+      default: return '#6c757d';
+    }
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'Normal': return '#28a745';
+      case 'Warm': return '#ffc107';
+      case 'Overheating': return '#dc3545';
+      default: return '#6c757d';
+    }
+  };
+
+  const handleSetFanState = (newState) => {
+    // This function will be called by FanControlToggle
+    console.log(`Command to set fan state to ${newState}`);
+    // For simulation, we'll just update the displayed fan state after a delay
+    setTimeout(() => setFanStatus(newState), 1600); // Match toggle's apply delay
+  };
+
+  return (
+    <div className="app-container">
+      <h1>Engine Cooling System Monitor</h1>
+
+      <div className="dashboard-grid">
+        <EngineMetricCard
+          title="Coolant Temp"
+          value={coolantTemp}
+          unit="°C"
+          color={getTempColor(coolantTemp, 'coolant')}
+          icon="🌡️"
+        />
+        <EngineMetricCard
+          title="Oil Temp"
+          value={oilTemp}
+          unit="°C"
+          color={getTempColor(oilTemp, 'oil')}
+          icon="💧"
+        />
+        <EngineMetricCard
+          title="Coolant Level"
+          value={coolantLevel}
+          unit=""
+          color={getLevelColor(coolantLevel)}
+          icon="🌊"
+        />
+        <EngineMetricCard
+          title="Cooling Fan"
+          value={fanStatus}
+          unit=""
+          color={fanStatus === 'On' ? '#28a745' : fanStatus === 'Off' ? '#dc3545' : '#007bff'}
+          icon="💨"
+        />
+      </div>
+
+      <TemperatureChart history={coolantTempHistory} title="Coolant Temperature History" />
+
+      <FanControlToggle initialFanState={fanStatus} onSetFanState={handleSetFanState} />
+
+      <div className="section-card" style={{ marginTop: '20px' }}>
+        <h2>System Alerts & Recommendations</h2>
+        {engineStatus === 'Overheating' && (
+          <p style={{ color: '#dc3545', fontWeight: 'bold' }}>
+            <span role="img" aria-label="alert">🚨</span> Critical: Engine overheating! Stop immediately and check coolant/radiator.
+          </p>
+        )}
+        {coolantTemp > 98 && engineStatus !== 'Overheating' && (
+          <p style={{ color: '#ffc107' }}>
+            <span role="img" aria-label="warning">⚠️</span> Coolant temperature is elevated. Monitor closely.
+          </p>
+        )}
+        {coolantLevel === 'Low' && (
+          <p style={{ color: '#ffc107' }}>
+            <span role="img" aria-label="warning">❗</span> Coolant level is low. Top up immediately.
+          </p>
+        )}
+        {coolantLevel === 'Critical' && (
+          <p style={{ color: '#dc3545', fontWeight: 'bold' }}>
+            <span role="img" aria-label="alert">❌</span> Coolant level critical! Risk of severe engine damage.
+          </p>
+        )}
+        {engineStatus === 'Normal' && (
+          <p style={{ color: '#28a745' }}>
+            <span role="img" aria-label="check">✅</span> Engine cooling system is operating normally.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default EngineCoolerDashboard;
+
+
+
+import React from 'react';
+import EngineCoolerDashboard from './components/EngineCoolerDashboard';
+import './index.css'; // Import the global CSS
+
+function App() {
+  return (
+    <div className="App">
+      <EngineCoolerDashboard />
+    </div>
+  );
+}
+
+export default App;
+
+
+
+npx create-react-app my-engine-monitor
+cd my-engine-monitor
+# OR (using Vite, which is faster)
+npm create vite@latest my-engine-monitor --template react
+cd my-engine-monitor
+npm install
+
+
+
+npm start
+# OR
+npm run dev
+
+
+
