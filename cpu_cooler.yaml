@@ -1,0 +1,1308 @@
+import React, { useState, useEffect } from 'react';
+
+function CPUTemperatureDisplay() {
+  const [cpuTemp, setCpuTemp] = useState(45); // Initial simulated temperature
+
+  useEffect(() => {
+    // Simulate fetching real-time CPU temperature
+    const interval = setInterval(() => {
+      // In a real application, you'd make an API call here:
+      // fetch('/api/cpu-temperature')
+      //   .then(response => response.json())
+      //   .then(data => setCpuTemp(data.temperature))
+      //   .catch(error => console.error('Error fetching CPU temperature:', error));
+
+      // Simulate temperature fluctuations
+      setCpuTemp(prevTemp => {
+        const fluctuation = (Math.random() - 0.5) * 2; // -1 to 1
+        let newTemp = prevTemp + fluctuation;
+        // Keep temperature within a reasonable range for simulation
+        if (newTemp < 30) newTemp = 30;
+        if (newTemp > 75) newTemp = 75;
+        return Math.round(newTemp);
+      });
+    }, 2000); // Update every 2 seconds
+
+    // Cleanup function to clear the interval when the component unmounts
+    return () => clearInterval(interval);
+  }, []); // Empty dependency array means this effect runs once on mount
+
+  const tempColor = cpuTemp > 65 ? 'red' : cpuTemp > 50 ? 'orange' : 'green';
+
+  return (
+    <div style={{
+      fontFamily: 'Arial, sans-serif',
+      padding: '20px',
+      border: '1px solid #ccc',
+      borderRadius: '8px',
+      textAlign: 'center',
+      maxWidth: '300px',
+      margin: '20px auto',
+      boxShadow: '0 2px 5px rgba(0,0,0,0.1)'
+    }}>
+      <h2>CPU Temperature</h2>
+      <p style={{
+        fontSize: '3em',
+        fontWeight: 'bold',
+        color: tempColor,
+        margin: '10px 0'
+      }}>
+        {cpuTemp}°C
+      </p>
+      <p style={{ color: '#666' }}>
+        Status: <span style={{ fontWeight: 'bold' }}>{cpuTemp > 70 ? 'Hot' : cpuTemp > 60 ? 'Warm' : 'Normal'}</span>
+      </p>
+    </div>
+  );
+}
+
+export default CPUTemperatureDisplay;
+
+
+import React, { useState, useEffect } from 'react';
+
+// Reusable component for displaying a metric
+const MetricCard = ({ title, value, unit, color }) => (
+  <div style={{
+    backgroundColor: '#f9f9f9',
+    padding: '15px',
+    borderRadius: '6px',
+    textAlign: 'center',
+    flex: '1',
+    minWidth: '150px',
+    margin: '10px',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.08)'
+  }}>
+    <h3 style={{ margin: '0 0 10px 0', color: '#333' }}>{title}</h3>
+    <p style={{
+      fontSize: '2.5em',
+      fontWeight: 'bold',
+      color: color || '#007bff',
+      margin: '0'
+    }}>
+      {value}{unit}
+    </p>
+  </div>
+);
+
+function CPUCoolerDashboard() {
+  const [cpuTemp, setCpuTemp] = useState(40);
+  const [fanSpeed, setFanSpeed] = useState(1500); // RPM
+  const [coolerStatus, setCoolerStatus] = useState('Optimal'); // Optimal, Running, Warning, Critical
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      // Simulate fetching data (replace with actual API calls)
+      const newTemp = Math.round(cpuTemp + (Math.random() - 0.5) * 3);
+      const newFanSpeed = Math.round(fanSpeed + (Math.random() - 0.5) * 100);
+
+      setCpuTemp(Math.max(30, Math.min(newTemp, 85))); // Clamp temp
+      setFanSpeed(Math.max(800, Math.min(newFanSpeed, 3000))); // Clamp fan speed
+
+      // Determine cooler status based on temperature and fan speed
+      if (newTemp > 75) {
+        setCoolerStatus('Critical');
+      } else if (newTemp > 65 || newFanSpeed < 1000) {
+        setCoolerStatus('Warning');
+      } else if (newTemp > 50) {
+        setCoolerStatus('Running');
+      } else {
+        setCoolerStatus('Optimal');
+      }
+
+    }, 3000); // Update every 3 seconds
+
+    return () => clearInterval(interval);
+  }, [cpuTemp, fanSpeed]); // Re-run effect if temp or fan speed changes (to update status logic)
+
+  const getTempColor = (temp) => {
+    if (temp > 75) return '#dc3545'; // Red
+    if (temp > 65) return '#ffc107'; // Yellow
+    if (temp > 50) return '#fd7e14'; // Orange
+    return '#28a745'; // Green
+  };
+
+  const getFanSpeedColor = (speed) => {
+    if (speed < 1000) return '#dc3545';
+    if (speed < 1500) return '#ffc107';
+    return '#28a745';
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'Optimal': return '#28a745';
+      case 'Running': return '#007bff';
+      case 'Warning': return '#ffc107';
+      case 'Critical': return '#dc3545';
+      default: return '#6c757d';
+    }
+  };
+
+  return (
+    <div style={{
+      fontFamily: 'Arial, sans-serif',
+      padding: '30px',
+      backgroundColor: '#f0f2f5',
+      minHeight: '100vh',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+    }}>
+      <h1 style={{ color: '#333', marginBottom: '30px' }}>CPU Cooler Monitor</h1>
+
+      <div style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        justifyContent: 'center',
+        width: '100%',
+        maxWidth: '900px',
+        marginBottom: '20px'
+      }}>
+        <MetricCard
+          title="CPU Temperature"
+          value={cpuTemp}
+          unit="°C"
+          color={getTempColor(cpuTemp)}
+        />
+        <MetricCard
+          title="Fan Speed"
+          value={fanSpeed}
+          unit=" RPM"
+          color={getFanSpeedColor(fanSpeed)}
+        />
+        <MetricCard
+          title="Cooler Status"
+          value={coolerStatus}
+          unit=""
+          color={getStatusColor(coolerStatus)}
+        />
+      </div>
+
+      <div style={{
+        backgroundColor: '#fff',
+        padding: '25px',
+        borderRadius: '8px',
+        width: '100%',
+        maxWidth: '900px',
+        boxShadow: '0 4px 10px rgba(0,0,0,0.05)',
+        textAlign: 'left'
+      }}>
+        <h3 style={{ color: '#333', borderBottom: '1px solid #eee', paddingBottom: '10px', marginBottom: '20px' }}>Cooling Recommendations</h3>
+        {cpuTemp > 75 && (
+          <p style={{ color: '#dc3545', fontWeight: 'bold' }}>
+            <span role="img" aria-label="alert">⚠️</span> Critical temperature detected! Check cooler mounting and airflow immediately.
+          </p>
+        )}
+        {cpuTemp > 65 && cpuTemp <= 75 && (
+          <p style={{ color: '#ffc107' }}>
+            <span role="img" aria-label="warning">❗</span> High temperature. Consider cleaning dust from cooler and case fans.
+          </p>
+        )}
+        {fanSpeed < 1000 && (
+          <p style={{ color: '#dc3545', fontWeight: 'bold' }}>
+            <span role="img" aria-label="alert">⚠️</span> Fan speed is very low. Fan may be malfunctioning or obstructed.
+          </p>
+        )}
+        {cpuTemp <= 50 && fanSpeed >= 1500 && (
+          <p style={{ color: '#28a745' }}>
+            <span role="img" aria-label="check">✅</span> CPU temperature and fan speeds are optimal.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default CPUCoolerDashboard;
+
+
+
+import React, { useState, useEffect } from 'react';
+
+function FanSpeedControl() {
+  const [currentFanSpeed, setCurrentFanSpeed] = useState(1500); // Simulated current RPM
+  const [desiredFanSpeed, setDesiredFanSpeed] = useState(1500); // RPM
+  const [isLoading, setIsLoading] = useState(false);
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    // In a real app, fetch initial fan speed from backend
+    // fetch('/api/fan-speed')
+    //   .then(res => res.json())
+    //   .then(data => {
+    //     setCurrentFanSpeed(data.speed);
+    //     setDesiredFanSpeed(data.speed);
+    //   })
+    //   .catch(err => console.error("Could not fetch initial fan speed", err));
+
+    // Simulate real-time current fan speed updates
+    const interval = setInterval(() => {
+        setCurrentFanSpeed(prev => {
+            const fluctuation = (Math.random() - 0.5) * 50; // Small fluctuations
+            let newSpeed = prev + fluctuation;
+            return Math.round(Math.max(800, Math.min(newSpeed, 3000)));
+        });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+
+  const handleSliderChange = (event) => {
+    setDesiredFanSpeed(Number(event.target.value));
+  };
+
+  const applyFanSpeed = async () => {
+    setIsLoading(true);
+    setMessage('');
+    try {
+      // In a real application, you'd send this to your backend
+      // Example using fetch:
+      // const response = await fetch('/api/set-fan-speed', {
+      //   method: 'POST',
+      //   headers: {
+      //     'Content-Type': 'application/json',
+      //   },
+      //   body: JSON.stringify({ speed: desiredFanSpeed }),
+      // });
+      // if (!response.ok) {
+      //   throw new Error('Failed to set fan speed');
+      // }
+      // const data = await response.json();
+      // console.log('Fan speed set:', data);
+
+      // Simulate API call delay
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      setCurrentFanSpeed(desiredFanSpeed); // Update current speed after successful "API" call
+      setMessage(`Fan speed set to ${desiredFanSpeed} RPM.`);
+    } catch (error) {
+      console.error('Error setting fan speed:', error);
+      setMessage(`Error: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div style={{
+      fontFamily: 'Arial, sans-serif',
+      padding: '25px',
+      border: '1px solid #ddd',
+      borderRadius: '8px',
+      maxWidth: '400px',
+      margin: '40px auto',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+      backgroundColor: '#fff'
+    }}>
+      <h2 style={{ textAlign: 'center', color: '#333' }}>CPU Fan Speed Control</h2>
+
+      <p style={{textAlign: 'center', fontSize: '1.2em', margin: '15px 0'}}>
+        Current Fan Speed: <span style={{fontWeight: 'bold', color: '#007bff'}}>{currentFanSpeed} RPM</span>
+      </p>
+
+      <label htmlFor="fanSpeedRange" style={{ display: 'block', marginBottom: '10px', color: '#555' }}>
+        Desired Fan Speed: {desiredFanSpeed} RPM
+      </label>
+      <input
+        type="range"
+        id="fanSpeedRange"
+        min="800"
+        max="3000"
+        step="100"
+        value={desiredFanSpeed}
+        onChange={handleSliderChange}
+        style={{ width: '100%', marginBottom: '20px' }}
+      />
+
+      <button
+        onClick={applyFanSpeed}
+        disabled={isLoading}
+        style={{
+          width: '100%',
+          padding: '12px 20px',
+          backgroundColor: isLoading ? '#6c757d' : '#007bff',
+          color: 'white',
+          border: 'none',
+          borderRadius: '5px',
+          fontSize: '1em',
+          cursor: isLoading ? 'not-allowed' : 'pointer',
+          transition: 'background-color 0.3s ease'
+        }}
+      >
+        {isLoading ? 'Applying...' : 'Apply Fan Speed'}
+      </button>
+
+      {message && (
+        <p style={{
+          marginTop: '15px',
+          textAlign: 'center',
+          color: message.startsWith('Error') ? 'red' : 'green',
+          fontWeight: 'bold'
+        }}>
+          {message}
+        </p>
+      )}
+    </div>
+  );
+}
+
+export default FanSpeedControl;
+
+
+
+npx create-react-app my-cooler-app
+cd my-cooler-app
+# OR
+npm create vite@latest my-cooler-app --template react
+cd my-cooler-app
+npm install
+
+
+
+import React from 'react';
+import CPUTemperatureDisplay from './CPUTemperatureDisplay';
+import CPUCoolerDashboard from './CPUCoolerDashboard';
+import FanSpeedControl from './FanSpeedControl'; // If you want to use this
+
+function App() {
+  return (
+    <div className="App">
+      {/* <CPUTemperatureDisplay /> */}
+      <CPUCoolerDashboard />
+      {/* <FanSpeedControl /> */} {/* Uncomment to see fan speed control */}
+    </div>
+  );
+}
+
+export default App;
+
+
+
+npm start
+# OR
+npm run dev
+
+
+
+You're asking for React code for both mobile and computer CPU thermal cooler interfaces. The core React components for displaying and interacting with cooler data will be very similar, as React is designed to be cross-platform.
+The main differences will lie in:
+ * Styling and Responsiveness: How the components adapt to different screen sizes (mobile vs. desktop). This is primarily handled with CSS (media queries, flexbox, grid) or responsive design frameworks.
+ * Data Source: The backend API providing the data might differ significantly.
+   * Desktop: Could connect to a local application (e.g., Python script with psutil) or a network service.
+   * Mobile: Typically, you'd be monitoring a remote server's CPU (e.g., your home server, a cloud instance) via an API, as mobile devices themselves don't usually expose CPU cooler controls directly to web apps. Or, if you're building a native mobile app with React Native, it could access device sensors, but this request is for "React codes," implying web.
+I will provide a consolidated set of React components designed to be responsive and work well on both mobile and desktop. I'll focus on the UI and data visualization, assuming the backend data source is handled separately.
+Key Features for Responsive Design:
+ * CSS Flexbox/Grid: For flexible layouts that adapt to screen size.
+ * Media Queries: To apply specific styles based on screen width.
+ * Relative Units: rem, em, %, vw, vh for scalable sizing.
+ * useState and useEffect: For managing dynamic data and fetching.
+ * Simulated Data: As before, I'll use simulated data for demonstration.
+React Code for Responsive CPU Thermal Cooler Monitor
+This example will feature:
+ * A responsive dashboard layout.
+ * Temperature and Fan Speed display.
+ * Usage History Chart (simple bar chart, could be replaced with a library like Recharts or Chart.js).
+ * Simulated controls (sliders) that would interact with a backend.
+File Structure Recommendation:
+src/
+├── components/
+│   ├── MetricCard.jsx
+│   ├── TemperatureChart.jsx
+│   ├── FanControlSlider.jsx
+│   └── CoolerDashboard.jsx
+└── App.jsx
+└── index.css (for global styles and media queries)
+
+1. src/index.css (Global Styles for Responsiveness)
+This file will contain basic reset and global styles, including media queries for responsiveness.
+/* Basic Reset & Global Styles */
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f0f2f5;
+  color: #333;
+}
+
+.app-container {
+  padding: 20px;
+  max-width: 1200px; /* Max width for desktop */
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+h1, h2, h3 {
+  color: #333;
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+/* Responsive layout for dashboard cards */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); /* 280px min width per card */
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+/* Mobile-first approach: Stack elements, then expand for desktop */
+@media (max-width: 768px) {
+  .app-container {
+    padding: 15px;
+  }
+
+  .dashboard-grid {
+    grid-template-columns: 1fr; /* Single column for small screens */
+    gap: 15px;
+  }
+
+  .section-card {
+    padding: 15px;
+  }
+
+  h1 {
+    font-size: 1.8em;
+  }
+}
+
+/* Section Card for grouping content */
+.section-card {
+  background-color: #fff;
+  border-radius: 10px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+  padding: 25px;
+  margin-bottom: 20px;
+  box-sizing: border-box;
+}
+
+2. src/components/MetricCard.jsx
+A reusable component for displaying a single metric.
+import React from 'react';
+
+const MetricCard = ({ title, value, unit, color, icon }) => (
+  <div style={{
+    backgroundColor: '#fff',
+    padding: '20px',
+    borderRadius: '10px',
+    textAlign: 'center',
+    boxShadow: '0 2px 10px rgba(0,0,0,0.05)',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '120px'
+  }}>
+    {icon && <span style={{ fontSize: '2em', marginBottom: '10px' }}>{icon}</span>}
+    <h3 style={{ margin: '0 0 8px 0', color: '#555', fontSize: '1.1em' }}>{title}</h3>
+    <p style={{
+      fontSize: '2.8em',
+      fontWeight: 'bold',
+      color: color || '#007bff',
+      margin: '0'
+    }}>
+      {value}{unit}
+    </p>
+  </div>
+);
+
+export default MetricCard;
+
+3. src/components/TemperatureChart.jsx
+A simple bar chart component to show recent temperature history. For production, consider libraries like Recharts or Chart.js for better charts.
+import React from 'react';
+
+const TemperatureChart = ({ history, title = 'Temperature History' }) => {
+  // Find max temperature to scale bars
+  const maxTemp = Math.max(...history.map(item => item.temp), 100); // Max 100 for scaling
+
+  return (
+    <div className="section-card" style={{ textAlign: 'center' }}>
+      <h2>{title}</h2>
+      <div style={{
+        display: 'flex',
+        alignItems: 'flex-end',
+        justifyContent: 'space-around',
+        height: '150px',
+        padding: '10px 0',
+        borderBottom: '1px solid #eee',
+        marginBottom: '10px'
+      }}>
+        {history.map((data, index) => (
+          <div key={index} style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            margin: '0 5px',
+            width: `${100 / history.length - 2}%`, // Distribute bars
+            minWidth: '20px', /* Ensure bars are visible on mobile */
+          }}>
+            <div
+              style={{
+                height: `${(data.temp / maxTemp) * 100}%`,
+                width: '80%',
+                backgroundColor: data.temp > 75 ? '#dc3545' : data.temp > 60 ? '#ffc107' : '#28a745',
+                borderRadius: '3px',
+                transition: 'height 0.5s ease-out, background-color 0.5s ease'
+              }}
+            ></div>
+            <span style={{ fontSize: '0.8em', marginTop: '5px', color: '#666' }}>
+              {data.label}
+            </span>
+          </div>
+        ))}
+      </div>
+      <p style={{fontSize: '0.9em', color: '#777'}}>Showing last {history.length} updates</p>
+    </div>
+  );
+};
+
+export default TemperatureChart;
+
+4. src/components/FanControlSlider.jsx
+A component for controlling fan speed. Requires a backend to function.
+import React, { useState } from 'react';
+
+const FanControlSlider = ({ onSetFanSpeed, initialSpeed = 1500, minSpeed = 800, maxSpeed = 3000 }) => {
+  const [desiredFanSpeed, setDesiredFanSpeed] = useState(initialSpeed);
+  const [isLoading, setIsLoading] = useState(false);
+  const [message, setMessage] = useState('');
+
+  const handleSliderChange = (event) => {
+    setDesiredFanSpeed(Number(event.target.value));
+  };
+
+  const handleApplyClick = async () => {
+    setIsLoading(true);
+    setMessage('');
+    try {
+      // --- IMPORTANT: This is where you'd make your API call ---
+      // Example:
+      // const response = await fetch('/api/set-fan-speed', {
+      //   method: 'POST',
+      //   headers: { 'Content-Type': 'application/json' },
+      //   body: JSON.stringify({ speed: desiredFanSpeed }),
+      // });
+      // if (!response.ok) {
+      //   throw new Error('Failed to set fan speed');
+      // }
+      // const data = await response.json();
+      // console.log('Fan speed set:', data);
+
+      // Simulate API call delay for demonstration
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      onSetFanSpeed(desiredFanSpeed); // Notify parent component (dashboard)
+      setMessage(`Fan speed command sent: ${desiredFanSpeed} RPM`);
+    } catch (error) {
+      console.error('Error setting fan speed:', error);
+      setMessage(`Error: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="section-card" style={{ textAlign: 'center' }}>
+      <h2>Fan Speed Control</h2>
+      <label htmlFor="fanSpeedRange" style={{ display: 'block', marginBottom: '15px', color: '#555', fontSize: '1.1em' }}>
+        Set Desired Speed: <span style={{fontWeight: 'bold', color: '#007bff'}}>{desiredFanSpeed} RPM</span>
+      </label>
+      <input
+        type="range"
+        id="fanSpeedRange"
+        min={minSpeed}
+        max={maxSpeed}
+        step="100"
+        value={desiredFanSpeed}
+        onChange={handleSliderChange}
+        style={{ width: '90%', marginBottom: '20px', height: '8px', cursor: 'pointer' }}
+      />
+
+      <button
+        onClick={handleApplyClick}
+        disabled={isLoading}
+        style={{
+          width: 'calc(90% - 20px)', /* Adjust for padding/margin */
+          padding: '12px 20px',
+          backgroundColor: isLoading ? '#6c757d' : '#007bff',
+          color: 'white',
+          border: 'none',
+          borderRadius: '6px',
+          fontSize: '1em',
+          cursor: isLoading ? 'not-allowed' : 'pointer',
+          transition: 'background-color 0.3s ease',
+          boxShadow: '0 2px 5px rgba(0,0,0,0.1)'
+        }}
+      >
+        {isLoading ? 'Applying...' : 'Apply Speed'}
+      </button>
+
+      {message && (
+        <p style={{
+          marginTop: '15px',
+          color: message.startsWith('Error') ? '#dc3545' : '#28a745',
+          fontWeight: 'bold',
+          fontSize: '0.9em'
+        }}>
+          {message}
+        </p>
+      )}
+    </div>
+  );
+};
+
+export default FanControlSlider;
+
+5. src/components/CoolerDashboard.jsx (Main Dashboard Component)
+This component orchestrates all the smaller components and handles data fetching/simulation.
+import React, { useState, useEffect } from 'react';
+import MetricCard from './MetricCard';
+import TemperatureChart from './TemperatureChart';
+import FanControlSlider from './FanControlSlider';
+
+function CoolerDashboard() {
+  const [cpuTemp, setCpuTemp] = useState(40);
+  const [fanSpeed, setFanSpeed] = useState(1500); // RPM
+  const [coolerStatus, setCoolerStatus] = useState('Optimal');
+  const [tempHistory, setTempHistory] = useState(
+    Array(10).fill({ temp: 40, label: '' }).map((_, i) => ({ temp: 40 + Math.random() * 5, label: `-${10 - i}m` }))
+  ); // Last 10 simulated minutes
+
+  useEffect(() => {
+    // Simulate fetching real-time data
+    const interval = setInterval(() => {
+      // In a real application, make API calls here:
+      // fetch('/api/cpu-data')
+      //   .then(response => response.json())
+      //   .then(data => {
+      //     setCpuTemp(data.temperature);
+      //     setFanSpeed(data.fanSpeed);
+      //     // Update temp history
+      //     setTempHistory(prev => {
+      //       const newHistory = [...prev.slice(1), { temp: data.temperature, label: 'now' }];
+      //       // Re-label for display
+      //       return newHistory.map((item, index) => ({
+      //         ...item,
+      //         label: index === newHistory.length - 1 ? 'Now' : `-${newHistory.length - 1 - index}m`
+      //       }));
+      //     });
+      //   })
+      //   .catch(error => console.error('Error fetching data:', error));
+
+      // Simulated data logic
+      setCpuTemp(prevTemp => {
+        const fluctuation = (Math.random() - 0.5) * 4; // -2 to 2
+        let newTemp = prevTemp + fluctuation;
+        return Math.round(Math.max(30, Math.min(newTemp, 85)));
+      });
+
+      setFanSpeed(prevSpeed => {
+        const fluctuation = (Math.random() - 0.5) * 100; // -50 to 50
+        let newSpeed = prevSpeed + fluctuation;
+        return Math.round(Math.max(800, Math.min(newSpeed, 3000)));
+      });
+
+      // Update history every 10 seconds for more frequent data points
+      setTempHistory(prev => {
+        const newHistory = [...prev.slice(1), { temp: cpuTemp, label: 'Now' }];
+        return newHistory.map((item, index) => ({
+          ...item,
+          label: index === newHistory.length - 1 ? 'Now' : `-${newHistory.length - 1 - index}m`
+        }));
+      });
+
+    }, 3000); // Update every 3 seconds
+
+    return () => clearInterval(interval);
+  }, [cpuTemp]); // Dependency on cpuTemp to update history properly
+
+  useEffect(() => {
+    // Determine cooler status based on current data
+    if (cpuTemp > 75) {
+      setCoolerStatus('Critical');
+    } else if (cpuTemp > 65 || fanSpeed < 1000) {
+      setCoolerStatus('Warning');
+    } else if (cpuTemp > 50) {
+      setCoolerStatus('Running');
+    } else {
+      setCoolerStatus('Optimal');
+    }
+  }, [cpuTemp, fanSpeed]); // Re-evaluate status when temp or fan speed changes
+
+  const getTempColor = (temp) => {
+    if (temp > 75) return '#dc3545'; // Red
+    if (temp > 65) return '#ffc107'; // Yellow
+    if (temp > 50) return '#fd7e14'; // Orange
+    return '#28a745'; // Green
+  };
+
+  const getFanSpeedColor = (speed) => {
+    if (speed < 1000) return '#dc3545';
+    if (speed < 1500) return '#ffc107';
+    return '#28a745';
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'Optimal': return '#28a745';
+      case 'Running': return '#007bff';
+      case 'Warning': return '#ffc107';
+      case 'Critical': return '#dc3545';
+      default: return '#6c757d';
+    }
+  };
+
+  const handleSetFanSpeed = (newSpeed) => {
+    // This function will be called by FanControlSlider
+    // In a real app, you might re-fetch current data or just update the UI optimistically
+    console.log(`Command to set fan speed to ${newSpeed} RPM`);
+    // For simulation, we'll just update the displayed fan speed after a delay
+    setTimeout(() => setFanSpeed(newSpeed), 1600); // Match slider's apply delay
+  };
+
+
+  return (
+    <div className="app-container">
+      <h1>CPU Cooler Monitor</h1>
+
+      <div className="dashboard-grid">
+        <MetricCard
+          title="CPU Temperature"
+          value={cpuTemp}
+          unit="°C"
+          color={getTempColor(cpuTemp)}
+          icon="🌡️"
+        />
+        <MetricCard
+          title="Fan Speed"
+          value={fanSpeed}
+          unit=" RPM"
+          color={getFanSpeedColor(fanSpeed)}
+          icon="💨"
+        />
+        <MetricCard
+          title="Cooler Status"
+          value={coolerStatus}
+          unit=""
+          color={getStatusColor(coolerStatus)}
+          icon="✨"
+        />
+      </div>
+
+      <TemperatureChart history={tempHistory} />
+
+      <FanControlSlider initialSpeed={fanSpeed} onSetFanSpeed={handleSetFanSpeed} />
+
+      <div className="section-card" style={{ marginTop: '20px' }}>
+        <h2>Recommendations</h2>
+        {cpuTemp > 75 && (
+          <p style={{ color: '#dc3545', fontWeight: 'bold' }}>
+            <span role="img" aria-label="alert">🚨</span> Critical: Extreme temperature detected! Immediate action required.
+          </p>
+        )}
+        {cpuTemp > 65 && cpuTemp <= 75 && (
+          <p style={{ color: '#ffc107' }}>
+            <span role="img" aria-label="warning">⚠️</span> High temperature. Check for dust buildup and ensure proper airflow.
+          </p>
+        )}
+        {fanSpeed < 1000 && (
+          <p style={{ color: '#dc3545', fontWeight: 'bold' }}>
+            <span role="img" aria-label="alert">❗</span> Fan speed is very low. Fan may be malfunctioning or obstructed.
+          </p>
+        )}
+        {coolerStatus === 'Optimal' && (
+          <p style={{ color: '#28a745' }}>
+            <span role="img" aria-label="check">✅</span> System is running optimally.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default CoolerDashboard;
+
+6. src/App.jsx
+This file will be the entry point to your React application.
+import React from 'react';
+import CoolerDashboard from './components/CoolerDashboard';
+import './index.css'; // Import the global CSS
+
+function App() {
+  return (
+    <div className="App">
+      <CoolerDashboard />
+    </div>
+  );
+}
+
+export default App;
+
+How to Run This Code:
+ * Create a React App:
+   If you don't have one, create a new React project using Create React App or Vite:
+   npx create-react-app my-cooler-monitor
+cd my-cooler-monitor
+# OR
+npm create vite@latest my-cooler-monitor --template react
+cd my-cooler-monitor
+npm install
+
+ * Organize Files:
+   Create the components directory inside src and place the .jsx files there as specified. Place index.css directly in src.
+ * Replace App.js or App.jsx with the content provided above.
+ * Start the Development Server:
+   npm start
+# OR
+npm run dev
+
+Now, open your browser (usually http://localhost:3000 or http://localhost:5173). Try resizing your browser window to see how the layout adapts for smaller (mobile) and larger (desktop) screens.
+Data Acquisition (Beyond React UI):
+As mentioned, React handles the frontend. For real CPU data:
+ * For your own computer: You would need a backend application (e.g., Python using psutil, wmi for Windows, or lm-sensors for Linux) running on your machine. This app would expose an API (REST or WebSockets) that your React app can fetch data from.
+ * For a mobile device (remote monitoring): You'd likely be monitoring a remote server or PC. The mobile browser would access a public API endpoint provided by that server. If you were building a native mobile app with React Native, you could potentially access device sensors directly, but that's outside the scope of a "React codes" request, which usually implies web.
+This responsive React code provides a solid foundation for a CPU thermal cooler monitoring interface that works seamlessly across different device types.
+
+
+
+/* Basic Reset & Global Styles */
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f0f2f5;
+  color: #333;
+}
+
+.app-container {
+  padding: 20px;
+  max-width: 1200px; /* Max width for desktop */
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+h1, h2, h3 {
+  color: #333;
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+/* Responsive layout for dashboard cards */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); /* 280px min width per card */
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+/* Mobile-first approach: Stack elements, then expand for desktop */
+@media (max-width: 768px) {
+  .app-container {
+    padding: 15px;
+  }
+
+  .dashboard-grid {
+    grid-template-columns: 1fr; /* Single column for small screens */
+    gap: 15px;
+  }
+
+  .section-card {
+    padding: 15px;
+  }
+
+  h1 {
+    font-size: 1.8em;
+  }
+}
+
+/* Section Card for grouping content */
+.section-card {
+  background-color: #fff;
+  border-radius: 10px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+  padding: 25px;
+  margin-bottom: 20px;
+  box-sizing: border-box;
+}
+
+
+
+import React from 'react';
+
+const MetricCard = ({ title, value, unit, color, icon }) => (
+  <div style={{
+    backgroundColor: '#fff',
+    padding: '20px',
+    borderRadius: '10px',
+    textAlign: 'center',
+    boxShadow: '0 2px 10px rgba(0,0,0,0.05)',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '120px'
+  }}>
+    {icon && <span style={{ fontSize: '2em', marginBottom: '10px' }}>{icon}</span>}
+    <h3 style={{ margin: '0 0 8px 0', color: '#555', fontSize: '1.1em' }}>{title}</h3>
+    <p style={{
+      fontSize: '2.8em',
+      fontWeight: 'bold',
+      color: color || '#007bff',
+      margin: '0'
+    }}>
+      {value}{unit}
+    </p>
+  </div>
+);
+
+export default MetricCard;
+
+
+
+import React from 'react';
+
+const TemperatureChart = ({ history, title = 'Temperature History' }) => {
+  // Find max temperature to scale bars
+  const maxTemp = Math.max(...history.map(item => item.temp), 100); // Max 100 for scaling
+
+  return (
+    <div className="section-card" style={{ textAlign: 'center' }}>
+      <h2>{title}</h2>
+      <div style={{
+        display: 'flex',
+        alignItems: 'flex-end',
+        justifyContent: 'space-around',
+        height: '150px',
+        padding: '10px 0',
+        borderBottom: '1px solid #eee',
+        marginBottom: '10px'
+      }}>
+        {history.map((data, index) => (
+          <div key={index} style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            margin: '0 5px',
+            width: `${100 / history.length - 2}%`, // Distribute bars
+            minWidth: '20px', /* Ensure bars are visible on mobile */
+          }}>
+            <div
+              style={{
+                height: `${(data.temp / maxTemp) * 100}%`,
+                width: '80%',
+                backgroundColor: data.temp > 75 ? '#dc3545' : data.temp > 60 ? '#ffc107' : '#28a745',
+                borderRadius: '3px',
+                transition: 'height 0.5s ease-out, background-color 0.5s ease'
+              }}
+            ></div>
+            <span style={{ fontSize: '0.8em', marginTop: '5px', color: '#666' }}>
+              {data.label}
+            </span>
+          </div>
+        ))}
+      </div>
+      <p style={{fontSize: '0.9em', color: '#777'}}>Showing last {history.length} updates</p>
+    </div>
+  );
+};
+
+export default TemperatureChart;
+
+
+
+import React, { useState } from 'react';
+
+const FanControlSlider = ({ onSetFanSpeed, initialSpeed = 1500, minSpeed = 800, maxSpeed = 3000 }) => {
+  const [desiredFanSpeed, setDesiredFanSpeed] = useState(initialSpeed);
+  const [isLoading, setIsLoading] = useState(false);
+  const [message, setMessage] = useState('');
+
+  const handleSliderChange = (event) => {
+    setDesiredFanSpeed(Number(event.target.value));
+  };
+
+  const handleApplyClick = async () => {
+    setIsLoading(true);
+    setMessage('');
+    try {
+      // --- IMPORTANT: This is where you'd make your API call ---
+      // Example:
+      // const response = await fetch('/api/set-fan-speed', {
+      //   method: 'POST',
+      //   headers: { 'Content-Type': 'application/json' },
+      //   body: JSON.stringify({ speed: desiredFanSpeed }),
+      // });
+      // if (!response.ok) {
+      //   throw new Error('Failed to set fan speed');
+      // }
+      // const data = await response.json();
+      // console.log('Fan speed set:', data);
+
+      // Simulate API call delay for demonstration
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      onSetFanSpeed(desiredFanSpeed); // Notify parent component (dashboard)
+      setMessage(`Fan speed command sent: ${desiredFanSpeed} RPM`);
+    } catch (error) {
+      console.error('Error setting fan speed:', error);
+      setMessage(`Error: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="section-card" style={{ textAlign: 'center' }}>
+      <h2>Fan Speed Control</h2>
+      <label htmlFor="fanSpeedRange" style={{ display: 'block', marginBottom: '15px', color: '#555', fontSize: '1.1em' }}>
+        Set Desired Speed: <span style={{fontWeight: 'bold', color: '#007bff'}}>{desiredFanSpeed} RPM</span>
+      </label>
+      <input
+        type="range"
+        id="fanSpeedRange"
+        min={minSpeed}
+        max={maxSpeed}
+        step="100"
+        value={desiredFanSpeed}
+        onChange={handleSliderChange}
+        style={{ width: '90%', marginBottom: '20px', height: '8px', cursor: 'pointer' }}
+      />
+
+      <button
+        onClick={handleApplyClick}
+        disabled={isLoading}
+        style={{
+          width: 'calc(90% - 20px)', /* Adjust for padding/margin */
+          padding: '12px 20px',
+          backgroundColor: isLoading ? '#6c757d' : '#007bff',
+          color: 'white',
+          border: 'none',
+          borderRadius: '6px',
+          fontSize: '1em',
+          cursor: isLoading ? 'not-allowed' : 'pointer',
+          transition: 'background-color 0.3s ease',
+          boxShadow: '0 2px 5px rgba(0,0,0,0.1)'
+        }}
+      >
+        {isLoading ? 'Applying...' : 'Apply Speed'}
+      </button>
+
+      {message && (
+        <p style={{
+          marginTop: '15px',
+          color: message.startsWith('Error') ? '#dc3545' : '#28a745',
+          fontWeight: 'bold',
+          fontSize: '0.9em'
+        }}>
+          {message}
+        </p>
+      )}
+    </div>
+  );
+};
+
+export default FanControlSlider;
+
+
+
+import React, { useState, useEffect } from 'react';
+import MetricCard from './MetricCard';
+import TemperatureChart from './TemperatureChart';
+import FanControlSlider from './FanControlSlider';
+
+function CoolerDashboard() {
+  const [cpuTemp, setCpuTemp] = useState(40);
+  const [fanSpeed, setFanSpeed] = useState(1500); // RPM
+  const [coolerStatus, setCoolerStatus] = useState('Optimal');
+  const [tempHistory, setTempHistory] = useState(
+    Array(10).fill({ temp: 40, label: '' }).map((_, i) => ({ temp: 40 + Math.random() * 5, label: `-${10 - i}m` }))
+  ); // Last 10 simulated minutes
+
+  useEffect(() => {
+    // Simulate fetching real-time data
+    const interval = setInterval(() => {
+      // In a real application, make API calls here:
+      // fetch('/api/cpu-data')
+      //   .then(response => response.json())
+      //   .then(data => {
+      //     setCpuTemp(data.temperature);
+      //     setFanSpeed(data.fanSpeed);
+      //     // Update temp history
+      //     setTempHistory(prev => {
+      //       const newHistory = [...prev.slice(1), { temp: data.temperature, label: 'now' }];
+      //       // Re-label for display
+      //       return newHistory.map((item, index) => ({
+      //         ...item,
+      //         label: index === newHistory.length - 1 ? 'Now' : `-${newHistory.length - 1 - index}m`
+      //       }));
+      //     });
+      //   })
+      //   .catch(error => console.error('Error fetching data:', error));
+
+      // Simulated data logic
+      setCpuTemp(prevTemp => {
+        const fluctuation = (Math.random() - 0.5) * 4; // -2 to 2
+        let newTemp = prevTemp + fluctuation;
+        return Math.round(Math.max(30, Math.min(newTemp, 85)));
+      });
+
+      setFanSpeed(prevSpeed => {
+        const fluctuation = (Math.random() - 0.5) * 100; // -50 to 50
+        let newSpeed = prevSpeed + fluctuation;
+        return Math.round(Math.max(800, Math.min(newSpeed, 3000)));
+      });
+
+      // Update history every 10 seconds for more frequent data points
+      setTempHistory(prev => {
+        const newHistory = [...prev.slice(1), { temp: cpuTemp, label: 'Now' }];
+        return newHistory.map((item, index) => ({
+          ...item,
+          label: index === newHistory.length - 1 ? 'Now' : `-${newHistory.length - 1 - index}m`
+        }));
+      });
+
+    }, 3000); // Update every 3 seconds
+
+    return () => clearInterval(interval);
+  }, [cpuTemp]); // Dependency on cpuTemp to update history properly
+
+  useEffect(() => {
+    // Determine cooler status based on current data
+    if (cpuTemp > 75) {
+      setCoolerStatus('Critical');
+    } else if (cpuTemp > 65 || fanSpeed < 1000) {
+      setCoolerStatus('Warning');
+    } else if (cpuTemp > 50) {
+      setCoolerStatus('Running');
+    } else {
+      setCoolerStatus('Optimal');
+    }
+  }, [cpuTemp, fanSpeed]); // Re-evaluate status when temp or fan speed changes
+
+  const getTempColor = (temp) => {
+    if (temp > 75) return '#dc3545'; // Red
+    if (temp > 65) return '#ffc107'; // Yellow
+    if (temp > 50) return '#fd7e14'; // Orange
+    return '#28a745'; // Green
+  };
+
+  const getFanSpeedColor = (speed) => {
+    if (speed < 1000) return '#dc3545';
+    if (speed < 1500) return '#ffc107';
+    return '#28a745';
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'Optimal': return '#28a745';
+      case 'Running': return '#007bff';
+      case 'Warning': return '#ffc107';
+      case 'Critical': return '#dc3545';
+      default: return '#6c757d';
+    }
+  };
+
+  const handleSetFanSpeed = (newSpeed) => {
+    // This function will be called by FanControlSlider
+    // In a real app, you might re-fetch current data or just update the UI optimistically
+    console.log(`Command to set fan speed to ${newSpeed} RPM`);
+    // For simulation, we'll just update the displayed fan speed after a delay
+    setTimeout(() => setFanSpeed(newSpeed), 1600); // Match slider's apply delay
+  };
+
+
+  return (
+    <div className="app-container">
+      <h1>CPU Cooler Monitor</h1>
+
+      <div className="dashboard-grid">
+        <MetricCard
+          title="CPU Temperature"
+          value={cpuTemp}
+          unit="°C"
+          color={getTempColor(cpuTemp)}
+          icon="🌡️"
+        />
+        <MetricCard
+          title="Fan Speed"
+          value={fanSpeed}
+          unit=" RPM"
+          color={getFanSpeedColor(fanSpeed)}
+          icon="💨"
+        />
+        <MetricCard
+          title="Cooler Status"
+          value={coolerStatus}
+          unit=""
+          color={getStatusColor(coolerStatus)}
+          icon="✨"
+        />
+      </div>
+
+      <TemperatureChart history={tempHistory} />
+
+      <FanControlSlider initialSpeed={fanSpeed} onSetFanSpeed={handleSetFanSpeed} />
+
+      <div className="section-card" style={{ marginTop: '20px' }}>
+        <h2>Recommendations</h2>
+        {cpuTemp > 75 && (
+          <p style={{ color: '#dc3545', fontWeight: 'bold' }}>
+            <span role="img" aria-label="alert">🚨</span> Critical: Extreme temperature detected! Immediate action required.
+          </p>
+        )}
+        {cpuTemp > 65 && cpuTemp <= 75 && (
+          <p style={{ color: '#ffc107' }}>
+            <span role="img" aria-label="warning">⚠️</span> High temperature. Check for dust buildup and ensure proper airflow.
+          </p>
+        )}
+        {fanSpeed < 1000 && (
+          <p style={{ color: '#dc3545', fontWeight: 'bold' }}>
+            <span role="img" aria-label="alert">❗</span> Fan speed is very low. Fan may be malfunctioning or obstructed.
+          </p>
+        )}
+        {coolerStatus === 'Optimal' && (
+          <p style={{ color: '#28a745' }}>
+            <span role="img" aria-label="check">✅</span> System is running optimally.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default CoolerDashboard;
+
+
+
+import React from 'react';
+import CoolerDashboard from './components/CoolerDashboard';
+import './index.css'; // Import the global CSS
+
+function App() {
+  return (
+    <div className="App">
+      <CoolerDashboard />
+    </div>
+  );
+}
+
+export default App;
+
+
+
+npx create-react-app my-cooler-monitor
+cd my-cooler-monitor
+# OR
+npm create vite@latest my-cooler-monitor --template react
+cd my-cooler-monitor
+npm install
+
+
+
+npm start
+# OR
+npm run dev
+
