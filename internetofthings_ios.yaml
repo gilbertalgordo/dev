@@ -1,0 +1,1376 @@
+import Foundation
+import Network // For more advanced network control, like VPN-like functionality
+
+// --- 1. Secure Network Communication (Example with URLSession for HTTPS) ---
+
+class IOTSecureCommunicator {
+    private let session: URLSession
+
+    init() {
+        // Configure URLSession for robust security
+        let configuration = URLSessionConfiguration.default
+        // Enforce TLS 1.2 or higher for all connections
+        configuration.tlsMinimumSupportedProtocol = .tlsProtocol12
+        session = URLSession(configuration: configuration)
+    }
+
+    func sendDataToDevice(url: URL, data: Data, completion: @escaping (Result<Data, Error>) -> Void) {
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = data
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        // Add authentication token if required (e.g., JWT)
+        // request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
+
+        let task = session.dataTask(with: request) { data, response, error in
+            if let error = error {
+                completion(.failure(error))
+                return
+            }
+
+            guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+                completion(.failure(NSError(domain: "IOTSecureCommunicator", code: statusCode, userInfo: [NSLocalizedDescriptionKey: "HTTP Error"])))
+                return
+            }
+
+            if let data = data {
+                completion(.success(data))
+            } else {
+                completion(.failure(NSError(domain: "IOTSecureCommunicator", code: 0, userInfo: [NSLocalizedDescriptionKey: "No data received"])))
+            }
+        }
+        task.resume()
+    }
+
+    // --- 2. Example for MQTT with MQTTS (MQTT over TLS/SSL) ---
+    // (Requires an MQTT client library, e.g., CocoaMQTT, Mosquitto.swift)
+    /*
+    import CocoaMQTT
+
+    private var mqttClient: CocoaMQTT!
+
+    func connectMQTT(host: String, port: UInt16, clientId: String, username: String?, password: String?) {
+        mqttClient = CocoaMQTT(clientID: clientId, host: host, port: port)
+        mqttClient.username = username
+        mqttClient.password = password
+        mqttClient.keepAlive = 60
+        mqttClient.allowUntrustCACertificate = false // Crucial for security: do NOT allow untrusted certificates in production!
+        mqttClient.mqtt5 = false // Or true if using MQTT 5
+
+        // Use TLS for secure connection
+        mqttClient.enableTLS = true
+        // If you have a specific trusted certificate, you'd load it here
+        // mqttClient.certs = [Data(contentsOf: URL(fileURLWithPath: "path/to/your/cert.pem"))]
+
+        mqttClient.connect()
+
+        mqttClient.didConnectAck = { mqtt, ack in
+            if ack == .accept {
+                print("MQTT Connected")
+                // Subscribe to topics
+                mqtt.subscribe("iot/device/data", qos: .qos1)
+            }
+        }
+
+        mqttClient.didPublishMessage = { mqtt, message, id in
+            print("Message published: \(message.string ?? "")")
+        }
+
+        mqttClient.didReadMessage = { mqtt, message, id in
+            print("Message received: \(message.string ?? "") on topic \(message.topic)")
+            // Process IoT data securely
+        }
+    }
+
+    func publishMQTTData(topic: String, message: String) {
+        mqttClient.publish(topic, withString: message, qos: .qos1)
+    }
+    */
+}
+
+// --- 3. Secure Credential Storage (iOS KeyChain) ---
+import Security
+
+class KeychainManager {
+    static let service = "com.yourcompany.YourIOTApp"
+
+    static func save(key: String, data: Data) -> OSStatus {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key,
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly // Highly secure access
+        ]
+        SecItemDelete(query as CFDictionary) // Delete existing item if any
+        return SecItemAdd(query as CFDictionary, nil)
+    }
+
+    static func load(key: String) -> Data? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key,
+            kSecReturnData as String: kCFBooleanTrue!,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        guard status == errSecSuccess else { return nil }
+        return item as? Data
+    }
+
+    static func delete(key: String) -> OSStatus {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key
+        ]
+        return SecItemDelete(query as CFDictionary)
+    }
+}
+
+
+
+import UIKit
+import Foundation
+
+class AntiSpywareMonitor {
+
+    // --- 1. Jailbreak Detection (Basic Examples) ---
+    // Note: Jailbreak detection is a cat-and-mouse game. Sophisticated jailbreaks
+    // can evade simple checks. Combine multiple techniques.
+    static func isJailbroken() -> Bool {
+        // Check for common jailbreak files
+        let fileManager = FileManager.default
+        let jailbreakFiles = [
+            "/Applications/Cydia.app",
+            "/Library/MobileSubstrate/MobileSubstrate.dylib",
+            "/bin/bash",
+            "/usr/sbin/sshd",
+            "/etc/apt",
+            "/private/var/lib/apt/",
+            "/private/var/mobile/Library/APT"
+        ]
+        for path in jailbreakFiles {
+            if fileManager.fileExists(atPath: path) {
+                return true
+            }
+        }
+
+        // Check for common writeable paths
+        let writeablePaths = [
+            "/private/jailbreak.txt",
+            "/private/test.txt"
+        ]
+        for path in writeablePaths {
+            do {
+                try "jailbreak".write(toFile: path, atomically: true, encoding: .utf8)
+                try fileManager.removeItem(atPath: path)
+                return true
+            } catch {
+                // Not writable, continue
+            }
+        }
+
+        // Check if certain system functions behave unusually
+        // This is more complex and less reliable without deeper system hooks.
+
+        return false
+    }
+
+    // --- 2. Debugger Detection (Basic) ---
+    static func isDebuggerAttached() -> Bool {
+        var info = kinfo_proc()
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+        var size = MemoryLayout.stride(ofValue: info)
+        let sysctlResult = sysctl(&mib, UInt32(mib.count), &info, &size, nil, 0)
+        guard sysctlResult == 0 else { return false }
+        return (info.kp_proc.p_flag & P_TRACED) != 0
+    }
+
+    // --- 3. App Integrity Check (Simplified - more complex in production) ---
+    // In a real scenario, you'd calculate and verify a hash of your app bundle
+    // against a known good hash stored securely (e.g., on a backend).
+    static func checkAppIntegrity() -> Bool {
+        guard let bundlePath = Bundle.main.bundlePath.cString(using: .utf8) else { return false }
+        let handle = dlopen(bundlePath, RTLD_LAZY)
+        guard let sym = dlsym(handle, "___DATA_CONST:__DATA:__restrict") else {
+            dlclose(handle)
+            return false // Could indicate tampering if this symbol is missing
+        }
+        _ = sym // Use the symbol to avoid warnings
+        dlclose(handle)
+        return true
+    }
+
+    // --- 4. Monitor for Suspicious IoT Device Behavior ---
+    // This is highly specific to your IoT device and data.
+    // Example: Detect unusually high data transmission, unauthorized commands,
+    // or sudden changes in device configuration.
+    func monitorIOTDeviceBehavior(deviceData: [String: Any]) {
+        // Implement your anomaly detection logic here
+        // For example:
+        if let sensorReadings = deviceData["temperature"] as? Double, sensorReadings > 100.0 {
+            print("Warning: Abnormally high temperature detected from IoT device!")
+            // Trigger an alert or remedial action
+        }
+        // ... more sophisticated checks ...
+    }
+
+    // Call these checks at appropriate times (e.g., app launch, before critical operations)
+    func performSecurityChecks() {
+        if AntiSpywareMonitor.isJailbroken() {
+            print("WARNING: Device is jailbroken. Security risks detected!")
+            // Consider disabling sensitive features or exiting the app.
+        }
+        if AntiSpywareMonitor.isDebuggerAttached() {
+            print("WARNING: Debugger attached. Potential reverse engineering attempt.")
+            // Implement anti-debugging techniques if critical.
+        }
+        if !AntiSpywareMonitor.checkAppIntegrity() {
+            print("WARNING: App integrity compromised!")
+            // React accordingly.
+        }
+    }
+}
+
+
+
+[
+    {
+        "action": {
+            "type": "block"
+        },
+        "trigger": {
+            "url-filter": ".*doubleclick\\.net.*"
+        }
+    },
+    {
+        "action": {
+            "type": "block"
+        },
+        "trigger": {
+            "url-filter": ".*googlesyndication\\.com.*"
+        }
+    },
+    {
+        "action": {
+            "type": "block"
+        },
+        "trigger": {
+            "url-filter": ".*adservice\\.google\\.com.*"
+        }
+    },
+    {
+        "action": {
+            "type": "block"
+        },
+        "trigger": {
+            "url-filter": ".*ad\\.network\\.com.*" // Example of another ad network
+        }
+    },
+    {
+        "action": {
+            "type": "css-display-none",
+            "selector": ".ad, .advertisement, #banner-ad" // Common ad class/ID selectors
+        },
+        "trigger": {
+            "url-filter": ".*" // Apply to all URLs for CSS hiding
+        }
+    }
+]
+
+
+
+import MobileCoreServices
+import SafariServices
+
+class ActionRequestHandler: SFSafariContentBlockerExtensionHandler {
+
+    override func beginRequest(with context: NSExtensionContext) {
+        let attachment = NSItemProvider(contentsOf: Bundle.main.url(forResource: "blockerList", withExtension: "json"))!
+
+        let item = NSExtensionItem()
+        item.attachments = [attachment]
+
+        context.completeRequest(returningItems: [item], completionHandler: nil)
+    }
+
+}
+
+
+
+import UIKit
+import WebKit
+
+class WebContentViewController: UIViewController, WKNavigationDelegate {
+
+    var webView: WKWebView!
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        let preferences = WKPreferences()
+        preferences.javaScriptCanOpenWindowsAutomatically = false
+
+        let configuration = WKWebViewConfiguration()
+        configuration.preferences = preferences
+
+        // Add a content rule list for in-app ad blocking
+        WKContentRuleListStore.default()?.compileContentRuleList(forIdentifier: "AdBlockRules", encodedContentRuleList: adBlockRulesJSONString) { (contentRuleList, error) in
+            if let error = error {
+                print("Error compiling content rule list: \(error.localizedDescription)")
+                return
+            }
+            if let contentRuleList = contentRuleList {
+                configuration.userContentController.add(contentRuleList)
+            }
+        }
+
+        webView = WKWebView(frame: view.bounds, configuration: configuration)
+        webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        webView.navigationDelegate = self
+        view.addSubview(webView)
+
+        if let url = URL(string: "https://www.example.com") { // Your IoT related web page
+            let request = URLRequest(url: url)
+            webView.load(request)
+        }
+    }
+
+    // The ad blocking rules as a JSON string (same format as blockerList.json)
+    // You might load this from a file or a remote server.
+    private let adBlockRulesJSONString = """
+    [
+        {
+            "action": {
+                "type": "block"
+            },
+            "trigger": {
+                "url-filter": ".*doubleclick\\.net.*"
+            }
+        },
+        {
+            "action": {
+                "type": "css-display-none",
+                "selector": ".ad, .advertisement, #banner-ad"
+            },
+            "trigger": {
+                "url-filter": ".*"
+            }
+        }
+    ]
+    """
+
+    // Optional: Inject JavaScript to block specific elements or scripts
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        let script = """
+        (function() {
+            // Remove common ad script elements
+            var adScripts = document.querySelectorAll('script[src*="adservice"], script[src*="googlesyndication"]');
+            adScripts.forEach(function(script) {
+                script.remove();
+            });
+
+            // Hide elements with common ad classes/ids (redundant if using WKContentRuleList with CSS, but good for robust blocking)
+            var adElements = document.querySelectorAll('.ad, .advertisement, #banner-ad, [id*="ad_"], [class*="ad-"]');
+            adElements.forEach(function(el) {
+                el.style.display = 'none';
+            });
+        })();
+        """
+        webView.evaluateJavaScript(script) { (result, error) in
+            if let error = error {
+                print("Error injecting ad-blocking script: \(error.localizedDescription)")
+            }
+        }
+    }
+}
+
+
+
+// services/KeychainService.ts
+import * as Keychain from 'react-native-keychain';
+
+export const saveIoTToken = async (deviceId: string, token: string) => {
+  try {
+    await Keychain.setGenericPassword(deviceId, token, {
+      service: 'com.yourcompany.iotapp.tokens',
+      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY, // Highest security
+    });
+    console.log('IoT token saved successfully!');
+  } catch (error) {
+    console.error('Error saving IoT token:', error);
+  }
+};
+
+export const getIoTToken = async (deviceId: string) => {
+  try {
+    const credentials = await Keychain.getGenericPassword({
+      service: 'com.yourcompany.iotapp.tokens',
+      // If you stored it with specific attributes, you might need them here too
+    });
+    if (credentials) {
+      console.log('IoT token retrieved successfully:', credentials.password);
+      return credentials.password;
+    } else {
+      console.log('No IoT token found for device:', deviceId);
+      return null;
+    }
+  } catch (error) {
+    console.error('Error retrieving IoT token:', error);
+    return null;
+  }
+};
+
+export const deleteIoTToken = async (deviceId: string) => {
+  try {
+    await Keychain.resetGenericPassword({
+      service: 'com.yourcompany.iotapp.tokens',
+    });
+    console.log('IoT token deleted successfully!');
+  } catch (error) {
+    console.error('Error deleting IoT token:', error);
+  }
+};
+
+
+
+// services/IoTAPIService.ts
+import axios from 'axios';
+import { getIoTToken } from './KeychainService';
+
+const API_BASE_URL = 'https://your-secure-iot-backend.com/api'; // Always HTTPS!
+
+const iotApiClient = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 10000, // 10 seconds
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Request interceptor to add authentication token
+iotApiClient.interceptors.request.use(
+  async (config) => {
+    // Assuming a single primary IoT token, or you'd pass deviceId
+    const authToken = await getIoTToken('main_iot_auth'); // Or specific device ID
+    if (authToken) {
+      config.headers.Authorization = `Bearer ${authToken}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+export const getDeviceStatus = async (deviceId: string) => {
+  try {
+    const response = await iotApiClient.get(`/devices/${deviceId}/status`);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching device status:', error);
+    throw error; // Re-throw for UI to handle
+  }
+};
+
+export const sendDeviceCommand = async (deviceId: string, command: any) => {
+  try {
+    const response = await iotApiClient.post(`/devices/${deviceId}/command`, command);
+    return response.data;
+  } catch (error) {
+    console.error('Error sending device command:', error);
+    throw error;
+  }
+};
+
+
+
+// services/MqttService.ts
+// (Install a suitable MQTT library first, e.g., react-native-mqtt)
+
+// import Mqtt from 'react-native-mqtt'; // Example import
+
+// export const connectMqtt = (host: string, port: number, clientId: string, options?: any) => {
+//   // Configuration for TLS/SSL
+//   const mqttOptions = {
+//     uri: `wss://${host}:${port}/mqtt`, // Use wss for secure WebSocket MQTT
+//     clientId: clientId,
+//     clean: true, // Clean session on connect
+//     // ... other options like username, password, keepalive
+//     ...options,
+//   };
+
+//   return new Promise((resolve, reject) => {
+//     Mqtt.createClient(mqttOptions)
+//       .then(client => {
+//         client.on('connect', () => {
+//           console.log('MQTT Connected');
+//           resolve(client);
+//         });
+
+//         client.on('message', (topic: string, message: string) => {
+//           console.log(`Received message on topic ${topic}: ${message}`);
+//           // Process incoming IoT data
+//         });
+
+//         client.on('error', (msg: string) => {
+//           console.error('MQTT Error:', msg);
+//           reject(new Error(msg));
+//         });
+
+//         client.on('closed', (msg: string) => {
+//           console.log('MQTT Closed:', msg);
+//         });
+
+//         client.connect();
+//       })
+//       .catch(err => {
+//         console.error('Failed to create MQTT client:', err);
+//         reject(err);
+//       });
+//   });
+// };
+
+// export const publishMqttMessage = (client: any, topic: string, message: string, qos: number = 0) => {
+//   if (client) {
+//     client.publish(topic, message, qos, false); // qos, retain
+//   } else {
+//     console.warn('MQTT client not connected.');
+//   }
+// };
+
+
+
+// utils/security.ts
+import { Platform, NativeModules } from 'react-native';
+
+// Simple checks (can be bypassed by sophisticated jailbreaks)
+export const isJailbroken = () => {
+  if (Platform.OS === 'ios') {
+    // Check for common jailbreak file paths (via react-native-fs or similar if needed)
+    // This is often done by attempting to write to forbidden paths or checking specific bundle IDs.
+    // However, direct file system access for arbitrary paths is limited by iOS sandbox.
+
+    // A more reliable way for RN is to use a native module.
+    // Example: Check if the app can write outside its sandbox (often indicative of jailbreak)
+    // This check is a simplification; a native module is better.
+    try {
+        const testPath = '/private/test_jailbreak.txt';
+        // This won't work in RN directly due to sandboxing for arbitrary paths.
+        // Instead, a native module checks for specific files or writable areas.
+        return NativeModules.JailbreakDetector?.isJailbroken() || false;
+    } catch (e) {
+        // Error could mean the check failed or it's not jailbroken
+        return false;
+    }
+  }
+  return false; // Not applicable for other platforms or if check fails
+};
+
+// --- Native Module for More Robust Jailbreak Detection ---
+// File: ios/YourApp/JailbreakDetector.h
+// #import <React/RCTBridgeModule.h>
+// @interface JailbreakDetector : NSObject <RCTBridgeModule>
+// @end
+
+// File: ios/YourApp/JailbreakDetector.m
+// #import "JailbreakDetector.h"
+// #import <sys/stat.h> // For stat()
+
+// @implementation JailbreakDetector
+// RCT_EXPORT_MODULE();
+
+// RCT_EXPORT_METHOD(isJailbroken:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+//     BOOL isJB = NO;
+//     // --- Check 1: Existence of common jailbreak files/apps ---
+//     NSArray *jailbreakPaths = @[
+//         @"/Applications/Cydia.app",
+//         @"/Library/MobileSubstrate/MobileSubstrate.dylib",
+//         @"/bin/bash",
+//         @"/usr/sbin/sshd",
+//         @"/etc/apt",
+//         @"/private/var/lib/apt/",
+//         @"/private/var/mobile/Library/APT"
+//     ];
+//     for (NSString *path in jailbreakPaths) {
+//         if ([[NSFileManager defaultManager] fileExistsAtPath:path]) {
+//             isJB = YES;
+//             break;
+//         }
+//     }
+
+//     // --- Check 2: Can write to sensitive areas (e.g., /private) ---
+//     if (!isJB) {
+//         NSError *error;
+//         NSString *testFilePath = @"/private/test_jb.txt";
+//         [@"test" writeToFile:testFilePath atomically:YES encoding:NSUTF8StringEncoding error:&error];
+//         if (!error) {
+//             [[NSFileManager defaultManager] removeItemAtPath:testFilePath error:nil];
+//             isJB = YES;
+//         }
+//     }
+
+//     // --- Check 3: Check for symbolic links outside sandbox ---
+//     // This is more complex and involves checking symlinks in /var/lib/apt or similar
+
+//     // --- Check 4: Can fork processes (more advanced, less common for simple checks) ---
+//     // This involves trying to fork, which is restricted on non-jailbroken devices.
+
+//     resolve(@(isJB));
+// }
+
+// @end
+
+
+
+// components/SecurityStatus.tsx
+import React, { useEffect, useState } from 'react';
+import { View, Text, Alert } from 'react-native';
+import { isJailbroken } from '../utils/security'; // Or import from NativeModules directly
+
+const SecurityStatus: React.FC = () => {
+  const [isDeviceJailbroken, setIsDeviceJailbroken] = useState(false);
+
+  useEffect(() => {
+    const checkSecurity = async () => {
+      // If using native module with promise
+      // const jbStatus = await NativeModules.JailbreakDetector.isJailbroken();
+      // setIsDeviceJailbroken(jbStatus);
+      const jbStatus = isJailbroken(); // If using simple JS check
+      setIsDeviceJailbroken(jbStatus);
+
+      if (jbStatus) {
+        Alert.alert(
+          'Security Alert',
+          'This device appears to be jailbroken. Your security may be compromised. Some features may be limited.',
+          [{ text: 'OK' }]
+        );
+      }
+    };
+    checkSecurity();
+  }, []);
+
+  return (
+    <View>
+      <Text style={{ color: isDeviceJailbroken ? 'red' : 'green' }}>
+        Device Security Status: {isDeviceJailbroken ? 'Compromised (Jailbroken)' : 'Secure'}
+      </Text>
+      {/* Optionally, display security logs or privacy settings */}
+    </View>
+  );
+};
+
+export default SecurityStatus;
+
+
+
+
+// utils/IoTAnomalyDetector.ts
+export const detectIoTDataAnomaly = (deviceData: any): string[] => {
+  const anomalies: string[] = [];
+
+  if (deviceData && typeof deviceData === 'object') {
+    // Example: Temperature anomaly
+    if (deviceData.temperature && deviceData.temperature > 80) {
+      anomalies.push('High temperature detected!');
+    }
+
+    // Example: Unusual power consumption
+    if (deviceData.powerConsumption && deviceData.powerConsumption > 500) {
+      anomalies.push('Abnormal power consumption!');
+    }
+
+    // Example: Unauthorized access attempt count (if device reports it)
+    if (deviceData.failedLoginAttempts && deviceData.failedLoginAttempts > 3) {
+        anomalies.push('Multiple failed login attempts on device!');
+    }
+
+    // More complex: Check for unusual command sequences, data frequency, etc.
+    // This might involve comparing current data to historical averages or predefined thresholds.
+  }
+  return anomalies;
+};
+
+// Usage in an IoT data display component
+// const anomalies = detectIoTDataAnomaly(currentDeviceData);
+// {anomalies.length > 0 && (
+//   <View>
+//     {anomalies.map((anomaly, index) => (
+//       <Text key={index} style={{ color: 'orange' }}>{anomaly}</Text>
+//     ))}
+//   </View>
+// )}
+
+
+
+// components/BlockedWebView.tsx
+import React from 'react';
+import { View, StyleSheet } from 'react-native';
+import { WebView } from 'react-native-webview';
+
+// Define your content blocker rules in JSON string format
+// This should match the format for iOS Safari Content Blockers
+const adBlockRules = `
+[
+    {
+        "action": {
+            "type": "block"
+        },
+        "trigger": {
+            "url-filter": ".*googlesyndication\\.com.*",
+            "load-type": ["third-party"]
+        }
+    },
+    {
+        "action": {
+            "type": "block"
+        },
+        "trigger": {
+            "url-filter": ".*doubleclick\\.net.*"
+        }
+    },
+    {
+        "action": {
+            "type": "css-display-none",
+            "selector": ".ad, .advertisement, [id*='ad-banner'], [class*='ad-container']"
+        },
+        "trigger": {
+            "url-filter": ".*"
+        }
+    }
+]
+`;
+
+const BlockedWebView: React.FC<{ uri: string }> = ({ uri }) => {
+  // JavaScript to inject after page load for additional hiding or script removal
+  // This is a fallback/enhancement to WKContentRuleList
+  const injectedJavaScript = `
+    (function() {
+        var style = document.createElement('style');
+        style.innerHTML = '.ad, .advertisement, [id*="ad-"], [class*="ad-"] { display: none !important; }';
+        document.head.appendChild(style);
+
+        // Remove common ad script tags
+        document.querySelectorAll('script[src*="adservice"], script[src*="googlesyndication"]').forEach(function(script) {
+            script.remove();
+        });
+    })();
+    true; // Return true to indicate the script executed
+  `;
+
+  return (
+    <View style={styles.container}>
+      <WebView
+        source={{ uri: uri }}
+        style={styles.webview}
+        // Apply content rule list for iOS only
+        {...(Platform.OS === 'ios' && {
+          // This requires a custom native module to expose WKContentRuleList to RN
+          // Alternatively, some WebView libraries might offer a prop for this,
+          // but a direct WKContentRuleList injection prop isn't standard in react-native-webview.
+          // You'd typically use `injectJavaScript` for broader blocking, or build a native module.
+          // For simplicity here, we'll focus on `injectedJavaScript` and mention native module for `WKContentRuleList`.
+        })}
+        injectedJavaScript={injectedJavaScript}
+        javaScriptEnabled={true}
+        domStorageEnabled={true}
+        startInLoadingState={true}
+        scalesPageToFit={true}
+        // Add more WebView props as needed
+      />
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  webview: {
+    flex: 1,
+  },
+});
+
+export default BlockedWebView;
+
+
+
+
+// ContentBlockerModule.h
+#import <React/RCTBridgeModule.h>
+#import <WebKit/WebKit.h> // Import WebKit
+
+@interface ContentBlockerModule : NSObject <RCTBridgeModule>
+@end
+
+// ContentBlockerModule.m
+#import "ContentBlockerModule.h"
+
+@implementation ContentBlockerModule
+
+RCT_EXPORT_MODULE();
+
+// This method compiles a content rule list and returns its ID
+RCT_EXPORT_METHOD(compileContentRuleList:(NSString *)identifier
+                  jsonRules:(NSString *)jsonRules
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+    if (@available(iOS 11.0, *)) { // WKContentRuleList is available from iOS 11
+        [WKContentRuleListStore.defaultStore compileContentRuleListForIdentifier:identifier
+                                                             encodedContentRuleList:jsonRules
+                                                                  completionHandler:^(WKContentRuleList * _Nullable contentRuleList, NSError * _Nullable error) {
+            if (error) {
+                reject(@"content_rule_list_error", error.localizedDescription, error);
+            } else {
+                // You cannot directly return the WKContentRuleList object to JS.
+                // Instead, you'd associate the identifier with the rule list on the native side
+                // and then tell your WKWebView to use that identifier.
+                // For simplicity here, just resolve with success.
+                resolve(@(YES));
+            }
+        }];
+    } else {
+        reject(@"unsupported_os", @"WKContentRuleList requires iOS 11 or later.", nil);
+    }
+}
+
+// You'd also need a way to apply this rule list to a specific WKWebView instance,
+// which is tricky with `react-native-webview` as it creates and manages its own WKWebView.
+// A more involved solution might involve creating your own custom WebView native component
+// that uses WKContentRuleList internally.
+
+@end
+
+
+
+// components/AdBlockSettings.tsx
+import React from 'react';
+import { View, Text, Button, Linking, Platform, Alert } from 'react-native';
+
+const AdBlockSettings: React.FC = () => {
+  const openSafariSettings = () => {
+    if (Platform.OS === 'ios') {
+      // Direct link to Safari extensions settings (may vary by iOS version/deep link support)
+      // This is not a guaranteed deep link and might just open general Settings.
+      // A better approach is to simply guide the user.
+      Alert.alert(
+        'Enable Safari Content Blocker',
+        'To block ads in Safari, please go to your iPhone/iPad Settings > Safari > Extensions, and enable "YourAppAdBlocker".',
+        [{ text: 'OK' }]
+      );
+      // You can try to link directly to Safari settings, but it's not always reliable
+      // Linking.openURL('App-Prefs:SAFARI&path=ContentBlockers'); // This might not work on all iOS versions
+    } else {
+      Alert.alert('Not Applicable', 'Safari Content Blocking is an iOS-specific feature.');
+    }
+  };
+
+  return (
+    <View style={{ padding: 20 }}>
+      <Text style={{ fontSize: 18, marginBottom: 10 }}>Ad Blocking Options</Text>
+      <Text style={{ marginBottom: 20 }}>
+        Enable our content blocker to block ads when Browse in Safari on your iOS device.
+      </Text>
+      <Button title="Go to iOS Safari Settings" onPress={openSafariSettings} />
+
+      <Text style={{ marginTop: 30, fontSize: 16 }}>
+        Note: Ads within this app's own web views (if any) are automatically blocked.
+      </Text>
+    </View>
+  );
+};
+
+export default AdBlockSettings;
+
+
+
+// App.tsx
+import React from 'react';
+import { SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import SecurityStatus from './components/SecurityStatus';
+import AdBlockSettings from './components/AdBlockSettings';
+import BlockedWebView from './components/BlockedWebView';
+import DeviceControlPanel from './components/DeviceControlPanel'; // You'd create this
+
+const App = () => {
+  return (
+    <SafeAreaView style={styles.container}>
+      <ScrollView contentContainerStyle={styles.scrollViewContent}>
+        <Text style={styles.title}>Advanced IoT Dashboard</Text>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Device Security</Text>
+          <SecurityStatus />
+          {/* Implement a button/section to show security logs from IoT devices */}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>IoT Device Control</Text>
+          <DeviceControlPanel />
+          {/* This component would use IoTAPIService/MqttService to interact with devices */}
+          {/* Example: Buttons to toggle lights, read sensor data, etc. */}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Ad & Privacy Settings</Text>
+          <AdBlockSettings />
+          {/* Link to Privacy Policy */}
+          <Text style={{marginTop: 10}}>
+            Review our <Text style={{color: 'blue'}} onPress={() => console.log('Open Privacy Policy')}>Privacy Policy</Text>
+          </Text>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>IoT Web Content (Ad-Blocked)</Text>
+          <Text style={{marginBottom: 10}}>
+            This web view demonstrates in-app ad blocking for external IoT dashboards or documentation.
+          </Text>
+          <View style={styles.webViewContainer}>
+            <BlockedWebView uri="https://www.nytimes.com/" />
+            {/* Replace with a relevant IoT-related URL that might contain ads */}
+          </View>
+        </View>
+
+      </ScrollView>
+    </SafeAreaView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  scrollViewContent: {
+    padding: 20,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginBottom: 30,
+    textAlign: 'center',
+    color: '#333',
+  },
+  section: {
+    backgroundColor: '#ffffff',
+    borderRadius: 10,
+    padding: 15,
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  sectionTitle: {
+    fontSize: 22,
+    fontWeight: '600',
+    marginBottom: 15,
+    color: '#555',
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+    paddingBottom: 10,
+  },
+  webViewContainer: {
+    height: 300, // Adjust height as needed
+    width: '100%',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+});
+
+export default App;
+
+
+
+# python_backend/mqtt_broker_config.py (Conceptual - Mosquitto config)
+# This is a configuration for an MQTT broker like Mosquitto, not Python code itself.
+# Ensure TLS is enabled, and client certificates/username/password authentication is used.
+#
+# listener 8883
+# cafile /etc/mosquitto/certs/ca.crt
+# certfile /etc/mosquitto/certs/server.crt
+# keyfile /etc/mosquitto/certs/server.key
+# require_certificate true # Clients must present a valid certificate
+# tls_version tlsv1.2
+# password_file /etc/mosquitto/pwfile # Username/password authentication
+
+# --- Python MQTT Client Example (for Backend or IoT Device) ---
+import paho.mqtt.client as mqtt
+import ssl
+import json
+
+def on_connect(client, userdata, flags, rc):
+    print(f"Connected with result code {rc}")
+    client.subscribe("iot/device/data/#") # Subscribe to all device data
+    client.subscribe("iot/device/commands/+") # Subscribe to specific commands
+
+def on_message(client, userdata, msg):
+    print(f"Received message: {msg.payload.decode()} on topic {msg.topic}")
+    try:
+        data = json.loads(msg.payload.decode())
+        # Process IoT data, store in database, apply anti-spyware checks
+        # For example, if data is sensor readings, pass to anomaly detection
+        # detect_anomaly(data)
+    except json.JSONDecodeError:
+        print("Invalid JSON received.")
+
+def connect_mqtt_client(host, port, username, password, ca_certs, client_cert=None, client_key=None):
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1) # Or VERSION2
+    client.on_connect = on_connect
+    client.on_message = on_message
+
+    if username and password:
+        client.username_pw_set(username, password)
+
+    # Configure TLS/SSL
+    client.tls_set(
+        ca_certs=ca_certs,
+        certfile=client_cert,   # If using client certificates
+        keyfile=client_key,     # If using client certificates
+        tls_version=ssl.PROTOCOL_TLSv1_2 # Enforce TLS 1.2
+    )
+
+    client.connect(host, port, 60)
+    return client
+
+if __name__ == "__main__":
+    # Example usage for a backend service or a more powerful IoT device
+    # Replace with your actual connection details and certificate paths
+    # You'd generate these certificates using OpenSSL for your infrastructure.
+    MQTT_HOST = "your_mqtt_broker.com"
+    MQTT_PORT = 8883 # Standard MQTTS port
+    MQTT_USERNAME = "backend_user"
+    MQTT_PASSWORD = "super_secure_password"
+    CA_CERTS_PATH = "path/to/ca.crt" # Root CA certificate
+
+    # Optional: Client certificate for mutual TLS
+    CLIENT_CERT_PATH = "path/to/client.crt"
+    CLIENT_KEY_PATH = "path/to/client.key"
+
+    mqtt_client = connect_mqtt_client(
+        MQTT_HOST, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD,
+        ca_certs=CA_CERTS_PATH,
+        client_cert=CLIENT_CERT_PATH,
+        client_key=CLIENT_KEY_PATH
+    )
+    mqtt_client.loop_forever() # Keep the client running
+
+
+
+# python_backend/app.py (Flask Example)
+from flask import Flask, request, jsonify
+from functools import wraps
+import jwt # PyJWT for token authentication
+import datetime
+import os
+import sqlite3 # For simple demonstration, use a proper DB in production
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'your_super_secret_jwt_key') # Use strong, env-var based key
+
+# --- Authentication Decorator ---
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = None
+        if 'Authorization' in request.headers:
+            token = request.headers['Authorization'].split(" ")[1] # Bearer <token>
+
+        if not token:
+            return jsonify({'message': 'Token is missing!'}), 401
+
+        try:
+            data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
+            # In a real app, retrieve user from database based on data['user_id']
+            current_user = {'id': data['user_id'], 'username': data['username']}
+        except jwt.ExpiredSignatureError:
+            return jsonify({'message': 'Token has expired!'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'message': 'Token is invalid!'}), 401
+
+        return f(current_user, *args, **kwargs)
+    return decorated
+
+# --- Database Setup (Simple SQLite for demo) ---
+def init_db():
+    conn = sqlite3.connect('iot_data.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS device_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            device_id TEXT NOT NULL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            temperature REAL,
+            humidity REAL,
+            power_consumption REAL,
+            anomaly_detected BOOLEAN DEFAULT FALSE
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+# --- Routes ---
+@app.route('/login', methods=['POST'])
+def login():
+    auth = request.json
+    if not auth or not auth.get('username') or not auth.get('password'):
+        return jsonify({'message': 'Missing credentials!'}), 400
+
+    # In production, check credentials against a secure user database
+    if auth['username'] == 'iot_user' and auth['password'] == 'password123': # NOT for production! Use hashed passwords!
+        token = jwt.encode(
+            {
+                'user_id': 1,
+                'username': auth['username'],
+                'exp': datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=24)
+            },
+            app.config['SECRET_KEY'],
+            algorithm="HS256"
+        )
+        return jsonify({'token': token})
+    return jsonify({'message': 'Invalid credentials!'}), 401
+
+@app.route('/device/<device_id>/data', methods=['POST'])
+@token_required
+def receive_device_data(current_user, device_id):
+    data = request.json
+    if not data:
+        return jsonify({'message': 'No data provided!'}), 400
+
+    # Basic anomaly detection (server-side anti-spyware component)
+    anomaly_detected = False
+    if 'temperature' in data and data['temperature'] > 80:
+        anomaly_detected = True
+        print(f"Anomaly detected for device {device_id}: High temperature!")
+    if 'power_consumption' in data and data['power_consumption'] > 500:
+        anomaly_detected = True
+        print(f"Anomaly detected for device {device_id}: High power consumption!")
+
+    conn = sqlite3.connect('iot_data.db')
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO device_data (device_id, temperature, humidity, power_consumption, anomaly_detected) VALUES (?, ?, ?, ?, ?)",
+        (device_id, data.get('temperature'), data.get('humidity'), data.get('power_consumption'), anomaly_detected)
+    )
+    conn.commit()
+    conn.close()
+
+    return jsonify({'message': 'Data received and processed', 'anomaly_detected': anomaly_detected}), 200
+
+@app.route('/device/<device_id>/status', methods=['GET'])
+@token_required
+def get_device_status(current_user, device_id):
+    conn = sqlite3.connect('iot_data.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM device_data WHERE device_id = ? ORDER BY timestamp DESC LIMIT 1", (device_id,))
+    latest_data = cursor.fetchone()
+    conn.close()
+
+    if latest_data:
+        return jsonify({
+            'device_id': latest_data[1],
+            'timestamp': latest_data[2],
+            'temperature': latest_data[3],
+            'humidity': latest_data[4],
+            'power_consumption': latest_data[5],
+            'anomaly_detected': bool(latest_data[6])
+        })
+    return jsonify({'message': 'Device data not found'}), 404
+
+if __name__ == '__main__':
+    init_db()
+    # For production, use a WSGI server like Gunicorn or uWSGI
+    # and configure HTTPS (e.g., with Nginx proxy and Let's Encrypt)
+    app.run(debug=True, host='0.0.0.0', port=5000)
+
+
+
+# python_backend/anomaly_detector.py
+import pandas as pd
+from sklearn.ensemble import IsolationForest
+import numpy as np
+
+# A simple model for anomaly detection. In a real scenario, you'd train this
+# on historical, normal operating data for each device type.
+# For simplicity, we'll use a fixed model.
+
+class IoTAnomalyDetector:
+    def __init__(self, contamination=0.01):
+        # contamination is the proportion of outliers in the data set.
+        # This should be tuned based on your expected anomaly rate.
+        self.model = IsolationForest(contamination=contamination, random_state=42)
+        self.trained = False
+
+    def train_model(self, historical_data_df: pd.DataFrame):
+        # historical_data_df should contain columns like 'temperature', 'humidity', 'power_consumption'
+        # Train the model on "normal" data
+        self.model.fit(historical_data_df)
+        self.trained = True
+        print("Anomaly detection model trained.")
+
+    def predict_anomaly(self, new_data_point: dict) -> bool:
+        if not self.trained:
+            print("Warning: Model not trained. Performing basic rule-based check.")
+            # Fallback to simple rules if model isn't trained
+            return self._rule_based_anomaly_check(new_data_point)
+
+        # Convert single data point to DataFrame for prediction
+        df_new = pd.DataFrame([new_data_point])
+        # Ensure columns match training data
+        required_cols = self.model.feature_names_in_ if hasattr(self.model, 'feature_names_in_') else ['temperature', 'humidity', 'power_consumption'] # Adjust
+        df_new = df_new.reindex(columns=required_cols, fill_value=0) # Fill missing with 0 or NaN handling
+
+        # Isolation Forest returns -1 for anomalies, 1 for normal
+        prediction = self.model.predict(df_new)
+        return prediction[0] == -1
+
+    def _rule_based_anomaly_check(self, data: dict) -> bool:
+        # Simple threshold-based checks for untrained model
+        if data.get('temperature', 0) > 85:
+            return True
+        if data.get('power_consumption', 0) > 600:
+            return True
+        return False
+
+# --- Example Usage ---
+if __name__ == "__main__":
+    detector = IoTAnomalyDetector(contamination=0.05)
+
+    # Simulate historical data (normal operation)
+    historical_data = {
+        'temperature': np.random.normal(25, 3, 100).tolist() + np.random.normal(26, 2, 100).tolist(),
+        'humidity': np.random.normal(50, 5, 200).tolist(),
+        'power_consumption': np.random.normal(100, 20, 200).tolist(),
+    }
+    historical_df = pd.DataFrame(historical_data)
+    detector.train_model(historical_df)
+
+    # Test new data points
+    normal_data = {'temperature': 27, 'humidity': 52, 'power_consumption': 110}
+    anomalous_temp = {'temperature': 95, 'humidity': 50, 'power_consumption': 120}
+    anomalous_power = {'temperature': 30, 'humidity': 55, 'power_consumption': 700}
+    anomalous_combined = {'temperature': 90, 'humidity': 40, 'power_consumption': 650}
+
+
+    print(f"Normal data ({normal_data}): Anomaly? {detector.predict_anomaly(normal_data)}")
+    print(f"Anomalous temp ({anomalous_temp}): Anomaly? {detector.predict_anomaly(anomalous_temp)}")
+    print(f"Anomalous power ({anomalous_power}): Anomaly? {detector.predict_anomaly(anomalous_power)}")
+    print(f"Anomalous combined ({anomalous_combined}): Anomaly? {detector.predict_anomaly(anomalous_combined)}")
+
+    # You would integrate this detector into your Flask/Django backend
+    # to run `predict_anomaly` every time new device data is received.
+
+
+
+# python_backend/adblock_rules_manager.py
+from adblockparser import AdblockRules
+import requests
+import os
+
+class AdBlockRulesManager:
+    def __init__(self, easylist_url="https://easylist.to/easylist/easylist.txt"):
+        self.easylist_url = easylist_url
+        self.rules = None
+        self.last_updated = None
+
+    def fetch_and_parse_rules(self):
+        try:
+            print(f"Fetching EasyList from {self.easylist_url}...")
+            response = requests.get(self.easylist_url)
+            response.raise_for_status() # Raise an exception for HTTP errors
+            raw_rules = response.text.splitlines()
+            self.rules = AdblockRules(raw_rules)
+            self.last_updated = datetime.datetime.now(datetime.timezone.utc)
+            print("AdBlock rules fetched and parsed successfully.")
+            return True
+        except requests.exceptions.RequestException as e:
+            print(f"Error fetching EasyList: {e}")
+            self.rules = None
+            return False
+
+    def should_block(self, url, options=None):
+        if not self.rules:
+            print("Rules not loaded. Attempting to fetch...")
+            self.fetch_and_parse_rules()
+            if not self.rules:
+                return False # Cannot block if rules are not available
+
+        return self.rules.should_block(url, options)
+
+    def get_rules_for_ios_content_blocker(self):
+        """
+        Generates rules in a format compatible with iOS WKContentRuleList.
+        Note: Adblock Plus rules are more extensive than what WKContentRuleList supports directly.
+        This function would need to translate/filter them.
+        """
+        if not self.rules:
+            self.fetch_and_parse_rules()
+            if not self.rules:
+                return []
+
+        ios_rules = []
+        for rule_string in self.rules.rules:
+            # Simple heuristic: Block based on URL filters
+            if rule_string.startswith("||") and "^" in rule_string:
+                url_filter = rule_string.replace("||", "").replace("^", ".*").replace("$", "")
+                if url_filter.endswith(".*"):
+                    url_filter = url_filter[:-2] + ".*" # Ensure regex is correct
+
+                ios_rule = {
+                    "action": {"type": "block"},
+                    "trigger": {"url-filter": url_filter}
+                }
+                ios_rules.append(ios_rule)
+            elif "##" in rule_string: # CSS hiding rules
+                parts = rule_string.split("##")
+                if len(parts) == 2:
+                    selector = parts[1].strip()
+                    # Basic CSS selectors can be translated
+                    ios_rule = {
+                        "action": {"type": "css-display-none", "selector": selector},
+                        "trigger": {"url-filter": ".*"} # Apply globally
+                    }
+                    ios_rules.append(ios_rule)
+            # More complex rules (e.g., script exceptions, element hiding with specific domains)
+            # would require more sophisticated parsing and mapping to WKContentRuleList capabilities.
+
+        return json.dumps(ios_rules, indent=2)
+
+# --- Example Usage ---
+if __name__ == "__main__":
+    manager = AdBlockRulesManager()
+    manager.fetch_and_parse_rules()
+
+    test_urls = [
+        "http://ads.example.com/banner.gif",
+        "http://www.google.com/search",
+        "http://doubleclick.net/ad.js",
+        "http://example.com/normal_image.png"
+    ]
+
+    for url in test_urls:
+        blocked = manager.should_block(url)
+        print(f"'{url}' should be blocked: {blocked}")
+
+    print("\n--- iOS Content Blocker Rules (Sample) ---")
+    ios_json_rules = manager.get_rules_for_ios_content_blocker()
+    print(ios_json_rules[:1000] + "..." if len(ios_json_rules) > 1000 else ios_json_rules) # Print first 1000 chars
+
+    # You could expose `get_rules_for_ios_content_blocker` via a Flask/Django API endpoint
+    # for your iOS app to fetch.
+    # E.g., @app.route('/adblock_rules', methods=['GET'])
+    # def get_adblock_rules():
+    #     rules_json = manager.get_rules_for_ios_content_blocker()
+    #     return Response(rules_json, mimetype='application/json')
+
+
+
