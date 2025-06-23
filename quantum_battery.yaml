@@ -1,0 +1,752 @@
+import numpy as np
+
+class QuantumBatteryCell:
+    def __init__(self, cell_id, initial_quantum_state=None):
+        self.cell_id = cell_id
+        # A highly simplified representation of a quantum state (e.g., a superposition)
+        # In reality, this would be a complex many-body quantum state.
+        self.quantum_state = initial_quantum_state if initial_quantum_state is not None else self._initialize_random_state()
+        self.energy_level = self._calculate_energy_from_state() # Represents stored energy
+        self.coherence_level = 1.0 # Represents quantum coherence, degrades over time
+        self.entangled_partners = [] # List of other cell_ids this cell is entangled with
+
+    def _initialize_random_state(self):
+        # A placeholder for complex quantum state initialization
+        # In reality, this would involve specific Hamiltonian and environmental interactions.
+        return np.random.rand(2) + 1j * np.random.rand(2) # Example: a 2-level system superposition
+
+    def _calculate_energy_from_state(self):
+        # Placeholder: energy derived from the quantum state's properties
+        # For a real quantum battery, this would be based on the expectation value of an energy operator.
+        return np.sum(np.abs(self.quantum_state)**2) * 10 # Arbitrary scaling for energy
+
+    def apply_quantum_charge_pulse(self, pulse_strength, duration):
+        # Simulates a quantum charging operation.
+        # This is where collective charging effects (entanglement, coherence) would be crucial.
+        # For simplicity, we'll just increase energy.
+        if self.coherence_level > 0.1: # Coherence needed for efficient quantum charging
+            charge_gain = pulse_strength * duration * self.coherence_level
+            # In a real quantum battery, entanglement would allow for super-extensive charging.
+            # Here, we'll add a boost if entangled.
+            if self.entangled_partners:
+                charge_gain *= (1 + 0.1 * len(self.entangled_partners)) # Example of entanglement benefit
+            self.energy_level += charge_gain
+            self.coherence_level = max(0, self.coherence_level - 0.01 * duration) # Coherence degrades
+            print(f"Cell {self.cell_id}: Charged by {charge_gain:.2f}. New energy: {self.energy_level:.2f}. Coherence: {self.coherence_level:.2f}")
+        else:
+            print(f"Cell {self.cell_id}: Low coherence, cannot charge efficiently.")
+
+    def discharge(self, amount):
+        if self.energy_level >= amount:
+            self.energy_level -= amount
+            self.coherence_level = max(0, self.coherence_level - 0.005) # Discharge can also affect coherence
+            print(f"Cell {self.cell_id}: Discharged by {amount:.2f}. New energy: {self.energy_level:.2f}.")
+            return amount
+        else:
+            discharged_amount = self.energy_level
+            self.energy_level = 0
+            print(f"Cell {self.cell_id}: Fully discharged. Discharged {discharged_amount:.2f}.")
+            return discharged_amount
+
+    def get_status(self):
+        return {
+            "cell_id": self.cell_id,
+            "energy_level": self.energy_level,
+            "coherence_level": self.coherence_level,
+            "entangled_partners": self.entangled_partners
+        }
+
+    def entangle_with(self, other_cell):
+        # A placeholder for establishing quantum entanglement
+        # This would be a highly precise and difficult operation in reality.
+        if other_cell.cell_id not in self.entangled_partners:
+            self.entangled_partners.append(other_cell.cell_id)
+            other_cell.entangled_partners.append(self.cell_id)
+            print(f"Cells {self.cell_id} and {other_cell.cell_id} are now entangled.")
+
+# Example Usage:
+# cell1 = QuantumBatteryCell(1)
+# cell2 = QuantumBatteryCell(2)
+# cell1.entangle_with(cell2)
+# cell1.apply_quantum_charge_pulse(pulse_strength=5, duration=1)
+# cell2.apply_quantum_charge_pulse(pulse_strength=5, duration=1) # May benefit from entanglement with cell1
+
+
+
+import datetime
+import time
+
+class AIAutoRechargeSystem:
+    def __init__(self, battery_system):
+        self.battery_system = battery_system
+        self.charging_state = "idle" # "idle", "charging", "paused"
+        self.target_charge_level = 0.95 # e.g., 95% to avoid overcharging stress
+        self.min_charge_level = 0.20 # Recharge if battery drops below this
+        self.predicted_usage_model = self._load_usage_prediction_model()
+        self.energy_cost_model = self._load_energy_cost_model()
+
+        # AI model for optimal charging strategy (placeholder)
+        # This could be a Reinforcement Learning agent or an optimization algorithm.
+        self.charging_optimizer = self._load_charging_optimizer()
+
+    def _load_usage_prediction_model(self):
+        # Predicts future energy demand based on historical data, calendar, weather, etc.
+        print("Loading AI usage prediction model...")
+        return "TrainedUsagePredictor"
+
+    def _load_energy_cost_model(self):
+        # Predicts future electricity prices (e.g., hourly rates, peak/off-peak).
+        print("Loading AI energy cost prediction model...")
+        return "TrainedEnergyCostPredictor"
+
+    def _load_charging_optimizer(self):
+        # Learns optimal charging schedules to maximize battery life and minimize cost.
+        print("Loading AI charging optimizer...")
+        return "TrainedChargingOptimizer"
+
+    def monitor_and_decide_recharge(self):
+        current_status = self.battery_system.get_overall_health()
+        current_energy_level = current_status['individual_cell_states'][0]['energy_level'] / 1000 # Assuming a scale
+
+        # Get predicted future usage and energy costs
+        predicted_usage = self.predicted_usage_model_predict(datetime.datetime.now() + datetime.timedelta(hours=6)) # Predict 6 hours ahead
+        predicted_cost = self.energy_cost_model_predict(datetime.datetime.now())
+
+        # AI-driven optimization (simplified)
+        optimal_charge_action = self.charging_optimizer_decide(
+            current_energy_level=current_energy_level,
+            battery_health=current_status['overall_health'],
+            predicted_usage=predicted_usage,
+            predicted_cost=predicted_cost,
+            time_of_day=datetime.datetime.now().hour
+        )
+
+        if optimal_charge_action == "start_charge" and self.charging_state == "idle":
+            self.start_charge()
+        elif optimal_charge_action == "stop_charge" and self.charging_state == "charging":
+            self.stop_charge()
+        elif optimal_charge_action == "pause_charge" and self.charging_state == "charging":
+            self.pause_charge()
+        elif optimal_charge_action == "resume_charge" and self.charging_state == "paused":
+            self.resume_charge()
+        elif optimal_charge_action == "maintain_level" and self.charging_state != "charging":
+             print("AI recommending to maintain current charge level.")
+        else:
+             # Default logic if AI doesn't give a strong signal or state mismatch
+             if current_energy_level < self.min_charge_level and self.charging_state == "idle":
+                 self.start_charge()
+             elif current_energy_level >= self.target_charge_level and self.charging_state == "charging":
+                 self.stop_charge()
+
+    def predicted_usage_model_predict(self, future_time):
+        # Placeholder for actual prediction.
+        # Could be higher if a trip is planned, lower if vehicle is parked.
+        return random.uniform(0.1, 0.5) # Example: predicted energy consumption
+
+    def energy_cost_model_predict(self, current_time):
+        # Placeholder for actual prediction.
+        # Could be lower during off-peak hours, higher during peak.
+        if 0 <= current_time.hour < 6 or 22 <= current_time.hour <= 23:
+            return 0.1 # Low cost
+        elif 6 <= current_time.hour < 9 or 17 <= current_time.hour < 22:
+            return 0.3 # High cost
+        else:
+            return 0.2 # Medium cost
+
+    def charging_optimizer_decide(self, current_energy_level, battery_health, predicted_usage, predicted_cost, time_of_day):
+        # This is the core AI logic for making charging decisions.
+        # A simple rule-based example for illustration; real AI would be more complex.
+
+        # Prioritize critical low battery
+        if current_energy_level < self.min_charge_level:
+            return "start_charge"
+
+        # Prioritize battery health over cost if health is low
+        if battery_health < 0.8 and current_energy_level < self.target_charge_level * 0.9:
+            return "start_charge"
+
+        # Optimize for cost if conditions allow
+        if predicted_cost < 0.15 and current_energy_level < self.target_charge_level:
+            return "start_charge"
+
+        # If already charging, stop if target reached or cost is too high
+        if current_energy_level >= self.target_charge_level:
+            return "stop_charge"
+        
+        # Pause during peak hours if not critically low
+        if (17 <= time_of_day < 22) and current_energy_level > self.min_charge_level + 0.1:
+            return "pause_charge"
+
+        return "maintain_level" # Default if no specific action triggered
+
+    def start_charge(self):
+        self.charging_state = "charging"
+        print("AI Initiated: Starting battery recharge.")
+        # Interface with physical charging system
+        # For quantum batteries, this would trigger the 'apply_quantum_charge_pulse' method
+        for cell in self.battery_system.cells:
+            cell.apply_quantum_charge_pulse(pulse_strength=10, duration=1) # Example quantum charge
+        self.battery_system.overall_health = min(1.0, self.battery_system.overall_health + 0.01) # Small health boost from optimal charge
+
+    def stop_charge(self):
+        self.charging_state = "idle"
+        print("AI Initiated: Stopping battery recharge.")
+
+    def pause_charge(self):
+        self.charging_state = "paused"
+        print("AI Initiated: Pausing battery recharge.")
+
+    def resume_charge(self):
+        self.charging_state = "charging"
+        print("AI Initiated: Resuming battery recharge.")
+        for cell in self.battery_system.cells:
+            cell.apply_quantum_charge_pulse(pulse_strength=10, duration=1)
+
+# Example Usage:
+# my_battery_pack = BatterySystem(num_cells=1) # Simplified for single cell
+# ai_recharge = AIAutoRechargeSystem(my_battery_pack)
+#
+# for i in range(20): # Simulate several time steps
+#     print(f"\n--- Time Step {i+1} ---")
+#     # Simulate battery discharge for demonstration
+#     my_battery_pack.cells[0].discharge(random.uniform(50, 150))
+#     ai_recharge.monitor_and_decide_recharge()
+#     time.sleep(0.5) # Simulate time passing
+
+
+
+npx create-react-app quantum-battery-dashboard
+cd quantum-battery-dashboard
+npm start
+
+
+
+// This is a conceptual backend for demonstration purposes.
+// In a real application, you'd integrate your Python AI logic here
+// and expose it via WebSockets or REST APIs.
+
+const WebSocket = require('ws');
+const wss = new WebSocket.Server({ port: 8080 });
+
+// --- Conceptual Battery & AI State (Mimicking Python logic) ---
+let batteryHealth = 1.0; // 0.0 to 1.0
+let currentEnergy = 500; // Example energy units
+let maxEnergy = 1000;
+let chargingState = 'idle'; // 'idle', 'charging', 'paused'
+let quantumCoherence = 0.95; // 0.0 to 1.0
+let degradationType = 'none';
+let degradationSeverity = 0;
+
+function simulateBatteryDegradation() {
+    batteryHealth = Math.max(0, batteryHealth - Math.random() * 0.001);
+    currentEnergy = Math.max(0, currentEnergy - Math.random() * 5); // Simulate slow discharge
+    if (Math.random() < 0.01) { // Small chance of degradation occurring
+        degradationType = Math.random() < 0.5 ? 'micro_crack' : 'localized_capacity_loss';
+        degradationSeverity = Math.random() * 0.3 + 0.1; // Small to moderate severity
+        batteryHealth = Math.max(0, batteryHealth - degradationSeverity * 0.1); // Impact health
+    } else {
+        degradationType = 'none';
+        degradationSeverity = 0;
+    }
+    quantumCoherence = Math.max(0.1, quantumCoherence - Math.random() * 0.0005); // Coherence degrades
+}
+
+function simulateRepair() {
+    batteryHealth = Math.min(1.0, batteryHealth + Math.random() * 0.05); // Repair improves health
+    quantumCoherence = Math.min(1.0, quantumCoherence + Math.random() * 0.02); // Repair improves coherence
+    degradationType = 'none';
+    degradationSeverity = 0;
+    console.log("Simulated Repair Completed.");
+}
+
+function simulateCharge() {
+    if (currentEnergy < maxEnergy) {
+        currentEnergy = Math.min(maxEnergy, currentEnergy + Math.random() * 20); // Simulate charging
+    }
+    quantumCoherence = Math.min(1.0, quantumCoherence + Math.random() * 0.001); // Charging can improve coherence
+}
+
+// --- AI Logic Placeholder ---
+function aiDecideRepair() {
+    if (batteryHealth < 0.8 && degradationType !== 'none') {
+        console.log("AI decided to initiate repair.");
+        setTimeout(simulateRepair, 3000); // Simulate repair taking time
+        return "Repair initiated";
+    }
+    return "No repair needed currently";
+}
+
+function aiDecideRecharge() {
+    const usagePrediction = Math.random() * 0.5 + 0.1; // Conceptual usage
+    const energyCost = new Date().getHours() < 6 || new Date().getHours() > 22 ? 0.1 : 0.3; // Lower cost at night
+
+    if (currentEnergy / maxEnergy < 0.2 && chargingState === 'idle') {
+        chargingState = 'charging';
+        console.log("AI decided to start charging (low battery).");
+        return "Charging started";
+    } else if (currentEnergy / maxEnergy < 0.9 && energyCost < 0.2 && chargingState === 'idle') {
+        chargingState = 'charging';
+        console.log("AI decided to start charging (optimal cost).");
+        return "Charging started";
+    } else if (currentEnergy / maxEnergy >= 0.95 && chargingState === 'charging') {
+        chargingState = 'idle';
+        console.log("AI decided to stop charging (target reached).");
+        return "Charging stopped";
+    } else if (energyCost > 0.25 && chargingState === 'charging' && currentEnergy / maxEnergy > 0.3) {
+        chargingState = 'paused';
+        console.log("AI decided to pause charging (high cost).");
+        return "Charging paused";
+    } else if (chargingState === 'paused' && energyCost < 0.2) {
+        chargingState = 'charging';
+        console.log("AI decided to resume charging (cost lowered).");
+        return "Charging resumed";
+    }
+    return "No change in charging state";
+}
+
+
+wss.on('connection', ws => {
+    console.log('Client connected');
+
+    // Send initial state
+    ws.send(JSON.stringify({
+        type: 'batteryStatus',
+        health: batteryHealth,
+        energy: currentEnergy,
+        maxEnergy: maxEnergy,
+        chargingState: chargingState,
+        coherence: quantumCoherence,
+        degradationType: degradationType,
+        degradationSeverity: degradationSeverity
+    }));
+
+    // Simulate real-time updates
+    const interval = setInterval(() => {
+        simulateBatteryDegradation();
+        if (chargingState === 'charging') {
+            simulateCharge();
+        }
+
+        ws.send(JSON.stringify({
+            type: 'batteryStatus',
+            health: batteryHealth,
+            energy: currentEnergy,
+            maxEnergy: maxEnergy,
+            chargingState: chargingState,
+            coherence: quantumCoherence,
+            degradationType: degradationType,
+            degradationSeverity: degradationSeverity
+        }));
+
+        // AI makes decisions periodically
+        aiDecideRepair();
+        aiDecideRecharge();
+
+    }, 2000); // Update every 2 seconds
+
+    ws.on('message', message => {
+        const msg = JSON.parse(message);
+        console.log('Received message from client:', msg);
+
+        if (msg.type === 'triggerRepair') {
+            console.log("Client requested repair trigger.");
+            const aiResponse = aiDecideRepair();
+            ws.send(JSON.stringify({ type: 'aiResponse', message: aiResponse }));
+        } else if (msg.type === 'triggerCharge') {
+            console.log("Client requested charge trigger.");
+            chargingState = 'charging';
+            ws.send(JSON.stringify({ type: 'aiResponse', message: "Manual charge initiated." }));
+        } else if (msg.type === 'triggerStopCharge') {
+            console.log("Client requested stop charge trigger.");
+            chargingState = 'idle';
+            ws.send(JSON.stringify({ type: 'aiResponse', message: "Manual charge stopped." }));
+        }
+    });
+
+    ws.on('close', () => {
+        console.log('Client disconnected');
+        clearInterval(interval);
+    });
+
+    ws.on('error', error => {
+        console.error('WebSocket error:', error);
+    });
+});
+
+console.log('WebSocket server started on port 8080');
+// To run this server:
+// 1. Create a folder named 'backend' in your project root.
+// 2. Save this code as `server.js` inside the 'backend' folder.
+// 3. In the 'backend' folder, run `npm init -y` and then `npm install ws`.
+// 4. Run the server using `node server.js`.
+
+
+
+
+import React, { useState, useEffect, useRef } from 'react';
+import BatteryDisplay from './components/BatteryDisplay';
+import AIStatus from './components/AIStatus';
+import LogViewer from './components/LogViewer';
+import './App.css'; // For basic styling
+
+function App() {
+  const [batteryData, setBatteryData] = useState({
+    health: 1.0,
+    energy: 0,
+    maxEnergy: 1000,
+    chargingState: 'idle',
+    coherence: 0.95,
+    degradationType: 'none',
+    degradationSeverity: 0,
+  });
+  const [aiLogs, setAiLogs] = useState([]);
+  const ws = useRef(null);
+
+  useEffect(() => {
+    // Establish WebSocket connection
+    ws.current = new WebSocket('ws://localhost:8080');
+
+    ws.current.onopen = () => {
+      console.log('WebSocket connection opened');
+      setAiLogs(prev => [...prev, { type: 'system', message: 'Connected to AI Backend' }]);
+    };
+
+    ws.current.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.type === 'batteryStatus') {
+        setBatteryData(data);
+      } else if (data.type === 'aiResponse') {
+        setAiLogs(prev => [...prev, { type: 'ai', message: `AI: ${data.message}` }]);
+      }
+    };
+
+    ws.current.onclose = () => {
+      console.log('WebSocket connection closed');
+      setAiLogs(prev => [...prev, { type: 'system', message: 'Disconnected from AI Backend' }]);
+    };
+
+    ws.current.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      setAiLogs(prev => [...prev, { type: 'error', message: `WebSocket error: ${error.message}` }]);
+    };
+
+    // Clean up WebSocket on component unmount
+    return () => {
+      if (ws.current) {
+        ws.current.close();
+      }
+    };
+  }, []);
+
+  const triggerAIAction = (actionType) => {
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ type: actionType }));
+      setAiLogs(prev => [...prev, { type: 'user', message: `Triggered: ${actionType}` }]);
+    } else {
+      setAiLogs(prev => [...prev, { type: 'error', message: 'WebSocket not connected. Cannot send command.' }]);
+    }
+  };
+
+  return (
+    <div className="App">
+      <header className="App-header">
+        <h1>Quantum Battery Management System</h1>
+      </header>
+      <div className="dashboard-container">
+        <BatteryDisplay data={batteryData} />
+        <AIStatus
+          data={batteryData}
+          onTriggerRepair={() => triggerAIAction('triggerRepair')}
+          onTriggerCharge={() => triggerAIAction('triggerCharge')}
+          onTriggerStopCharge={() => triggerAIAction('triggerStopCharge')}
+        />
+        <LogViewer logs={aiLogs} />
+      </div>
+    </div>
+  );
+}
+
+export default App;
+
+
+
+import React from 'react';
+import './BatteryDisplay.css'; // For specific styling
+
+const BatteryDisplay = ({ data }) => {
+  const energyPercentage = (data.energy / data.maxEnergy) * 100;
+  const healthColor = data.health > 0.8 ? 'green' : data.health > 0.5 ? 'orange' : 'red';
+  const coherenceColor = data.coherence > 0.7 ? 'blue' : data.coherence > 0.4 ? 'purple' : 'gray';
+
+  return (
+    <div className="battery-display-card">
+      <h2>Battery Status</h2>
+      <div className="battery-bar-container">
+        <div className="battery-fill" style={{ width: `${energyPercentage}%` }}></div>
+      </div>
+      <p>Energy Level: {data.energy.toFixed(0)} / {data.maxEnergy} units ({energyPercentage.toFixed(1)}%)</p>
+      <p>Charging State: <span className={`status-${data.chargingState}`}>{data.chargingState.toUpperCase()}</span></p>
+      <p>
+        Overall Health: <span style={{ color: healthColor }}>{(data.health * 100).toFixed(1)}%</span>
+      </p>
+      <p>
+        Quantum Coherence: <span style={{ color: coherenceColor }}>{(data.coherence * 100).toFixed(1)}%</span>
+      </p>
+      {data.degradationType !== 'none' && (
+        <p className="degradation-warning">
+          Degradation Detected: {data.degradationType.replace('_', ' ')} (Severity: {(data.degradationSeverity * 100).toFixed(1)}%)
+        </p>
+      )}
+    </div>
+  );
+};
+
+export default BatteryDisplay;
+
+
+
+import React from 'react';
+import './AIStatus.css'; // For specific styling
+
+const AIStatus = ({ data, onTriggerRepair, onTriggerCharge, onTriggerStopCharge }) => {
+  const shouldRecommendRepair = data.health < 0.8 && data.degradationType !== 'none';
+  const shouldRecommendCharge = data.energy / data.maxEnergy < 0.2 || (data.energy / data.maxEnergy < 0.9 && data.chargingState === 'idle');
+
+  return (
+    <div className="ai-status-card">
+      <h2>AI Recommendations & Controls</h2>
+      <div className="ai-section">
+        <h3>Auto Repair</h3>
+        <p>AI Health Assessment: {shouldRecommendRepair ? "Degradation detected. Repair recommended." : "Healthy."}</p>
+        {shouldRecommendRepair && (
+          <button onClick={onTriggerRepair} disabled={data.chargingState === 'charging'}>
+            Trigger AI Repair
+          </button>
+        )}
+        {!shouldRecommendRepair && <p>No immediate repair needed.</p>}
+      </div>
+
+      <div className="ai-section">
+        <h3>Auto Recharge</h3>
+        <p>AI Charging Status: {data.chargingState.toUpperCase()}</p>
+        <p>AI Recommendation: {shouldRecommendCharge ? "Recharge recommended." : "Optimal charge level."}</p>
+        {data.chargingState !== 'charging' && (
+          <button onClick={onTriggerCharge} disabled={data.energy / data.maxEnergy >= 0.95}>
+            Initiate AI Charge
+          </button>
+        )}
+        {data.chargingState === 'charging' && (
+          <button onClick={onTriggerStopCharge}>
+            Stop AI Charge
+          </button>
+        )}
+      </div>
+
+      <p className="ai-note">
+        *AI decisions are simulated. Actual AI would use complex models.
+      </p>
+    </div>
+  );
+};
+
+export default AIStatus;
+
+
+
+import React, { useEffect, useRef } from 'react';
+import './LogViewer.css'; // For specific styling
+
+const LogViewer = ({ logs }) => {
+  const logEndRef = useRef(null);
+
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [logs]);
+
+  return (
+    <div className="log-viewer-card">
+      <h2>System Logs</h2>
+      <div className="log-messages">
+        {logs.map((log, index) => (
+          <p key={index} className={`log-${log.type}`}>
+            [{new Date().toLocaleTimeString()}]{' '}
+            {log.type === 'ai' && <strong>AI: </strong>}
+            {log.type === 'user' && <em>User: </em>}
+            {log.message}
+          </p>
+        ))}
+        <div ref={logEndRef} /> {/* For auto-scrolling */}
+      </div>
+    </div>
+  );
+};
+
+export default LogViewer;
+
+
+
+.App {
+  font-family: Arial, sans-serif;
+  text-align: center;
+  background-color: #f0f2f5;
+  min-height: 100vh;
+  padding: 20px;
+}
+
+.App-header {
+  margin-bottom: 30px;
+  color: #333;
+}
+
+.dashboard-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.status-charging {
+  color: #28a745; /* Green */
+  font-weight: bold;
+}
+
+.status-idle {
+  color: #6c757d; /* Gray */
+}
+
+.status-paused {
+  color: #ffc107; /* Yellow */
+}
+
+
+
+.battery-display-card {
+  background-color: #fff;
+  border-radius: 10px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.battery-bar-container {
+  width: 80%;
+  height: 30px;
+  background-color: #e0e0e0;
+  border-radius: 5px;
+  overflow: hidden;
+  margin-bottom: 15px;
+}
+
+.battery-fill {
+  height: 100%;
+  background-color: #28a745; /* Green for full */
+  transition: width 0.5s ease-in-out;
+  border-radius: 5px;
+}
+
+/* Color changes based on energy level for more realism */
+.battery-fill[style*="width: 0%"] { background-color: #dc3545; } /* Red */
+.battery-fill[style*="width: 1"] { background-color: #dc3545; }
+.battery-fill[style*="width: 2"] { background-color: #ffc107; } /* Orange */
+.battery-fill[style*="width: 3"] { background-color: #ffc107; }
+.battery-fill[style*="width: 4"] { background-color: #ffc107; }
+.battery-fill[style*="width: 5"] { background-color: #ffc107; }
+.battery-fill[style*="width: 6"] { background-color: #ffc107; }
+.battery-fill[style*="width: 7"] { background-color: #28a745; }
+.battery-fill[style*="width: 8"] { background-color: #28a745; }
+.battery-fill[style*="width: 9"] { background-color: #28a745; }
+
+
+.degradation-warning {
+  color: #dc3545; /* Red for warnings */
+  font-weight: bold;
+  margin-top: 10px;
+}
+
+
+
+.ai-status-card {
+  background-color: #fff;
+  border-radius: 10px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  padding: 20px;
+}
+
+.ai-section {
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid #eee;
+}
+
+.ai-section:last-child {
+  border-bottom: none;
+}
+
+.ai-status-card button {
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  padding: 10px 15px;
+  cursor: pointer;
+  font-size: 1em;
+  margin-top: 10px;
+  transition: background-color 0.3s ease;
+}
+
+.ai-status-card button:hover:not(:disabled) {
+  background-color: #0056b3;
+}
+
+.ai-status-card button:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+}
+
+.ai-note {
+  font-size: 0.8em;
+  color: #6c757d;
+  margin-top: 20px;
+}
+
+
+
+.log-viewer-card {
+  background-color: #333;
+  color: #f8f9fa;
+  border-radius: 10px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  padding: 20px;
+  grid-column: span 2; /* Spans across two columns in the grid */
+  overflow-y: auto;
+  max-height: 400px; /* Limit height for scrolling */
+  text-align: left;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.9em;
+}
+
+.log-messages {
+  padding: 10px;
+}
+
+.log-system {
+  color: #17a2b8; /* Info blue */
+}
+
+.log-ai {
+  color: #28a745; /* Success green */
+}
+
+.log-user {
+  color: #ffc107; /* Warning yellow */
+}
+
+.log-error {
+  color: #dc3545; /* Danger red */
+}
+
+
+
