@@ -1,0 +1,952 @@
+import numpy as np
+import tensorflow as tf # Or PyTorch for AI
+from qiskit import QuantumCircuit, Aer, execute # For quantum simulation (if needed)
+from scipy.optimize import minimize # For classical optimization baselines
+
+# --- 1. Quantum Battery and Charger Models (Simulated) ---
+class QuantumBattery:
+    def __init__(self, num_qubits=4, initial_state='ground'):
+        self.num_qubits = num_qubits
+        self.state = self._initialize_state(initial_state)
+        self.energy_levels = self._define_energy_levels() # Example: based on Hamiltonian
+        self.stored_energy = self._calculate_stored_energy()
+
+    def _initialize_state(self, initial_state):
+        # In a real scenario, this would be a quantum state vector or density matrix
+        if initial_state == 'ground':
+            return np.zeros(2**self.num_qubits) # All zeros for ground state
+        # Add other initial states (e.g., random, partially charged)
+        return np.random.rand(2**self.num_qubits) + 1j * np.random.rand(2**self.num_qubits)
+
+    def _define_energy_levels(self):
+        # Example: Simple equidistant energy levels for a multi-qubit system
+        return np.arange(2**self.num_qubits) * 0.1 # Arbitrary energy unit
+
+    def _calculate_stored_energy(self):
+        # Calculate expected energy based on current state and energy levels
+        # For a pure state |psi>, E = <psi|H|psi>
+        # For a mixed state rho, E = Tr(rho * H)
+        # This is a simplification. A real QB would have a more complex Hamiltonian.
+        return np.sum(np.abs(self.state)**2 * self.energy_levels)
+
+    def evolve(self, hamiltonian_matrix, dt):
+        # Simulate quantum evolution under a given Hamiltonian for time dt
+        # This is a very simplified representation.
+        # In practice, this involves solving the Schrödinger equation or master equation.
+        # For a small time step, U = exp(-i H dt / hbar)
+        # self.state = U @ self.state
+        pass # Placeholder for complex quantum dynamics
+
+class QuantumCharger:
+    def __init__(self, charge_type='wired', parameters=None):
+        self.charge_type = charge_type
+        self.parameters = parameters if parameters else {}
+        # Parameters could include:
+        # Wired: pulse amplitude, duration, frequency, phase
+        # Wireless: frequency, power, beam shape, distance, resonant coupling strength
+
+    def generate_charging_field(self):
+        # Returns a Hamiltonian term or a classical field description based on charge_type
+        if self.charge_type == 'wired':
+            # Example: A simple oscillating field for wired charging
+            amplitude = self.parameters.get('amplitude', 1.0)
+            frequency = self.parameters.get('frequency', 1.0)
+            phase = self.parameters.get('phase', 0.0)
+            # This would construct a time-dependent Hamiltonian
+            return lambda t: amplitude * np.cos(2 * np.pi * frequency * t + phase) * np.eye(self.qb_size)
+        elif self.charge_type == 'wireless':
+            # Example: Resonant inductive coupling strength, tuned by AI
+            coupling_strength = self.parameters.get('coupling_strength', 0.5)
+            resonant_freq = self.parameters.get('resonant_frequency', 5.0)
+            # This would define the interaction term in the system's Hamiltonian
+            return lambda t: coupling_strength * np.sin(2 * np.pi * resonant_freq * t) * np.eye(self.qb_size)
+        return None
+
+# --- 2. Environment Model ---
+class QuantumEnvironment:
+    def __init__(self, decoherence_rate=0.01, thermal_noise=0.001):
+        self.decoherence_rate = decoherence_rate
+        self.thermal_noise = thermal_noise
+
+    def apply_noise(self, quantum_state, dt):
+        # Simulate decoherence and noise effects on the quantum state
+        # This is highly simplified. In reality, this involves quantum master equations.
+        # For example, adding a small amount of random perturbation or applying a
+        # depolarizing channel.
+        return quantum_state * (1 - self.decoherence_rate * dt) # Very basic decay
+        # Plus random thermal fluctuations
+
+# --- 3. AI Optimization Engine (Reinforcement Learning Example) ---
+class AIChargerOptimizer:
+    def __init__(self, observation_space_size, action_space_size, learning_rate=0.001):
+        self.model = self._build_model(observation_space_size, action_space_size)
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+        self.gamma = 0.99 # Discount factor for rewards
+
+    def _build_model(self, obs_size, action_size):
+        # A simple neural network for policy and value function in RL
+        model = tf.keras.Sequential([
+            tf.keras.layers.Dense(64, activation='relu', input_shape=(obs_size,)),
+            tf.keras.layers.Dense(64, activation='relu'),
+            tf.keras.layers.Dense(action_size, activation='tanh') # Output actions (e.g., control parameters)
+        ])
+        return model
+
+    def choose_action(self, observation):
+        # Predict optimal charging parameters based on current battery state
+        obs_tensor = tf.convert_to_tensor(observation[np.newaxis, :], dtype=tf.float32)
+        action_raw = self.model(obs_tensor)
+        # Scale/transform action_raw to meaningful physical parameters
+        # e.g., map tanh output from [-1, 1] to desired range for amplitude, frequency
+        amplitude = (action_raw[0, 0].numpy() + 1) / 2.0 * 5.0 # Scale to 0-5
+        frequency = (action_raw[0, 1].numpy() + 1) / 2.0 * 10.0 # Scale to 0-10
+        phase = (action_raw[0, 2].numpy() + 1) / 2.0 * 2 * np.pi # Scale to 0-2pi
+        coupling = (action_raw[0, 3].numpy() + 1) / 2.0 * 1.0 # For wireless coupling
+        return {'amplitude': amplitude, 'frequency': frequency, 'phase': phase, 'coupling_strength': coupling}
+
+    def train_step(self, states, actions, rewards, next_states, dones):
+        # Reinforcement learning training step (e.g., using Q-learning or A2C)
+        # This is a conceptual outline.
+        with tf.GradientTape() as tape:
+            # Predict Q-values for current states and chosen actions
+            current_q_values = self.model(states)
+            # For simplicity, let's assume direct action output as "Q-value" for now
+            # In a proper RL setup, this would be more complex (e.g., actor-critic)
+
+            # Calculate target Q-values
+            next_q_values = self.model(next_states)
+            max_next_q_values = tf.reduce_max(next_q_values, axis=1) # If discrete actions
+            # For continuous actions, it's typically an actor-critic setup
+            # For simplicity, assuming a critic directly predicts reward
+            target_q_values = rewards + self.gamma * max_next_q_values * (1 - dones)
+
+            # Calculate loss (e.g., Mean Squared Error between predicted and target Q-values)
+            loss = tf.keras.losses.MSE(target_q_values, current_q_values[:, 0]) # Assuming a single output for simplicity
+
+        grads = tape.gradient(loss, self.model.trainable_variables)
+        self.optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
+        return loss
+
+# --- Main Simulation Loop ---
+def simulate_charging(qb, charger, environment, ai_optimizer, total_charging_time, dt):
+    time_steps = int(total_charging_time / dt)
+    history = {'time': [], 'energy': [], 'reward': [], 'actions': []}
+
+    current_state = qb.state # Or other relevant observable (e.g., energy, coherence)
+    # For a real quantum system, 'observation' would be measurement results
+    observation = np.array([qb.stored_energy, environment.decoherence_rate]) # Example observation
+
+    for t_step in range(time_steps):
+        # AI chooses action (charging parameters)
+        action_params = ai_optimizer.choose_action(observation)
+        history['actions'].append(action_params)
+
+        # Update charger based on AI's action
+        charger.parameters.update(action_params)
+
+        # Generate charging field (Hamiltonian)
+        charging_hamiltonian = charger.generate_charging_field()
+        if charging_hamiltonian:
+            # Simulate quantum evolution
+            # This is the most complex part and would use a quantum simulator backend
+            # e.g., qb.evolve(charging_hamiltonian(t_step * dt), dt)
+            # For a basic conceptual simulation, we'll just increment energy
+            initial_energy = qb.stored_energy
+            energy_gain_factor = action_params['amplitude'] * action_params['frequency'] * dt
+            qb.stored_energy += energy_gain_factor * (qb.energy_levels[-1] - qb.stored_energy) / qb.energy_levels[-1] # Simple energy gain towards max
+
+        # Apply environmental noise
+        # qb.state = environment.apply_noise(qb.state, dt) # Apply to actual state if simulating
+        # For simplicity, let's just model energy loss due to decoherence
+        qb.stored_energy -= qb.stored_energy * environment.decoherence_rate * dt
+
+        # Calculate reward
+        reward = (qb.stored_energy - initial_energy) - (environment.decoherence_rate * 10) # Maximize energy gain, penalize decoherence
+        done = (qb.stored_energy >= qb.energy_levels[-1] * 0.95) # Battery almost full
+
+        # Get next observation
+        next_observation = np.array([qb.stored_energy, environment.decoherence_rate])
+
+        # Train AI (if within training phase)
+        # In a real RL loop, you'd store experiences in a replay buffer
+        ai_optimizer.train_step(
+            tf.convert_to_tensor(observation[np.newaxis, :], dtype=tf.float32),
+            # This needs to be the actual action taken, not just params
+            # For simplicity, using a dummy action representation for now
+            tf.convert_to_tensor(np.array([action_params['amplitude'], action_params['frequency'], action_params['phase'], action_params['coupling_strength']])[np.newaxis, :], dtype=tf.float32),
+            tf.convert_to_tensor(np.array([reward]), dtype=tf.float32),
+            tf.convert_to_tensor(next_observation[np.newaxis, :], dtype=tf.float32),
+            tf.convert_to_tensor(np.array([float(done)]), dtype=tf.float32)
+        )
+
+        observation = next_observation
+
+        history['time'].append(t_step * dt)
+        history['energy'].append(qb.stored_energy)
+        history['reward'].append(reward)
+
+        if done:
+            print(f"Battery charged to {qb.stored_energy:.2f} at time {t_step * dt:.2f}")
+            break
+
+    return history
+
+# --- Main Execution ---
+if __name__ == "__main__":
+    # Initialize quantum battery, charger, and environment
+    qb = QuantumBattery(num_qubits=2) # A very simple 2-qubit battery
+    # Wired charger example:
+    wired_charger = QuantumCharger(charge_type='wired', parameters={'qb_size': 2**qb.num_qubits})
+    # Wireless charger example (conceptually, AI could switch between modes or optimize both):
+    wireless_charger = QuantumCharger(charge_type='wireless', parameters={'qb_size': 2**qb.num_qubits})
+    env = QuantumEnvironment(decoherence_rate=0.005)
+
+    # Initialize AI optimizer
+    observation_space_size = 2 # Energy, Decoherence Rate
+    # Action space: amplitude, frequency, phase (for wired), coupling (for wireless)
+    action_space_size = 4
+    ai_optimizer = AIChargerOptimizer(observation_space_size, action_space_size)
+
+    total_time = 100 # Total simulation time in arbitrary units
+    time_step = 0.1 # Time step for simulation
+
+    print("Starting AI-controlled quantum battery charging simulation (wired)...")
+    charging_history_wired = simulate_charging(qb, wired_charger, env, ai_optimizer, total_time, time_step)
+    print("\nWired Charging Results:")
+    print(f"Final Energy: {charging_history_wired['energy'][-1]:.2f}")
+    print(f"Total Time Steps: {len(charging_history_wired['time'])}")
+
+    # Reset QB for wireless simulation
+    qb = QuantumBattery(num_qubits=2)
+    print("\nStarting AI-controlled quantum battery charging simulation (wireless)...")
+    charging_history_wireless = simulate_charging(qb, wireless_charger, env, ai_optimizer, total_time, time_step)
+    print("\nWireless Charging Results:")
+    print(f"Final Energy: {charging_history_wireless['energy'][-1]:.2f}")
+    print(f"Total Time Steps: {len(charging_history_wireless['time'])}")
+
+    # You would typically plot history['energy'] to visualize charging curves
+    # and analyze history['actions'] to understand AI's strategy.
+
+
+# Using Vite (recommended for speed)
+npm create vite@latest quantum-battery-app -- --template react
+cd quantum-battery-app
+npm install
+
+# Or using Create React App
+npx create-react-app quantum-battery-app
+cd quantum-battery-app
+npm start
+
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import Chart from './components/Chart';
+import ControlPanel from './components/ControlPanel';
+import StatusDisplay from './components/StatusDisplay';
+import QuantumStateViz from './components/QuantumStateViz'; // For conceptual visualization
+import './App.css'; // Basic styling
+
+function App() {
+    const [batteryData, setBatteryData] = useState([]); // Array of { time, energy, coherence }
+    const [chargingStatus, setChargingStatus] = useState('idle'); // 'idle', 'charging', 'full', 'error'
+    const [chargingMode, setChargingMode] = useState('wired'); // 'wired' or 'wireless'
+    const [aiParameters, setAiParameters] = useState({
+        learningRate: 0.01,
+        optimizationGoal: 'speed', // 'speed', 'efficiency', 'longevity'
+        // ... more AI parameters
+    });
+    const [quantumState, setQuantumState] = useState(null); // Data for quantum state visualization
+    const ws = useRef(null); // WebSocket reference
+
+    const connectWebSocket = useCallback(() => {
+        // Use a WebSocket URL that points to your backend simulation server
+        ws.current = new WebSocket('ws://localhost:8080'); // Replace with your backend URL
+
+        ws.current.onopen = () => {
+            console.log('WebSocket connected');
+            setChargingStatus('idle');
+            // Send initial configuration to backend
+            ws.current.send(JSON.stringify({ type: 'config', mode: chargingMode, aiParams: aiParameters }));
+        };
+
+        ws.current.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.type === 'battery_update') {
+                setBatteryData(prevData => [...prevData, data.payload]);
+                setQuantumState(data.payload.quantumState); // Assuming backend sends a simplified quantumState
+                setChargingStatus(data.payload.status);
+            } else if (data.type === 'status_update') {
+                setChargingStatus(data.payload.status);
+            } else if (data.type === 'error') {
+                console.error('Backend Error:', data.payload);
+                setChargingStatus('error');
+            }
+        };
+
+        ws.current.onclose = () => {
+            console.log('WebSocket disconnected. Attempting to reconnect in 5 seconds...');
+            setChargingStatus('disconnected');
+            setTimeout(connectWebSocket, 5000); // Attempt to reconnect
+        };
+
+        ws.current.onerror = (error) => {
+            console.error('WebSocket Error:', error);
+            setChargingStatus('error');
+            ws.current.close(); // Close to trigger reconnect
+        };
+    }, [chargingMode, aiParameters]);
+
+    useEffect(() => {
+        connectWebSocket();
+
+        // Cleanup on component unmount
+        return () => {
+            if (ws.current) {
+                ws.current.close();
+            }
+        };
+    }, [connectWebSocket]); // Reconnect if mode or AI params change
+
+    const handleStartCharging = () => {
+        if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+            setBatteryData([]); // Clear previous data
+            setChargingStatus('charging');
+            ws.current.send(JSON.stringify({
+                type: 'start_charging',
+                mode: chargingMode,
+                aiParams: aiParameters
+            }));
+        } else {
+            console.warn("WebSocket not open. Cannot start charging.");
+            setChargingStatus('disconnected');
+        }
+    };
+
+    const handleStopCharging = () => {
+        if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+            setChargingStatus('idle');
+            ws.current.send(JSON.stringify({ type: 'stop_charging' }));
+        }
+    };
+
+    const handleModeChange = (mode) => {
+        setChargingMode(mode);
+        // Re-establish connection or send config if already connected
+        if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+            ws.current.send(JSON.stringify({ type: 'config', mode: mode, aiParams: aiParameters }));
+        }
+    };
+
+    const handleAiParamChange = (param, value) => {
+        setAiParameters(prevParams => ({ ...prevParams, [param]: value }));
+        // Re-establish connection or send config if already connected
+        if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+            ws.current.send(JSON.stringify({ type: 'config', mode: chargingMode, aiParams: { ...aiParameters, [param]: value } }));
+        }
+    };
+
+    return (
+        <div className="app-container">
+            <h1>AI-Driven Quantum Battery Recharging Simulator</h1>
+
+            <ControlPanel
+                onStart={handleStartCharging}
+                onStop={handleStopCharging}
+                onModeChange={handleModeChange}
+                chargingMode={chargingMode}
+                aiParameters={aiParameters}
+                onAiParamChange={handleAiParamChange}
+                chargingStatus={chargingStatus}
+            />
+
+            <StatusDisplay status={chargingStatus} />
+
+            <div className="visualization-area">
+                <div className="chart-container">
+                    <h2>Battery Energy & Coherence</h2>
+                    <Chart data={batteryData} />
+                </div>
+                <div className="quantum-state-viz-container">
+                    <h2>Conceptual Quantum State</h2>
+                    {quantumState && <QuantumStateViz quantumState={quantumState} />}
+                    {!quantumState && <p>No quantum state data available.</p>}
+                </div>
+            </div>
+
+            <p className="footer">
+                *This is a conceptual simulation for educational purposes. Real quantum battery technology is in early research stages.
+            </p>
+        </div>
+    );
+}
+
+export default App;
+
+
+
+import React from 'react';
+import './ControlPanel.css';
+
+const ControlPanel = ({
+    onStart,
+    onStop,
+    onModeChange,
+    chargingMode,
+    aiParameters,
+    onAiParamChange,
+    chargingStatus
+}) => {
+    const isCharging = chargingStatus === 'charging';
+
+    return (
+        <div className="control-panel">
+            <div className="mode-selection">
+                <h3>Charging Mode</h3>
+                <label>
+                    <input
+                        type="radio"
+                        value="wired"
+                        checked={chargingMode === 'wired'}
+                        onChange={() => onModeChange('wired')}
+                        disabled={isCharging}
+                    />
+                    Wired
+                </label>
+                <label>
+                    <input
+                        type="radio"
+                        value="wireless"
+                        checked={chargingMode === 'wireless'}
+                        onChange={() => onModeChange('wireless')}
+                        disabled={isCharging}
+                    />
+                    Wireless
+                </label>
+            </div>
+
+            <div className="ai-params">
+                <h3>AI Parameters</h3>
+                <div>
+                    <label>
+                        Learning Rate:
+                        <input
+                            type="number"
+                            step="0.001"
+                            min="0.0001"
+                            value={aiParameters.learningRate}
+                            onChange={(e) => onAiParamChange('learningRate', parseFloat(e.target.value))}
+                            disabled={isCharging}
+                        />
+                    </label>
+                </div>
+                <div>
+                    <label>
+                        Optimization Goal:
+                        <select
+                            value={aiParameters.optimizationGoal}
+                            onChange={(e) => onAiParamChange('optimizationGoal', e.target.value)}
+                            disabled={isCharging}
+                        >
+                            <option value="speed">Speed</option>
+                            <option value="efficiency">Efficiency</option>
+                            <option value="longevity">Longevity</option>
+                        </select>
+                    </label>
+                </div>
+                {/* Add more AI parameters as needed for your simulation */}
+            </div>
+
+            <div className="actions">
+                <button onClick={onStart} disabled={isCharging || chargingStatus === 'disconnected'}>
+                    Start Charging
+                </button>
+                <button onClick={onStop} disabled={!isCharging}>
+                    Stop Charging
+                </button>
+            </div>
+        </div>
+    );
+};
+
+export default ControlPanel;
+
+
+import React from 'react';
+import './StatusDisplay.css';
+
+const StatusDisplay = ({ status }) => {
+    let message = '';
+    let className = 'status-indicator';
+
+    switch (status) {
+        case 'idle':
+            message = 'Idle: Ready to charge.';
+            className += ' status-idle';
+            break;
+        case 'charging':
+            message = 'Charging: AI optimizing process...';
+            className += ' status-charging';
+            break;
+        case 'full':
+            message = 'Battery Full: Charging complete!';
+            className += ' status-full';
+            break;
+        case 'error':
+            message = 'Error: Check backend connection or simulation.';
+            className += ' status-error';
+            break;
+        case 'disconnected':
+            message = 'Disconnected: Attempting to reconnect to simulation backend...';
+            className += ' status-disconnected';
+            break;
+        default:
+            message = `Status: ${status}`;
+            className += ' status-unknown';
+    }
+
+    return (
+        <div className={className}>
+            <p>{message}</p>
+        </div>
+    );
+};
+
+export default StatusDisplay;
+
+
+import React from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import './Chart.css';
+
+const Chart = ({ data }) => {
+    return (
+        <ResponsiveContainer width="100%" height={300}>
+            <LineChart
+                data={data}
+                margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+            >
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="time" label={{ value: "Time Step", position: "insideBottomRight", offset: 0 }} />
+                <YAxis yAxisId="left" label={{ value: "Energy (%)", angle: -90, position: "insideLeft" }} />
+                <YAxis yAxisId="right" orientation="right" label={{ value: "Coherence", angle: 90, position: "insideRight" }} />
+                <Tooltip />
+                <Legend />
+                <Line yAxisId="left" type="monotone" dataKey="energy" stroke="#8884d8" name="Energy (%)" activeDot={{ r: 8 }} />
+                <Line yAxisId="right" type="monotone" dataKey="coherence" stroke="#82ca9d" name="Coherence" />
+            </LineChart>
+        </ResponsiveContainer>
+    );
+};
+
+export default Chart;
+
+
+
+import React from 'react';
+import './QuantumStateViz.css';
+
+const QuantumStateViz = ({ quantumState }) => {
+    if (!quantumState) {
+        return <div className="quantum-state-viz">Loading quantum state...</div>;
+    }
+
+    // Example: Assuming quantumState has { probability_distribution: [0.1, 0.2, 0.7], entanglement_score: 0.5 }
+    const { probability_distribution, entanglement_score, description } = quantumState;
+
+    return (
+        <div className="quantum-state-viz">
+            <p><strong>Current State Description:</strong> {description || 'N/A'}</p>
+            {probability_distribution && (
+                <div className="probability-bars">
+                    <h4>Probability Distribution:</h4>
+                    {probability_distribution.map((prob, index) => (
+                        <div key={index} className="prob-bar-container">
+                            <span className="state-label">|{index.toString(2).padStart(Math.log2(probability_distribution.length), '0')}></span>
+                            <div className="prob-bar" style={{ width: `${prob * 100}%` }}>
+                                {`${(prob * 100).toFixed(1)}%`}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+            {entanglement_score !== undefined && (
+                <p><strong>Entanglement Score:</strong> {(entanglement_score * 100).toFixed(1)}%</p>
+            )}
+            {/* Further visualization could go here, e.g., a simple Bloch sphere for 1-qubit system using a 3D library */}
+            <div className="bloch-sphere-placeholder">
+                <p>Bloch Sphere (Conceptual) - Requires 3D library for rendering</p>
+            </div>
+        </div>
+    );
+};
+
+export default QuantumStateViz;
+
+
+
+body {
+    font-family: 'Arial', sans-serif;
+    margin: 0;
+    padding: 20px;
+    background-color: #f4f7f6;
+    color: #333;
+}
+
+.app-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    background-color: #fff;
+    padding: 30px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+h1, h2, h3 {
+    color: #2c3e50;
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.visualization-area {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    margin-top: 30px;
+}
+
+.chart-container, .quantum-state-viz-container {
+    flex: 1;
+    min-width: 300px;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 20px;
+    background-color: #fdfdfd;
+}
+
+.footer {
+    text-align: center;
+    margin-top: 40px;
+    font-size: 0.8em;
+    color: #777;
+}
+
+
+.control-panel {
+    display: flex;
+    justify-content: space-around;
+    align-items: flex-start;
+    padding: 20px;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    background-color: #f9f9f9;
+    margin-bottom: 20px;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+
+.control-panel h3 {
+    margin-top: 0;
+    color: #34495e;
+    text-align: left;
+}
+
+.mode-selection label, .ai-params label {
+    display: block;
+    margin-bottom: 10px;
+    font-weight: bold;
+    color: #555;
+}
+
+.mode-selection input[type="radio"] {
+    margin-right: 8px;
+}
+
+.ai-params input[type="number"],
+.ai-params select {
+    width: 150px;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    margin-left: 10px;
+}
+
+.actions button {
+    background-color: #007bff;
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 1em;
+    margin-right: 10px;
+    transition: background-color 0.3s ease;
+}
+
+.actions button:hover:not(:disabled) {
+    background-color: #0056b3;
+}
+
+.actions button:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
+}
+
+
+.status-indicator {
+    padding: 15px;
+    margin-bottom: 20px;
+    border-radius: 8px;
+    text-align: center;
+    font-weight: bold;
+    font-size: 1.1em;
+}
+
+.status-idle {
+    background-color: #e0f7fa;
+    color: #00796b;
+}
+
+.status-charging {
+    background-color: #fff3e0;
+    color: #ef6c00;
+}
+
+.status-full {
+    background-color: #e8f5e9;
+    color: #2e7d32;
+}
+
+.status-error {
+    background-color: #ffebee;
+    color: #d32f2f;
+}
+
+.status-disconnected {
+    background-color: #eceff1;
+    color: #455a64;
+}
+
+
+
+.chart-container {
+    /* Styles from App.css apply */
+}
+
+
+
+.quantum-state-viz {
+    padding: 15px;
+    border: 1px dashed #b0c4de;
+    border-radius: 5px;
+    background-color: #f0f8ff;
+    min-height: 250px; /* Ensure it takes up space */
+}
+
+.quantum-state-viz h4 {
+    margin-top: 0;
+    color: #4682b4;
+}
+
+.probability-bars {
+    margin-top: 15px;
+}
+
+.prob-bar-container {
+    display: flex;
+    align-items: center;
+    margin-bottom: 8px;
+    font-size: 0.9em;
+}
+
+.state-label {
+    width: 60px; /* Fixed width for labels */
+    flex-shrink: 0;
+    font-family: 'monospace';
+    color: #555;
+}
+
+.prob-bar {
+    background-color: #6a5acd;
+    height: 20px;
+    border-radius: 3px;
+    color: white;
+    display: flex;
+    align-items: center;
+    padding-left: 5px;
+    box-sizing: border-box;
+    transition: width 0.3s ease-out; /* Smooth transition for bar growth */
+    margin-left: 10px;
+}
+
+.bloch-sphere-placeholder {
+    border: 1px solid #ccc;
+    height: 150px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-style: italic;
+    color: #888;
+    background-color: #e9e9e9;
+    margin-top: 20px;
+}
+
+
+
+// server.js (Node.js with 'ws' library)
+const WebSocket = require('ws');
+
+const wss = new WebSocket.Server({ port: 8080 });
+
+console.log('WebSocket server started on port 8080');
+
+// --- Simulated Quantum Battery & AI Logic ---
+let quantumBattery = {
+    energy: 0, // Percentage
+    coherence: 1.0, // 0 to 1, higher is better
+    maxEnergy: 100,
+    minCoherence: 0.1,
+    timeStep: 0.1, // Sim time step
+    quantumState: {
+        probability_distribution: [1.0, 0.0], // Example for 1 qubit ground state
+        entanglement_score: 0.0,
+        description: "Ground State"
+    }
+};
+
+let currentChargingMode = 'wired';
+let currentAiParams = {
+    learningRate: 0.01,
+    optimizationGoal: 'speed',
+};
+let simulationInterval = null; // To control the simulation loop
+
+function simulateChargingStep() {
+    // --- This is where the core (highly simplified) quantum battery & AI logic runs ---
+    // In a real scenario, this would involve complex physics simulations or calls to quantum computing SDKs.
+
+    let energyGain = 0;
+    let coherenceLoss = 0;
+
+    // AI-driven charging logic (simplified)
+    if (currentChargingMode === 'wired') {
+        // Wired charging: direct energy transfer, potentially more precise but also more susceptible to local noise
+        energyGain = 1.0 * currentAiParams.learningRate; // AI "learns" to apply optimal pulses
+        coherenceLoss = 0.005; // Base decoherence
+    } else { // wireless
+        // Wireless charging: energy via fields, potentially more robust to localized noise but might be slower or less efficient initially
+        energyGain = 0.8 * currentAiParams.learningRate; // Slightly less direct
+        coherenceLoss = 0.003; // Slightly less decoherence if engineered well
+    }
+
+    // Adjust based on AI optimization goal
+    if (currentAiParams.optimizationGoal === 'speed') {
+        energyGain *= 1.5;
+        coherenceLoss *= 1.2; // Sacrifice coherence for speed
+    } else if (currentAiParams.optimizationGoal === 'efficiency') {
+        energyGain *= 1.2;
+        coherenceLoss *= 0.8; // Optimize for less loss
+    } else if (currentAiParams.optimizationGoal === 'longevity') {
+        energyGain *= 0.7; // Slower
+        coherenceLoss *= 0.5; // Preserve coherence for longer life
+    }
+
+    // Apply gains/losses
+    quantumBattery.energy = Math.min(quantumBattery.maxEnergy, quantumBattery.energy + energyGain);
+    quantumBattery.coherence = Math.max(quantumBattery.minCoherence, quantumBattery.coherence - coherenceLoss);
+
+    // Simulate AI adapting over time (very basic feedback loop)
+    // If energy is low, increase learning rate slightly to speed up
+    if (quantumBattery.energy < quantumBattery.maxEnergy * 0.5 && currentAiParams.learningRate < 0.05) {
+        currentAiParams.learningRate += 0.0001;
+    } else if (quantumBattery.energy >= quantumBattery.maxEnergy * 0.9 && currentAiParams.learningRate > 0.01) {
+        // Once charged, reduce learning rate or switch strategy
+        currentAiParams.learningRate -= 0.0001;
+    }
+
+    // Update conceptual quantum state (very simplified changes)
+    if (quantumBattery.energy > quantumBattery.maxEnergy * 0.8) {
+        quantumBattery.quantumState.probability_distribution = [0.1, 0.9]; // More excited state
+        quantumBattery.quantumState.entanglement_score = 0.7 * (quantumBattery.coherence / 1.0); // Entanglement related to coherence
+        quantumBattery.quantumState.description = "Highly Excited, Partially Entangled";
+    } else if (quantumBattery.energy > quantumBattery.maxEnergy * 0.4) {
+        quantumBattery.quantumState.probability_distribution = [0.5, 0.5]; // Superposition
+        quantumBattery.quantumState.entanglement_score = 0.3 * (quantumBattery.coherence / 1.0);
+        quantumBattery.quantumState.description = "Superposition State";
+    } else {
+        quantumBattery.quantumState.probability_distribution = [1.0, 0.0]; // Ground state
+        quantumBattery.quantumState.entanglement_score = 0.0;
+        quantumBattery.quantumState.description = "Ground State";
+    }
+
+
+    let status = 'charging';
+    if (quantumBattery.energy >= quantumBattery.maxEnergy) {
+        status = 'full';
+        clearInterval(simulationInterval);
+        simulationInterval = null;
+    }
+
+
+    // Send update to all connected clients
+    wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({
+                type: 'battery_update',
+                payload: {
+                    time: Math.round(quantumBattery.energy * 10) / 10, // Using energy as a proxy for time for plotting
+                    energy: parseFloat(quantumBattery.energy.toFixed(2)),
+                    coherence: parseFloat(quantumBattery.coherence.toFixed(2)),
+                    quantumState: quantumBattery.quantumState,
+                    status: status
+                }
+            }));
+        }
+    });
+
+    if (status === 'full') {
+        // Reset for next charge cycle or stop completely
+        // quantumBattery.energy = 0;
+        // quantumBattery.coherence = 1.0;
+    }
+}
+
+wss.on('connection', ws => {
+    console.log('Client connected');
+
+    ws.on('message', message => {
+        const data = JSON.parse(message);
+        console.log('Received:', data);
+
+        if (data.type === 'start_charging') {
+            quantumBattery.energy = 0; // Reset for new charge
+            quantumBattery.coherence = 1.0;
+            currentChargingMode = data.mode;
+            currentAiParams = data.aiParams;
+            if (simulationInterval) {
+                clearInterval(simulationInterval);
+            }
+            simulationInterval = setInterval(simulateChargingStep, 500); // Update every 0.5 seconds
+            ws.send(JSON.stringify({ type: 'status_update', payload: { status: 'charging' } }));
+        } else if (data.type === 'stop_charging') {
+            if (simulationInterval) {
+                clearInterval(simulationInterval);
+                simulationInterval = null;
+            }
+            ws.send(JSON.stringify({ type: 'status_update', payload: { status: 'idle' } }));
+        } else if (data.type === 'config') {
+            currentChargingMode = data.mode;
+            currentAiParams = data.aiParams;
+            console.log('Backend config updated:', { mode: currentChargingMode, aiParams: currentAiParams });
+        }
+    });
+
+    ws.on('close', () => {
+        console.log('Client disconnected');
+    });
+
+    ws.on('error', error => {
+        console.error('WebSocket error:', error);
+    });
+});
+
+
