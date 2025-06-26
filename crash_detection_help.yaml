@@ -1,0 +1,206 @@
+import time
+
+class VehicleCrashDetection:
+    def __init__(self, accel_threshold=5.0, gyro_threshold=100.0, impact_duration_ms=50):
+        self.accelerometer_data = [] # [x, y, z] G-forces
+        self.gyroscope_data = []     # [roll, pitch, yaw] degrees/second
+        self.accel_threshold = accel_threshold  # G-force threshold for impact
+        self.gyro_threshold = gyro_threshold    # Angular velocity threshold
+        self.impact_duration_ms = impact_duration_ms # Duration over which impact must be sustained
+
+        self.gps_module = None # Placeholder for GPS module object
+        self.gsm_module = None # Placeholder for GSM/LTE module object (for communication)
+        self.emergency_contacts = ["+1234567890", "+1987654321"] # Pre-configured contacts
+
+    def read_accelerometer(self):
+        # Simulate reading from a physical accelerometer sensor
+        # In a real system, this would interact with hardware APIs
+        # Return [ax, ay, az]
+        return [self.simulate_sensor_reading(10), self.simulate_sensor_reading(10), self.simulate_sensor_reading(10)]
+
+    def read_gyroscope(self):
+        # Simulate reading from a physical gyroscope sensor
+        # Return [gx, gy, gz]
+        return [self.simulate_sensor_reading(200), self.simulate_sensor_reading(200), self.simulate_sensor_reading(200)]
+
+    def simulate_sensor_reading(self, max_val):
+        # Simulate normal fluctuating sensor data
+        import random
+        return random.uniform(-max_val / 10, max_val / 10)
+
+    def calculate_g_force_magnitude(self, accel_data):
+        # Calculate the magnitude of the acceleration vector
+        return (accel_data[0]**2 + accel_data[1]**2 + accel_data[2]**2)**0.5
+
+    def check_for_crash(self):
+        start_time = time.time()
+        impact_detected_start = None
+
+        while True:
+            current_accel = self.read_accelerometer()
+            current_gyro = self.read_gyroscope()
+
+            g_force_mag = self.calculate_g_force_magnitude(current_accel)
+            gyro_mag = self.calculate_g_force_magnitude(current_gyro) # Using same for simplicity
+
+            # Basic impact detection logic
+            if g_force_mag > self.accel_threshold and gyro_mag > self.gyro_threshold:
+                if impact_detected_start is None:
+                    impact_detected_start = time.time()
+                elif (time.time() - impact_detected_start) * 1000 >= self.impact_duration_ms:
+                    print("CRASH DETECTED!")
+                    self.trigger_emergency_response()
+                    impact_detected_start = None # Reset for next detection
+            else:
+                impact_detected_start = None
+
+            time.sleep(0.01) # Check every 10 milliseconds
+
+    def get_current_location(self):
+        # In a real system, interact with GPS module
+        if self.gps_module:
+            return self.gps_module.get_location()
+        return "Unknown Location (Lat: XX.XXXX, Lon: YY.YYYY)"
+
+    def send_emergency_alert(self, message):
+        # In a real system, interact with GSM/LTE module
+        if self.gsm_module:
+            for contact in self.emergency_contacts:
+                self.gsm_module.send_sms(contact, message)
+        print(f"Emergency Alert Sent to: {self.emergency_contacts} with message: '{message}'")
+
+    def trigger_emergency_response(self):
+        location = self.get_current_location()
+        message = f"Urgent: Vehicle crash detected! Possible location: {location}. Please send help."
+        self.send_emergency_alert(message)
+        # Activate in-vehicle emergency call system (e.g., eCall)
+        self.activate_ecall()
+
+    def activate_ecall(self):
+        # Simulate eCall system activation (e.g., connecting to emergency services automatically)
+        print("Activating automatic emergency call (eCall)...")
+        # This would typically involve a dedicated module that establishes a voice call and transmits data
+
+# Example Usage (conceptual):
+if __name__ == "__main__":
+    crash_detector = VehicleCrashDetection()
+    print("Monitoring for crashes...")
+    # Simulate a crash after a few seconds
+    # For a real system, this would be a continuous loop in the vehicle's embedded system
+    # You would replace the simulate_sensor_reading with actual sensor reads.
+    
+    # To demonstrate a simulated crash:
+    print("Simulating normal driving for 3 seconds...")
+    time.sleep(3) 
+
+    print("Simulating a crash event...")
+    # Manually set accelerometer data to simulate a crash
+    crash_detector.simulate_sensor_reading = lambda x: random.uniform(5.5, 15.0) # High G-force
+    crash_detector.check_for_crash() # Start the monitoring loop (would be continuously running)
+    
+    # In a real system, the `check_for_crash` would be a background process.
+    # The simulation above will trigger the detection quickly due to the forced high readings.
+
+
+import subprocess
+import time
+import os
+
+class DeviceAutoRepair:
+    def __init__(self, service_name="my_critical_service.py", log_file="repair_log.txt"):
+        self.service_name = service_name
+        self.log_file = log_file
+        self.max_restart_attempts = 3
+        self.restart_interval_sec = 5
+
+    def log_event(self, message):
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        with open(self.log_file, "a") as f:
+            f.write(f"[{timestamp}] {message}\n")
+        print(message)
+
+    def check_service_status(self):
+        # Simulate checking if a process is running
+        try:
+            # This is a very basic check. In a real system, you might:
+            # - Check a specific PID file
+            # - Query a system service manager (e.g., systemd on Linux, Windows Services)
+            # - Try to connect to a port the service should be listening on
+            cmd = f"pgrep -f {self.service_name}" # Example for Linux/macOS
+            output = subprocess.check_output(cmd, shell=True).decode().strip()
+            if output:
+                return True
+            return False
+        except subprocess.CalledProcessError:
+            return False # Process not found
+
+    def start_service(self):
+        self.log_event(f"Attempting to start {self.service_name}...")
+        try:
+            # In a real scenario, you'd use a proper service management command
+            # e.g., `sudo systemctl start my_service` or `python my_critical_service.py &`
+            subprocess.Popen(["python", self.service_name]) # Example: running a Python script
+            time.sleep(2) # Give it time to start
+            if self.check_service_status():
+                self.log_event(f"{self.service_name} started successfully.")
+                return True
+            else:
+                self.log_event(f"Failed to start {self.service_name}.")
+                return False
+        except Exception as e:
+            self.log_event(f"Error starting {self.service_name}: {e}")
+            return False
+
+    def auto_repair_loop(self):
+        restart_count = 0
+        while True:
+            if not self.check_service_status():
+                self.log_event(f"{self.service_name} is not running. Initiating repair...")
+                if restart_count < self.max_restart_attempts:
+                    if self.start_service():
+                        restart_count = 0 # Reset count on successful restart
+                    else:
+                        restart_count += 1
+                        self.log_event(f"Restart attempt {restart_count}/{self.max_restart_attempts} failed. Retrying in {self.restart_interval_sec} seconds.")
+                else:
+                    self.log_event(f"Max restart attempts reached for {self.service_name}. Manual intervention required.")
+                    # Potentially send an alert (email, SMS) here
+                    break # Stop trying to restart, assume unrecoverable
+
+            time.sleep(self.restart_interval_sec) # Check every few seconds
+
+# Example Usage (conceptual):
+if __name__ == "__main__":
+    # Create a dummy service file to test
+    with open("my_critical_service.py", "w") as f:
+        f.write("import time\n")
+        f.write("print('My critical service started.')\n")
+        f.write("while True: time.sleep(1) # Keep running\n")
+
+    repair_system = DeviceAutoRepair()
+    print("Starting auto-repair system for my_critical_service.py...")
+    
+    # In a real scenario, this would likely be a background daemon
+    # For demonstration, we'll run it directly and then simulate a crash
+    
+    # Start the service initially
+    if repair_system.start_service():
+        print("Service running. Simulating a crash after 10 seconds...")
+        time.sleep(10)
+        
+        # Simulate a crash by killing the process
+        print("Killing the service to simulate a crash...")
+        try:
+            subprocess.run(f"pkill -f {repair_system.service_name}", shell=True)
+            print("Service killed.")
+        except Exception as e:
+            print(f"Could not kill service (might not be running): {e}")
+
+        # Now let the auto-repair loop try to fix it
+        repair_system.auto_repair_loop()
+    else:
+        print("Initial service start failed. Auto-repair won't proceed.")
+
+
+
+
