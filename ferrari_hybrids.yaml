@@ -1,0 +1,605 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# --- Vehicle Parameters (Highly Exaggerated for 0-400 mph "attempt") ---
+# These values are *not* realistic for any current or near-future vehicle.
+
+# Hybrid Powertrain (Illustrative - far beyond current tech)
+ICE_MAX_POWER_HP = 15000  # Theoretical Internal Combustion Engine Max Horsepower
+EV_MAX_POWER_HP = 10000   # Theoretical Electric Motor Max Horsepower
+SYSTEM_MAX_POWER_HP = ICE_MAX_POWER_HP + EV_MAX_POWER_HP # Combined power
+SYSTEM_MAX_POWER_WATTS = SYSTEM_MAX_POWER_HP * 745.7 # Convert to Watts
+
+BATTERY_CAPACITY_KWH = 500 # kWh - massively larger and more powerful than current car batteries
+BATTERY_DISCHARGE_RATE_KW = EV_MAX_POWER_HP * 0.7457 * 1.2 # Allow for burst power higher than continuous
+REGEN_EFFICIENCY = 0.8 # Regenerative braking efficiency
+
+# Vehicle Characteristics
+MASS_KG = 1000       # kg (very light for such power, like an F1 car, but needs to be for speed)
+DRAG_COEFFICIENT = 0.20 # Cd (extremely low, optimized for top speed)
+FRONTAL_AREA_SQM = 1.8  # sq meters (typical for a sports car)
+ROLLING_RESISTANCE_COEFF = 0.005 # Cr (low friction)
+MAX_TIRE_GRIP_MU = 2.5 # Coefficient of friction (unrealistically high for acceleration and speed)
+
+# Environment
+AIR_DENSITY = 1.225 # kg/m^3 (standard air density at sea level)
+GRAVITY = 9.81     # m/s^2
+
+# Simulation Parameters
+TIME_STEP = 0.01  # seconds
+MAX_SIM_TIME = 60 # seconds (we'll stop early if 400 mph is reached)
+TARGET_SPEED_MPH = 400
+TARGET_SPEED_MPS = TARGET_SPEED_MPH * 0.44704 # Convert mph to m/s
+
+# --- Simulation Function ---
+def simulate_acceleration(powertrain_type="hybrid"):
+    time = [0.0]
+    speed_mps = [0.0]
+    distance_m = [0.0]
+    acceleration_mps2 = [0.0]
+    power_used_watts = [0.0]
+
+    current_speed_mps = 0.0
+    current_distance_m = 0.0
+    current_time = 0.0
+
+    while current_speed_mps < TARGET_SPEED_MPS and current_time < MAX_SIM_TIME:
+        # Calculate forces
+        # 1. Aerodynamic Drag Force: F_drag = 0.5 * rho * Cd * A * v^2
+        drag_force = 0.5 * AIR_DENSITY * DRAG_COEFFICIENT * FRONTAL_AREA_SQM * (current_speed_mps**2)
+
+        # 2. Rolling Resistance Force: F_roll = Cr * mass * g
+        rolling_force = ROLLING_RESISTANCE_COEFF * MASS_KG * GRAVITY
+
+        # 3. Available Power for Propulsion (assuming maximum available power)
+        # In a real car, power varies with RPM, gear, etc. This simplifies to max power always.
+        if powertrain_type == "hybrid":
+            available_power_watts = SYSTEM_MAX_POWER_WATTS
+        elif powertrain_type == "fuel_cell":
+            # For simplicity, assume fuel cell can also deliver immense, sustained power
+            available_power_watts = SYSTEM_MAX_POWER_WATTS * 0.9 # Slightly less, just for distinction
+        else: # ICE only
+            available_power_watts = ICE_MAX_POWER_HP * 745.7
+
+        # Propulsive Force: F_prop = Power / speed (simplified, assuming ideal power delivery)
+        # Avoid division by zero at standstill
+        if current_speed_mps < 1.0: # At very low speeds, torque is limited, not power
+            propulsive_force = (available_power_watts / 1.0) # Apply full power as torque until speed builds
+        else:
+            propulsive_force = available_power_watts / current_speed_mps
+
+        # Account for traction limit (max force tires can provide)
+        max_traction_force = MAX_TIRE_GRIP_MU * MASS_KG * GRAVITY
+        propulsive_force = min(propulsive_force, max_traction_force)
+
+        # Net Force
+        net_force = propulsive_force - drag_force - rolling_force
+
+        # Acceleration: a = F_net / m
+        accel = net_force / MASS_KG
+
+        # Update values
+        current_speed_mps += accel * TIME_STEP
+        current_distance_m += current_speed_mps * TIME_STEP # distance = speed * time (simplified)
+        current_time += TIME_STEP
+
+        # Store data
+        time.append(current_time)
+        speed_mps.append(current_speed_mps)
+        distance_m.append(current_distance_m)
+        acceleration_mps2.append(accel)
+        power_used_watts.append(propulsive_force * current_speed_mps) # P = F * v
+
+    speed_mph = [s * 2.23694 for s in speed_mps] # Convert m/s to mph
+
+    return time, speed_mph, distance_m, acceleration_mps2, power_used_watts
+
+# --- Run Simulations ---
+print(f"--- Simulating Hybrid Ferrari (Theoretical 0-400 mph attempt) ---")
+hybrid_time, hybrid_speed, hybrid_distance, hybrid_accel, hybrid_power = simulate_acceleration("hybrid")
+
+print(f"\n--- Simulating Hydrogen Fuel Cell Ferrari (Theoretical 0-400 mph attempt) ---")
+# For the sake of this theoretical exercise, assuming similar power delivery characteristics
+# but with a slight distinction as fuel cells produce electricity for motors.
+fuel_cell_time, fuel_cell_speed, fuel_cell_distance, fuel_cell_accel, fuel_cell_power = simulate_acceleration("fuel_cell")
+
+
+# --- Analysis and Output ---
+def print_results(label, time, speed, distance):
+    final_speed_mph = speed[-1]
+    final_time = time[-1]
+
+    if final_speed_mph >= TARGET_SPEED_MPH - 0.1: # Allow for slight float inaccuracy
+        time_to_400_mph = -1
+        for i, s in enumerate(speed):
+            if s >= TARGET_SPEED_MPH:
+                time_to_400_mph = time[i]
+                break
+        print(f"{label}: Achieved {TARGET_SPEED_MPH} mph in {time_to_400_mph:.2f} seconds.")
+    else:
+        print(f"{label}: Did not reach {TARGET_SPEED_MPH} mph. Max speed: {final_speed_mph:.2f} mph in {final_time:.2f} seconds.")
+    print(f"  Distance covered: {distance[-1]/1000:.2f} km")
+
+print_results("Theoretical Hybrid Ferrari", hybrid_time, hybrid_speed, hybrid_distance)
+print_results("Theoretical Hydrogen Fuel Cell Ferrari", fuel_cell_time, fuel_cell_speed, fuel_cell_distance)
+
+
+# --- Plotting Results ---
+plt.figure(figsize=(12, 8))
+
+plt.subplot(2, 1, 1)
+plt.plot(hybrid_time, hybrid_speed, label='Hybrid Ferrari (Theoretical)')
+plt.plot(fuel_cell_time, fuel_cell_speed, label='Hydrogen Fuel Cell Ferrari (Theoretical)', linestyle='--')
+plt.axhline(y=TARGET_SPEED_MPH, color='r', linestyle=':', label=f'Target: {TARGET_SPEED_MPH} mph')
+plt.xlabel('Time (s)')
+plt.ylabel('Speed (mph)')
+plt.title('Theoretical 0-400 mph Acceleration Simulation')
+plt.grid(True)
+plt.legend()
+plt.xlim(0, max(hybrid_time[-1], fuel_cell_time[-1]) if max(hybrid_time[-1], fuel_cell_time[-1]) < MAX_SIM_TIME else MAX_SIM_TIME)
+plt.ylim(0, TARGET_SPEED_MPH * 1.1)
+
+
+plt.subplot(2, 1, 2)
+plt.plot(hybrid_time, hybrid_distance, label='Hybrid Ferrari (Theoretical)')
+plt.plot(fuel_cell_time, fuel_cell_distance, label='Hydrogen Fuel Cell Ferrari (Theoretical)', linestyle='--')
+plt.xlabel('Time (s)')
+plt.ylabel('Distance (m)')
+plt.title('Theoretical Distance Covered')
+plt.grid(True)
+plt.legend()
+plt.xlim(0, max(hybrid_time[-1], fuel_cell_time[-1]) if max(hybrid_time[-1], fuel_cell_time[-1]) < MAX_SIM_TIME else MAX_SIM_TIME)
+
+plt.tight_layout()
+plt.show()
+
+print("\nDisclaimer: The parameters used in this simulation are highly theoretical and vastly exceed")
+print("current automotive engineering capabilities. A 0-400 mph acceleration is not currently achievable")
+print("by any production vehicle. This code is for illustrative purposes only to demonstrate")
+print("the physics involved with extreme, hypothetical performance.")
+
+
+npx create-react-app ferrari-simulation
+cd ferrari-simulation
+npm start
+
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import './App.css';
+
+// --- Simulation Logic (Adapted from Python - NOT REALISTIC FOR 0-400 MPH) ---
+// These values are *highly theoretical* and vastly exceed current automotive capabilities.
+const VEHICLE_PARAMS = {
+    hybrid: {
+        ICE_MAX_POWER_HP: 15000,
+        EV_MAX_POWER_HP: 10000,
+        DRAG_COEFFICIENT: 0.20,
+        MASS_KG: 1000,
+        COLOR: '#FF0000' // Red
+    },
+    fuelCell: {
+        ICE_MAX_POWER_HP: 0, // No ICE for pure fuel cell
+        EV_MAX_POWER_HP: 24000, // Even higher power for dedicated fuel cell
+        DRAG_COEFFICIENT: 0.18, // Slightly more aerodynamic
+        MASS_KG: 950,           // Slightly lighter
+        COLOR: '#0000FF' // Blue
+    },
+};
+
+const SIM_CONSTANTS = {
+    FRONTAL_AREA_SQM: 1.8,
+    ROLLING_RESISTANCE_COEFF: 0.005,
+    MAX_TIRE_GRIP_MU: 2.5, // Unrealistically high
+    AIR_DENSITY: 1.225,
+    GRAVITY: 9.81,
+    TIME_STEP: 0.01, // seconds
+    TARGET_SPEED_MPH: 400,
+    TARGET_SPEED_MPS: 400 * 0.44704, // Convert mph to m/s
+    MAX_SIM_TIME: 120 // seconds (longer for higher speeds)
+};
+
+function calculateAcceleration(speed_mps, vehicleType) {
+    const params = VEHICLE_PARAMS[vehicleType];
+    const { FRONTAL_AREA_SQM, ROLLING_RESISTANCE_COEFF, MAX_TIRE_GRIP_MU, AIR_DENSITY, GRAVITY } = SIM_CONSTANTS;
+
+    const SYSTEM_MAX_POWER_WATTS = (params.ICE_MAX_POWER_HP + params.EV_MAX_POWER_HP) * 745.7;
+
+    // Forces
+    const drag_force = 0.5 * AIR_DENSITY * params.DRAG_COEFFICIENT * FRONTAL_AREA_SQM * (speed_mps ** 2);
+    const rolling_force = ROLLING_RESISTANCE_COEFF * params.MASS_KG * GRAVITY;
+
+    let propulsive_force;
+    if (speed_mps < 1.0) {
+        propulsive_force = (SYSTEM_MAX_POWER_WATTS / 1.0); // Max torque at low speed
+    } else {
+        propulsive_force = SYSTEM_MAX_POWER_WATTS / speed_mps;
+    }
+
+    const max_traction_force = MAX_TIRE_GRIP_MU * params.MASS_KG * GRAVITY;
+    propulsive_force = Math.min(propulsive_force, max_traction_force);
+
+    const net_force = propulsive_force - drag_force - rolling_force;
+    const accel = net_force / params.MASS_KG;
+
+    return accel;
+}
+
+// --- React Component ---
+function App() {
+    const [speedMph, setSpeedMph] = useState(0);
+    const [distanceKm, setDistanceKm] = useState(0);
+    const [accelerationG, setAccelerationG] = useState(0);
+    const [timeElapsed, setTimeElapsed] = useState(0);
+    const [isRunning, setIsRunning] = useState(false);
+    const [vehicleType, setVehicleType] = useState('hybrid'); // 'hybrid' or 'fuelCell'
+    const [topSpeedAchieved, setTopSpeedAchieved] = useState(0);
+    const [timeTo400Mph, setTimeTo400Mph] = useState(null);
+    const [isFinished, setIsFinished] = useState(false);
+
+    // Using useRef to hold mutable simulation state without triggering re-renders
+    const simulationState = useRef({
+        currentSpeedMps: 0,
+        currentDistanceM: 0,
+        currentTime: 0,
+        animationFrameId: null,
+    });
+
+    const resetSimulation = useCallback(() => {
+        setIsRunning(false);
+        setSpeedMph(0);
+        setDistanceKm(0);
+        setAccelerationG(0);
+        setTimeElapsed(0);
+        setTopSpeedAchieved(0);
+        setTimeTo400Mph(null);
+        setIsFinished(false);
+
+        simulationState.current = {
+            currentSpeedMps: 0,
+            currentDistanceM: 0,
+            currentTime: 0,
+            animationFrameId: null,
+        };
+
+        if (simulationState.current.animationFrameId) {
+            cancelAnimationFrame(simulationState.current.animationFrameId);
+            simulationState.current.animationFrameId = null;
+        }
+    }, []);
+
+    const startSimulation = useCallback(() => {
+        resetSimulation(); // Reset before starting
+        setIsRunning(true);
+    }, [resetSimulation]);
+
+    const stopSimulation = useCallback(() => {
+        setIsRunning(false);
+        if (simulationState.current.animationFrameId) {
+            cancelAnimationFrame(simulationState.current.animationFrameId);
+            simulationState.current.animationFrameId = null;
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!isRunning) {
+            return;
+        }
+
+        const animate = () => {
+            const { currentSpeedMps, currentDistanceM, currentTime } = simulationState.current;
+            const { TIME_STEP, TARGET_SPEED_MPS, MAX_SIM_TIME, GRAVITY } = SIM_CONSTANTS;
+
+            // Calculate new state
+            const accelMps2 = calculateAcceleration(currentSpeedMps, vehicleType);
+            const newSpeedMps = currentSpeedMps + accelMps2 * TIME_STEP;
+            const newDistanceM = currentDistanceM + newSpeedMps * TIME_STEP;
+            const newTime = currentTime + TIME_STEP;
+
+            // Update ref
+            simulationState.current.currentSpeedMps = newSpeedMps;
+            simulationState.current.currentDistanceM = newDistanceM;
+            simulationState.current.currentTime = newTime;
+
+            // Update React state for display (throttled to avoid excessive re-renders)
+            if (newTime % 0.05 < TIME_STEP) { // Update display every 50ms approx
+                const newSpeedMph = newSpeedMps * 2.23694;
+                setSpeedMph(newSpeedMph);
+                setDistanceKm(newDistanceM / 1000);
+                setAccelerationG(accelMps2 / GRAVITY);
+                setTimeElapsed(newTime);
+                setTopSpeedAchieved(prev => Math.max(prev, newSpeedMph));
+
+                if (timeTo400Mph === null && newSpeedMph >= SIM_CONSTANTS.TARGET_SPEED_MPH) {
+                    setTimeTo400Mph(newTime);
+                }
+            }
+
+
+            // Check termination conditions
+            if (newSpeedMps >= TARGET_SPEED_MPS || newTime >= MAX_SIM_TIME) {
+                stopSimulation();
+                setIsFinished(true);
+                // Ensure final state is updated
+                setSpeedMph(newSpeedMps * 2.23694);
+                setDistanceKm(newDistanceM / 1000);
+                setTimeElapsed(newTime);
+                setTopSpeedAchieved(prev => Math.max(prev, newSpeedMps * 2.23694));
+            } else {
+                simulationState.current.animationFrameId = requestAnimationFrame(animate);
+            }
+        };
+
+        simulationState.current.animationFrameId = requestAnimationFrame(animate);
+
+        // Cleanup on unmount or if simulation stops
+        return () => {
+            if (simulationState.current.animationFrameId) {
+                cancelAnimationFrame(simulationState.current.animationFrameId);
+            }
+        };
+    }, [isRunning, vehicleType, stopSimulation, timeTo400Mph]); // Dependencies for useEffect
+
+    const carStyle = {
+        transform: `translateX(${(distanceKm / (SIM_CONSTANTS.TARGET_SPEED_MPH / 1000))}vw)`, // Simple visual progression
+        backgroundColor: VEHICLE_PARAMS[vehicleType].COLOR,
+        transition: 'transform 0.1s linear', // Smooth out the animation steps
+        boxShadow: isRunning ? '0 0 10px 5px rgba(255, 255, 0, 0.7)' : 'none', // Glow effect when running
+    };
+
+    return (
+        <div className="App">
+            <header className="App-header">
+                <h1>Theoretical Ferrari Hyper-Acceleration</h1>
+                <p className="disclaimer">
+                    Disclaimer: This simulation uses highly theoretical and exaggerated parameters.
+                    <strong> 0-400 mph is not currently achievable by any real-world production vehicle.</strong>
+                    This is for conceptual demonstration only.
+                </p>
+            </header>
+
+            <div className="controls">
+                <div className="vehicle-selector">
+                    <label>Select Vehicle Type:</label>
+                    <select value={vehicleType} onChange={(e) => {
+                        setVehicleType(e.target.value);
+                        resetSimulation(); // Reset when vehicle type changes
+                    }} disabled={isRunning}>
+                        <option value="hybrid">Advanced Hybrid</option>
+                        <option value="fuelCell">Hydrogen Fuel Cell</option>
+                    </select>
+                </div>
+                <button onClick={startSimulation} disabled={isRunning && !isFinished}>
+                    {isRunning ? 'Running...' : (isFinished ? 'Restart Simulation' : 'Start Simulation')}
+                </button>
+                <button onClick={stopSimulation} disabled={!isRunning}>Stop Simulation</button>
+                <button onClick={resetSimulation} disabled={isRunning && !isFinished}>Reset</button>
+            </div>
+
+            <div className="dashboard">
+                <div className="metric">
+                    <h3>Speed</h3>
+                    <p>{speedMph.toFixed(2)} mph</p>
+                </div>
+                <div className="metric">
+                    <h3>Acceleration</h3>
+                    <p>{accelerationG.toFixed(2)} G</p>
+                </div>
+                <div className="metric">
+                    <h3>Distance</h3>
+                    <p>{distanceKm.toFixed(2)} km</p>
+                </div>
+                <div className="metric">
+                    <h3>Time Elapsed</h3>
+                    <p>{timeElapsed.toFixed(2)} s</p>
+                </div>
+            </div>
+
+            <div className="results">
+                <h2>Simulation Results</h2>
+                <p>Top Speed Achieved: <strong>{topSpeedAchieved.toFixed(2)} mph</strong></p>
+                <p>Time to {SIM_CONSTANTS.TARGET_SPEED_MPH} mph: <strong>
+                    {timeTo400Mph !== null ? `${timeTo400Mph.toFixed(2)} seconds` : 'N/A'}
+                </strong></p>
+                {isFinished && (
+                    <p className="simulation-status">
+                        {topSpeedAchieved >= SIM_CONSTANTS.TARGET_SPEED_MPH - 0.1
+                            ? `Target speed of ${SIM_CONSTANTS.TARGET_SPEED_MPH} mph reached!`
+                            : `Simulation finished. Did not reach ${SIM_CONSTANTS.TARGET_SPEED_MPH} mph.`}
+                    </p>
+                )}
+            </div>
+
+            <div className="road-container">
+                <div className="road"></div>
+                <div className="car" style={carStyle}></div>
+            </div>
+        </div>
+    );
+}
+
+export default App;
+
+
+.App {
+    font-family: Arial, sans-serif;
+    text-align: center;
+    background-color: #282c34;
+    color: white;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+.App-header {
+    margin-bottom: 20px;
+}
+
+.disclaimer {
+    color: #f0f0f0;
+    font-size: 0.9em;
+    max-width: 600px;
+    margin: 10px auto 20px auto;
+    padding: 10px;
+    border: 1px dashed #666;
+    border-radius: 5px;
+}
+
+.controls {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 30px;
+    align-items: center;
+}
+
+.controls button {
+    padding: 10px 20px;
+    font-size: 1em;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    background-color: #007bff;
+    color: white;
+    transition: background-color 0.3s ease;
+}
+
+.controls button:hover:not(:disabled) {
+    background-color: #0056b3;
+}
+
+.controls button:disabled {
+    background-color: #6c757d;
+    cursor: not-allowed;
+}
+
+.vehicle-selector label {
+    margin-right: 10px;
+}
+
+.vehicle-selector select {
+    padding: 8px;
+    border-radius: 5px;
+    border: 1px solid #ccc;
+    background-color: #333;
+    color: white;
+    cursor: pointer;
+}
+
+.dashboard {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+    margin-bottom: 40px;
+    width: 80%;
+    max-width: 900px;
+}
+
+.metric {
+    background-color: #3a3f47;
+    padding: 15px;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.metric h3 {
+    margin-top: 0;
+    color: #61dafb;
+    font-size: 1.2em;
+}
+
+.metric p {
+    font-size: 1.8em;
+    font-weight: bold;
+    margin: 5px 0 0 0;
+}
+
+.results {
+    margin-top: 20px;
+    background-color: #3a3f47;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    width: 80%;
+    max-width: 900px;
+}
+
+.results h2 {
+    color: #61dafb;
+    margin-bottom: 15px;
+}
+
+.results p {
+    font-size: 1.1em;
+    margin-bottom: 10px;
+}
+
+.simulation-status {
+    font-weight: bold;
+    color: #4CAF50; /* Green for success */
+    margin-top: 15px;
+}
+
+/* --- Basic Car Animation --- */
+.road-container {
+    width: 90%;
+    height: 50px;
+    background-color: #444;
+    margin-top: 50px;
+    border-radius: 5px;
+    position: relative;
+    overflow: hidden; /* Hide car when it goes off screen */
+}
+
+.road {
+    width: 100%;
+    height: 100%;
+    background: repeating-linear-gradient(
+        to right,
+        #555 0px,
+        #555 20px,
+        #777 20px,
+        #777 40px
+    );
+    animation: road-move 0.5s infinite linear;
+    animation-play-state: paused; /* Pause by default */
+}
+
+.car {
+    position: absolute;
+    top: 50%;
+    left: 0; /* Start at the beginning */
+    width: 80px; /* Small car representation */
+    height: 30px;
+    transform: translateY(-50%);
+    border-radius: 15px;
+    border: 2px solid #ccc;
+    box-shadow: 0 0 5px rgba(255, 255, 255, 0.5);
+}
+
+/* Pause road animation when simulation is not running */
+.App:not(.running) .road {
+    animation-play-state: paused;
+}
+
+/* Apply road animation when simulation is running */
+.App.running .road {
+    animation-play-state: running;
+}
+
+@keyframes road-move {
+    from {
+        background-position: 0 0;
+    }
+    to {
+        background-position: -40px 0; /* Move the stripes */
+    }
+}
+
+/* Adjust car movement dynamically via JS `transform` */
+/* The CSS transition makes it smooth, JS updates the value */
+
+
+
