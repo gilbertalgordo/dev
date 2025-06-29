@@ -1,0 +1,380 @@
+import subprocess
+import re
+
+def get_wifi_signal_strength(interface='wlan0'):
+    """
+    Attempts to get the Wi-Fi signal strength for a given interface on Linux.
+    This uses the 'iwconfig' command, which might not be available on all systems
+    or for all Wi-Fi drivers.
+
+    Args:
+        interface (str): The name of the Wi-Fi interface (e.g., 'wlan0').
+
+    Returns:
+        int or None: The signal strength in dBm if found, otherwise None.
+    """
+    try:
+        # Run the iwconfig command
+        result = subprocess.run(['iwconfig', interface], capture_output=True, text=True, check=True)
+        output = result.stdout
+
+        # Use regex to find the 'Signal level' line and extract dBm value
+        match = re.search(r'Signal level[=:]\s*(-?\d+)\s*dBm', output)
+        if match:
+            signal_strength_dbm = int(match.group(1))
+            return signal_strength_dbm
+        else:
+            print(f"Could not find signal level for interface {interface}. Output:\n{output}")
+            return None
+    except subprocess.CalledProcessError as e:
+        print(f"Error executing iwconfig: {e}")
+        print(f"Stderr: {e.stderr}")
+        return None
+    except FileNotFoundError:
+        print("Error: 'iwconfig' command not found. Make sure it's installed and in your PATH.")
+        return None
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        return None
+
+def interpret_signal_strength(dbm):
+    """Interprets dBm values into a more user-friendly description."""
+    if dbm is None:
+        return "Unknown"
+    elif dbm >= -50:
+        return "Excellent (100%)"
+    elif dbm >= -60:
+        return "Very Good"
+    elif dbm >= -70:
+        return "Good"
+    elif dbm >= -80:
+        return "Fair"
+    else:
+        return "Weak"
+
+if __name__ == "__main__":
+    # You might need to change 'wlan0' to your actual Wi-Fi interface name
+    # You can find your interface name using 'ip a' or 'ifconfig' in your terminal
+    wifi_interface = 'wlan0'
+    
+    print(f"Checking Wi-Fi signal strength for {wifi_interface}...")
+    signal_dbm = get_wifi_signal_strength(wifi_interface)
+
+    if signal_dbm is not None:
+        interpretation = interpret_signal_strength(signal_dbm)
+        print(f"Current Wi-Fi Signal Strength: {signal_dbm} dBm ({interpretation})")
+    else:
+        print("Failed to retrieve Wi-Fi signal strength.")
+
+    print("\nDisclaimer: This code only reads the signal strength. "
+          "It cannot directly make a device generate '100% signal strength'. "
+          "Signal strength is a physical property influenced by environment and hardware.")
+
+    # A conceptual placeholder for cellular, but not practically achievable with Python alone
+    print("\n--- Cellular Signal (Conceptual, not directly controllable by Python) ---")
+    print("Directly controlling or boosting cellular signal strength (like 100%) "
+          "on all devices via Python code is not possible.")
+    print("Cellular signal depends on factors like proximity to cell towers, "
+          "carrier network, and hardware capabilities.")
+    print("To improve cellular signal, you would typically need:")
+    print(" - Move closer to a cell tower or go outside.")
+    print(" - Use a cellular signal booster (hardware device).")
+    print(" - Use Wi-Fi calling if available.")
+    print(" - Check for network outages or device issues.")
+
+
+
+npm install @react-native-community/netinfo react-native-wifi-reborn
+# For iOS, run pod install in your ios/ directory:
+cd ios && pod install && cd ..
+
+
+
+<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+<uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+<uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+<uses-permission android:name="android.permission.BLUETOOTH" />
+<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+
+
+<key>NSLocationWhenInUseUsageDescription</key>
+<string>Your precise location is used to determine Wi-Fi signal strength.</string>
+<key>NSBluetoothAlwaysUsageDescription</key>
+<string>Bluetooth is used to scan for devices and determine signal strength.</string>
+<key>NSBluetoothPeripheralUsageDescription</key>
+<string>Bluetooth is used to connect to peripherals.</string>
+
+
+
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, Platform, PermissionsAndroid, Alert } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
+import WifiManager from 'react-native-wifi-reborn'; // More detailed Wi-Fi info
+
+// Helper to convert dBm to a percentage or descriptive string
+const convertRssiToPercentage = (rssi) => {
+    if (rssi === null || isNaN(rssi)) {
+        return 'N/A';
+    }
+    // Standard conversion for Wi-Fi RSSI to percentage
+    // Values range typically from -100 (very weak) to -30 (excellent)
+    if (rssi >= -50) return '100% (Excellent)';
+    if (rssi >= -60) return `${Math.round(((rssi + 60) / 10) * 100)}% (Good)`; // Adjusted scale
+    if (rssi >= -70) return `${Math.round(((rssi + 70) / 10) * 100)}% (Fair)`;
+    if (rssi >= -80) return `Weak (${Math.round(((rssi + 80) / 10) * 100)}%)`;
+    return 'Very Weak (<10%)';
+};
+
+const SignalStrengthDisplay = () => {
+    const [networkState, setNetworkState] = useState(null);
+    const [wifiRssi, setWifiRssi] = useState(null);
+    const [bluetoothRssi, setBluetoothRssi] = useState('N/A (Scanning...)'); // Placeholder for Bluetooth
+
+    useEffect(() => {
+        // Request Location permission for Wi-Fi scanning on Android
+        const requestLocationPermission = async () => {
+            if (Platform.OS === 'android') {
+                try {
+                    const granted = await PermissionsAndroid.request(
+                        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+                        {
+                            title: "Location Permission",
+                            message: "This app needs location access to get Wi-Fi information.",
+                            buttonNeutral: "Ask Me Later",
+                            buttonNegative: "Cancel",
+                            buttonPositive: "OK"
+                        }
+                    );
+                    if (granted === PermissionsAndroid.RESULTS.GRANTED) {
+                        console.log("Location permission granted for Wi-Fi.");
+                    } else {
+                        console.log("Location permission denied for Wi-Fi.");
+                        Alert.alert("Permission Denied", "Cannot get detailed Wi-Fi information without location access.");
+                    }
+                } catch (err) {
+                    console.warn(err);
+                }
+            }
+        };
+
+        requestLocationPermission();
+
+        // Subscribe to network state changes
+        const unsubscribeNetInfo = NetInfo.addEventListener(state => {
+            setNetworkState(state);
+            console.log("Network state changed:", state);
+
+            // Fetch specific Wi-Fi RSSI if connected to Wi-Fi
+            if (state.type === 'wifi' && state.isConnected) {
+                if (Platform.OS === 'android') {
+                    WifiManager.getCurrentSignalStrength()
+                        .then(level => {
+                            setWifiRssi(level); // level is dBm
+                        })
+                        .catch(error => {
+                            console.error("Error getting Wi-Fi signal strength (Android):", error);
+                            setWifiRssi(null);
+                        });
+                } else if (Platform.OS === 'ios') {
+                    // react-native-wifi-reborn on iOS generally doesn't expose getCurrentSignalStrength
+                    // directly for the connected network due to iOS limitations on third-party apps.
+                    // NetInfo's signalStrength (0-100) is often the best you'll get for iOS Wi-Fi.
+                    // For cellular, NetInfo's `details.strength` is more reliable.
+                    if (state.details && state.details.strength !== undefined) {
+                        setWifiRssi(state.details.strength); // NetInfo provides 0-100 for iOS Wi-Fi
+                    } else {
+                         setWifiRssi(null);
+                    }
+                }
+            } else {
+                setWifiRssi(null); // Not connected to Wi-Fi
+            }
+        });
+
+        // Cleanup subscription
+        return () => {
+            unsubscribeNetInfo();
+        };
+    }, []);
+
+    // Placeholder for Bluetooth RSSI (requires react-native-ble-plx and more complex logic)
+    // You would typically scan for devices and get their RSSI values here.
+    // For simplicity, we'll keep it as a placeholder.
+    useEffect(() => {
+        // Example: If you had a Bluetooth manager
+        // bluetoothManager.onDeviceDiscovered(device => {
+        //    if (device.rssi) {
+        //        setBluetoothRssi(device.rssi);
+        //    }
+        // });
+        // Set a timeout to simulate a scan or just show N/A
+        const btTimeout = setTimeout(() => {
+            setBluetoothRssi('N/A (Requires BLE library)');
+        }, 3000);
+        return () => clearTimeout(btTimeout);
+    }, []);
+
+
+    const renderNetworkInfo = () => {
+        if (!networkState) {
+            return <Text style={styles.text}>Checking network status...</Text>;
+        }
+
+        let signalInfo = "N/A";
+        let detailedStrength = "N/A";
+
+        if (networkState.type === 'wifi') {
+            signalInfo = `Wi-Fi (${networkState.details?.ssid || 'Unknown'})`;
+            if (wifiRssi !== null) {
+                // WifiManager gives dBm on Android, NetInfo gives 0-100 on iOS for strength
+                detailedStrength = `Signal: ${wifiRssi} ${Platform.OS === 'android' ? 'dBm' : '%'} (${convertRssiToPercentage(wifiRssi)})`;
+            } else if (networkState.details?.strength !== undefined) {
+                 // Fallback to NetInfo's strength for Wi-Fi if available (often 0-100)
+                 detailedStrength = `Signal: ${networkState.details.strength}%`;
+            } else {
+                detailedStrength = "Signal: Not available";
+            }
+        } else if (networkState.type === 'cellular') {
+            signalInfo = `Cellular (${networkState.details?.carrier || 'Unknown'})`;
+            // cellular signal strength from NetInfo is often 0-100
+            if (networkState.details?.strength !== undefined) {
+                detailedStrength = `Strength: ${networkState.details.strength}%`;
+            } else {
+                detailedStrength = "Strength: Not available";
+            }
+            if (networkState.details?.cellularGeneration) {
+                detailedStrength += ` - ${networkState.details.cellularGeneration.toUpperCase()}`;
+            }
+        } else if (networkState.type === 'bluetooth') {
+            signalInfo = `Bluetooth`;
+            detailedStrength = `RSSI: ${bluetoothRssi}`; // This would come from a BLE library like react-native-ble-plx
+        } else {
+            signalInfo = `Other (${networkState.type})`;
+            detailedStrength = `Is Connected: ${networkState.isConnected ? 'Yes' : 'No'}`;
+        }
+
+        return (
+            <View style={styles.infoContainer}>
+                <Text style={styles.text}>Connection Type: {signalInfo}</Text>
+                <Text style={styles.text}>{detailedStrength}</Text>
+                <Text style={styles.text}>Is Internet Reachable: {networkState.isInternetReachable ? 'Yes' : 'No'}</Text>
+            </View>
+        );
+    };
+
+    return (
+        <View style={styles.container}>
+            <Text style={styles.title}>Device Signal Strength Monitor</Text>
+            {renderNetworkInfo()}
+
+            <View style={styles.disclaimerContainer}>
+                <Text style={styles.disclaimerTitle}>Important Disclaimer:</Text>
+                <Text style={styles.disclaimerText}>
+                    This application can only **read and display** the current signal strength of your device.
+                    It **cannot directly generate or force a "100% signal strength"** on any device.
+                    Signal strength is a physical property determined by:
+                </Text>
+                <Text style={styles.disclaimerList}>
+                    - Your device's hardware and antenna quality
+                    - Proximity to Wi-Fi routers or cellular towers
+                    - Physical obstacles (walls, buildings)
+                    - Environmental interference
+                    - Network congestion
+                </Text>
+                <Text style={styles.disclaimerText}>
+                    To improve signal strength, consider physical actions like:
+                </Text>
+                <Text style={styles.disclaimerList}>
+                    - Moving closer to a router/tower
+                    - Removing physical obstructions
+                    - Using a signal booster (hardware)
+                    - Enabling Wi-Fi Calling (for cellular)
+                </Text>
+            </View>
+        </View>
+    );
+};
+
+const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 20,
+        backgroundColor: '#f0f0f0',
+    },
+    title: {
+        fontSize: 24,
+        fontWeight: 'bold',
+        marginBottom: 30,
+        color: '#333',
+    },
+    infoContainer: {
+        backgroundColor: '#fff',
+        padding: 20,
+        borderRadius: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 5,
+        marginBottom: 30,
+        width: '90%',
+        alignItems: 'center',
+    },
+    text: {
+        fontSize: 18,
+        marginBottom: 10,
+        color: '#555',
+        textAlign: 'center',
+    },
+    disclaimerContainer: {
+        marginTop: 20,
+        padding: 15,
+        backgroundColor: '#ffe0b2', // Light orange background
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#ffc107', // Orange border
+        width: '90%',
+    },
+    disclaimerTitle: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        marginBottom: 8,
+        color: '#e65100', // Darker orange text
+        textAlign: 'center',
+    },
+    disclaimerText: {
+        fontSize: 14,
+        marginBottom: 5,
+        color: '#757575',
+        lineHeight: 20,
+    },
+    disclaimerList: {
+        fontSize: 14,
+        color: '#757575',
+        marginLeft: 15,
+        marginBottom: 5,
+    }
+});
+
+export default SignalStrengthDisplay;
+
+
+// App.js
+import React from 'react';
+import SignalStrengthDisplay from './SignalStrengthDisplay'; // Adjust path if needed
+
+const App = () => {
+  return (
+    <SignalStrengthDisplay />
+  );
+};
+
+export default App;
+
+
+
