@@ -1,0 +1,762 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.signal import chirp, hilbert
+from numpy.fft import fft, ifft, fftshift
+
+# --- Constants (Simplified for demonstration) ---
+C = 299792458  # Speed of light in m/s
+Fc = 5.3e9     # Carrier frequency (e.g., C-band, 5.3 GHz)
+Lambda = C / Fc # Wavelength
+Pulse_Repetition_Frequency = 1000 # Hz (number of pulses per second)
+Pulse_Duration = 10e-6 # seconds (10 microseconds)
+Bandwidth = 50e6 # Hz (50 MHz, for chirp)
+Sampling_Rate = 100e6 # Hz (100 MHz, must be > 2 * Bandwidth)
+PRI = 1 / Pulse_Repetition_Frequency # Pulse Repetition Interval
+
+# --- Simulated Satellite and Target Parameters ---
+Satellite_Velocity = 7500 # m/s (typical LEO satellite speed)
+Satellite_Height = 700000 # m (700 km)
+
+# Simulate a simple scene with a few point targets
+# Format: [range (m), azimuth_time (s), reflectivity]
+targets = [
+    [700000, 0, 1.0],   # Target 1: Directly below, center of aperture
+    [700050, 0.05, 0.8], # Target 2: Further range, slightly offset in azimuth
+    [700025, -0.03, 1.2] # Target 3: Closer range, slightly offset in azimuth
+]
+
+# --- 1. Chirp Pulse Generation ---
+def generate_chirp_pulse(duration, bandwidth, sampling_rate):
+    t = np.linspace(0, duration, int(duration * sampling_rate), endpoint=False)
+    # Linear Frequency Modulation (LFM) chirp
+    # Start frequency is effectively 0 for the baseband chirp here
+    # The actual carrier frequency is applied later in the simulation
+    f0 = -bandwidth / 2
+    f1 = bandwidth / 2
+    return chirp(t, f0, duration, f1, method='linear', phi=90) # phi=90 for cosine output
+
+# Transmitted pulse
+tx_pulse_baseband = generate_chirp_pulse(Pulse_Duration, Bandwidth, Sampling_Rate)
+time_axis_pulse = np.linspace(0, Pulse_Duration, len(tx_pulse_baseband), endpoint=False)
+
+plt.figure(figsize=(12, 6))
+plt.subplot(2, 1, 1)
+plt.plot(time_axis_pulse * 1e6, tx_pulse_baseband.real)
+plt.title('Transmitted Chirp Pulse (Real Part)')
+plt.xlabel('Time (us)')
+plt.ylabel('Amplitude')
+plt.grid(True)
+
+plt.subplot(2, 1, 2)
+# Calculate instantaneous frequency for visualization
+instantaneous_frequency = np.diff(np.unwrap(np.angle(hilbert(tx_pulse_baseband)))) / (2.0 * np.pi * (time_axis_pulse[1] - time_axis_pulse[0]))
+plt.plot(time_axis_pulse[:-1] * 1e6, instantaneous_frequency / 1e6)
+plt.title('Instantaneous Frequency of Chirp Pulse')
+plt.xlabel('Time (us)')
+plt.ylabel('Frequency (MHz)')
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+
+# --- 2. Simplified Raw Data Simulation ---
+# This is highly simplified. A real SAR simulation would involve detailed
+# antenna patterns, noise, atmospheric effects, complex scattering models, etc.
+
+# Define the azimuth processing window (synthetic aperture length)
+azimuth_time_start = -0.1 # seconds relative to scene center
+azimuth_time_end = 0.1   # seconds relative to scene center
+azimuth_time_step = PRI # Each pulse is a "sample" in azimuth
+azimuth_times = np.arange(azimuth_time_start, azimuth_time_end, azimuth_time_step)
+
+# Determine the maximum range delay to size our data matrix
+max_range_delay = 2 * (max(t[0] for t in targets) + 1000) / C # Add some buffer
+num_range_samples = int(max_range_delay * Sampling_Rate)
+if num_range_samples % 2 != 0: num_range_samples += 1 # Ensure even for FFT
+
+raw_sar_data = np.zeros((len(azimuth_times), num_range_samples), dtype=complex)
+range_axis = np.linspace(0, num_range_samples / Sampling_Rate, num_range_samples, endpoint=False) * C / 2
+
+print(f"Simulating {len(azimuth_times)} azimuth pulses over {len(range_axis)} range samples...")
+
+for i, az_t in enumerate(azimuth_times):
+    received_signal_slice = np.zeros(num_range_samples, dtype=complex)
+    for target_range, target_az_t, reflectivity in targets:
+        # Calculate instantaneous range to target for this azimuth time
+        # This is a simplified hyperbolic range model for a point target
+        target_range_at_az_t = np.sqrt(Satellite_Height**2 + (Satellite_Velocity * (az_t - target_az_t))**2 + (target_range - Satellite_Height)**2)
+
+        time_delay = 2 * target_range_at_az_t / C
+        doppler_shift = -2 * Satellite_Velocity * (az_t - target_az_t) / (Lambda * target_range_at_az_t) # Simplified Doppler
+
+        # Simulate received chirp (time-shifted and Doppler-shifted)
+        # Find the start index in the received_signal_slice for the delayed pulse
+        start_idx = int(time_delay * Sampling_Rate)
+        if start_idx >= num_range_samples:
+            continue # Target is out of our simulated range window
+
+        # Get a slice of the transmitted pulse corresponding to the available samples
+        pulse_len = len(tx_pulse_baseband)
+        end_idx = min(start_idx + pulse_len, num_range_samples)
+        valid_pulse_len = end_idx - start_idx
+
+        # Apply carrier frequency and Doppler shift in complex exponential
+        # Note: In a real system, the carrier is typically removed (demodulated)
+        # before digital processing, leaving a baseband signal with Doppler.
+        # Here we directly simulate the baseband signal with a Doppler phase shift.
+        t_pulse_relative = np.linspace(0, valid_pulse_len / Sampling_Rate, valid_pulse_len, endpoint=False)
+        simulated_received_chirp = reflectivity * tx_pulse_baseband[:valid_pulse_len] * np.exp(1j * 2 * np.pi * doppler_shift * t_pulse_relative)
+
+        # Add to the received signal slice
+        received_signal_slice[start_idx:end_idx] += simulated_received_chirp
+
+    raw_sar_data[i, :] = received_signal_slice
+
+print("Raw SAR Data Simulated.")
+
+plt.figure(figsize=(12, 5))
+plt.imshow(20 * np.log10(np.abs(raw_sar_data.T) + 1e-10), aspect='auto', cmap='viridis',
+           extent=[azimuth_times[0], azimuth_times[-1], range_axis[-1]/1000, range_axis[0]/1000])
+plt.title('Simulated Raw SAR Data (Magnitude dB)')
+plt.xlabel('Azimuth Time (s)')
+plt.ylabel('Range (km)')
+plt.colorbar(label='Magnitude (dB)')
+plt.gca().invert_yaxis()
+plt.show()
+
+
+# --- 3. Pulse Compression (Range Compression) ---
+# Correlate the received signal with a replica of the transmitted chirp.
+# This compresses the chirp into a sharp peak, improving range resolution.
+
+# Replica conjugate and flipped for convolution (or just conjugate for multiplication in freq domain)
+replica_freq = fft(tx_pulse_baseband, n=num_range_samples) # Zero-pad to data length
+replica_conj_freq = np.conj(replica_freq)
+
+range_compressed_data = np.zeros_like(raw_sar_data, dtype=complex)
+for i in range(raw_sar_data.shape[0]):
+    raw_data_freq = fft(raw_sar_data[i, :])
+    compressed_freq = raw_data_freq * replica_conj_freq
+    range_compressed_data[i, :] = ifft(compressed_freq)
+
+print("Range Compression Complete.")
+
+plt.figure(figsize=(12, 5))
+plt.imshow(20 * np.log10(np.abs(range_compressed_data.T) + 1e-10), aspect='auto', cmap='viridis',
+           extent=[azimuth_times[0], azimuth_times[-1], range_axis[-1]/1000, range_axis[0]/1000])
+plt.title('Range Compressed SAR Data (Magnitude dB)')
+plt.xlabel('Azimuth Time (s)')
+plt.ylabel('Range (km)')
+plt.colorbar(label='Magnitude (dB)')
+plt.gca().invert_yaxis()
+plt.show()
+
+# --- 4. Azimuth Compression (Simplified Range-Doppler) ---
+# This is where the "synthetic aperture" is formed.
+
+# Determine Doppler centroid and rate for focusing
+# For a broadside acquisition and flat earth, the Doppler centroid is ~0
+# Doppler rate (azimuth FM rate) changes with range
+R_ref = targets[0][0] # Use a reference range for simplicity
+K_a = -2 * Satellite_Velocity**2 / (Lambda * R_ref) # Azimuth FM rate (slope of Doppler vs time)
+
+# Generate azimuth compression filter (matched filter for Doppler history)
+# The Doppler bandwidth of a point target is roughly 2 * V_s / (Antenna_Length_Azimuth)
+# Here, we'll use a simplified chirp-like filter based on the azimuth FM rate.
+# In a real system, the exact Doppler history of each range cell is used.
+
+# Azimuth frequency axis
+azimuth_freq_axis = fftshift(np.fft.fftfreq(len(azimuth_times), d=PRI))
+
+# Create a simplified azimuth matched filter (linear chirp in frequency domain)
+# This filter compensates for the phase curvature due to Doppler.
+azimuth_filter = np.exp(1j * np.pi * azimuth_freq_axis**2 / K_a) # Inverse of Doppler phase
+
+# Apply azimuth compression (matched filter in frequency domain)
+sar_image = np.zeros_like(range_compressed_data, dtype=complex)
+
+# FFT along azimuth for each range gate
+for j in range(range_compressed_data.shape[1]):
+    azimuth_spectrum = fftshift(fft(range_compressed_data[:, j]))
+    # Apply the azimuth filter (simple multiply)
+    compressed_azimuth_spectrum = azimuth_spectrum * azimuth_filter
+    sar_image[:, j] = ifft(fftshift(compressed_azimuth_spectrum))
+
+print("Azimuth Compression (SAR Image Formation) Complete.")
+
+# --- 5. Display the SAR Image ---
+plt.figure(figsize=(10, 8))
+plt.imshow(20 * np.log10(np.abs(sar_image.T) + 1e-10), aspect='auto', cmap='gray',
+           extent=[azimuth_times[0], azimuth_times[-1], range_axis[-1]/1000, range_axis[0]/1000])
+plt.title('SAR Image (Magnitude dB)')
+plt.xlabel('Azimuth Time (s)')
+plt.ylabel('Range (km)')
+plt.colorbar(label='Magnitude (dB)')
+plt.gca().invert_yaxis()
+plt.tight_layout()
+plt.show()
+
+# You should see the three simulated point targets focused into bright spots.
+# The resolution will depend on the simulated parameters and the simplification of the model.
+
+
+
+
+# Create a new React project
+npx create-react-app advanced-radar-app
+cd advanced-radar-app
+
+# Install necessary libraries for map visualization
+npm install leaflet react-leaflet
+
+
+import React, { useState, useEffect } from 'react';
+import './App.css';
+import RadarControlPanel from './components/RadarControlPanel';
+import SarImageViewer from './components/SarImageViewer';
+import RadarMapOverlay from './components/RadarMapOverlay';
+import LoadingSpinner from './components/LoadingSpinner'; // A simple loading component
+
+function App() {
+  const [radarParameters, setRadarParameters] = useState({
+    mode: 'SAR_Stripmap',
+    frequencyBand: 'C_Band',
+    polarization: 'HH',
+    resolution: 'Medium',
+    simulationTime: 0, // Simulate a time for dynamic data
+  });
+
+  const [sarImageData, setSarImageData] = useState(null); // Stores URL or base64 of SAR image
+  const [mapOverlayData, setMapOverlayData] = useState(null); // GeoJSON or image URL for map overlay
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  // Simulate fetching/generating SAR data based on parameters
+  useEffect(() => {
+    const fetchData = async () => {
+      setIsLoading(true);
+      setError(null);
+      setSarImageData(null);
+      setMapOverlayData(null);
+
+      try {
+        // --- REAL-WORLD SCENARIO ---
+        // In a real application, you'd make an API call here to your backend
+        // const response = await fetch('/api/generate-sar-image', {
+        //   method: 'POST',
+        //   headers: { 'Content-Type': 'application/json' },
+        //   body: JSON.stringify(radarParameters),
+        // });
+        // if (!response.ok) {
+        //   throw new Error(`HTTP error! status: ${response.status}`);
+        // }
+        // const data = await response.json();
+        // setSarImageData(data.imageUrl); // Assuming backend returns an image URL
+        // setMapOverlayData(data.geoJsonOverlay); // And possibly GeoJSON for map
+
+        // --- SIMULATED DATA FOR DEMO ---
+        // Simulate a delay and different images based on 'mode'
+        await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate network delay
+
+        let simulatedImageUrl;
+        let simulatedGeoJson;
+
+        switch (radarParameters.mode) {
+          case 'SAR_Stripmap':
+            simulatedImageUrl = 'https://via.placeholder.com/800x600/FF5733/FFFFFF?text=SAR+Stripmap+Image';
+            // Example GeoJSON for a rectangle representing the image extent
+            simulatedGeoJson = {
+              type: "FeatureCollection",
+              features: [{
+                type: "Feature",
+                properties: { name: "Simulated Stripmap Area" },
+                geometry: {
+                  type: "Polygon",
+                  coordinates: [[
+                    [120.9842, 14.5995], // Example coordinates for Manila area (San Pedro, Calabarzon)
+                    [121.0500, 14.5995],
+                    [121.0500, 14.5500],
+                    [120.9842, 14.5500],
+                    [120.9842, 14.5995]
+                  ]]
+                }
+              }]
+            };
+            break;
+          case 'InSAR_Deformation':
+            simulatedImageUrl = 'https://via.placeholder.com/800x600/33FF57/000000?text=InSAR+Deformation+Map';
+             simulatedGeoJson = {
+              type: "FeatureCollection",
+              features: [{
+                type: "Feature",
+                properties: { name: "Simulated InSAR Area" },
+                geometry: {
+                  type: "Polygon",
+                  coordinates: [[
+                    [121.0000, 14.5000],
+                    [121.0700, 14.5000],
+                    [121.0700, 14.4500],
+                    [121.0000, 14.4500],
+                    [121.0000, 14.5000]
+                  ]]
+                }
+              }]
+            };
+            break;
+          case 'PolSAR_Classification':
+            simulatedImageUrl = 'https://via.placeholder.com/800x600/5733FF/FFFFFF?text=PolSAR+Classification';
+             simulatedGeoJson = {
+              type: "FeatureCollection",
+              features: [{
+                type: "Feature",
+                properties: { name: "Simulated PolSAR Area" },
+                geometry: {
+                  type: "Polygon",
+                  coordinates: [[
+                    [121.0200, 14.5700],
+                    [121.0900, 14.5700],
+                    [121.0900, 14.5200],
+                    [121.0200, 14.5200],
+                    [121.0200, 14.5700]
+                  ]]
+                }
+              }]
+            };
+            break;
+          default:
+            simulatedImageUrl = 'https://via.placeholder.com/800x600/AAAAAA/000000?text=Select+Radar+Mode';
+            simulatedGeoJson = null;
+        }
+
+        setSarImageData(simulatedImageUrl);
+        setMapOverlayData(simulatedGeoJson);
+
+      } catch (err) {
+        setError(err.message);
+        console.error("Error fetching SAR data:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [radarParameters]); // Re-run effect when radarParameters change
+
+  return (
+    <div className="App">
+      <header className="App-header">
+        <h1>Advanced Satellite Radar Dashboard</h1>
+      </header>
+      <div className="App-content">
+        <div className="control-panel-container">
+          <RadarControlPanel
+            parameters={radarParameters}
+            onParameterChange={setRadarParameters}
+          />
+        </div>
+        <div className="visualization-container">
+          {isLoading ? (
+            <LoadingSpinner />
+          ) : error ? (
+            <div className="error-message">Error: {error}</div>
+          ) : (
+            <>
+              <h2>Radar Image Output</h2>
+              <SarImageViewer imageUrl={sarImageData} />
+
+              <h2>Geographic Overlay</h2>
+              <RadarMapOverlay overlayData={mapOverlayData} />
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default App;
+
+
+import React from 'react';
+import './RadarControlPanel.css'; // For styling
+
+function RadarControlPanel({ parameters, onParameterChange }) {
+  const handleModeChange = (e) => {
+    onParameterChange({ ...parameters, mode: e.target.value });
+  };
+
+  const handleBandChange = (e) => {
+    onParameterChange({ ...parameters, frequencyBand: e.target.value });
+  };
+
+  const handlePolarizationChange = (e) => {
+    onParameterChange({ ...parameters, polarization: e.target.value });
+  };
+
+  const handleResolutionChange = (e) => {
+    onParameterChange({ ...parameters, resolution: e.target.value });
+  };
+
+  const handleTimeSliderChange = (e) => {
+    onParameterChange({ ...parameters, simulationTime: parseFloat(e.target.value) });
+  };
+
+  return (
+    <div className="radar-control-panel">
+      <h3>Radar Parameters</h3>
+
+      <div className="param-group">
+        <label htmlFor="mode-select">Radar Mode:</label>
+        <select id="mode-select" value={parameters.mode} onChange={handleModeChange}>
+          <option value="SAR_Stripmap">SAR Stripmap</option>
+          <option value="InSAR_Deformation">InSAR Deformation</option>
+          <option value="PolSAR_Classification">PolSAR Classification</option>
+          <option value="GMTI_Tracking">GMTI Tracking (Conceptual)</option>
+        </select>
+      </div>
+
+      <div className="param-group">
+        <label htmlFor="band-select">Frequency Band:</label>
+        <select id="band-select" value={parameters.frequencyBand} onChange={handleBandChange}>
+          <option value="X_Band">X-Band (High Resolution)</option>
+          <option value="C_Band">C-Band (Common)</option>
+          <option value="L_Band">L-Band (Penetration)</option>
+        </select>
+      </div>
+
+      <div className="param-group">
+        <label htmlFor="polarization-select">Polarization:</label>
+        <select id="polarization-select" value={parameters.polarization} onChange={handlePolarizationChange}>
+          <option value="HH">HH (Horizontal Tx/Rx)</option>
+          <option value="VV">VV (Vertical Tx/Rx)</option>
+          <option value="HV">HV (Cross-pol)</option>
+          <option value="Full">Full (Conceptual)</option>
+        </select>
+      </div>
+
+      <div className="param-group">
+        <label htmlFor="resolution-select">Resolution:</label>
+        <select id="resolution-select" value={parameters.resolution} onChange={handleResolutionChange}>
+          <option value="High">High (0.5m-1m)</option>
+          <option value="Medium">Medium (3m-10m)</option>
+          <option value="Low">Low (10m+)</option>
+        </select>
+      </div>
+
+      <div className="param-group">
+        <label htmlFor="time-slider">Simulation Time:</label>
+        <input
+          type="range"
+          id="time-slider"
+          min="0"
+          max="10"
+          step="0.1"
+          value={parameters.simulationTime}
+          onChange={handleTimeSliderChange}
+        />
+        <span>{parameters.simulationTime.toFixed(1)} seconds</span>
+        <p className="param-description">
+          (Conceptually, this might change the specific data slice or animate results.)
+        </p>
+      </div>
+
+      <p className="status-message">
+        Current Mode: <strong>{parameters.mode.replace('_', ' ')}</strong>
+      </p>
+    </div>
+  );
+}
+
+export default RadarControlPanel;
+
+
+import React from 'react';
+import './SarImageViewer.css'; // For styling
+
+function SarImageViewer({ imageUrl }) {
+  if (!imageUrl) {
+    return <div className="sar-image-viewer placeholder">No Radar Image Data Available</div>;
+  }
+
+  return (
+    <div className="sar-image-viewer">
+      <img src={imageUrl} alt="Satellite Radar Output" className="radar-image" />
+      <p className="image-caption">
+        Displayed image is a conceptual representation of radar data.
+        In a real scenario, this would be a processed SAR amplitude image,
+        interferogram, or classification map.
+      </p>
+    </div>
+  );
+}
+
+export default SarImageViewer;
+
+
+
+import React from 'react';
+import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css'; // Don't forget Leaflet's CSS
+import L from 'leaflet'; // Import Leaflet for icon fix
+
+// Fix for default marker icon issues with Webpack
+delete L.Icon.Default.prototype._get='https://via.placeholder.com/800x600/AAAAAA/000000?text=Select+Radar+Mode'IconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon-2x.png',
+  iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
+});
+
+function FlyToFeature({ overlayData }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (overlayData && overlayData.features && overlayData.features.length > 0) {
+      // Calculate bounds for the GeoJSON feature
+      const bounds = L.geoJSON(overlayData).getBounds();
+      if (bounds.isValid()) {
+        map.fitBounds(bounds);
+      }
+    }
+  }, [overlayData, map]);
+  return null;
+}
+
+
+function RadarMapOverlay({ overlayData }) {
+  // Default center for San Pedro, Calabarzon, Philippines
+  const defaultCenter = [14.3315, 121.0505];
+  const defaultZoom = 12;
+
+  // Style for the GeoJSON overlay
+  const geoJsonStyle = {
+    fillColor: 'blue',
+    weight: 2,
+    opacity: 1,
+    color: 'white',
+    dashArray: '3',
+    fillOpacity: 0.5
+  };
+
+  return (
+    <div className="radar-map-overlay">
+      <MapContainer center={defaultCenter} zoom={defaultZoom} style={{ height: '500px', width: '100%' }}>
+        <TileLayer
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors'
+        />
+        {overlayData && (
+          <>
+            <GeoJSON data={overlayData} style={geoJsonStyle} />
+            <FlyToFeature overlayData={overlayData} />
+          </>
+        )}
+      </MapContainer>
+      <p className="map-caption">
+        This map displays the approximate geographic extent of the simulated radar data.
+        In advanced applications, actual pixel data or complex geospatial layers would be overlaid.
+      </p>
+    </div>
+  );
+}
+
+export default RadarMapOverlay;
+
+import React from 'react';
+import './LoadingSpinner.css';
+
+function LoadingSpinner() {
+  return (
+    <div className="loading-spinner-container">
+      <div className="loading-spinner"></div>
+      <p>Processing radar data...</p>
+    </div>
+  );
+}
+
+export default LoadingSpinner;
+
+
+
+.App {
+  font-family: Arial, sans-serif;
+  text-align: center;
+  background-color: #282c34;
+  color: white;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.App-header {
+  background-color: #333;
+  padding: 20px;
+  border-bottom: 2px solid #61dafb;
+}
+
+.App-content {
+  display: flex;
+  flex-wrap: wrap; /* Allows panels to wrap on smaller screens */
+  justify-content: space-around;
+  padding: 20px;
+  flex-grow: 1; /* Allow content to take available space */
+}
+
+.control-panel-container, .visualization-container {
+  background-color: #3a3f4a;
+  border-radius: 8px;
+  padding: 20px;
+  margin: 10px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.control-panel-container {
+  flex: 1; /* Takes up one part of the available space */
+  min-width: 300px; /* Minimum width for control panel */
+}
+
+.visualization-container {
+  flex: 2; /* Takes up two parts of the available space */
+  min-width: 500px; /* Minimum width for visualization */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+h2 {
+  color: #61dafb;
+  margin-top: 20px;
+  margin-bottom: 15px;
+}
+
+.error-message {
+  color: #ff6b6b;
+  font-weight: bold;
+  margin-top: 20px;
+}
+
+
+
+.radar-control-panel {
+  text-align: left;
+}
+
+.radar-control-panel h3 {
+  color: #61dafb;
+  margin-bottom: 20px;
+}
+
+.param-group {
+  margin-bottom: 15px;
+}
+
+.param-group label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: bold;
+}
+
+.param-group select,
+.param-group input[type="range"] {
+  width: 100%;
+  padding: 8px;
+  border-radius: 4px;
+  border: 1px solid #555;
+  background-color: #444;
+  color: white;
+}
+
+.param-description {
+  font-size: 0.8em;
+  color: #bbb;
+  margin-top: 5px;
+}
+
+.status-message {
+  margin-top: 25px;
+  padding: 10px;
+  background-color: #4CAF50;
+  border-radius: 5px;
+  color: white;
+  font-weight: bold;
+}
+
+
+
+
+.sar-image-viewer {
+  width: 100%;
+  max-width: 800px;
+  margin-top: 20px;
+  border: 1px solid #61dafb;
+  border-radius: 8px;
+  overflow: hidden; /* Ensures image fits within rounded corners */
+}
+
+.sar-image-viewer.placeholder {
+  height: 300px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: #555;
+  color: #ccc;
+  font-style: italic;
+}
+
+.radar-image {
+  width: 100%;
+  height: auto;
+  display: block; /* Remove extra space below image */
+}
+
+.image-caption {
+  font-size: 0.9em;
+  color: #ccc;
+  padding: 10px;
+  background-color: #3a3f4a; /* Match container background */
+  border-top: 1px solid #555;
+}
+
+
+
+.loading-spinner-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 300px; /* Or adjust as needed */
+  margin-top: 50px;
+}
+
+.loading-spinner {
+  border: 8px solid #f3f3f3; /* Light grey */
+  border-top: 8px solid #61dafb; /* Blue */
+  border-radius: 50%;
+  width: 60px;
+  height: 60px;
+  animation: spin 1.5s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.loading-spinner-container p {
+  margin-top: 15px;
+  font-size: 1.1em;
+  color: #bbb;
+}
+
+
+
+npx create-react-app advanced-radar-app
+cd advanced-radar-app
+
+
+
+npm install leaflet react-leaflet
+
+
+
+npm start
