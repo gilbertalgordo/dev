@@ -1,0 +1,772 @@
+npx create-react-app x-wing-vtol
+cd x-wing-vtol
+
+
+
+npm install three @react-three/fiber @react-three/drei
+
+
+
+
+// src/components/XWingVTOL.js
+import React, { useRef, useEffect, useState } from 'react';
+import { useGLTF, OrbitControls } from '@react-three/drei';
+import { useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
+
+function XWingVTOL({ modelPath = '/x-wing-vtol.gltf' }) {
+  const { scene } = useGLTF(modelPath);
+  const modelRef = useRef(); // Ref for the whole X-wing scene
+  const leftEngineRef = useRef();
+  const rightEngineRef = useRef();
+
+  const [isVtolMode, setIsVtolMode] = useState(false); // State to control engine rotation
+
+  // Traverse the scene to find specific meshes (e.g., engines)
+  useEffect(() => {
+    if (scene) {
+      scene.traverse((child) => {
+        // Log child names to help identify your engine meshes if names are unknown
+        // console.log(child.name);
+
+        if (child.isMesh) {
+          // You might need to adjust these names based on your actual 3D model's hierarchy
+          if (child.name.includes('Engine_Left') || child.name.includes('engine_L')) {
+            leftEngineRef.current = child;
+          }
+          if (child.name.includes('Engine_Right') || child.name.includes('engine_R')) {
+            rightEngineRef.current = child;
+          }
+        }
+      });
+      // Important: Clone the scene to prevent modifications from affecting other instances if you had them
+      // and to allow direct manipulation.
+      modelRef.current = scene.clone();
+    }
+  }, [scene]);
+
+  // Animation loop for engine rotation
+  useFrame((state, delta) => {
+    if (leftEngineRef.current && rightEngineRef.current) {
+      const targetRotationX = isVtolMode ? Math.PI / 2 : 0; // Rotate 90 degrees (PI/2 radians) for VTOL
+      const rotationSpeed = 2 * delta; // Adjust speed as needed
+
+      // Smoothly interpolate rotation for left engine
+      leftEngineRef.current.rotation.x = THREE.MathUtils.lerp(
+        leftEngineRef.current.rotation.x,
+        targetRotationX,
+        rotationSpeed
+      );
+
+      // Smoothly interpolate rotation for right engine
+      rightEngineRef.current.rotation.x = THREE.MathUtils.lerp(
+        rightEngineRef.current.rotation.x,
+        targetRotationX,
+        rotationSpeed
+      );
+
+      // Example for continuous general rotation of the whole model (optional)
+      // modelRef.current.rotation.y += 0.002;
+    }
+  });
+
+  return (
+    <>
+      {/* Lights */}
+      <ambientLight intensity={0.8} />
+      <directionalLight position={[10, 10, 5]} intensity={1.5} />
+      <spotLight position={[0, 20, 10]} angle={0.3} penumbra={1} intensity={1} castShadow />
+
+      {/* The loaded 3D model */}
+      {modelRef.current && (
+        <primitive object={modelRef.current} scale={0.5} position={[0, -1, 0]} /> // Adjust scale and position as needed
+      )}
+
+      {/* OrbitControls for user interaction (rotate, zoom, pan) */}
+      <OrbitControls makeDefault />
+
+      {/* UI for toggling VTOL mode (optional, can be moved to App.js or a separate UI component) */}
+      <Html position={[-3, 2, 0]}> {/* Requires @react-three/drei's Html component */}
+        <button
+          onClick={() => setIsVtolMode(!isVtolMode)}
+          style={{ padding: '10px 20px', fontSize: '16px', cursor: 'pointer', background: isVtolMode ? 'green' : 'blue', color: 'white', border: 'none', borderRadius: '5px' }}
+        >
+          {isVtolMode ? 'Switch to Horizontal Flight' : 'Switch to VTOL Mode'}
+        </button>
+      </Html>
+    </>
+  );
+}
+
+// Ensure you import Html if you use the button inside the Canvas
+import { Html } from '@react-three/drei';
+
+export default XWingVTOL;
+
+
+
+// src/App.js
+import React from 'react';
+import { Canvas } from '@react-three/fiber';
+import XWingVTOL from './components/XWingVTOL';
+import './App.css'; // For basic styling
+
+function App() {
+  return (
+    <div className="App">
+      <header className="App-header">
+        <h1>5th Gen F-55 X-Wing VTOL</h1>
+      </header>
+      <div className="XWing-viewer-container">
+        <Canvas camera={{ position: [0, 5, 10], fov: 50 }}> {/* Adjust camera for better view */}
+          {/* Add a ground plane (optional) */}
+          <gridHelper args={[100, 100]} />
+          <axesHelper args={[5]} /> {/* Helps visualize axes */}
+
+          <XWingVTOL />
+        </Canvas>
+      </div>
+      <footer className="App-footer">
+        <p>Stealthier Hybrid Titanium Autopilot with Laser Cannon, Electric Shockwave, Unlimited Flares & Rotating Engines</p>
+      </footer>
+    </div>
+  );
+}
+
+export default App;
+
+
+
+/* src/App.css */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+.App {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background-color: #282c34;
+  color: white;
+}
+
+.App-header {
+  padding: 20px;
+  background-color: #1a1e24;
+  z-index: 10; /* Ensure header is above canvas */
+  position: relative;
+}
+
+.XWing-viewer-container {
+  flex-grow: 1;
+  width: 100%;
+  position: relative; /* Needed for absolute positioning of UI elements if using other methods */
+}
+
+.App-footer {
+  padding: 10px;
+  background-color: #1a1e24;
+  font-size: 0.8em;
+  z-index: 10; /* Ensure footer is above canvas */
+  position: relative;
+}
+
+/* Style for the button rendered by Html component */
+.r3f-html-wrapper button {
+  /* This targets the button inside the Html component */
+  position: absolute;
+  top: 20px; /* Adjust as needed */
+  left: 20px; /* Adjust as needed */
+  z-index: 100; /* Make sure it's on top of everything */
+}
+
+
+// xWing.js
+
+class XWing {
+    constructor(id) {
+        this.id = id || `x-wing-${Math.random().toString(36).substr(2, 9)}`; // Unique ID
+        this.model = "F-55";
+        this.generation = "5th";
+        this.material = "Hybrid Titanium";
+        this.stealthLevel = "High";
+        this.autopilotEngaged = false;
+        this.currentLocation = { x: 0, y: 0, z: 0 }; // Example coordinates
+        this.currentSpeed = 0; // Units per second
+        this.engineMode = "horizontal"; // "horizontal" or "vtol"
+        this.isLanded = true;
+        this.isStealthed = false;
+        this.weapons = {
+            laserCannonReady: true,
+            electricShockwaveReady: true,
+            flares: "Unlimited" // Or a numeric count
+        };
+        console.log(`[X-Wing ${this.id}] Initialized ${this.generation} gen ${this.material} X-Wing.`);
+    }
+
+    /**
+     * Toggles the stealth system.
+     * @returns {boolean} New stealth status
+     */
+    toggleStealth() {
+        this.isStealthed = !this.isStealthed;
+        console.log(`[X-Wing ${this.id}] Stealth systems ${this.isStealthed ? 'ACTIVE' : 'INACTIVE'}.`);
+        return this.isStealthed;
+    }
+
+    /**
+     * Toggles between horizontal flight mode and VTOL mode.
+     * Returns true if mode successfully changed, false otherwise.
+     */
+    toggleEngineMode() {
+        if (!this.isLanded && this.engineMode === "horizontal") {
+            console.log(`[X-Wing ${this.id}] Cannot switch to VTOL mid-flight from horizontal. Please land first.`);
+            return false;
+        }
+
+        if (this.engineMode === "horizontal") {
+            this.engineMode = "vtol";
+            console.log(`[X-Wing ${this.id}] Engines rotated to Vertical Takeoff/Landing (VTOL) mode.`);
+        } else {
+            this.engineMode = "horizontal";
+            console.log(`[X-Wing ${this.id}] Engines rotated to Horizontal Flight mode.`);
+        }
+        return true;
+    }
+
+    /**
+     * Initiates takeoff sequence.
+     * @returns {boolean} True if takeoff initiated, false otherwise.
+     */
+    takeOff() {
+        if (!this.isLanded) {
+            console.log(`[X-Wing ${this.id}] Already in flight.`);
+            return false;
+        }
+        if (this.engineMode !== "vtol") {
+            console.log(`[X-Wing ${this.id}] Engines not in VTOL mode. Cannot take off vertically.`);
+            return false;
+        }
+
+        console.log(`[X-Wing ${this.id}] Initiating vertical takeoff...`);
+        this.isLanded = false;
+        this.currentSpeed = 50; // Initial ascent speed
+        this.currentLocation.z += 10; // Simulate initial altitude gain
+        console.log(`[X-Wing ${this.id}] Liftoff complete. Current altitude: ${this.currentLocation.z}.`);
+        return true;
+    }
+
+    /**
+     * Initiates landing sequence.
+     * @returns {boolean} True if landing initiated, false otherwise.
+     */
+    land() {
+        if (this.isLanded) {
+            console.log(`[X-Wing ${this.id}] Already landed.`);
+            return false;
+        }
+        if (this.engineMode !== "vtol") {
+             console.log(`[X-Wing ${this.id}] Engines not in VTOL mode. Cannot land vertically. Need a runway for horizontal landing.`);
+            return false;
+        }
+
+        console.log(`[X-Wing ${this.id}] Initiating vertical landing...`);
+        this.currentSpeed = 0;
+        this.currentLocation = { x: 0, y: 0, z: 0 }; // Assume landing at origin for simplicity
+        this.isLanded = true;
+        console.log(`[X-Wing ${this.id}] Landing complete.`);
+        return true;
+    }
+
+    /**
+     * Fires laser cannons.
+     */
+    fireLaserCannon() {
+        if (this.isLanded) {
+            console.log(`[X-Wing ${this.id}] Cannot fire laser cannons while landed (safety protocol).`);
+            return;
+        }
+        console.log(`[X-Wing ${this.id}] Laser cannons firing! Pew! Pew! Pew!`);
+        this.weapons.laserCannonReady = false; // Simulate cooldown/charging
+        setTimeout(() => this.weapons.laserCannonReady = true, 500); // Reset after 0.5s
+    }
+
+    /**
+     * Deploys electric shockwave.
+     */
+    deployElectricShockwave() {
+        if (this.isLanded) {
+            console.log(`[X-Wing ${this.id}] Cannot deploy shockwave while landed (safety protocol).`);
+            return;
+        }
+        if (!this.weapons.electricShockwaveReady) {
+            console.log(`[X-Wing ${this.id}] Electric shockwave not ready yet.`);
+            return;
+        }
+        console.log(`[X-Wing ${this.id}] Deploying electric shockwave! Zzzzzap!`);
+        this.weapons.electricShockwaveReady = false;
+        setTimeout(() => this.weapons.electricShockwaveReady = true, 5000); // 5-second cooldown
+    }
+
+    /**
+     * Deploys flares.
+     * @param {number} count - Number of flares to deploy.
+     */
+    deployFlares(count = 1) {
+        if (this.isLanded) {
+            console.log(`[X-Wing ${this.id}] Cannot deploy flares while landed.`);
+            return;
+        }
+        if (this.weapons.flares === "Unlimited") {
+            console.log(`[X-Wing ${this.id}] Deploying ${count} flares!`);
+        } else if (this.weapons.flares >= count) {
+            this.weapons.flares -= count;
+            console.log(`[X-Wing ${this.id}] Deploying ${count} flares. Remaining: ${this.weapons.flares}.`);
+        } else {
+            console.log(`[X-Wing ${this.id}] Not enough flares!`);
+        }
+    }
+
+    /**
+     * Initiates autopilot navigation to target coordinates.
+     * @param {{x: number, y: number, z: number}} targetCoords
+     */
+    autopilotNavigateTo(targetCoords) {
+        if (!this.autopilotEngaged) {
+            console.log(`[X-Wing ${this.id}] Autopilot is not engaged. Engaging...`);
+            this.autopilotEngaged = true;
+        }
+        if (this.isLanded) {
+            console.log(`[X-Wing ${this.id}] Cannot navigate while landed. Take off first.`);
+            return;
+        }
+
+        console.log(`[X-Wing ${this.id}] Autopilot setting course to ${JSON.stringify(targetCoords)}.`);
+        // In a real system, this would involve pathfinding and gradual movement
+        this.currentLocation = { ...targetCoords }; // Instantly move for this example
+        this.currentSpeed = 750; // Example cruising speed
+        console.log(`[X-Wing ${this.id}] Autopilot arrived at target. Current location: ${JSON.stringify(this.currentLocation)}.`);
+    }
+
+    /**
+     * Updates the X-wing's position based on speed and direction over time.
+     * @param {number} deltaTime - Time elapsed in seconds.
+     */
+    updatePosition(deltaTime) {
+        if (!this.isLanded && this.currentSpeed > 0) {
+            // This is a very simplified movement. Real movement would use direction vectors.
+            // For now, let's just show it moving "forward" from its previous position
+            // For a more accurate simulation, 'direction_vector' property would be crucial
+            this.currentLocation.x += this.currentSpeed * deltaTime * (Math.random() - 0.5) * 0.1; // Add some slight random drift
+            this.currentLocation.y += this.currentSpeed * deltaTime * (Math.random() - 0.5) * 0.1;
+            this.currentLocation.z += this.currentSpeed * deltaTime * (Math.random() - 0.5) * 0.1;
+            // console.log(`[X-Wing ${this.id}] Moving. Current position: ${JSON.stringify(this.currentLocation)}`);
+        }
+    }
+
+    getStatus() {
+        return {
+            id: this.id,
+            model: this.model,
+            generation: this.generation,
+            stealth: this.isStealthed ? "Active" : "Inactive",
+            autopilot: this.autopilotEngaged ? "Engaged" : "Disengaged",
+            engineMode: this.engineMode,
+            landed: this.isLanded,
+            location: this.currentLocation,
+            speed: this.currentSpeed,
+            weapons: this.weapons
+        };
+    }
+}
+
+module.exports = XWing; // Export the class
+
+
+
+// server.js
+const express = require('express');
+const XWing = require('./xWing'); // Import our XWing class
+
+const app = express();
+const port = 3000;
+
+app.use(express.json()); // Enable JSON body parsing for requests
+
+const myXWing = new XWing("Eagle-1"); // Create an instance of our X-wing
+
+// --- API Endpoints ---
+
+// Get X-wing status
+app.get('/api/xwing/status', (req, res) => {
+    res.json(myXWing.getStatus());
+});
+
+// Toggle stealth
+app.post('/api/xwing/toggleStealth', (req, res) => {
+    myXWing.toggleStealth();
+    res.json(myXWing.getStatus());
+});
+
+// Toggle engine mode
+app.post('/api/xwing/toggleEngineMode', (req, res) => {
+    const success = myXWing.toggleEngineMode();
+    res.json({ success, status: myXWing.getStatus() });
+});
+
+// Takeoff
+app.post('/api/xwing/takeOff', (req, res) => {
+    const success = myXWing.takeOff();
+    res.json({ success, status: myXWing.getStatus() });
+});
+
+// Land
+app.post('/api/xwing/land', (req, res) => {
+    const success = myXWing.land();
+    res.json({ success, status: myXWing.getStatus() });
+});
+
+// Fire Laser Cannon
+app.post('/api/xwing/fireLaser', (req, res) => {
+    myXWing.fireLaserCannon();
+    res.json(myXWing.getStatus());
+});
+
+// Deploy Electric Shockwave
+app.post('/api/xwing/deployShockwave', (req, res) => {
+    myXWing.deployElectricShockwave();
+    res.json(myXWing.getStatus());
+});
+
+// Deploy Flares
+app.post('/api/xwing/deployFlares', (req, res) => {
+    const count = req.body.count || 1;
+    myXWing.deployFlares(count);
+    res.json(myXWing.getStatus());
+});
+
+// Autopilot Navigate
+app.post('/api/xwing/autopilot/navigate', (req, res) => {
+    const { x, y, z } = req.body.target;
+    if (x === undefined || y === undefined || z === undefined) {
+        return res.status(400).json({ error: "Target coordinates (x, y, z) are required." });
+    }
+    myXWing.autopilotNavigateTo({ x, y, z });
+    res.json(myXWing.getStatus());
+});
+
+
+app.listen(port, () => {
+    console.log(`X-Wing control server listening at http://localhost:${port}`);
+    console.log(`Try: curl http://localhost:${port}/api/xwing/status`);
+    console.log(`Try: curl -X POST http://localhost:${port}/api/xwing/takeOff`);
+});
+
+
+
+mkdir x-wing-node
+cd x-wing-node
+npm init -y
+
+
+
+npm install express
+
+
+
+node server.js
+
+
+
+curl -X POST http://localhost:3000/api/xwing/toggleEngineMode
+curl -X POST http://localhost:3000/api/xwing/takeOff
+curl -X POST http://localhost:3000/api/xwing/fireLaser
+curl -X POST -H "Content-Type: application/json" -d '{"target":{"x":100,"y":50,"z":20}}' http://localhost:3000/api/xwing/autopilot/navigate
+
+
+
+import math
+import time # For simulating time progression
+
+class XWing:
+    """
+    Represents a 5th generation F-55 stealthier hybrid titanium
+    autopilot X-Wing with rotating twin engines for VTOL.
+    """
+    def __init__(self, model="F-55", generation="5th"):
+        self.model = model
+        self.generation = generation
+        self.material = "Hybrid Titanium"
+        self.stealth_level = "High"
+        self.has_autopilot = True
+        
+        # Positional attributes
+        self.current_location = {"x": 0.0, "y": 0.0, "z": 0.0} # x, y, z coordinates
+        self.velocity = {"vx": 0.0, "vy": 0.0, "vz": 0.0} # Velocity components
+        self.orientation = {"pitch": 0.0, "roll": 0.0, "yaw": 0.0} # Radians for orientation
+
+        # Engine specific attributes
+        # engine_angle: 0 for horizontal flight, 90 (math.pi/2) for VTOL
+        self.engine_angle_degrees = 0.0 # Current engine angle in degrees (0-90)
+        self.engine_mode = "horizontal_flight" # "horizontal_flight", "vtol_ready", "vtol_ascending", "vtol_descending"
+        self.is_landed = True # True if on ground, False if airborne
+
+        # Power/Fuel for hybrid system (conceptual)
+        self.hybrid_power = {"plasma_core": 100, "ion_cells": 100} 
+
+        # Weapon systems
+        self.weapons = {
+            "laser_cannon_ready": True,
+            "electric_shockwave_ready": True,
+            "unlimited_flares": True # Simplified as always available
+        }
+        
+        self.is_stealthed = False
+        self.autopilot_engaged = False
+
+        print(f"[{self.model}] Initialized {self.generation} gen {self.material} X-Wing.")
+
+    def _rotate_engines(self, target_angle_degrees, rotation_speed_degrees_per_sec=45):
+        """Internal method to simulate engine rotation."""
+        print(f"[{self.model}] Rotating engines from {self.engine_angle_degrees:.1f}° to {target_angle_degrees:.1f}°...")
+        
+        # Simple linear rotation simulation
+        while abs(self.engine_angle_degrees - target_angle_degrees) > 0.1:
+            if self.engine_angle_degrees < target_angle_degrees:
+                self.engine_angle_degrees = min(self.engine_angle_degrees + rotation_speed_degrees_per_sec * 0.1, target_angle_degrees)
+            else:
+                self.engine_angle_degrees = max(self.engine_angle_degrees - rotation_speed_degrees_per_sec * 0.1, target_angle_degrees)
+            # In a real-time simulation, this loop would be handled by game loop's delta time
+            # For this conceptual example, we print progress
+            # print(f"  Current engine angle: {self.engine_angle_degrees:.1f}°")
+            time.sleep(0.01) # Small delay for demonstration
+
+        self.engine_angle_degrees = target_angle_degrees # Ensure it's exact at the end
+        print(f"[{self.model}] Engines now at {self.engine_angle_degrees:.1f}°.")
+
+
+    def set_engine_mode(self, mode):
+        """
+        Sets the primary engine mode, handling rotation.
+        'horizontal_flight' or 'vtol_ready'
+        """
+        if self.is_landed and self.current_location['z'] > 0.1:
+             print(f"[{self.model}] Cannot change engine mode while landed at altitude. Please ensure z=0 to simulate ground.")
+             return False
+
+        if mode == "vtol_ready":
+            if self.engine_mode != "vtol_ready":
+                print(f"[{self.model}] Requesting VTOL mode...")
+                if not self.is_landed:
+                    print(f"[{self.model}] Cannot switch to VTOL from horizontal flight mid-air. Must be landed first.")
+                    return False
+                self._rotate_engines(90) # Rotate to 90 degrees for vertical
+                self.engine_mode = "vtol_ready"
+                print(f"[{self.model}] Ready for Vertical Takeoff/Landing.")
+                return True
+            else:
+                print(f"[{self.model}] Already in VTOL ready mode.")
+                return False
+        
+        elif mode == "horizontal_flight":
+            if self.engine_mode != "horizontal_flight":
+                print(f"[{self.model}] Requesting Horizontal Flight mode...")
+                # If currently in a VTOL ascent/descent, would need to transition or land first
+                if not self.is_landed and self.engine_mode in ["vtol_ascending", "vtol_descending"]:
+                    print(f"[{self.model}] Cannot switch to horizontal flight during VTOL ascent/descent. Please complete operation.")
+                    return False
+
+                self._rotate_engines(0) # Rotate to 0 degrees for horizontal
+                self.engine_mode = "horizontal_flight"
+                print(f"[{self.model}] Ready for Horizontal Flight.")
+                return True
+            else:
+                print(f"[{self.model}] Already in Horizontal Flight mode.")
+                return False
+        else:
+            print(f"[{self.model}] Invalid engine mode: {mode}. Use 'horizontal_flight' or 'vtol_ready'.")
+            return False
+
+    def vertical_takeoff(self, target_altitude=100.0, thrust_factor=1.0):
+        """Initiates a vertical takeoff."""
+        if not self.is_landed:
+            print(f"[{self.model}] Already airborne.")
+            return False
+        if self.engine_mode != "vtol_ready":
+            print(f"[{self.model}] Engines not in VTOL ready mode. Cannot perform vertical takeoff.")
+            self.set_engine_mode("vtol_ready") # Try to set it
+            if self.engine_mode != "vtol_ready":
+                return False # Failed to switch mode
+
+        print(f"[{self.model}] Initiating vertical takeoff to {target_altitude} units...")
+        self.is_landed = False
+        self.engine_mode = "vtol_ascending"
+        self.velocity['vz'] = 10.0 * thrust_factor # Initial vertical speed
+        
+        # Simulate ascent (simplified)
+        while self.current_location['z'] < target_altitude:
+            self.current_location['z'] += self.velocity['vz'] * 0.1 # Small step
+            self.velocity['vz'] = min(self.velocity['vz'] + 0.5 * thrust_factor, 50.0) # Accelerate up to max speed
+            print(f"  Altitude: {self.current_location['z']:.1f} units, Speed: {self.velocity['vz']:.1f} units/s")
+            time.sleep(0.01)
+
+        self.current_location['z'] = target_altitude # Ensure target reached
+        self.velocity['vz'] = 0.0 # Stop vertical movement
+        self.engine_mode = "horizontal_flight" # Auto-transition to horizontal flight at altitude
+        self._rotate_engines(0) # Rotate engines back
+        print(f"[{self.model}] Vertical takeoff complete. Now in horizontal flight mode at altitude {self.current_location['z']:.1f}.")
+        return True
+
+    def vertical_landing(self):
+        """Initiates a vertical landing."""
+        if self.is_landed:
+            print(f"[{self.model}] Already landed.")
+            return False
+        if self.engine_mode != "horizontal_flight": # Need to switch to VTOL from horizontal flight at altitude
+             print(f"[{self.model}] Must be in horizontal flight mode before initiating VTOL landing sequence.")
+             # You might add logic here to automatically switch modes or guide to a landing zone
+             # For now, let's assume it attempts to switch to vtol_ready
+             self.set_engine_mode("vtol_ready")
+             if self.engine_mode != "vtol_ready":
+                print(f"[{self.model}] Failed to enter VTOL ready mode for landing.")
+                return False
+
+        print(f"[{self.model}] Initiating vertical landing...")
+        self.engine_mode = "vtol_descending"
+        self.velocity['vz'] = -20.0 # Initial descent speed
+
+        # Simulate descent (simplified)
+        while self.current_location['z'] > 0.1: # Land until close to ground
+            self.current_location['z'] += self.velocity['vz'] * 0.1 # Small step
+            self.velocity['vz'] = max(self.velocity['vz'] - 0.5, -50.0) # Decelerate descent
+            print(f"  Altitude: {self.current_location['z']:.1f} units, Speed: {self.velocity['vz']:.1f} units/s")
+            time.sleep(0.01)
+        
+        self.current_location['z'] = 0.0 # Set exactly to ground
+        self.velocity['vx'] = self.velocity['vy'] = self.velocity['vz'] = 0.0
+        self.is_landed = True
+        self.engine_mode = "vtol_ready" # Remains in VTOL ready mode after landing
+        print(f"[{self.model}] Vertical landing complete. X-Wing is on the ground.")
+        return True
+
+    def fire_laser_cannon(self):
+        """Fires the laser cannons."""
+        if self.is_landed:
+            print(f"[{self.model}] Cannot fire laser cannons while landed. (Safety protocol)")
+            return
+        if self.weapons["laser_cannon_ready"]:
+            print(f"[{self.model}] Laser cannons firing! Pew! Pew! Pew!")
+            self.weapons["laser_cannon_ready"] = False
+            # Simulate cooldown
+            time.sleep(0.1) # Small delay
+            self.weapons["laser_cannon_ready"] = True
+        else:
+            print(f"[{self.model}] Laser cannons recharging...")
+
+    def deploy_electric_shockwave(self):
+        """Deploys an electric shockwave."""
+        if self.is_landed:
+            print(f"[{self.model}] Cannot deploy shockwave while landed. (Safety protocol)")
+            return
+        if self.weapons["electric_shockwave_ready"]:
+            print(f"[{self.model}] Deploying electric shockwave! Zzzzzap!")
+            self.weapons["electric_shockwave_ready"] = False
+            # Simulate cooldown
+            time.sleep(5) # 5-second cooldown
+            self.weapons["electric_shockwave_ready"] = True
+        else:
+            print(f"[{self.model}] Electric shockwave on cooldown.")
+
+    def deploy_flares(self, count=1):
+        """Deploys flares for evasion."""
+        if self.is_landed:
+            print(f"[{self.model}] Cannot deploy flares while landed.")
+            return
+        if self.weapons["unlimited_flares"]:
+            print(f"[{self.model}] Deploying {count} flares! Distracting missile lock.")
+        else:
+            # If flares were limited, logic to decrement count and check availability
+            print(f"[{self.model}] No flares remaining (if not unlimited).")
+
+    def autopilot_navigate_to(self, target_coords):
+        """Conceptual autopilot navigation. Very simplified."""
+        if not self.has_autopilot:
+            print(f"[{self.model}] Autopilot not available on this model.")
+            return
+        if self.is_landed:
+            print(f"[{self.model}] Cannot navigate while landed. Take off first.")
+            return
+        if not self.autopilot_engaged:
+            print(f"[{self.model}] Autopilot engaged.")
+            self.autopilot_engaged = True
+
+        print(f"[{self.model}] Autopilot calculating trajectory to {target_coords}...")
+        # In a real simulation, this would involve physics and pathfinding
+        # For simplicity, we just 'jump' to the target
+        self.current_location = target_coords
+        self.velocity = {"vx": 100.0, "vy": 0.0, "vz": 0.0} # Assume new velocity after nav
+        print(f"[{self.model}] Autopilot: Arrived at target coordinates: {self.current_location}.")
+
+    def update_state(self, delta_time):
+        """
+        Updates the X-wing's state based on time elapsed.
+        In a real simulation, this would be called repeatedly in a loop.
+        """
+        if not self.is_landed:
+            self.current_location['x'] += self.velocity['vx'] * delta_time
+            self.current_location['y'] += self.velocity['vy'] * delta_time
+            self.current_location['z'] += self.velocity['vz'] * delta_time
+            # Gravity could be added here: self.velocity['vz'] -= 9.8 * delta_time
+
+        # Update other states if necessary (e.g., power levels, weapon cooldowns)
+        # For this example, we keep it simple.
+
+    def get_status(self):
+        """Returns a dictionary of the X-wing's current status."""
+        return {
+            "model": self.model,
+            "generation": self.generation,
+            "stealth_active": self.is_stealthed,
+            "autopilot_engaged": self.autopilot_engaged,
+            "engine_angle_degrees": self.engine_angle_degrees,
+            "engine_mode": self.engine_mode,
+            "is_landed": self.is_landed,
+            "current_location": self.current_location,
+            "velocity": self.velocity,
+            "weapons": self.weapons
+        }
+
+# --- Example Usage (Simulation Flow) ---
+if __name__ == "__main__":
+    print("--- X-Wing VTOL Simulation Start ---")
+    my_x_wing = XWing()
+
+    # Sequence 1: Vertical Takeoff, Flight, and VTOL Landing
+    my_x_wing.set_engine_mode("vtol_ready")
+    my_x_wing.vertical_takeoff(target_altitude=200.0)
+
+    print("\n--- Mid-flight operations ---")
+    my_x_wing.fire_laser_cannon()
+    my_x_wing.deploy_electric_shockwave()
+    my_x_wing.deploy_flares()
+    my_x_wing.autopilot_navigate_to({"x": 1000.0, "y": 500.0, "z": 200.0})
+
+    # To land, need to be in horizontal flight at altitude, then switch to VTOL for descent
+    print("\n--- Preparing for VTOL Landing ---")
+    # For this simplified example, assume it is already in horizontal flight mode after takeoff
+    # If not, my_x_wing.set_engine_mode("horizontal_flight") would be needed here
+    my_x_wing.vertical_landing() # This will internally set engine to vtol_ready then land
+
+    print("\n--- X-Wing Status After Landing ---")
+    print(my_x_wing.get_status())
+
+    print("\n--- Testing another takeoff/landing cycle ---")
+    my_x_wing.set_engine_mode("vtol_ready")
+    my_x_wing.vertical_takeoff(target_altitude=50.0)
+    my_x_wing.vertical_landing()
+
+    print("\n--- X-Wing VTOL Simulation End ---")
+
