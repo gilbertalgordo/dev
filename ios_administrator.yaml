@@ -1,0 +1,2965 @@
+#!/bin/bash
+
+# Example: Script to check for and install specific macOS updates
+# This would typically be deployed via an MDM's script execution capability.
+
+log_file="/Library/Logs/mac_update_script.log"
+
+echo "$(date): Starting macOS update check..." | tee -a "$log_file"
+
+# Check for available software updates (excluding major OS upgrades for controlled environments)
+softwareupdate -l | tee -a "$log_file"
+
+# Example: Install only security updates and minor OS updates
+# BE CAREFUL with "softwareupdate -ia" as it can install major upgrades
+# Always test thoroughly in a non-production environment.
+if softwareupdate -l | grep -q "Recommended updates:"; then
+    echo "$(date): Recommended updates found. Installing..." | tee -a "$log_file"
+    # Example: Install specific update labels. You'd get these from 'softwareupdate -l' output.
+    # softwareupdate -i "macOS Ventura 13.5.1-22G90" --restart --agree-to-license | tee -a "$log_file"
+
+    # This command installs all *available* recommended updates, which might include point releases
+    # and security updates, but typically excludes major OS upgrades unless specified.
+    softwareupdate -iaR | tee -a "$log_file" # -iaR = install all recommended, restart if needed
+    echo "$(date): macOS updates installed." | tee -a "$log_file"
+else
+    echo "$(date): No recommended macOS updates found." | tee -a "$log_file"
+fi
+
+echo "$(date): Finished macOS update check." | tee -a "$log_file"
+
+exit 0
+
+
+
+#!/bin/bash
+
+# Example: Script to enforce Gatekeeper settings and check firewall status on macOS
+
+log_file="/Library/Logs/security_enforcement.log"
+
+echo "$(date): Enforcing security settings..." | tee -a "$log_file"
+
+# Enforce Gatekeeper to allow apps from App Store and identified developers
+# This is a common security best practice.
+sudo spctl --master-enable | tee -a "$log_file"
+sudo spctl --disable --label "Developer ID" | tee -a "$log_file" # Allow Developer ID apps
+sudo spctl --enable --label "Apple" | tee -a "$log_file" # Enforce Apple apps
+
+echo "$(date): Gatekeeper settings enforced." | tee -a "$log_file"
+
+# Check Firewall Status
+firewall_status=$(/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate)
+echo "$(date): Firewall status: $firewall_status" | tee -a "$log_file"
+
+if [[ "$firewall_status" != *"State = 1"* ]]; then
+    echo "$(date): Firewall is not enabled. Enabling firewall..." | tee -a "$log_file"
+    sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on | tee -a "$log_file"
+    echo "$(date): Firewall enabled." | tee -a "$log_file"
+else
+    echo "$(date): Firewall is already enabled." | tee -a "$log_file"
+fi
+
+echo "$(date): Finished security enforcement." | tee -a "$log_file"
+
+exit 0
+
+
+
+#!/bin/bash
+
+# Example: Script to get last login user and report it
+# This might be useful for auditing shared machines or specific user activity.
+
+last_user=$(last -1 -t console | awk 'NR==1{print $1}')
+last_login_time=$(last -1 -t console | awk 'NR==1{print $4,$5,$6,$7,$8}')
+
+echo "Last logged in user: $last_user"
+echo "Last login time: $last_login_time"
+
+# In a real MDM deployment, you'd likely use the MDM's mechanism
+# to submit this data back as an extension attribute or custom field.
+# For a simple script, you could write to a file or send to a logging service.
+
+
+
+#!/bin/bash
+
+# Example: Script to clear DNS cache on macOS for troubleshooting network issues
+
+log_file="/Library/Logs/clear_dns_cache.log"
+
+echo "$(date): Attempting to clear DNS cache..." | tee -a "$log_file"
+
+if sudo dscacheutil -flushcache; then
+    echo "$(date): DNS cache flushed using dscacheutil." | tee -a "$log_file"
+else
+    echo "$(date): Failed to flush DNS cache with dscacheutil." | tee -a "$log_file"
+fi
+
+if sudo killall -HUP mDNSResponder; then
+    echo "$(date): mDNSResponder restarted." | tee -a "$log_file"
+else
+    echo "$(date): Failed to restart mDNSResponder (might not be running or insufficient permissions)." | tee -a "$log_file"
+fi
+
+echo "$(date): DNS cache clearing attempt complete." | tee -a "$log_file"
+
+exit 0
+
+
+
+import requests
+import json
+
+# --- CONFIGURATION (Replace with your MDM's actual details) ---
+MDM_BASE_URL = "https://your-mdm-instance.com/api/v1"
+API_KEY = "YOUR_MDM_API_KEY" # Or username/password for authentication
+
+HEADERS = {
+    "Authorization": f"Bearer {API_KEY}", # Or 'Basic base64encoded_credentials'
+    "Content-Type": "application/json",
+    "Accept": "application/json"
+}
+
+def get_device_info(device_id):
+    """Fetches detailed information for a specific device from the MDM."""
+    endpoint = f"{MDM_BASE_URL}/devices/{device_id}"
+    try:
+        response = requests.get(endpoint, headers=HEADERS)
+        response.raise_for_status() # Raise an exception for HTTP errors
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching device info for {device_id}: {e}")
+        return None
+
+def send_mdm_command(device_id, command_type, payload=None):
+    """Sends a specific MDM command to a device."""
+    endpoint = f"{MDM_BASE_URL}/devices/{device_id}/commands"
+    command_data = {
+        "command": command_type,
+        "payload": payload # Optional payload for specific commands (e.g., Wipe, Lock)
+    }
+    try:
+        response = requests.post(endpoint, headers=HEADERS, json=command_data)
+        response.raise_for_status()
+        print(f"Command '{command_type}' sent successfully to device {device_id}.")
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error sending command '{command_type}' to device {device_id}: {e}")
+        return None
+
+if __name__ == "__main__":
+    # Example Usage:
+    test_device_serial = "C02XXXXXXXXX" # Replace with a real device serial from your MDM
+
+    # 1. Get device info
+    device_details = get_device_info(test_device_serial)
+    if device_details:
+        print("\nDevice Details:")
+        print(json.dumps(device_details, indent=2))
+        # Example: Check OS version
+        if "osVersion" in device_details:
+            print(f"OS Version: {device_details['osVersion']}")
+
+    # 2. Send a command (e.g., a device lock command - USE WITH CAUTION IN PRODUCTION!)
+    # Note: A real MDM might require specific payloads for each command type.
+    # This is a conceptual example.
+    # lock_command_payload = {"message": "Your device has been locked by IT."}
+    # send_mdm_command(test_device_serial, "DeviceLock", lock_command_payload)
+
+    # Example: Send a "DeviceInformation" command to refresh inventory
+    # send_mdm_command(test_device_serial, "DeviceInformation")
+
+
+
+// mdmService.js - A module to interact with your MDM's API
+
+const axios = require('axios'); // For making HTTP requests
+const config = require('./config'); // Contains MDM URL, API Key, etc.
+
+class MdmService {
+    constructor() {
+        this.baseUrl = config.mdm.baseUrl;
+        this.apiKey = config.mdm.apiKey;
+        this.headers = {
+            'Authorization': `Bearer ${this.apiKey}`, // Or 'Basic Auth' depending on your MDM
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        };
+    }
+
+    async getDevices(query = {}) {
+        try {
+            const response = await axios.get(`${this.baseUrl}/devices`, {
+                headers: this.headers,
+                params: query // For filtering, pagination, etc.
+            });
+            return response.data;
+        } catch (error) {
+            console.error('Error fetching devices:', error.response ? error.response.data : error.message);
+            throw error;
+        }
+    }
+
+    async getDeviceInfo(deviceId) {
+        try {
+            const response = await axios.get(`${this.baseUrl}/devices/${deviceId}`, {
+                headers: this.headers
+            });
+            return response.data;
+        } catch (error) {
+            console.error(`Error fetching info for device ${deviceId}:`, error.response ? error.response.data : error.message);
+            throw error;
+        }
+    }
+
+    async sendDeviceCommand(deviceId, commandType, commandPayload = {}) {
+        try {
+            const response = await axios.post(`${this.baseUrl}/devices/${deviceId}/commands`, {
+                command: commandType,
+                ...commandPayload // Additional parameters like message for lock, wipeToken for wipe
+            }, {
+                headers: this.headers
+            });
+            console.log(`Command '${commandType}' sent to device ${deviceId}.`);
+            return response.data;
+        } catch (error) {
+            console.error(`Error sending command '${commandType}' to device ${deviceId}:`, error.response ? error.response.data : error.message);
+            throw error;
+        }
+    }
+
+    async deployProfile(deviceIds, profileId) {
+        try {
+            const response = await axios.post(`${this.baseUrl}/profiles/${profileId}/deploy`, {
+                deviceIds: deviceIds
+            }, {
+                headers: this.headers
+            });
+            console.log(`Profile ${profileId} deployed to devices: ${deviceIds.join(', ')}.`);
+            return response.data;
+        } catch (error) {
+            console.error(`Error deploying profile ${profileId}:`, error.response ? error.response.data : error.message);
+            throw error;
+        }
+    }
+
+    // Add more methods for app deployment, user management, etc.
+}
+
+module.exports = new MdmService();
+
+
+
+// config.js (Sensitive information should be loaded from environment variables or a secure vault)
+module.exports = {
+    mdm: {
+        baseUrl: process.env.MDM_API_BASE_URL || 'https://api.your-mdm.com/v1',
+        apiKey: process.env.MDM_API_KEY || 'YOUR_SECURE_MDM_API_KEY'
+    }
+};
+
+
+
+// app.js (Example usage)
+const mdmService = require('./mdmService');
+
+async function main() {
+    try {
+        console.log('Fetching all devices...');
+        const devices = await mdmService.getDevices({ osType: 'iOS' });
+        console.log(`Found ${devices.length} iOS devices.`);
+        devices.forEach(device => {
+            console.log(`- ${device.name} (Serial: ${device.serialNumber}, OS: ${device.osVersion})`);
+        });
+
+        // Example: Get detailed info for a specific device (replace with a real serial)
+        const specificDeviceSerial = 'YOUR_IOS_DEVICE_SERIAL';
+        const deviceInfo = await mdmService.getDeviceInfo(specificDeviceSerial);
+        if (deviceInfo) {
+            console.log(`\nDetails for ${deviceInfo.name}:`);
+            console.log(JSON.stringify(deviceInfo, null, 2));
+        }
+
+        // Example: Send a remote wipe command (USE WITH EXTREME CAUTION!)
+        // const wipeConfirmToken = 'YOUR_WIPE_TOKEN_FROM_MDM'; // Some MDMs require a token
+        // await mdmService.sendDeviceCommand(specificDeviceSerial, 'WipeDevice', { wipeToken: wipeConfirmToken });
+
+        // Example: Send a device lock command
+        // await mdmService.sendDeviceCommand(specificDeviceSerial, 'DeviceLock', { message: 'IT has locked your device.' });
+
+    } catch (error) {
+        console.error('An error occurred during MDM operations:', error.message);
+    }
+}
+
+main();
+
+
+
+// localIosTool.js (Requires macOS)
+
+const iosDevice = require('node-ios-device');
+
+async function manageLocalIosDevices() {
+    console.log('Listing connected iOS devices...');
+    try {
+        const devices = iosDevice.list();
+        if (devices.length === 0) {
+            console.log('No iOS devices connected via USB.');
+            return;
+        }
+
+        console.log('Connected iOS Devices:');
+        devices.forEach(device => {
+            console.log(`- Name: ${device.name}, UDID: ${device.udid}, OS: ${device.productVersion}`);
+        });
+
+        // Example: Install an app (replace with your app's path and a device UDID)
+        // const appPath = '/path/to/your/app.ipa';
+        // const targetUdid = devices[0].udid; // Use the first connected device
+        // console.log(`\nAttempting to install ${appPath} on ${targetUdid}...`);
+        // try {
+        //     await iosDevice.install(targetUdid, appPath);
+        //     console.log('App installed successfully!');
+        // } catch (installError) {
+        //     console.error('Error installing app:', installError.message);
+        // }
+
+        // Example: Watch for device connection/disconnection
+        console.log('\nWatching for device changes (Ctrl+C to stop)...');
+        const handle = iosDevice.watch();
+        handle.on('change', (updatedDevices) => {
+            console.log('\n--- Device List Changed ---');
+            console.log('Connected devices:', updatedDevices.map(d => d.name));
+        });
+        handle.on('error', (err) => {
+            console.error('Error watching devices:', err);
+        });
+
+    } catch (error) {
+        console.error('Error managing local iOS devices:', error.message);
+    }
+}
+
+manageLocalIosDevices();
+
+
+
+// macAdminTool.js
+
+const { exec } = require('child_process');
+const os = require('os');
+
+// Helper to execute shell commands
+function runCommand(command) {
+    return new Promise((resolve, reject) => {
+        exec(command, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`Command failed: ${command}\n${stderr}`);
+                return reject(error);
+            }
+            if (stderr) {
+                console.warn(`Command stderr: ${command}\n${stderr}`);
+            }
+            resolve(stdout.trim());
+        });
+    });
+}
+
+class MacAdminTool {
+    async getSystemInfo() {
+        console.log('\n--- System Information ---');
+        console.log(`Hostname: ${os.hostname()}`);
+        console.log(`OS Type: ${os.type()} ${os.release()}`);
+        console.log(`Architecture: ${os.arch()}`);
+        console.log(`Total Memory: ${(os.totalmem() / (1024 ** 3)).toFixed(2)} GB`);
+        console.log(`Free Memory: ${(os.freemem() / (1024 ** 3)).toFixed(2)} GB`);
+
+        try {
+            const macOSVersion = await runCommand('sw_vers -productVersion');
+            console.log(`macOS Version: ${macOSVersion}`);
+
+            const serialNumber = await runCommand('ioreg -l | grep IOPlatformSerialNumber | awk \'{print $NF}\' | tr -d \'"\'');
+            console.log(`Serial Number: ${serialNumber}`);
+
+            const modelName = await runCommand('sysctl -n machdep.cpu.brand_string');
+            console.log(`CPU: ${modelName}`);
+
+            const uptime = await runCommand('uptime');
+            console.log(`Uptime: ${uptime}`);
+        } catch (error) {
+            console.error('Error fetching system info:', error.message);
+        }
+    }
+
+    async checkForSoftwareUpdates() {
+        console.log('\n--- Checking for macOS Software Updates ---');
+        try {
+            const output = await runCommand('softwareupdate -l');
+            console.log(output);
+            if (output.includes('No new software available.')) {
+                console.log('No macOS updates found.');
+            } else {
+                console.log('Updates are available. Consider running `sudo softwareupdate -iaR`');
+            }
+        } catch (error) {
+            console.error('Error checking for updates:', error.message);
+        }
+    }
+
+    async setEnergySaverSettings(displaySleepMinutes, computerSleepMinutes) {
+        console.log(`\n--- Setting Energy Saver Settings (Display Sleep: ${displaySleepMinutes} min, Computer Sleep: ${computerSleepMinutes} min) ---`);
+        try {
+            // AC Power settings
+            await runCommand(`sudo pmset -c displaysleep ${displaySleepMinutes} sleep ${computerSleepMinutes}`);
+            // Battery Power settings (optional, can be different)
+            await runCommand(`sudo pmset -b displaysleep ${displaySleepMinutes} sleep ${computerSleepMinutes}`);
+            console.log('Energy saver settings updated successfully.');
+            // Verify
+            const currentSettings = await runCommand('pmset -g custom');
+            console.log('Current pmset settings:\n', currentSettings);
+        } catch (error) {
+            console.error('Error setting energy saver settings:', error.message);
+        }
+    }
+
+    async enableFirewall() {
+        console.log('\n--- Enabling macOS Firewall ---');
+        try {
+            const status = await runCommand('/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate');
+            if (status.includes('State = 1')) {
+                console.log('Firewall is already enabled.');
+            } else {
+                await runCommand('sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on');
+                console.log('Firewall enabled successfully.');
+            }
+        } catch (error) {
+            console.error('Error enabling firewall:', error.message);
+        }
+    }
+
+    async getInstalledApplications() {
+        console.log('\n--- Listing Installed Applications ---');
+        try {
+            // This command lists applications in the /Applications directory
+            const apps = await runCommand('ls -1 /Applications');
+            const appList = apps.split('\n').filter(Boolean); // Filter out empty lines
+            console.log(`Found ${appList.length} applications:`);
+            appList.forEach(app => console.log(`- ${app}`));
+        } catch (error) {
+            console.error('Error listing applications:', error.message);
+        }
+    }
+
+    async triggerMDMCheckin() {
+        console.log('\n--- Triggering MDM Check-in ---');
+        try {
+            // This command forces the device to check in with its assigned MDM server.
+            // Requires the device to be enrolled in MDM.
+            await runCommand('sudo /usr/bin/profiles -L -F'); // -L for list, -F for force check-in
+            console.log('MDM check-in command sent.');
+        } catch (error) {
+            console.error('Error triggering MDM check-in. Ensure MDM is enrolled and permissions are correct:', error.message);
+        }
+    }
+
+    // Add more functions for file management, user management, software installation (e.g., via Homebrew or PKG installers)
+    // For software installation, you'd typically have a PKG file hosted internally, and then use:
+    // await runCommand(`sudo installer -pkg /path/to/your.pkg -target /`);
+}
+
+async function main() {
+    const adminTool = new MacAdminTool();
+    await adminTool.getSystemInfo();
+    await adminTool.checkForSoftwareUpdates();
+    await adminTool.setEnergySaverSettings(15, 60); // Display sleeps after 15 min, computer after 60 min
+    await adminTool.enableFirewall();
+    await adminTool.getInstalledApplications();
+    await adminTool.triggerMDMCheckin();
+}
+
+main();
+
+
+
+# mdm_service.py - A module to interact with your MDM's API
+
+import requests
+import json
+import os
+
+class MdmService:
+    def __init__(self, base_url, api_key):
+        self.base_url = base_url
+        self.api_key = api_key
+        self.headers = {
+            'Authorization': f'Bearer {self.api_key}', # Or 'Basic your_base64_encoded_credentials'
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        }
+
+    def _make_request(self, method, endpoint, data=None, params=None):
+        url = f"{self.base_url}{endpoint}"
+        try:
+            if method == 'GET':
+                response = requests.get(url, headers=self.headers, params=params)
+            elif method == 'POST':
+                response = requests.post(url, headers=self.headers, json=data)
+            elif method == 'PUT':
+                response = requests.put(url, headers=self.headers, json=data)
+            elif method == 'DELETE':
+                response = requests.delete(url, headers=self.headers)
+            else:
+                raise ValueError("Unsupported HTTP method")
+
+            response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+            return response.json()
+        except requests.exceptions.HTTPError as http_err:
+            print(f"HTTP error occurred: {http_err} - {response.status_code} {response.text}")
+            raise
+        except requests.exceptions.ConnectionError as conn_err:
+            print(f"Connection error occurred: {conn_err}")
+            raise
+        except requests.exceptions.Timeout as timeout_err:
+            print(f"Request timed out: {timeout_err}")
+            raise
+        except requests.exceptions.RequestException as req_err:
+            print(f"An unexpected error occurred: {req_err}")
+            raise
+
+    def get_devices(self, query_params=None):
+        """Fetches a list of devices, optionally filtered by query parameters."""
+        print("Fetching devices...")
+        return self._make_request('GET', '/devices', params=query_params)
+
+    def get_device_info(self, device_id):
+        """Fetches detailed information for a specific device."""
+        print(f"Fetching info for device ID: {device_id}...")
+        return self._make_request('GET', f'/devices/{device_id}')
+
+    def send_device_command(self, device_id, command_type, command_payload=None):
+        """Sends a specific MDM command to a device."""
+        print(f"Sending command '{command_type}' to device ID: {device_id}...")
+        data = {"command": command_type}
+        if command_payload:
+            data.update(command_payload)
+        return self._make_request('POST', f'/devices/{device_id}/commands', data=data)
+
+    def deploy_profile(self, profile_id, device_ids):
+        """Deploys a configuration profile to specified devices."""
+        print(f"Deploying profile {profile_id} to devices: {device_ids}...")
+        data = {"profileId": profile_id, "deviceIds": device_ids}
+        return self._make_request('POST', '/deployments/profiles', data=data)
+
+# --- Configuration (Load sensitive info from environment variables) ---
+MDM_BASE_URL = os.getenv("MDM_API_BASE_URL", "https://api.your-mdm.com/v1")
+MDM_API_KEY = os.getenv("MDM_API_KEY", "YOUR_SECURE_MDM_API_KEY") # Use environment variables!
+
+if __name__ == "__main__":
+    mdm = MdmService(MDM_BASE_URL, MDM_API_KEY)
+
+    async def main_async():
+        try:
+            # 1. Get all iOS devices
+            ios_devices = await mdm.get_devices(query_params={"os_type": "iOS"})
+            print(f"\nFound {len(ios_devices)} iOS devices:")
+            for device in ios_devices:
+                print(f"- Name: {device.get('name')}, Serial: {device.get('serialNumber')}, OS: {device.get('osVersion')}")
+
+            # 2. Get detailed info for a specific device (replace with a real ID/Serial)
+            # Find a device to inspect
+            if ios_devices:
+                first_device_id = ios_devices[0].get('id') # Or use serial number if your API supports it
+                device_details = await mdm.get_device_info(first_device_id)
+                print(f"\nDetails for {device_details.get('name')}:")
+                print(json.dumps(device_details, indent=2))
+
+                # 3. Send a remote command (e.g., Device Lock)
+                # !! USE WITH EXTREME CAUTION IN PRODUCTION ENVIRONMENTS !!
+                # lock_payload = {"message": "Your device has been locked by IT for maintenance."}
+                # await mdm.send_device_command(first_device_id, "DeviceLock", lock_payload)
+                # print(f"Sent 'DeviceLock' command to {device_details.get('name')}.")
+
+                # 4. Deploy a profile (conceptual)
+                # profile_id_to_deploy = "your_wifi_profile_id"
+                # await mdm.deploy_profile(profile_id_to_deploy, [first_device_id])
+                # print(f"Deployed profile {profile_id_to_deploy} to {device_details.get('name')}.")
+            else:
+                print("No iOS devices found to perform operations.")
+
+        except Exception as e:
+            print(f"An error occurred: {e}")
+
+    # For demonstration, run a simple synchronous main if not using asyncio
+    # For real-world use with large MDM queries, consider asyncio if your MDM API supports it,
+    # or handle pagination/batching in the `get_devices` method.
+    try:
+        # Example of synchronous usage
+        print('Fetching all devices...')
+        all_devices = mdm.get_devices()
+        print(f"Total devices found: {len(all_devices)}")
+
+        if all_devices:
+            # Assuming the first device is an iOS device for demonstration
+            # In a real scenario, you'd filter for iOS devices or specific criteria
+            first_device_id_or_serial = all_devices[0].get('id') # or 'serialNumber'
+            if first_device_id_or_serial:
+                print(f"\nGetting info for first device ({first_device_id_or_serial})...")
+                info = mdm.get_device_info(first_device_id_or_serial)
+                print(json.dumps(info, indent=2))
+
+                # Example: Send a 'DeviceInformation' command to refresh inventory
+                # This doesn't usually require a specific payload
+                print(f"\nSending 'DeviceInformation' command to {first_device_id_or_serial}...")
+                mdm.send_device_command(first_device_id_or_serial, "DeviceInformation")
+                print("Command sent.")
+            else:
+                print("Could not find a valid device ID/serial for demonstration.")
+
+    except Exception as e:
+        print(f"Script failed: {e}")
+
+
+
+
+# local_ios_tool.py (Requires macOS and libimobiledevice tools installed via Homebrew)
+
+import subprocess
+import json
+import time
+
+def run_command(cmd_list):
+    """Executes a shell command and returns stdout."""
+    try:
+        result = subprocess.run(cmd_list, capture_output=True, text=True, check=True)
+        return result.stdout.strip()
+    except subprocess.CalledProcessError as e:
+        print(f"Error executing command: {' '.join(cmd_list)}\n{e.stderr}")
+        raise
+    except FileNotFoundError:
+        print(f"Error: Command not found. Make sure {' '.join(cmd_list[0])} is installed and in your PATH.")
+        raise
+
+def list_connected_devices():
+    """Lists UDIDs of connected iOS devices."""
+    print("Listing connected iOS devices...")
+    try:
+        output = run_command(['idevice_id', '-l'])
+        return output.splitlines()
+    except Exception as e:
+        print(f"Could not list devices: {e}")
+        return []
+
+def get_device_info(udid):
+    """Gets detailed info for a specific device using ideviceinfo."""
+    print(f"Getting info for device {udid}...")
+    try:
+        # ideviceinfo can output in plist format, which Python can parse
+        output = run_command(['ideviceinfo', '-u', udid, '-x']) # -x for XML plist output
+        # You would typically parse this XML to a Python dictionary
+        # For simplicity, let's just print it as-is or extract key-value pairs
+        print(output)
+        # Example of parsing: requires `pip install biplist` or similar
+        # import plistlib
+        # info_dict = plistlib.loads(output.encode('utf-8'))
+        # return info_dict
+    except Exception as e:
+        print(f"Could not get info for {udid}: {e}")
+        return None
+
+def install_app(udid, ipa_path):
+    """Installs an IPA file on a connected device."""
+    print(f"Installing {ipa_path} on {udid}...")
+    try:
+        output = run_command(['ideviceinstaller', '-u', udid, '-i', ipa_path])
+        print(output)
+        print(f"App '{ipa_path}' installed successfully on {udid}.")
+    except Exception as e:
+        print(f"Could not install app on {udid}: {e}")
+
+def uninstall_app(udid, bundle_id):
+    """Uninstalls an app by bundle ID from a connected device."""
+    print(f"Uninstalling {bundle_id} from {udid}...")
+    try:
+        output = run_command(['ideviceinstaller', '-u', udid, '-U', bundle_id])
+        print(output)
+        print(f"App '{bundle_id}' uninstalled successfully from {udid}.")
+    except Exception as e:
+        print(f"Could not uninstall app from {udid}: {e}")
+
+def capture_syslog(udid, duration_seconds=10):
+    """Captures syslog from a device for a given duration."""
+    print(f"Capturing syslog from {udid} for {duration_seconds} seconds...")
+    try:
+        process = subprocess.Popen(['idevicesyslog', '-u', udid], stdout=subprocess.PIPE, text=True, bufsize=1)
+        start_time = time.time()
+        for line in iter(process.stdout.readline, ''):
+            print(line, end='')
+            if time.time() - start_time > duration_seconds:
+                process.terminate()
+                break
+        print("\nSyslog capture stopped.")
+    except Exception as e:
+        print(f"Error capturing syslog: {e}")
+
+
+if __name__ == "__main__":
+    # Ensure libimobiledevice is installed (e.g., via Homebrew: brew install libimobiledevice)
+    print("--- Local iOS Device Management ---")
+    devices = list_connected_devices()
+
+    if devices:
+        print(f"\nFound {len(devices)} connected device(s):")
+        for i, udid in enumerate(devices):
+            print(f"{i+1}. UDID: {udid}")
+
+        first_device_udid = devices[0]
+
+        # Get device information
+        print("\n--- Device Information ---")
+        get_device_info(first_device_udid)
+
+        # Install/Uninstall App (Requires an .ipa file and knowledge of bundle ID)
+        # print("\n--- App Management ---")
+        # local_ipa_path = "/path/to/your/app.ipa" # Replace with actual path
+        # app_bundle_id = "com.yourcompany.yourapp" # Replace with actual bundle ID
+        # try:
+        #     install_app(first_device_udid, local_ipa_path)
+        #     time.sleep(5) # Give it some time
+        #     uninstall_app(first_device_udid, app_bundle_id)
+        # except Exception as e:
+        #     print(f"App management demo failed: {e}")
+
+        # Capture Syslog
+        print("\n--- Syslog Capture ---")
+        capture_syslog(first_device_udid, duration_seconds=5) # Capture for 5 seconds
+    else:
+        print("No iOS devices detected. Please connect one via USB.")
+
+
+
+
+# mac_admin_tool.py (Requires macOS)
+
+import subprocess
+import os
+import platform
+import json
+import plistlib # For parsing Apple Property List files
+
+def run_command(cmd_list, check_error=True):
+    """Executes a shell command and returns stdout."""
+    try:
+        result = subprocess.run(cmd_list, capture_output=True, text=True, check=check_error)
+        if result.stderr and check_error:
+            print(f"Warning/Error output for: {' '.join(cmd_list)}\n{result.stderr.strip()}")
+        return result.stdout.strip()
+    except subprocess.CalledProcessError as e:
+        print(f"Command failed with exit code {e.returncode}: {' '.join(cmd_list)}\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}")
+        raise
+    except FileNotFoundError:
+        print(f"Error: Command '{cmd_list[0]}' not found. Ensure it's installed and in your PATH.")
+        raise
+
+class MacAdministrator:
+    def __init__(self):
+        if platform.system() != "Darwin":
+            raise SystemError("This script is designed for macOS only.")
+        print(f"Initializing Mac Administrator tools on {platform.mac_ver()[0]}...")
+
+    def get_system_info(self):
+        """Retrieves common macOS system information."""
+        print("\n--- macOS System Information ---")
+        try:
+            print(f"Hostname: {platform.node()}")
+            print(f"macOS Version: {platform.mac_ver()[0]}")
+            print(f"Kernel: {platform.release()}")
+            print(f"Architecture: {platform.machine()}")
+
+            # Get CPU info
+            cpu_brand = run_command(['sysctl', '-n', 'machdep.cpu.brand_string'])
+            print(f"CPU: {cpu_brand}")
+
+            # Get Memory Info (in human readable format)
+            memory_info = run_command(['sysctl', '-n', 'hw.memsize'])
+            total_memory_bytes = int(memory_info)
+            print(f"Total Memory: {total_memory_bytes / (1024**3):.2f} GB")
+
+            # Get Serial Number
+            serial_number = run_command(['ioreg', '-l', '|', 'grep', 'IOPlatformSerialNumber', '|', 'awk', '{print $NF}', '|', 'tr', '-d', '"\'"'])
+            print(f"Serial Number: {serial_number}")
+
+            # Get uptime
+            uptime = run_command(['uptime'])
+            print(f"Uptime: {uptime}")
+
+        except Exception as e:
+            print(f"Failed to retrieve system info: {e}")
+
+    def check_for_software_updates(self):
+        """Checks for available macOS software updates."""
+        print("\n--- Checking for macOS Software Updates ---")
+        try:
+            output = run_command(['softwareupdate', '-l'])
+            print(output)
+            if "No new software available." in output:
+                print("No macOS updates found.")
+            else:
+                print("Updates are available. Consider running 'sudo softwareupdate -iaR'.")
+        except Exception as e:
+            print(f"Failed to check for updates: {e}")
+
+    def set_energy_saver_settings(self, display_sleep_minutes_ac, computer_sleep_minutes_ac):
+        """Sets energy saver settings for AC power."""
+        print(f"\n--- Setting Energy Saver (AC Power): Display Sleep {display_sleep_minutes_ac} min, Computer Sleep {computer_sleep_minutes_ac} min ---")
+        try:
+            # -c for AC Power, -b for Battery Power, -a for AC and Battery
+            run_command(['sudo', 'pmset', '-c', 'displaysleep', str(display_sleep_minutes_ac), 'sleep', str(computer_sleep_minutes_ac)])
+            print("Energy saver settings updated successfully.")
+            current_settings = run_command(['pmset', '-g', 'custom'])
+            print("Current pmset settings:\n", current_settings)
+        except Exception as e:
+            print(f"Failed to set energy saver settings: {e}")
+
+    def enable_firewall(self):
+        """Enables the macOS application firewall."""
+        print("\n--- Enabling macOS Firewall ---")
+        try:
+            status = run_command(['/usr/libexec/ApplicationFirewall/socketfilterfw', '--getglobalstate'])
+            if "State = 1" in status:
+                print("Firewall is already enabled.")
+            else:
+                run_command(['sudo', '/usr/libexec/ApplicationFirewall/socketfilterfw', '--setglobalstate', 'on'])
+                print("Firewall enabled successfully.")
+        except Exception as e:
+            print(f"Failed to enable firewall: {e}")
+
+    def get_installed_applications(self):
+        """Lists applications installed in /Applications."""
+        print("\n--- Listing Installed Applications ---")
+        try:
+            apps = run_command(['ls', '-1', '/Applications'])
+            app_list = [app for app in apps.splitlines() if app]
+            print(f"Found {len(app_list)} applications:")
+            for app in app_list:
+                print(f"- {app}")
+        except Exception as e:
+            print(f"Failed to list applications: {e}")
+
+    def install_pkg(self, pkg_path, target_volume='/'):
+        """Installs a .pkg file."""
+        if not os.path.exists(pkg_path):
+            print(f"Error: PKG file not found at {pkg_path}")
+            return
+        print(f"\n--- Installing PKG: {pkg_path} on {target_volume} ---")
+        try:
+            run_command(['sudo', 'installer', '-pkg', pkg_path, '-target', target_volume])
+            print(f"Successfully installed {pkg_path}.")
+        except Exception as e:
+            print(f"Failed to install PKG: {e}")
+
+    def trigger_mdm_checkin(self):
+        """Forces a macOS device to check in with its MDM server."""
+        print("\n--- Triggering MDM Check-in ---")
+        try:
+            # -L for list profiles, -F for force check-in
+            run_command(['sudo', '/usr/bin/profiles', '-L', '-F'])
+            print("MDM check-in command sent successfully.")
+        except Exception as e:
+            print(f"Failed to trigger MDM check-in. Ensure MDM is enrolled and permissions are correct: {e}")
+
+    def get_network_interfaces(self):
+        """Gets information about network interfaces."""
+        print("\n--- Network Interfaces ---")
+        try:
+            # `ifconfig` is deprecated in favor of `ipconfig` or `networksetup` for specific things,
+            # but it's still widely used for basic info.
+            # Using `networksetup -listallhardwareports` for a more structured output
+            output = run_command(['networksetup', '-listallhardwareports'])
+            print(output)
+            # You could parse this output further for specific details
+        except Exception as e:
+            print(f"Failed to get network interface info: {e}")
+
+if __name__ == "__main__":
+    try:
+        admin_tool = MacAdministrator()
+
+        admin_tool.get_system_info()
+        admin_tool.check_for_software_updates()
+        admin_tool.set_energy_saver_settings(display_sleep_minutes_ac=15, computer_sleep_minutes_ac=60)
+        admin_tool.enable_firewall()
+        admin_tool.get_installed_applications()
+        admin_tool.trigger_mdm_checkin()
+        admin_tool.get_network_interfaces()
+
+        # Example: Install a dummy PKG (replace with a real path if testing)
+        # dummy_pkg_path = "/path/to/your/installer.pkg"
+        # if os.path.exists(dummy_pkg_path):
+        #     admin_tool.install_pkg(dummy_pkg_path)
+        # else:
+        #     print(f"\nSkipping PKG install: {dummy_pkg_path} not found.")
+
+    except SystemError as e:
+        print(e)
+    except Exception as e:
+        print(f"An unexpected error occurred during macOS administration: {e}")
+
+
+
+
+npx create-react-app mdm-admin-dashboard
+cd mdm-admin-dashboard
+npm install axios react-router-dom # For API calls and navigation
+
+
+
+// src/App.js
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
+import DeviceList from './components/DeviceList';
+import DeviceDetail from './components/DeviceDetail';
+import Dashboard from './components/Dashboard';
+import './App.css';
+
+function App() {
+  return (
+    <Router>
+      <div className="App">
+        <nav className="navbar">
+          <ul>
+            <li><Link to="/">Dashboard</Link></li>
+            <li><Link to="/devices">Devices</Link></li>
+            {/* Add more links as your dashboard grows */}
+          </ul>
+        </nav>
+        <div className="main-content">
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/devices" element={<DeviceList />} />
+            <Route path="/devices/:id" element={<DeviceDetail />} />
+          </Routes>
+        </div>
+      </div>
+    </Router>
+  );
+}
+
+export default App;
+
+
+
+// src/components/Dashboard.js
+import React from 'react';
+
+function Dashboard() {
+  return (
+    <div className="dashboard-container">
+      <h1>Admin Dashboard Overview</h1>
+      <p>Welcome to your MDM administration portal.</p>
+      {/* Add summary widgets here, e.g., device counts, compliance stats */}
+      <div className="dashboard-widgets">
+        <div className="widget">
+          <h2>Total Devices</h2>
+          <p>Loading...</p> {/* Replace with actual data from backend */}
+        </div>
+        <div className="widget">
+          <h2>iOS Devices</h2>
+          <p>Loading...</p>
+        </div>
+        <div className="widget">
+          <h2>macOS Devices</h2>
+          <p>Loading...</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default Dashboard;
+
+
+
+// src/components/DeviceList.js
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+import { Link } from 'react-router-dom';
+
+const API_BASE_URL = 'http://localhost:3001/api'; // Your Node.js/Python backend API
+
+function DeviceList() {
+  const [devices, setDevices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [osFilter, setOsFilter] = useState('all');
+
+  useEffect(() => {
+    fetchDevices();
+  }, [osFilter]); // Refetch when OS filter changes
+
+  const fetchDevices = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = {};
+      if (osFilter !== 'all') {
+        params.osType = osFilter;
+      }
+      const response = await axios.get(`${API_BASE_URL}/devices`, { params });
+      setDevices(response.data);
+    } catch (err) {
+      setError('Failed to fetch devices. Please check your backend connection.');
+      console.error('Error fetching devices:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredDevices = devices.filter(device =>
+    device.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    device.serialNumber.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  if (loading) return <div className="loading">Loading devices...</div>;
+  if (error) return <div className="error">{error}</div>;
+
+  return (
+    <div className="device-list-container">
+      <h1>Managed Devices</h1>
+      <div className="controls">
+        <input
+          type="text"
+          placeholder="Search by name or serial..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+        <select value={osFilter} onChange={(e) => setOsFilter(e.target.value)}>
+          <option value="all">All OS</option>
+          <option value="iOS">iOS</option>
+          <option value="macOS">macOS</option>
+        </select>
+        <button onClick={fetchDevices}>Refresh</button>
+      </div>
+      {filteredDevices.length === 0 ? (
+        <p>No devices found matching your criteria.</p>
+      ) : (
+        <ul className="device-list">
+          {filteredDevices.map(device => (
+            <li key={device.id}>
+              <Link to={`/devices/${device.id}`}>
+                <strong>{device.name}</strong> ({device.osType || 'N/A'}) - {device.serialNumber}
+                <br />
+                <small>Last Check-in: {new Date(device.lastCheckin).toLocaleString()}</small>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+export default DeviceList;
+
+
+
+// src/components/DeviceDetail.js
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+import { useParams, useNavigate } from 'react-router-dom';
+
+const API_BASE_URL = 'http://localhost:3001/api';
+
+function DeviceDetail() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [device, setDevice] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [commandStatus, setCommandStatus] = useState({});
+
+  useEffect(() => {
+    fetchDeviceDetail();
+  }, [id]);
+
+  const fetchDeviceDetail = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await axios.get(`${API_BASE_URL}/devices/${id}`);
+      setDevice(response.data);
+    } catch (err) {
+      setError('Failed to fetch device details.');
+      console.error('Error fetching device details:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSendCommand = async (commandType, payload = {}) => {
+    setCommandStatus(prev => ({ ...prev, [commandType]: 'sending' }));
+    try {
+      await axios.post(`${API_BASE_URL}/devices/${id}/command`, { command: commandType, payload });
+      setCommandStatus(prev => ({ ...prev, [commandType]: 'success' }));
+      alert(`Command '${commandType}' sent to ${device.name}.`);
+    } catch (err) {
+      setCommandStatus(prev => ({ ...prev, [commandType]: 'failed' }));
+      setError(`Failed to send command '${commandType}'.`);
+      console.error(`Error sending command ${commandType}:`, err);
+    }
+  };
+
+  if (loading) return <div className="loading">Loading device details...</div>;
+  if (error) return <div className="error">{error}</div>;
+  if (!device) return <div className="not-found">Device not found.</div>;
+
+  return (
+    <div className="device-detail-container">
+      <button onClick={() => navigate('/devices')}>Back to Devices</button>
+      <h1>{device.name}</h1>
+      <p><strong>Serial Number:</strong> {device.serialNumber}</p>
+      <p><strong>OS Type:</strong> {device.osType || 'N/A'}</p>
+      <p><strong>OS Version:</strong> {device.osVersion || 'N/A'}</p>
+      <p><strong>Model:</strong> {device.model || 'N/A'}</p>
+      <p><strong>Last Check-in:</strong> {new Date(device.lastCheckin).toLocaleString()}</p>
+      <p><strong>Battery Level:</strong> {device.batteryLevel ? `${device.batteryLevel}%` : 'N/A'}</p>
+      <p><strong>Managed:</strong> {device.isManaged ? 'Yes' : 'No'}</p>
+
+      <h2>Actions</h2>
+      <div className="device-actions">
+        {device.osType === 'iOS' && (
+          <>
+            <button
+              onClick={() => handleSendCommand('DeviceLock', { message: 'Device locked by IT.' })}
+              disabled={commandStatus.DeviceLock === 'sending'}
+            >
+              {commandStatus.DeviceLock === 'sending' ? 'Locking...' : 'Lock Device'}
+            </button>
+            <button
+              onClick={() => {
+                if (window.confirm('Are you sure you want to wipe this device? This cannot be undone.')) {
+                  handleSendCommand('EraseDevice');
+                }
+              }}
+              disabled={commandStatus.EraseDevice === 'sending'}
+            >
+              {commandStatus.EraseDevice === 'sending' ? 'Wiping...' : 'Wipe Device'}
+            </button>
+          </>
+        )}
+        {device.osType === 'macOS' && (
+          <>
+            <button
+              onClick={() => handleSendCommand('RestartDevice')}
+              disabled={commandStatus.RestartDevice === 'sending'}
+            >
+              {commandStatus.RestartDevice === 'sending' ? 'Restarting...' : 'Restart Mac'}
+            </button>
+            <button
+              onClick={() => handleSendCommand('UpdateOS')} // Your backend would map this to `softwareupdate`
+              disabled={commandStatus.UpdateOS === 'sending'}
+            >
+              {commandStatus.UpdateOS === 'sending' ? 'Updating...' : 'Check/Update OS'}
+            </button>
+          </>
+        )}
+         <button
+              onClick={() => handleSendCommand('RefreshInfo')} // Forces MDM check-in/inventory refresh
+              disabled={commandStatus.RefreshInfo === 'sending'}
+            >
+              {commandStatus.RefreshInfo === 'sending' ? 'Refreshing...' : 'Refresh Info'}
+            </button>
+      </div>
+
+      {/* Display more details like installed apps, profiles etc., from device.installedApps, device.profiles */}
+      {device.installedApps && device.installedApps.length > 0 && (
+        <>
+          <h2>Installed Apps</h2>
+          <ul>
+            {device.installedApps.map(app => (
+              <li key={app.id || app.bundleIdentifier}>{app.name} ({app.version})</li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
+export default DeviceDetail;
+
+
+
+/* src/App.css (Basic styling) */
+body {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  background-color: #f4f7f6;
+}
+
+.App {
+  display: flex;
+  min-height: 100vh;
+}
+
+.navbar {
+  width: 200px;
+  background-color: #282c34;
+  color: white;
+  padding: 20px;
+}
+
+.navbar ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.navbar li {
+  margin-bottom: 10px;
+}
+
+.navbar a {
+  color: white;
+  text-decoration: none;
+  display: block;
+  padding: 8px 12px;
+  border-radius: 4px;
+}
+
+.navbar a:hover {
+  background-color: #444a56;
+}
+
+.main-content {
+  flex-grow: 1;
+  padding: 20px;
+  background-color: #ffffff;
+}
+
+h1, h2 {
+  color: #333;
+}
+
+.loading, .error, .not-found {
+  padding: 20px;
+  text-align: center;
+  font-size: 1.2em;
+}
+.error { color: #d9534f; }
+
+.dashboard-container, .device-list-container, .device-detail-container {
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  background-color: #fff;
+  margin-bottom: 20px;
+}
+
+.dashboard-widgets {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.widget {
+  flex: 1;
+  min-width: 200px;
+  padding: 15px;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  background-color: #f9f9f9;
+}
+
+.controls {
+  margin-bottom: 20px;
+  display: flex;
+  gap: 10px;
+}
+
+.controls input, .controls select, .controls button {
+  padding: 8px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+}
+
+.device-list ul {
+  list-style: none;
+  padding: 0;
+}
+
+.device-list li {
+  background-color: #f9f9f9;
+  border: 1px solid #eee;
+  margin-bottom: 10px;
+  padding: 15px;
+  border-radius: 6px;
+}
+
+.device-list li a {
+  text-decoration: none;
+  color: #333;
+  display: block;
+}
+
+.device-list li a:hover {
+  background-color: #f0f0f0;
+}
+
+.device-actions button {
+  background-color: #007bff;
+  color: white;
+  border: none;
+  padding: 10px 15px;
+  border-radius: 5px;
+  cursor: pointer;
+  margin-right: 10px;
+}
+
+.device-actions button:hover:not(:disabled) {
+  background-color: #0056b3;
+}
+
+.device-actions button:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+}
+
+
+
+# In a new directory
+mkdir mac-admin-electron-app
+cd mac-admin-electron-app
+npm init -y
+npm install electron # Install Electron itself
+npm install react react-dom # React for the renderer process
+npm install @electron-forge/cli @electron-forge/maker-zip # For bundling
+npx electron-forge import # To set up Electron Forge
+
+
+
+{
+  "name": "mac-admin-electron-app",
+  "version": "1.0.0",
+  "description": "macOS Admin Tool with Electron and React",
+  "main": "main.js", // This is your Electron main process file
+  "scripts": {
+    "start": "electron-forge start",
+    "package": "electron-forge package",
+    "make": "electron-forge make",
+    "publish": "electron-forge publish"
+  },
+  // ... other configs ...
+}
+
+
+
+// main.js
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const path = require('path');
+const { exec } = require('child_process');
+
+let mainWindow;
+
+function createWindow () {
+  mainWindow = new BrowserWindow({
+    width: 1000,
+    height: 700,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'), // For secure IPC
+      nodeIntegration: false, // Strongly recommended false for security
+      contextIsolation: true // Strongly recommended true for security
+    }
+  });
+
+  // For development, load from dev server
+  // mainWindow.loadURL('http://localhost:3000');
+  // mainWindow.webContents.openDevTools();
+
+  // For production, load the built React app
+  mainWindow.loadFile(path.join(__dirname, 'renderer/index.html'));
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+}
+
+app.on('ready', createWindow);
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+app.on('activate', () => {
+  if (mainWindow === null) {
+    createWindow();
+  }
+});
+
+// --- IPC Handlers for communication between renderer (React) and main process (Node.js) ---
+
+// General command execution handler
+ipcMain.handle('run-command', async (event, { command, args }) => {
+  return new Promise((resolve, reject) => {
+    // Basic validation for security: Only allow specific commands/paths
+    // In a real app, you'd have a whitelist of allowed commands/scripts
+    if (!command.startsWith('/usr/sbin/') && !command.startsWith('/usr/bin/')) {
+        // Prevent arbitrary commands
+        return reject(new Error('Unauthorized command.'));
+    }
+
+    // Example: Add sudo if necessary, but handle carefully
+    const fullCommand = ['sudo', command, ...args].join(' '); // BE CAREFUL WITH SUDO!
+    console.log(`Executing: ${fullCommand}`);
+
+    exec(fullCommand, (error, stdout, stderr) => {
+      if (error) {
+        console.error(`exec error: ${error}`);
+        reject({ error: error.message, stderr });
+        return;
+      }
+      if (stderr) {
+        console.warn(`stderr: ${stderr}`);
+        // Optionally, still resolve but include stderr as a warning
+      }
+      resolve(stdout);
+    });
+  });
+});
+
+// Specific handler for getting system info (e.g., to avoid exposing `sysctl` directly to `run-command`)
+ipcMain.handle('get-system-info', async () => {
+    try {
+        const osVersion = await new Promise((resolve, reject) => exec('sw_vers -productVersion', (e,s,r) => e ? reject(e) : resolve(s.trim())));
+        const serial = await new Promise((resolve, reject) => exec('ioreg -l | grep IOPlatformSerialNumber | awk \'{print $NF}\' | tr -d \'"\'', (e,s,r) => e ? reject(e) : resolve(s.trim())));
+        const cpu = await new Promise((resolve, reject) => exec('sysctl -n machdep.cpu.brand_string', (e,s,r) => e ? reject(e) : resolve(s.trim())));
+        const uptime = await new Promise((resolve, reject) => exec('uptime', (e,s,r) => e ? reject(e) : resolve(s.trim())));
+
+        return {
+            osVersion,
+            serial,
+            cpu,
+            uptime,
+            hostname: app.getName(), // Electron's app.getName() might not be hostname
+            platform: process.platform,
+            arch: process.arch
+            // Add more info
+        };
+    } catch (error) {
+        console.error("Error fetching system info:", error);
+        throw error;
+    }
+});
+
+// Handler for opening file dialog for PKG selection
+ipcMain.handle('open-pkg-dialog', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+        properties: ['openFile'],
+        filters: [{ name: 'macOS Packages', extensions: ['pkg'] }]
+    });
+    if (!canceled && filePaths.length > 0) {
+        return filePaths[0];
+    }
+    return null;
+});
+
+// Installer for PKG
+ipcMain.handle('install-pkg', async (event, pkgPath) => {
+    return new Promise((resolve, reject) => {
+        if (!pkgPath || !pkgPath.endsWith('.pkg')) {
+            return reject(new Error('Invalid PKG path.'));
+        }
+        // !! CAUTION: Using sudo here. Ensure proper security measures. !!
+        const command = `sudo installer -pkg "${pkgPath}" -target /`;
+        exec(command, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`PKG install error: ${error}`);
+                reject({ error: error.message, stderr });
+                return;
+            }
+            if (stderr) {
+                console.warn(`PKG install stderr: ${stderr}`);
+            }
+            resolve(stdout);
+        });
+    });
+});
+
+
+
+// preload.js
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('electronAPI', {
+  runCommand: (command, args) => ipcRenderer.invoke('run-command', { command, args }),
+  getSystemInfo: () => ipcRenderer.invoke('get-system-info'),
+  openPkgDialog: () => ipcRenderer.invoke('open-pkg-dialog'),
+  installPkg: (pkgPath) => ipcRenderer.invoke('install-pkg', pkgPath),
+  // Add other IPC functions here
+});
+
+
+
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>macOS Admin Tool</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="./src/index.js"></script> </body>
+</html>
+
+
+
+// renderer/src/index.js
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App';
+import './index.css'; // Basic styling for the Electron app
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+
+
+
+// renderer/src/App.js
+import React, { useState, useEffect } from 'react';
+
+function App() {
+  const [sysInfo, setSysInfo] = useState(null);
+  const [commandOutput, setCommandOutput] = useState('');
+  const [commandError, setCommandError] = useState('');
+  const [pkgPath, setPkgPath] = useState('');
+  const [installStatus, setInstallStatus] = useState('');
+
+  useEffect(() => {
+    async function fetchSystemInfo() {
+      try {
+        const info = await window.electronAPI.getSystemInfo();
+        setSysInfo(info);
+      } catch (err) {
+        console.error('Failed to fetch system info:', err);
+        setCommandError('Failed to load system info.');
+      }
+    }
+    fetchSystemInfo();
+  }, []);
+
+  const handleRunSoftwareUpdate = async () => {
+    setCommandOutput('Checking for updates...');
+    setCommandError('');
+    try {
+      // Example: 'softwareupdate' command
+      const output = await window.electronAPI.runCommand('/usr/sbin/softwareupdate', ['-l']);
+      setCommandOutput(output);
+    } catch (err) {
+      setCommandError(`Error running command: ${err.error || err.message}\n${err.stderr || ''}`);
+      setCommandOutput('');
+    }
+  };
+
+  const handleClearDnsCache = async () => {
+    setCommandOutput('Clearing DNS cache...');
+    setCommandError('');
+    try {
+      await window.electronAPI.runCommand('sudo', ['dscacheutil', '-flushcache']);
+      await window.electronAPI.runCommand('sudo', ['killall', '-HUP', 'mDNSResponder']);
+      setCommandOutput('DNS cache flushed successfully.');
+    } catch (err) {
+      setCommandError(`Error clearing DNS cache: ${err.error || err.message}\n${err.stderr || ''}`);
+      setCommandOutput('');
+    }
+  };
+
+  const handleSelectPkg = async () => {
+    const path = await window.electronAPI.openPkgDialog();
+    if (path) {
+      setPkgPath(path);
+      setInstallStatus('');
+    }
+  };
+
+  const handleInstallPkg = async () => {
+    if (!pkgPath) {
+      setInstallStatus('Please select a PKG file first.');
+      return;
+    }
+    setInstallStatus('Installing...');
+    setCommandError('');
+    try {
+      const output = await window.electronAPI.installPkg(pkgPath);
+      setInstallStatus('Installation successful!');
+      setCommandOutput(output);
+    } catch (err) {
+      setInstallStatus('Installation failed!');
+      setCommandError(`Error installing PKG: ${err.error || err.message}\n${err.stderr || ''}`);
+    }
+  };
+
+  return (
+    <div className="app-container">
+      <h1>macOS Admin Panel</h1>
+
+      <section className="info-section">
+        <h2>System Information</h2>
+        {sysInfo ? (
+          <ul>
+            <li><strong>OS Version:</strong> {sysInfo.osVersion}</li>
+            <li><strong>Serial Number:</strong> {sysInfo.serial}</li>
+            <li><strong>CPU:</strong> {sysInfo.cpu}</li>
+            <li><strong>Uptime:</strong> {sysInfo.uptime}</li>
+            {/* Add more info from sysInfo */}
+          </ul>
+        ) : (
+          <p>Loading system information...</p>
+        )}
+      </section>
+
+      <section className="action-section">
+        <h2>Quick Actions</h2>
+        <button onClick={handleRunSoftwareUpdate}>Check for Software Updates</button>
+        <button onClick={handleClearDnsCache}>Clear DNS Cache</button>
+      </section>
+
+      <section className="pkg-install-section">
+        <h2>Install PKG</h2>
+        <input type="text" value={pkgPath} readOnly placeholder="Select .pkg file" />
+        <button onClick={handleSelectPkg}>Select PKG</button>
+        <button onClick={handleInstallPkg} disabled={!pkgPath}>Install PKG</button>
+        {installStatus && <p>Status: {installStatus}</p>}
+      </section>
+
+      <section className="output-section">
+        <h2>Command Output</h2>
+        {commandOutput && <pre className="output">{commandOutput}</pre>}
+        {commandError && <pre className="error-output">{commandError}</pre>}
+      </section>
+    </div>
+  );
+}
+
+export default App;
+
+
+
+// In main.js, change this line:
+// mainWindow.loadFile(path.join(__dirname, 'renderer/index.html'));
+// To:
+mainWindow.loadFile(path.join(__dirname, 'renderer/build/index.html'));
+
+
+
+npx react-native@latest init AdminSelfService --template react-native-template-typescript
+cd AdminSelfService
+npm install axios @react-native-community/netinfo # For API calls and network status
+
+
+
+// src/App.tsx
+import React from 'react';
+import { NavigationContainer } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import HomeScreen from './screens/HomeScreen';
+import DeviceStatusScreen from './screens/DeviceStatusScreen';
+import AppCatalogScreen from './screens/AppCatalogScreen';
+
+const Stack = createNativeStackNavigator();
+
+function App(): React.JSX.Element {
+  return (
+    <NavigationContainer>
+      <Stack.Navigator initialRouteName="Home">
+        <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Self-Service Portal' }} />
+        <Stack.Screen name="DeviceStatus" component={DeviceStatusScreen} options={{ title: 'My Device Status' }} />
+        <Stack.Screen name="AppCatalog" component={AppCatalogScreen} options={{ title: 'Company Apps' }} />
+      </Stack.Navigator>
+    </NavigationContainer>
+  );
+}
+
+export default App;
+
+
+
+// src/screens/HomeScreen.tsx
+import React from 'react';
+import { View, Text, Button, StyleSheet } from 'react-native';
+import { NativeStackScreenProps } from '@react-navigation/native-stack';
+
+type RootStackParamList = {
+  Home: undefined;
+  DeviceStatus: undefined;
+  AppCatalog: undefined;
+};
+
+type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
+
+function HomeScreen({ navigation }: Props): React.JSX.Element {
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Welcome to the IT Self-Service Portal</Text>
+      <View style={styles.buttonContainer}>
+        <Button
+          title="My Device Status"
+          onPress={() => navigation.navigate('DeviceStatus')}
+        />
+        <Button
+          title="Company App Catalog"
+          onPress={() => navigation.navigate('AppCatalog')}
+        />
+        {/* Add more options like "Report an Issue", "Lost Device" (which triggers MDM functions) */}
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    backgroundColor: '#f5f5f5',
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 30,
+    textAlign: 'center',
+  },
+  buttonContainer: {
+    width: '80%',
+    gap: 15, // Space between buttons
+  },
+});
+
+export default HomeScreen;
+
+
+
+// src/screens/DeviceStatusScreen.tsx
+import React, { useState, useEffect } from 'react';
+import { View, Text, ActivityIndicator, StyleSheet, Button, Alert } from 'react-native';
+import axios from 'axios';
+import NetInfo from '@react-native-community/netinfo';
+
+const API_BASE_URL = 'https://your-mdm-backend.com/api/selfservice'; // Your MDM's self-service API or custom backend
+
+function DeviceStatusScreen(): React.JSX.Element {
+  const [deviceInfo, setDeviceInfo] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchDeviceInfo();
+  }, []);
+
+  const fetchDeviceInfo = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      // In a real app, you'd need to authenticate the user and get their device ID/serial
+      // For demo, assume a fixed device or obtain it securely
+      const deviceIdentifier = 'CURRENT_USER_DEVICE_ID'; // This needs to come from secure storage/login
+      const response = await axios.get(`${API_BASE_URL}/devices/${deviceIdentifier}/status`);
+      setDeviceInfo(response.data);
+    } catch (err: any) {
+      setError('Failed to fetch device status. Please try again.');
+      console.error('Error fetching device status:', err.response?.data || err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLocateDevice = async () => {
+    Alert.alert(
+      'Locate Device',
+      'This will send a command to your MDM to locate your device. Do you want to proceed?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'OK', onPress: async () => {
+            try {
+              // This command should trigger an MDM action, e.g., playing a sound or getting location
+              await axios.post(`${API_BASE_URL}/devices/${deviceInfo.id}/locate`);
+              Alert.alert('Success', 'Locate command sent. Check your device!');
+            } catch (err: any) {
+              Alert.alert('Error', `Failed to send locate command: ${err.response?.data?.message || err.message}`);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleCheckCompliance = async () => {
+    Alert.alert(
+      'Check Compliance',
+      'This will re-check your device against IT policies.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'OK', onPress: async () => {
+            try {
+              await axios.post(`${API_BASE_URL}/devices/${deviceInfo.id}/check-compliance`);
+              Alert.alert('Success', 'Compliance check initiated. Please wait a moment for updates.');
+              // Optionally refresh info after a delay
+              setTimeout(fetchDeviceInfo, 5000);
+            } catch (err: any) {
+              Alert.alert('Error', `Failed to initiate compliance check: ${err.response?.data?.message || err.message}`);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#0000ff" />
+        <Text>Loading device status...</Text>
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.errorContainer}>
+        <Text style={styles.errorText}>{error}</Text>
+        <Button title="Retry" onPress={fetchDeviceInfo} />
+      </View>
+    );
+  }
+
+  if (!deviceInfo) {
+    return (
+      <View style={styles.container}>
+        <Text>No device information available.</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>My Device Details</Text>
+      <View style={styles.infoRow}>
+        <Text style={styles.label}>Device Name:</Text>
+        <Text style={styles.value}>{deviceInfo.name}</Text>
+      </View>
+      <View style={styles.infoRow}>
+        <Text style={styles.label}>OS Version:</Text>
+        <Text style={styles.value}>{deviceInfo.osVersion}</Text>
+      </View>
+      <View style={styles.infoRow}>
+        <Text style={styles.label}>Serial Number:</Text>
+        <Text style={styles.value}>{deviceInfo.serialNumber}</Text>
+      </View>
+      <View style={styles.infoRow}>
+        <Text style={styles.label}>Compliance Status:</Text>
+        <Text style={styles.value}>{deviceInfo.complianceStatus || 'Unknown'}</Text>
+      </View>
+      <View style={styles.infoRow}>
+        <Text style={styles.label}>Battery Level:</Text>
+        <Text style={styles.value}>{deviceInfo.batteryLevel ? `${deviceInfo.batteryLevel}%` : 'N/A'}</Text>
+      </View>
+
+      <View style={styles.actionButtons}>
+        <Button title="Locate My Device" onPress={handleLocateDevice} />
+        <Button title="Check Compliance" onPress={handleCheckCompliance} />
+        {/* Add 'Remote Lock' or 'Remote Wipe' if MDM allows for self-service and is configured carefully */}
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    padding: 20,
+    backgroundColor: '#fff',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorText: {
+    color: 'red',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  title: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  label: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#555',
+  },
+  value: {
+    fontSize: 16,
+    color: '#333',
+  },
+  actionButtons: {
+    marginTop: 30,
+    gap: 15,
+  },
+});
+
+export default DeviceStatusScreen;
+
+
+
+//
+//  SelfServiceApp.swift
+//  SelfServicePortal
+//
+//  Created by Your Name on 2025-07-06.
+//
+
+import SwiftUI
+import UIKit // For UIDevice
+
+@main
+struct SelfServicePortalApp: App {
+    var body: some Scene {
+        WindowGroup {
+            DeviceAdminView()
+        }
+    }
+}
+
+// MARK: - ViewModel for fetching device data and interacting with MDM
+class DeviceAdminViewModel: ObservableObject {
+    @Published var deviceName: String = ""
+    @Published var systemVersion: String = ""
+    @Published var model: String = ""
+    @Published var freeSpace: String = ""
+    @Published var batteryLevel: String = ""
+    @Published var isManaged: Bool = false // Simulated, would come from MDM backend
+    @Published var complianceStatus: String = "Checking..." // Simulated
+    @Published var isLoading: Bool = false
+    @Published var errorMessage: String?
+
+    // Simulate an MDM Backend API URL (replace with your actual backend)
+    private let mdmApiBaseUrl = "https://your-mdm-backend.com/api/v1/selfservice"
+
+    init() {
+        fetchLocalDeviceInfo()
+        fetchMdmInfo() // Fetch info from MDM backend
+    }
+
+    // Get local device information
+    func fetchLocalDeviceInfo() {
+        let device = UIDevice.current
+        deviceName = device.name
+        systemVersion = device.systemVersion
+        model = device.model
+
+        // Get storage space
+        if let attributes = try? FileManager.default.attributesOfFileSystem(forPath: NSHomeDirectory()) {
+            let freeFileSystemSizeInBytes = attributes[.systemFreeSize] as? NSNumber
+            if let freeSize = freeFileSystemSizeInBytes?.int64Value {
+                freeSpace = ByteCountFormatter.string(fromByteCount: freeSize, countStyle: .file)
+            }
+        }
+
+        // Get battery level (requires Info.plist: Privacy - Device Usage Description)
+        device.isBatteryMonitoringEnabled = true
+        let level = device.batteryLevel
+        if level >= 0 {
+            batteryLevel = "\(Int(level * 100))%"
+        } else {
+            batteryLevel = "N/A"
+        }
+    }
+
+    // Simulate fetching MDM information for the device
+    // In a real app, you'd send the device's UDID or serial number
+    // and authenticate the user to the backend.
+    func fetchMdmInfo() {
+        isLoading = true
+        errorMessage = nil
+        guard let url = URL(string: "\(mdmApiBaseUrl)/devices/current") else { // "current" would be resolved by backend based on user auth
+            errorMessage = "Invalid MDM API URL."
+            isLoading = false
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        // Add authentication headers (e.g., Bearer token from user login)
+        // request.setValue("Bearer YOUR_AUTH_TOKEN", forHTTPHeaderField: "Authorization")
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            DispatchQueue.main.async {
+                self.isLoading = false
+                if let error = error {
+                    self.errorMessage = "Network error: \(error.localizedDescription)"
+                    return
+                }
+
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    self.errorMessage = "Invalid server response."
+                    return
+                }
+
+                if httpResponse.statusCode == 200, let data = data {
+                    // Parse the JSON response from your MDM backend
+                    if let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
+                        self.isManaged = json["isManaged"] as? Bool ?? false
+                        self.complianceStatus = json["complianceStatus"] as? String ?? "Unknown"
+                        // Update other properties from MDM if needed
+                    } else {
+                        self.errorMessage = "Failed to parse MDM data."
+                    }
+                } else {
+                    self.errorMessage = "MDM API Error: \(httpResponse.statusCode)"
+                }
+            }
+        }.resume()
+    }
+
+    // Simulate sending a "Locate Device" command via MDM backend
+    func sendLocateCommand() {
+        isLoading = true
+        errorMessage = nil
+        guard let url = URL(string: "\(mdmApiBaseUrl)/devices/current/locate") else {
+            errorMessage = "Invalid MDM API URL for locate."
+            isLoading = false
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        // Add authentication headers
+        // request.setValue("Bearer YOUR_AUTH_TOKEN", forHTTPHeaderField: "Authorization")
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            DispatchQueue.main.async {
+                self.isLoading = false
+                if let error = error {
+                    self.errorMessage = "Network error: \(error.localizedDescription)"
+                    return
+                }
+
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    self.errorMessage = "Invalid server response."
+                    return
+                }
+
+                if httpResponse.statusCode == 200 {
+                    // Command sent successfully
+                    self.errorMessage = nil // Clear any previous errors
+                    print("Locate command sent successfully.")
+                } else {
+                    self.errorMessage = "Failed to send locate command: \(httpResponse.statusCode)"
+                    print("Error response: \(String(data: data ?? Data(), encoding: .utf8) ?? "N/A")")
+                }
+            }
+        }.resume()
+    }
+}
+
+// MARK: - SwiftUI View
+struct DeviceAdminView: View {
+    @StateObject private var viewModel = DeviceAdminViewModel()
+    @State private var showingLocateAlert = false
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section("Device Information") {
+                    InfoRow(label: "Name", value: viewModel.deviceName)
+                    InfoRow(label: "Model", value: viewModel.model)
+                    InfoRow(label: "OS Version", value: viewModel.systemVersion)
+                    InfoRow(label: "Free Space", value: viewModel.freeSpace)
+                    InfoRow(label: "Battery Level", value: viewModel.batteryLevel)
+                }
+
+                Section("MDM Status") {
+                    InfoRow(label: "Managed", value: viewModel.isManaged ? "Yes" : "No")
+                    InfoRow(label: "Compliance", value: viewModel.complianceStatus)
+                }
+
+                Section("Actions") {
+                    Button("Locate My Device") {
+                        showingLocateAlert = true
+                    }
+                    .alert(isPresented: $showingLocateAlert) {
+                        Alert(
+                            title: Text("Locate Device"),
+                            message: Text("This will send a signal to your device to play a sound and/or report its location. Do you want to proceed?"),
+                            primaryButton: .default(Text("OK")) {
+                                viewModel.sendLocateCommand()
+                            },
+                            secondaryButton: .cancel()
+                        )
+                    }
+                    Button("Refresh Information") {
+                        viewModel.fetchMdmInfo()
+                    }
+                }
+
+                if viewModel.isLoading {
+                    ProgressView("Loading...")
+                }
+
+                if let errorMessage = viewModel.errorMessage {
+                    Text("Error: \(errorMessage)")
+                        .foregroundColor(.red)
+                }
+            }
+            .navigationTitle("Self-Service Portal")
+            .onAppear {
+                // Request Battery Monitoring Usage Description in Info.plist
+                // Privacy - Device Usage Description: "This app needs to access device information to display battery level and other details."
+            }
+        }
+    }
+}
+
+struct InfoRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text(value)
+                .foregroundColor(.secondary)
+        }
+    }
+}
+
+
+
+//
+//  macOSAdminToolApp.swift
+//  macOSAdminTool
+//
+//  Created by Your Name on 2025-07-06.
+//
+
+import SwiftUI
+import Foundation // For Process, FileManager, etc.
+import AppKit // For NSWorkspace, NSAlert (optional for dialogs)
+
+@main
+struct MacOSAdminToolApp: App {
+    var body: some Scene {
+        WindowGroup {
+            AdminToolView()
+        }
+    }
+}
+
+// MARK: - ViewModel for macOS Admin Actions
+class MacOSAdminViewModel: ObservableObject {
+    @Published var systemInfo: String = "Loading System Information..."
+    @Published var softwareUpdateStatus: String = "Checking for updates..."
+    @Published var pkgInstallStatus: String = ""
+    @Published var selectedPkgPath: String = ""
+    @Published var commandOutput: String = ""
+    @Published var errorMessage: String?
+
+    init() {
+        fetchSystemInformation()
+    }
+
+    // Function to run shell commands
+    // WARNING: Running commands with `sudo` requires careful handling of permissions.
+    // For App Store apps, this is generally not allowed without specific entitlements/techniques.
+    // For enterprise distribution, you might use a helper tool or agent with elevated privileges.
+    func runShellCommand(_ command: String, withArguments args: [String], requiresSudo: Bool = false) async -> String {
+        DispatchQueue.main.async {
+            self.commandOutput = "" // Clear previous output
+            self.errorMessage = nil
+        }
+        
+        return await withCheckedContinuation { continuation in
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: requiresSudo ? "/usr/bin/sudo" : command)
+            
+            var fullArgs = args
+            if requiresSudo {
+                fullArgs.insert(command, at: 0) // Add the actual command after sudo
+            }
+            task.arguments = fullArgs
+
+            let pipe = Pipe()
+            task.standardOutput = pipe
+            task.standardError = pipe // Capture stderr as well
+
+            do {
+                try task.run()
+
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: data, encoding: .utf8) ?? "Failed to decode output."
+                
+                task.waitUntilExit() // Wait for the task to complete
+
+                DispatchQueue.main.async {
+                    if task.terminationStatus != 0 {
+                        self.errorMessage = "Command failed with exit code \(task.terminationStatus):\n\(output)"
+                        self.commandOutput = output // Show output even on error
+                        continuation.resume(returning: "")
+                    } else {
+                        self.commandOutput = output
+                        continuation.resume(returning: output)
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.errorMessage = "Failed to run command \(command): \(error.localizedDescription)"
+                    continuation.resume(returning: "")
+                }
+            }
+        }
+    }
+
+    // Fetch basic system information
+    func fetchSystemInformation() {
+        Task {
+            let osVersion = await runShellCommand("/usr/bin/sw_vers", withArguments: ["-productVersion"])
+            let cpuBrand = await runShellCommand("/usr/bin/sysctl", withArguments: ["-n", "machdep.cpu.brand_string"])
+            let serialNumber = await runShellCommand("/usr/sbin/ioreg", withArguments: ["-l", "|", "grep", "IOPlatformSerialNumber", "|", "awk", "{print $NF}", "|", "tr", "-d", "\"\""])
+            let uptime = await runShellCommand("/usr/bin/uptime", withArguments: [])
+            
+            DispatchQueue.main.async {
+                self.systemInfo = """
+                macOS Version: \(osVersion)
+                CPU: \(cpuBrand)
+                Serial Number: \(serialNumber)
+                Uptime: \(uptime)
+                """
+            }
+        }
+    }
+
+    // Check for software updates
+    func checkForSoftwareUpdates() {
+        Task {
+            DispatchQueue.main.async {
+                self.softwareUpdateStatus = "Checking for updates..."
+            }
+            let output = await runShellCommand("/usr/sbin/softwareupdate", withArguments: ["-l"])
+            DispatchQueue.main.async {
+                self.softwareUpdateStatus = output
+            }
+        }
+    }
+
+    // Function to handle PKG file selection using NSOpenPanel
+    func selectPkgFile() {
+        let openPanel = NSOpenPanel()
+        openPanel.allowedContentTypes = [.package] // .pkg files
+        openPanel.allowsMultipleSelection = false
+        openPanel.canChooseDirectories = false
+        openPanel.canChooseFiles = true
+
+        if openPanel.runModal() == .OK {
+            if let url = openPanel.url {
+                DispatchQueue.main.async {
+                    self.selectedPkgPath = url.path
+                    self.pkgInstallStatus = "PKG selected: \(url.lastPathComponent)"
+                }
+            }
+        }
+    }
+
+    // Install the selected PKG
+    func installSelectedPkg() {
+        guard !selectedPkgPath.isEmpty else {
+            DispatchQueue.main.async {
+                self.pkgInstallStatus = "Please select a PKG file first."
+            }
+            return
+        }
+
+        Task {
+            DispatchQueue.main.async {
+                self.pkgInstallStatus = "Installing \(URL(fileURLWithPath: self.selectedPkgPath).lastPathComponent)..."
+            }
+            // WARNING: Requires sudo. This will typically prompt the user for credentials.
+            // For unattended installation, you would need to pre-authorize `installer` in sudoers
+            // or use an MDM-deployed solution.
+            let output = await runShellCommand("/usr/sbin/installer", withArguments: ["-pkg", selectedPkgPath, "-target", "/"], requiresSudo: true)
+            
+            DispatchQueue.main.async {
+                if !output.isEmpty && self.errorMessage == nil {
+                    self.pkgInstallStatus = "Installation complete."
+                } else {
+                    self.pkgInstallStatus = "Installation failed. Check output/error."
+                }
+            }
+        }
+    }
+    
+    // Example: Trigger MDM Check-in (if managed)
+    func triggerMDMCheckin() {
+        Task {
+            DispatchQueue.main.async {
+                self.commandOutput = "Triggering MDM check-in..."
+            }
+            // `profiles -L -F` forces a check-in with the configured MDM server
+            let output = await runShellCommand("/usr/bin/profiles", withArguments: ["-L", "-F"], requiresSudo: true)
+            DispatchQueue.main.async {
+                if !output.isEmpty && self.errorMessage == nil {
+                    self.commandOutput = "MDM check-in command sent."
+                } else {
+                    self.commandOutput = "Failed to send MDM check-in command."
+                }
+            }
+        }
+    }
+}
+
+// MARK: - SwiftUI View for macOS Admin Tool
+struct AdminToolView: View {
+    @StateObject private var viewModel = MacOSAdminViewModel()
+
+    var body: some View {
+        VStack(spacing: 15) {
+            Text("macOS Administrator Tools")
+                .font(.largeTitle)
+                .padding(.bottom, 10)
+
+            // System Information Section
+            GroupBox("System Information") {
+                TextEditor(text: .constant(viewModel.systemInfo))
+                    .font(.body)
+                    .frame(minHeight: 100, maxHeight: 200)
+                    .border(Color.gray.opacity(0.2))
+                    .padding(5)
+            }
+
+            // Software Update Section
+            GroupBox("Software Updates") {
+                VStack(alignment: .leading) {
+                    Button("Check for Updates") {
+                        viewModel.checkForSoftwareUpdates()
+                    }
+                    TextEditor(text: .constant(viewModel.softwareUpdateStatus))
+                        .font(.body)
+                        .frame(minHeight: 80, maxHeight: 150)
+                        .border(Color.gray.opacity(0.2))
+                        .padding(5)
+                }
+            }
+
+            // PKG Installer Section
+            GroupBox("PKG Installer") {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        TextField("PKG Path", text: $viewModel.selectedPkgPath)
+                            .disabled(true) // Disable manual editing
+                        Button("Select PKG...") {
+                            viewModel.selectPkgFile()
+                        }
+                    }
+                    Button("Install PKG") {
+                        viewModel.installSelectedPkg()
+                    }
+                    Text(viewModel.pkgInstallStatus)
+                        .font(.callout)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            // MDM Action Section
+            GroupBox("MDM Actions") {
+                VStack(alignment: .leading) {
+                    Button("Force MDM Check-in") {
+                        viewModel.triggerMDMCheckin()
+                    }
+                }
+            }
+
+            // General Command Output / Error Section
+            GroupBox("Command Output") {
+                TextEditor(text: .constant(viewModel.commandOutput))
+                    .font(.body)
+                    .frame(minHeight: 100, maxHeight: 250)
+                    .border(Color.gray.opacity(0.2))
+                    .padding(5)
+            }
+            
+            if let errorMessage = viewModel.errorMessage {
+                Text("Error: \(errorMessage)")
+                    .foregroundColor(.red)
+                    .font(.headline)
+            }
+
+            Spacer()
+        }
+        .padding()
+        .frame(minWidth: 600, minHeight: 700)
+    }
+}
+
+
+
+
+let command = "/bin/bash"
+let args = ["-c", "ioreg -l | grep IOPlatformSerialNumber | awk '{print $NF}' | tr -d '\"'"]
+let serialNumber = await runShellCommand(command, withArguments: args)
+
+
+//
+//  MDMSelfServiceApp.swift
+//  MDMSelfService
+//
+//  Created by [Your Name] on 2025-07-06.
+//
+
+import SwiftUI
+
+@main
+struct MDMSelfServiceApp: App {
+    var body: some Scene {
+        WindowGroup {
+            DeviceStatusView()
+        }
+    }
+}
+
+
+//
+//  DeviceStatusView.swift
+//  MDMSelfService
+//
+//  Created by [Your Name] on 2025-07-06.
+//
+
+import SwiftUI
+import UIKit // For UIDevice, etc.
+
+struct DeviceStatusView: View {
+    @StateObject private var viewModel = DeviceStatusViewModel()
+    @State private var showingLocateAlert = false
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section("Device Information") {
+                    InfoRow(label: "Name", value: viewModel.deviceName)
+                    InfoRow(label: "Model", value: viewModel.model)
+                    InfoRow(label: "OS Version", value: viewModel.systemVersion)
+                    InfoRow(label: "Free Space", value: viewModel.freeSpace)
+                    InfoRow(label: "Battery Level", value: viewModel.batteryLevel)
+                }
+
+                Section("MDM Status") {
+                    InfoRow(label: "Managed", value: viewModel.isManaged ? "Yes" : "No")
+                    InfoRow(label: "Compliance", value: viewModel.complianceStatus)
+                }
+
+                Section("Actions") {
+                    Button("Locate My Device") {
+                        showingLocateAlert = true
+                    }
+                    .alert(isPresented: $showingLocateAlert) {
+                        Alert(
+                            title: Text("Locate Device"),
+                            message: Text("This will send a signal to your device to play a sound and/or report its location via MDM. Do you want to proceed?"),
+                            primaryButton: .default(Text("OK")) {
+                                viewModel.sendLocateCommand()
+                            },
+                            secondaryButton: .cancel()
+                        )
+                    }
+                    
+                    Button("Refresh MDM Information") {
+                        viewModel.fetchMdmInfo()
+                    }
+                }
+
+                if viewModel.isLoading {
+                    ProgressView("Loading...")
+                }
+
+                if let errorMessage = viewModel.errorMessage {
+                    Text("Error: \(errorMessage)")
+                        .foregroundColor(.red)
+                }
+            }
+            .navigationTitle("My Device Portal")
+            .onAppear {
+                // Ensure battery monitoring is enabled for battery level
+                UIDevice.current.isBatteryMonitoringEnabled = true
+            }
+        }
+    }
+}
+
+// Helper view for info rows
+struct InfoRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text(value)
+                .foregroundColor(.secondary)
+        }
+    }
+}
+
+// MARK: - ViewModel (Backend Logic)
+class DeviceStatusViewModel: ObservableObject {
+    @Published var deviceName: String = ""
+    @Published var systemVersion: String = ""
+    @Published var model: String = ""
+    @Published var freeSpace: String = ""
+    @Published var batteryLevel: String = ""
+    @Published var isManaged: Bool = false
+    @Published var complianceStatus: String = "Unknown"
+    @Published var isLoading: Bool = false
+    @Published var errorMessage: String?
+
+    // IMPORTANT: Replace with your actual MDM backend URL.
+    // This backend would then communicate with your MDM solution (Jamf, Mosyle, Intune, etc.)
+    private let mdmApiBaseUrl = "https://your-mdm-backend.com/api/v1/selfservice"
+
+    init() {
+        fetchLocalDeviceInfo()
+        fetchMdmInfo()
+    }
+
+    // Gathers information available directly from the iOS device
+    func fetchLocalDeviceInfo() {
+        let device = UIDevice.current
+        deviceName = device.name
+        systemVersion = device.systemVersion
+        model = device.model
+
+        // Get storage space
+        if let attributes = try? FileManager.default.attributesOfFileSystem(forPath: NSHomeDirectory()) {
+            let freeFileSystemSizeInBytes = attributes[.systemFreeSize] as? NSNumber
+            if let freeSize = freeFileSystemSizeInBytes?.int64Value {
+                freeSpace = ByteCountFormatter.string(fromByteCount: freeSize, countStyle: .file)
+            }
+        }
+
+        // Get battery level
+        device.isBatteryMonitoringEnabled = true // Must be true to get batteryLevel
+        let level = device.batteryLevel
+        if level >= 0 { // -1.0 means unknown
+            batteryLevel = "\(Int(level * 100))%"
+        } else {
+            batteryLevel = "N/A"
+        }
+    }
+
+    // Fetches device status from your MDM backend
+    // In a real app, you'd send a device identifier (e.g., UDID, serial number, or user ID)
+    // and include authentication headers (e.g., JWT token from user login).
+    func fetchMdmInfo() {
+        isLoading = true
+        errorMessage = nil
+        // Replace 'current' with a dynamically obtained device ID or serial number
+        guard let url = URL(string: "\(mdmApiBaseUrl)/devices/YOUR_DEVICE_IDENTIFIER") else {
+            errorMessage = "Invalid MDM API URL for info."
+            isLoading = false
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        // Add auth header here: request.setValue("Bearer YOUR_AUTH_TOKEN", forHTTPHeaderField: "Authorization")
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                self?.isLoading = false
+                if let error = error {
+                    self?.errorMessage = "Network error: \(error.localizedDescription)"
+                    return
+                }
+
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    self?.errorMessage = "Invalid server response."
+                    return
+                }
+
+                if httpResponse.statusCode == 200, let data = data {
+                    do {
+                        // Assuming your backend returns JSON like:
+                        // {"isManaged": true, "complianceStatus": "Compliant", "id": "...", "name": "..."}
+                        if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
+                            self?.isManaged = json["isManaged"] as? Bool ?? false
+                            self?.complianceStatus = json["complianceStatus"] as? String ?? "Unknown"
+                            // Update other properties if MDM provides them
+                        } else {
+                            self?.errorMessage = "Failed to parse MDM data."
+                        }
+                    } catch {
+                        self?.errorMessage = "JSON parsing error: \(error.localizedDescription)"
+                    }
+                } else {
+                    let responseBody = String(data: data ?? Data(), encoding: .utf8) ?? "N/A"
+                    self?.errorMessage = "MDM API Error: \(httpResponse.statusCode)\n\(responseBody)"
+                }
+            }
+        }.resume()
+    }
+
+    // Sends a "Locate Device" command via your MDM backend
+    // This assumes your backend provides an endpoint that translates this to an MDM command.
+    func sendLocateCommand() {
+        isLoading = true
+        errorMessage = nil
+        guard let url = URL(string: "\(mdmApiBaseUrl)/devices/YOUR_DEVICE_IDENTIFIER/locate") else {
+            errorMessage = "Invalid MDM API URL for locate."
+            isLoading = false
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        // Add auth header here: request.setValue("Bearer YOUR_AUTH_TOKEN", forHTTPHeaderField: "Authorization")
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                self?.isLoading = false
+                if let error = error {
+                    self?.errorMessage = "Network error: \(error.localizedDescription)"
+                    return
+                }
+
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    self?.errorMessage = "Invalid server response."
+                    return
+                }
+
+                if httpResponse.statusCode == 200 {
+                    print("Locate command sent successfully.")
+                    // Optionally show a success alert
+                } else {
+                    let responseBody = String(data: data ?? Data(), encoding: .utf8) ?? "N/A"
+                    self?.errorMessage = "Failed to send locate command: \(httpResponse.statusCode)\n\(responseBody)"
+                }
+            }
+        }.resume()
+    }
+}
+
+
+
+//
+//  MacOSAdminToolApp.swift
+//  MacOSAdminTool
+//
+//  Created by [Your Name] on 2025-07-06.
+//
+
+import SwiftUI
+
+@main
+struct MacOSAdminToolApp: App {
+    var body: some Scene {
+        WindowGroup {
+            AdminToolView()
+        }
+    }
+}
+
+
+
+//
+//  AdminToolView.swift
+//  MacOSAdminTool
+//
+//  Created by [Your Name] on 2025-07-06.
+//
+
+import SwiftUI
+import AppKit // For NSOpenPanel
+
+struct AdminToolView: View {
+    @StateObject private var viewModel = MacOSAdminViewModel()
+
+    var body: some View {
+        VStack(spacing: 15) {
+            Text("macOS Administrator Tools")
+                .font(.largeTitle)
+                .padding(.bottom, 10)
+
+            // System Information Section
+            GroupBox("System Information") {
+                TextEditor(text: .constant(viewModel.systemInfo))
+                    .font(.body)
+                    .frame(minHeight: 100, maxHeight: 200)
+                    .border(Color.gray.opacity(0.2))
+                    .padding(5)
+            }
+
+            // Software Update Section
+            GroupBox("Software Updates") {
+                VStack(alignment: .leading) {
+                    Button("Check for Updates") {
+                        Task { await viewModel.checkForSoftwareUpdates() }
+                    }
+                    TextEditor(text: .constant(viewModel.softwareUpdateStatus))
+                        .font(.body)
+                        .frame(minHeight: 80, maxHeight: 150)
+                        .border(Color.gray.opacity(0.2))
+                        .padding(5)
+                }
+            }
+
+            // PKG Installer Section
+            GroupBox("PKG Installer") {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        TextField("Selected PKG Path", text: $viewModel.selectedPkgPath)
+                            .disabled(true) // Disable manual editing
+                        Button("Select PKG...") {
+                            viewModel.selectPkgFile()
+                        }
+                    }
+                    Button("Install PKG") {
+                        Task { await viewModel.installSelectedPkg() }
+                    }
+                    Text(viewModel.pkgInstallStatus)
+                        .font(.callout)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            // MDM Action Section
+            GroupBox("MDM Actions") {
+                VStack(alignment: .leading) {
+                    Button("Force MDM Check-in") {
+                        Task { await viewModel.triggerMDMCheckin() }
+                    }
+                }
+            }
+
+            // General Command Output / Error Section
+            GroupBox("Command Output") {
+                TextEditor(text: .constant(viewModel.commandOutput))
+                    .font(.body)
+                    .frame(minHeight: 100, maxHeight: 250)
+                    .border(Color.gray.opacity(0.2))
+                    .padding(5)
+            }
+            
+            if let errorMessage = viewModel.errorMessage {
+                Text("Error: \(errorMessage)")
+                    .foregroundColor(.red)
+                    .font(.headline)
+            }
+
+            Spacer()
+        }
+        .padding()
+        .frame(minWidth: 600, minHeight: 700)
+    }
+}
+
+// MARK: - ViewModel (Backend Logic)
+class MacOSAdminViewModel: ObservableObject {
+    @Published var systemInfo: String = "Loading System Information..."
+    @Published var softwareUpdateStatus: String = "Checking for updates..."
+    @Published var pkgInstallStatus: String = ""
+    @Published var selectedPkgPath: String = ""
+    @Published var commandOutput: String = ""
+    @Published var errorMessage: String?
+
+    init() {
+        Task { await fetchSystemInformation() }
+    }
+
+    // Function to run shell commands
+    // WARNING: Running commands with `sudo` requires careful handling of permissions.
+    // For App Store apps, this is generally not allowed without specific entitlements/techniques.
+    // For enterprise distribution, you might use a helper tool or agent with elevated privileges.
+    func runShellCommand(_ executablePath: String, withArguments args: [String], requiresSudo: Bool = false) async -> String {
+        await MainActor.run {
+            self.commandOutput = "" // Clear previous output
+            self.errorMessage = nil
+        }
+        
+        return await withCheckedContinuation { continuation in
+            let task = Process()
+            
+            var fullArguments = args
+            if requiresSudo {
+                task.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
+                fullArguments.insert(executablePath, at: 0) // sudo then the actual command
+            } else {
+                task.executableURL = URL(fileURLWithPath: executablePath)
+            }
+            task.arguments = fullArguments
+
+            let pipe = Pipe()
+            task.standardOutput = pipe
+            task.standardError = pipe // Capture stderr as well
+
+            do {
+                try task.run() // Start the process
+
+                // Read data asynchronously
+                let outputHandle = pipe.fileHandleForReading
+                var completeOutput = Data()
+                
+                outputHandle.readabilityHandler = { handle in
+                    let data = handle.availableData
+                    completeOutput.append(data)
+                    // Update UI with partial output if desired, but be careful with frequent updates
+                }
+                
+                task.waitUntilExit() // Wait for the task to complete
+
+                outputHandle.readabilityHandler = nil // Stop reading
+                let outputString = String(data: completeOutput, encoding: .utf8) ?? "Failed to decode output."
+                
+                await MainActor.run {
+                    if task.terminationStatus != 0 {
+                        self.errorMessage = "Command failed with exit code \(task.terminationStatus):\n\(outputString)"
+                        self.commandOutput = outputString // Show output even on error
+                        continuation.resume(returning: "")
+                    } else {
+                        self.commandOutput = outputString
+                        continuation.resume(returning: outputString)
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.errorMessage = "Failed to run command \(executablePath): \(error.localizedDescription)"
+                    continuation.resume(returning: "")
+                }
+            }
+        }
+    }
+
+    // Fetch basic system information
+    func fetchSystemInformation() async {
+        let osVersion = await runShellCommand("/usr/bin/sw_vers", withArguments: ["-productVersion"])
+        let cpuBrand = await runShellCommand("/usr/bin/sysctl", withArguments: ["-n", "machdep.cpu.brand_string"])
+        
+        // For commands with pipes, it's safer to wrap them in `bash -c`
+        let serialNumberCommand = "/usr/sbin/ioreg -l | grep IOPlatformSerialNumber | awk '{print $NF}' | tr -d '\"'"
+        let serialNumber = await runShellCommand("/bin/bash", withArguments: ["-c", serialNumberCommand])
+        
+        let uptime = await runShellCommand("/usr/bin/uptime", withArguments: [])
+        
+        await MainActor.run {
+            self.systemInfo = """
+            macOS Version: \(osVersion)
+            CPU: \(cpuBrand)
+            Serial Number: \(serialNumber)
+            Uptime: \(uptime)
+            """
+        }
+    }
+
+    // Check for software updates
+    func checkForSoftwareUpdates() async {
+        await MainActor.run {
+            self.softwareUpdateStatus = "Checking for updates..."
+        }
+        let output = await runShellCommand("/usr/sbin/softwareupdate", withArguments: ["-l"])
+        await MainActor.run {
+            self.softwareUpdateStatus = output
+        }
+    }
+
+    // Function to handle PKG file selection using NSOpenPanel
+    func selectPkgFile() {
+        let openPanel = NSOpenPanel()
+        openPanel.allowedContentTypes = [.package] // .pkg files
+        openPanel.allowsMultipleSelection = false
+        openPanel.canChooseDirectories = false
+        openPanel.canChooseFiles = true
+
+        if openPanel.runModal() == .OK {
+            if let url = openPanel.url {
+                DispatchQueue.main.async {
+                    self.selectedPkgPath = url.path
+                    self.pkgInstallStatus = "PKG selected: \(url.lastPathComponent)"
+                }
+            }
+        }
+    }
+
+    // Install the selected PKG
+    func installSelectedPkg() async {
+        guard !selectedPkgPath.isEmpty else {
+            await MainActor.run {
+                self.pkgInstallStatus = "Please select a PKG file first."
+            }
+            return
+        }
+
+        await MainActor.run {
+            self.pkgInstallStatus = "Installing \(URL(fileURLWithPath: self.selectedPkgPath).lastPathComponent)..."
+        }
+        // WARNING: Requires sudo. This will typically prompt the user for credentials.
+        // For unattended installation, you would need to pre-authorize `installer` in sudoers
+        // or use an MDM-deployed solution.
+        let output = await runShellCommand("/usr/sbin/installer", withArguments: ["-pkg", selectedPkgPath, "-target", "/"], requiresSudo: true)
+        
+        await MainActor.run {
+            if self.errorMessage == nil { // Check if runShellCommand set an error
+                self.pkgInstallStatus = "Installation complete."
+            } else {
+                self.pkgInstallStatus = "Installation failed. Check output/error section."
+            }
+        }
+    }
+    
+    // Example: Trigger MDM Check-in (if managed)
+    func triggerMDMCheckin() async {
+        await MainActor.run {
+            self.commandOutput = "Triggering MDM check-in..."
+        }
+        // `profiles -L -F` forces a check-in with the configured MDM server
+        let output = await runShellCommand("/usr/bin/profiles", withArguments: ["-L", "-F"], requiresSudo: true)
+        await MainActor.run {
+            if self.errorMessage == nil {
+                self.commandOutput = "MDM check-in command sent."
+            } else {
+                self.commandOutput = "Failed to send MDM check-in command."
+            }
+        }
+    }
+}
+
+
+
+
+
+
+
