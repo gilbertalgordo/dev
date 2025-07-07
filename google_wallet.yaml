@@ -1,0 +1,2964 @@
+This is an exciting and powerful combination! Integrating Google Wallet with Google Cloud APIs (especially Gemini for AI) allows for highly personalized, dynamic, and intelligent user experiences.
+Here's a breakdown of the concepts, a conceptual architecture, and Python code examples for an advanced Google Wallet integration leveraging Google Cloud and Gemini.
+Core Idea:
+The goal is to use Gemini (Google's AI model) to enrich Google Wallet passes with dynamic, AI-generated content or to trigger actions based on user context. This can range from personalized offers on loyalty cards to real-time, AI-summarized event information on tickets.
+Conceptual Architecture:
++-------------------+      +-------------------------+      +---------------------+
+| User Interaction  |      |      Your Backend       |      |  Google Cloud AI    |
+| (e.g., App, Web)  |----->|   (e.g., Cloud Run,     |----->| (Gemini API, Vertex |
+|   (Triggers)      |      |   Cloud Functions)      |      |   AI, etc.)         |
++-------------------+      |                         |      +---------------------+
+                           |   - Google Wallet API   |<-----+
+                           |   - User Data (Firestore, |
+                           |     Cloud SQL, etc.)    |
+                           +-------------------------+
+                                        |
+                                        | (Updates Pass)
+                                        v
+                           +-------------------------+
+                           |     Google Wallet       |
+                           |   (Updated Pass for     |
+                           |       User)             |
+                           +-------------------------+
+
+Key Google Cloud Services Involved:
+ * Google Wallet API: The primary API for creating, updating, and managing various pass types (loyalty, offers, event tickets, boarding passes, generic passes).
+ * Gemini API: For generating text, code, or other modalities based on prompts. This is where the AI magic happens for personalization, summarization, or intelligent decision-making.
+ * Google Cloud Functions/Cloud Run/App Engine: Serverless compute options to host your backend logic that orchestrates the interactions between Google Wallet and Gemini.
+ * Firestore/Cloud SQL/Cloud Spanner: Databases to store user profiles, historical data, pass templates, and other relevant information.
+ * Cloud Pub/Sub: For asynchronous event-driven architectures (e.g., a new transaction triggers an AI analysis).
+ * Secret Manager: Securely store API keys (for Google Wallet, Gemini) and other sensitive credentials.
+ * IAM (Identity and Access Management): To control permissions for your services.
+Advanced Use Case Examples with Gemini:
+ * Personalized Loyalty Offers:
+   * Trigger: User makes a purchase, or a new loyalty tier is achieved.
+   * Gemini: Based on user's purchase history (from your database) and current promotions, Gemini generates a personalized offer message (e.g., "Hi [Name], based on your recent coffee purchases, here's 20% off your next large latte!").
+   * Google Wallet: Update the user's loyalty pass with this dynamically generated offer text and a relevant barcode/QR code.
+ * Dynamic Event Information & Recommendations:
+   * Trigger: User adds an event ticket, or event date approaches.
+   * Gemini: Fetch real-time data (weather, traffic, news about the event/artists). Gemini can summarize this info and even suggest related activities (e.g., "Weather for the concert: partly cloudy. Consider taking public transport due to expected traffic. Did you know [Artist] is doing a meet-and-greet at 6 PM?").
+   * Google Wallet: Update the event pass with these dynamic messages.
+ * Intelligent Customer Support Context:
+   * Trigger: User taps a "Help" button on a Wallet pass.
+   * Gemini: Analyze the pass details and potentially user interaction history. Generate context-aware suggestions or common FAQs specific to that pass type and user.
+   * Google Wallet: Present these AI-generated FAQs or direct links to relevant support within the Wallet pass or a linked web view.
+ * Custom Pass Generation from Images (Advanced): Google Wallet already has a "Custom Passes" feature that uses AI. If you wanted to build on this, Gemini could analyze user-provided text descriptions (e.g., "I need a gym membership pass with my name John Doe and membership ID 12345") and generate structured data to populate a Generic Pass, reducing manual input.
+Python Code Example (Google Cloud Function/Cloud Run):
+This example demonstrates generating a personalized offer using Gemini and then updating a Google Wallet Loyalty Pass.
+Prerequisites:
+ * Google Cloud Project Setup:
+   * Enable Google Wallet API.
+   * Enable Generative Language API (for Gemini).
+   * Enable Cloud Functions API (or Cloud Run).
+   * Create a Service Account with the following roles:
+     * Google Wallet API Editor
+     * Vertex AI User (for Gemini API access)
+     * Cloud Functions Invoker (if using API Gateway trigger)
+     * Secret Manager Secret Accessor (highly recommended for credentials)
+   * Download your Service Account JSON key.
+   * Store your Google Wallet API Issuer ID (available in the Google Pay & Wallet Console).
+   * Create a Loyalty Class in the Google Pay & Wallet Console first. Note its classId.
+ * Environment Setup:
+   * Install Google Cloud SDK: gcloud auth application-default login (for local testing)
+   * For deployment, use Secret Manager for your service account key.
+main.py for Google Cloud Function:
+import functions_framework
+import json
+import os
+from google.auth import jwt
+from google.auth.transport import requests
+from google.cloud import secretmanager
+from vertexai.preview.generative_models import GenerativeModel, Part
+
+# --- Configuration (Fetch securely from Secret Manager in production) ---
+# Project ID where Secret Manager and Gemini API are enabled
+PROJECT_ID = os.environ.get('GCP_PROJECT_ID', 'your-gcp-project-id')
+# Secret Manager secret ID for your Google Service Account Key JSON
+GOOGLE_SERVICE_ACCOUNT_SECRET_ID = os.environ.get('GOOGLE_SERVICE_ACCOUNT_SECRET_ID', 'google-wallet-service-account-key')
+# Your Google Wallet Issuer ID (from Google Pay & Wallet Console)
+ISSUER_ID = os.environ.get('GOOGLE_WALLET_ISSUER_ID', 'your-issuer-id')
+# Your pre-created Google Wallet Loyalty Class ID
+LOYALTY_CLASS_ID_SUFFIX = os.environ.get('LOYALTY_CLASS_ID_SUFFIX', 'your-loyalty-class-id-suffix') # e.g., "my-loyalty-program-class"
+
+# Global variables to store credentials and clients
+_google_wallet_credentials = None
+_gemini_model = None
+
+def _get_google_wallet_credentials():
+    global _google_wallet_credentials
+    if _google_wallet_credentials is None:
+        try:
+            client = secretmanager.SecretManagerServiceClient()
+            response = client.access_secret_version(
+                request={"name": f"projects/{PROJECT_ID}/secrets/{GOOGLE_SERVICE_ACCOUNT_SECRET_ID}/versions/latest"}
+            )
+            payload = response.payload.data.decode("UTF-8")
+            _google_wallet_credentials = json.loads(payload)
+        except Exception as e:
+            print(f"Error fetching Google Wallet credentials from Secret Manager: {e}")
+            raise RuntimeError("Failed to load Google Wallet credentials.")
+    return _google_wallet_credentials
+
+def _get_gemini_model():
+    global _gemini_model
+    if _gemini_model is None:
+        # Initialize Gemini GenerativeModel. Ensure Vertex AI API is enabled.
+        _gemini_model = GenerativeModel("gemini-pro") # Or "gemini-1.5-pro-latest" for more advanced
+    return _gemini_model
+
+def generate_personalized_offer_with_gemini(user_history, recent_activity):
+    """
+    Uses Gemini to generate a personalized offer based on user data.
+    """
+    model = _get_gemini_model()
+
+    prompt = f"""
+    You are an AI assistant for a loyalty program. Your goal is to create a compelling, personalized offer for a customer.
+    Here's the customer's purchase history: {user_history}.
+    Here's their most recent activity: {recent_activity}.
+    Based on this, suggest a concise and attractive offer they can use. Keep it under 20 words.
+    Example: "Enjoy 20% off your next coffee!" or "Get a free dessert with your next meal!"
+    """
+
+    try:
+        response = model.generate_content(prompt)
+        offer_text = response.candidates[0].content.parts[0].text.strip()
+        print(f"Gemini-generated offer: {offer_text}")
+        return offer_text
+    except Exception as e:
+        print(f"Error generating content with Gemini: {e}")
+        return "Enjoy a special discount on your next visit!" # Fallback offer
+
+def create_or_update_google_wallet_pass(user_id, offer_text):
+    """
+    Creates or updates a Google Wallet Loyalty Pass with the generated offer.
+    Requires Google Wallet API authentication and object manipulation.
+    """
+    credentials = _get_google_wallet_credentials()
+    service_account_email = credentials['client_email']
+    private_key = credentials['private_key']
+
+    # Google Wallet API endpoint for Loyalty Objects
+    wallet_api_url = f"https://walletobjects.googleapis.com/walletobjects/v1/loyaltyObject/batchUpdate" # Or POST for individual object update/creation
+    # For simplicity, we'll demonstrate updating a specific field.
+    # In a real scenario, you'd likely fetch the existing object first with a GET request
+    # and then PATCH it. For this example, we'll assume a new object or a full update.
+
+    # loyaltyObjectId is typically ISSUER_ID.EXTERNAL_ID
+    # For a new pass, you'd generate a unique external ID.
+    # For an existing pass, you'd use its known external ID.
+    loyalty_object_id = f"{ISSUER_ID}.{user_id}_loyalty_pass"
+    
+    # Construct the LoyaltyObject payload
+    # Note: This is a simplified example. Real LoyaltyObjects have many more fields.
+    # The 'textModulesData' is a good place to put dynamic text.
+    loyalty_object = {
+        "id": loyalty_object_id,
+        "classId": f"{ISSUER_ID}.{LOYALTY_CLASS_ID_SUFFIX}",
+        "state": "ACTIVE", # Can be ACTIVE, COMPLETED, EXPIRED, INACTIVE
+        "loyaltyPoints": { # Example, adjust as needed
+            "label": "Points",
+            "balance": {
+                "int": 1234
+            }
+        },
+        "textModulesData": [
+            {
+                "header": "Special Offer Just For You!",
+                "body": offer_text,
+                "id": "offer_text_module"
+            },
+            {
+                "header": "Membership Level",
+                "body": "Gold Tier",
+                "id": "membership_level_module"
+            }
+        ],
+        "barcode": {
+            "type": "QR_CODE",
+            "value": user_id # Or a specific loyalty number
+        }
+        # Add more fields as per your Loyalty Class definition and needs
+    }
+
+    # Create JWT for authentication
+    claimset = {
+        'iss': service_account_email,
+        'aud': 'google',
+        'iat': requests.datetime.datetime.utcnow(),
+        'exp': requests.datetime.datetime.utcnow() + requests.datetime.timedelta(minutes=5), # Expires in 5 minutes
+        'typ': 'savetowallet', # This is for "Add to Google Wallet" links.
+                               # For API calls, typically just 'iat', 'exp', 'aud', 'iss'
+        'origins': [os.environ.get('APP_URL', 'https://your-app-domain.com')] # Your app's origin
+    }
+    
+    # For API calls to update existing objects, the JWT structure might be simpler,
+    # often just including 'iss', 'aud', 'iat', 'exp'.
+    # The `walletobjects.googleapis.com` endpoint typically uses an Authorization: Bearer token.
+    # The `jwt.encode` part creates the signed token.
+
+    # Simulating a Google Wallet API call.
+    # You would typically use the `google-api-python-client` library or `requests` directly.
+    # Example using direct requests and JWT (simplified for bearer token):
+    
+    # For API authentication, the scope should be 'https://www.googleapis.com/auth/wallet_object.issuer'
+    # And the JWT payload would include 'scope'.
+    # A robust solution uses google.auth for API access tokens.
+    
+    signed_jwt = jwt.encode(credentials, claimset).decode('utf-8')
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {signed_jwt}' # This is incorrect for API calls, should be OAuth2 access token
+    }
+
+    # Correct way to get authenticated session using `google.auth.transport.requests`
+    # This requires `google-auth-oauthlib` and `google-api-python-client` in your environment.
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+
+    # Create credentials from the service account key
+    creds = service_account.Credentials.from_service_account_info(
+        credentials,
+        scopes=['https://www.googleapis.com/auth/wallet_object.issuer']
+    )
+    
+    # Build the Wallet Objects service client
+    service = build('walletobjects', 'v1', credentials=creds)
+
+    try:
+        # Create or update the loyalty object
+        # If the object exists, this will update it. If not, it will create it.
+        # For a more specific PATCH, you'd use service.loyaltyobject().patch(...)
+        # For simplicity, we are using the 'update' which replaces the entire object.
+        # For creating a new object, use service.loyaltyobject().insert(...)
+        request = service.loyaltyobject().update(
+            resourceId=loyalty_object_id,
+            body=loyalty_object
+        )
+        response = request.execute()
+        print(f"Google Wallet API response: {json.dumps(response, indent=2)}")
+        print(f"Successfully updated/created Google Wallet pass for user: {user_id}")
+        return True
+    except Exception as e:
+        print(f"Error updating Google Wallet pass: {e}")
+        return False
+
+@functions_framework.http
+def main(request):
+    """
+    Main entry point for the Google Cloud Function.
+    This function processes an HTTP request, triggers AI, and updates Google Wallet.
+    """
+    if request.method == 'OPTIONS':
+        # Handle CORS preflight request
+        headers = {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST',
+            'Access-Control-Allow-Headers': 'Content-Type',
+            'Access-Control-Max-Age': '3600'
+        }
+        return ('', 204, headers)
+
+    headers = {
+        'Access-Control-Allow-Origin': '*'
+    }
+
+    try:
+        request_json = request.get_json(silent=True)
+        if not request_json:
+            raise ValueError("Invalid JSON payload.")
+
+        user_id = request_json.get('userId')
+        user_history = request_json.get('userHistory', [])
+        recent_activity = request_json.get('recentActivity', '')
+
+        if not user_id:
+            return (json.dumps({'status': 'error', 'message': 'Missing userId'}), 400, headers)
+
+        print(f"Processing request for user: {user_id}")
+
+        # 1. Generate personalized offer using Gemini
+        personalized_offer = generate_personalized_offer_with_gemini(user_history, recent_activity)
+
+        # 2. Update Google Wallet pass
+        success = create_or_update_google_wallet_pass(user_id, personalized_offer)
+
+        if success:
+            return (json.dumps({
+                'status': 'success',
+                'message': 'Google Wallet pass updated with personalized offer',
+                'offer': personalized_offer,
+                'googleWalletPassId': f"{ISSUER_ID}.{user_id}_loyalty_pass"
+            }), 200, headers)
+        else:
+            return (json.dumps({'status': 'error', 'message': 'Failed to update Google Wallet pass'}), 500, headers)
+
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        return (json.dumps({'status': 'error', 'message': str(e)}), 500, headers)
+
+
+requirements.txt:
+functions-framework
+google-cloud-secret-manager
+google-auth
+google-auth-oauthlib
+google-api-python-client
+vertexai
+
+Deployment (Google Cloud Function):
+ * Save Files: Save the code above as main.py and requirements.txt in a directory.
+ * Service Account Key:
+   * Option A (Secure - Recommended): Create a secret in Secret Manager named google-wallet-service-account-key and paste your service account JSON key as the secret value. Set the GOOGLE_SERVICE_ACCOUNT_SECRET_ID environment variable in your Cloud Function to this name.
+   * Option B (Less Secure, Dev Only): Place your service_account_key.json directly in the deployment package (next to main.py). Then modify _get_google_wallet_credentials to load it directly:
+     def _get_google_wallet_credentials():
+    global _google_wallet_credentials
+    if _google_wallet_credentials is None:
+        # For development, loading directly from file. NOT recommended for production.
+        with open('service_account_key.json', 'r') as f:
+            _google_wallet_credentials = json.load(f)
+    return _google_wallet_credentials
+
+ * Deploy Cloud Function:
+   gcloud functions deploy advanced-google-wallet-ai \
+    --runtime python311 \
+    --trigger-http \
+    --allow-unauthenticated \ # Or configure IAM for authenticated calls
+    --entry-point main \
+    --region us-central1 \ # Or your preferred region
+    --set-env-vars GCP_PROJECT_ID=your-gcp-project-id,GOOGLE_WALLET_ISSUER_ID=your-issuer-id,LOYALTY_CLASS_ID_SUFFIX=your-loyalty-class-id-suffix,GOOGLE_SERVICE_ACCOUNT_SECRET_ID=google-wallet-service-account-key
+
+   * Replace your-gcp-project-id, your-issuer-id, and your-loyalty-class-id-suffix with your actual values.
+   * Adjust --allow-unauthenticated as per your security needs. For production, you'd likely restrict access via IAM or API Gateway authentication.
+Testing:
+Once deployed, get the trigger URL for your Cloud Function. You can test it using curl:
+curl -X POST YOUR_CLOUD_FUNCTION_URL \
+-H "Content-Type: application/json" \
+-d '{
+    "userId": "user12345",
+    "userHistory": ["coffee", "sandwich", "muffin", "latte", "bagel"],
+    "recentActivity": "Just bought a large cappuccino."
+}'
+
+Important Security & Best Practices:
+ * API Keys/Service Account Keys:
+   * NEVER hardcode sensitive credentials directly in your code.
+   * Use Google Cloud Secret Manager to store your service account key JSON. Your Cloud Function's service account should have permission to access this secret.
+   * For the Gemini API, if you're using an API key directly (instead of service account for Vertex AI), ensure it's securely stored and used only on the server-side.
+ * Least Privilege: Grant your Cloud Function's service account only the minimum necessary IAM roles.
+ * Error Handling & Logging: Implement robust try-except blocks and use print() statements (which go to Cloud Logging) for debugging.
+ * Idempotency: If your function can be triggered multiple times for the same event, design it to be idempotent (i.e., multiple identical requests have the same effect as a single request).
+ * Rate Limits and Quotas: Be mindful of the API rate limits for Google Wallet and Gemini. Implement exponential backoff for retries.
+ * User Consent: Ensure you have proper user consent for collecting and using their data for personalization, especially when dealing with sensitive information.
+ * Google Wallet API JWT: The JWT generation for Google Wallet API calls (especially for savetowallet links) is complex. The example uses google.auth and googleapiclient which handles a lot of the OAuth2 token exchange for API calls. For generating signed JWTs for "Add to Google Wallet" links, you'll need to explicitly construct and sign the JWT payload as per Google Wallet documentation.
+ * Pass Types: This example focuses on Loyalty Passes. Google Wallet supports various pass types (Event Ticket, Boarding Pass, Offer, Generic Pass, etc.). Each has specific fields and nuances. Adapt your loyalty_object payload accordingly.
+ * Asynchronous Processing: For complex AI tasks or high-volume scenarios, consider using Cloud Pub/Sub to decouple the request from the processing. A request can publish a message to Pub/Sub, and your Cloud Function/Cloud Run service can subscribe to it, processing the AI and Wallet update in the background.
+This comprehensive example provides a strong foundation for building advanced Google Wallet integrations with the power of Google Cloud and Gemini. Remember to adapt it to your specific business logic and ensure all security best practices are followed.
+
+
+
+import functions_framework
+import json
+import os
+from google.auth import jwt
+from google.auth.transport import requests
+from google.cloud import secretmanager
+from vertexai.preview.generative_models import GenerativeModel, Part
+
+# --- Configuration (Fetch securely from Secret Manager in production) ---
+# Project ID where Secret Manager and Gemini API are enabled
+PROJECT_ID = os.environ.get('GCP_PROJECT_ID', 'your-gcp-project-id')
+# Secret Manager secret ID for your Google Service Account Key JSON
+GOOGLE_SERVICE_ACCOUNT_SECRET_ID = os.environ.get('GOOGLE_SERVICE_ACCOUNT_SECRET_ID', 'google-wallet-service-account-key')
+# Your Google Wallet Issuer ID (from Google Pay & Wallet Console)
+ISSUER_ID = os.environ.get('GOOGLE_WALLET_ISSUER_ID', 'your-issuer-id')
+# Your pre-created Google Wallet Loyalty Class ID
+LOYALTY_CLASS_ID_SUFFIX = os.environ.get('LOYALTY_CLASS_ID_SUFFIX', 'your-loyalty-class-id-suffix') # e.g., "my-loyalty-program-class"
+
+# Global variables to store credentials and clients
+_google_wallet_credentials = None
+_gemini_model = None
+
+def _get_google_wallet_credentials():
+    global _google_wallet_credentials
+    if _google_wallet_credentials is None:
+        try:
+            client = secretmanager.SecretManagerServiceClient()
+            response = client.access_secret_version(
+                request={"name": f"projects/{PROJECT_ID}/secrets/{GOOGLE_SERVICE_ACCOUNT_SECRET_ID}/versions/latest"}
+            )
+            payload = response.payload.data.decode("UTF-8")
+            _google_wallet_credentials = json.loads(payload)
+        except Exception as e:
+            print(f"Error fetching Google Wallet credentials from Secret Manager: {e}")
+            raise RuntimeError("Failed to load Google Wallet credentials.")
+    return _google_wallet_credentials
+
+def _get_gemini_model():
+    global _gemini_model
+    if _gemini_model is None:
+        # Initialize Gemini GenerativeModel. Ensure Vertex AI API is enabled.
+        _gemini_model = GenerativeModel("gemini-pro") # Or "gemini-1.5-pro-latest" for more advanced
+    return _gemini_model
+
+def generate_personalized_offer_with_gemini(user_history, recent_activity):
+    """
+    Uses Gemini to generate a personalized offer based on user data.
+    """
+    model = _get_gemini_model()
+
+    prompt = f"""
+    You are an AI assistant for a loyalty program. Your goal is to create a compelling, personalized offer for a customer.
+    Here's the customer's purchase history: {user_history}.
+    Here's their most recent activity: {recent_activity}.
+    Based on this, suggest a concise and attractive offer they can use. Keep it under 20 words.
+    Example: "Enjoy 20% off your next coffee!" or "Get a free dessert with your next meal!"
+    """
+
+    try:
+        response = model.generate_content(prompt)
+        offer_text = response.candidates[0].content.parts[0].text.strip()
+        print(f"Gemini-generated offer: {offer_text}")
+        return offer_text
+    except Exception as e:
+        print(f"Error generating content with Gemini: {e}")
+        return "Enjoy a special discount on your next visit!" # Fallback offer
+
+def create_or_update_google_wallet_pass(user_id, offer_text):
+    """
+    Creates or updates a Google Wallet Loyalty Pass with the generated offer.
+    Requires Google Wallet API authentication and object manipulation.
+    """
+    credentials = _get_google_wallet_credentials()
+    service_account_email = credentials['client_email']
+    private_key = credentials['private_key']
+
+    # Google Wallet API endpoint for Loyalty Objects
+    wallet_api_url = f"https://walletobjects.googleapis.com/walletobjects/v1/loyaltyObject/batchUpdate" # Or POST for individual object update/creation
+    # For simplicity, we'll demonstrate updating a specific field.
+    # In a real scenario, you'd likely fetch the existing object first with a GET request
+    # and then PATCH it. For this example, we'll assume a new object or a full update.
+
+    # loyaltyObjectId is typically ISSUER_ID.EXTERNAL_ID
+    # For a new pass, you'd generate a unique external ID.
+    # For an existing pass, you'd use its known external ID.
+    loyalty_object_id = f"{ISSUER_ID}.{user_id}_loyalty_pass"
+    
+    # Construct the LoyaltyObject payload
+    # Note: This is a simplified example. Real LoyaltyObjects have many more fields.
+    # The 'textModulesData' is a good place to put dynamic text.
+    loyalty_object = {
+        "id": loyalty_object_id,
+        "classId": f"{ISSUER_ID}.{LOYALTY_CLASS_ID_SUFFIX}",
+        "state": "ACTIVE", # Can be ACTIVE, COMPLETED, EXPIRED, INACTIVE
+        "loyaltyPoints": { # Example, adjust as needed
+            "label": "Points",
+            "balance": {
+                "int": 1234
+            }
+        },
+        "textModulesData": [
+            {
+                "header": "Special Offer Just For You!",
+                "body": offer_text,
+                "id": "offer_text_module"
+            },
+            {
+                "header": "Membership Level",
+                "body": "Gold Tier",
+                "id": "membership_level_module"
+            }
+        ],
+        "barcode": {
+            "type": "QR_CODE",
+            "value": user_id # Or a specific loyalty number
+        }
+        # Add more fields as per your Loyalty Class definition and needs
+    }
+
+    # Create JWT for authentication
+    claimset = {
+        'iss': service_account_email,
+        'aud': 'google',
+        'iat': requests.datetime.datetime.utcnow(),
+        'exp': requests.datetime.datetime.utcnow() + requests.datetime.timedelta(minutes=5), # Expires in 5 minutes
+        'typ': 'savetowallet', # This is for "Add to Google Wallet" links.
+                               # For API calls, typically just 'iat', 'exp', 'aud', 'iss'
+        'origins': [os.environ.get('APP_URL', 'https://your-app-domain.com')] # Your app's origin
+    }
+    
+    # For API calls to update existing objects, the JWT structure might be simpler,
+    # often just including 'iss', 'aud', 'iat', 'exp'.
+    # The `walletobjects.googleapis.com` endpoint typically uses an Authorization: Bearer token.
+    # The `jwt.encode` part creates the signed token.
+
+    # Simulating a Google Wallet API call.
+    # You would typically use the `google-api-python-client` library or `requests` directly.
+    # Example using direct requests and JWT (simplified for bearer token):
+    
+    # For API authentication, the scope should be 'https://www.googleapis.com/auth/wallet_object.issuer'
+    # And the JWT payload would include 'scope'.
+    # A robust solution uses google.auth for API access tokens.
+    
+    signed_jwt = jwt.encode(credentials, claimset).decode('utf-8')
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {signed_jwt}' # This is incorrect for API calls, should be OAuth2 access token
+    }
+
+    # Correct way to get authenticated session using `google.auth.transport.requests`
+    # This requires `google-auth-oauthlib` and `google-api-python-client` in your environment.
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+
+    # Create credentials from the service account key
+    creds = service_account.Credentials.from_service_account_info(
+        credentials,
+        scopes=['https://www.googleapis.com/auth/wallet_object.issuer']
+    )
+    
+    # Build the Wallet Objects service client
+    service = build('walletobjects', 'v1', credentials=creds)
+
+    try:
+        # Create or update the loyalty object
+        # If the object exists, this will update it. If not, it will create it.
+        # For a more specific PATCH, you'd use service.loyaltyobject().patch(...)
+        # For simplicity, we are using the 'update' which replaces the entire object.
+        # For creating a new object, use service.loyaltyobject().insert(...)
+        request = service.loyaltyobject().update(
+            resourceId=loyalty_object_id,
+            body=loyalty_object
+        )
+        response = request.execute()
+        print(f"Google Wallet API response: {json.dumps(response, indent=2)}")
+        print(f"Successfully updated/created Google Wallet pass for user: {user_id}")
+        return True
+    except Exception as e:
+        print(f"Error updating Google Wallet pass: {e}")
+        return False
+
+@functions_framework.http
+def main(request):
+    """
+    Main entry point for the Google Cloud Function.
+    This function processes an HTTP request, triggers AI, and updates Google Wallet.
+    """
+    if request.method == 'OPTIONS':
+        # Handle CORS preflight request
+        headers = {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST',
+            'Access-Control-Allow-Headers': 'Content-Type',
+            'Access-Control-Max-Age': '3600'
+        }
+        return ('', 204, headers)
+
+    headers = {
+        'Access-Control-Allow-Origin': '*'
+    }
+
+    try:
+        request_json = request.get_json(silent=True)
+        if not request_json:
+            raise ValueError("Invalid JSON payload.")
+
+        user_id = request_json.get('userId')
+        user_history = request_json.get('userHistory', [])
+        recent_activity = request_json.get('recentActivity', '')
+
+        if not user_id:
+            return (json.dumps({'status': 'error', 'message': 'Missing userId'}), 400, headers)
+
+        print(f"Processing request for user: {user_id}")
+
+        # 1. Generate personalized offer using Gemini
+        personalized_offer = generate_personalized_offer_with_gemini(user_history, recent_activity)
+
+        # 2. Update Google Wallet pass
+        success = create_or_update_google_wallet_pass(user_id, personalized_offer)
+
+        if success:
+            return (json.dumps({
+                'status': 'success',
+                'message': 'Google Wallet pass updated with personalized offer',
+                'offer': personalized_offer,
+                'googleWalletPassId': f"{ISSUER_ID}.{user_id}_loyalty_pass"
+            }), 200, headers)
+        else:
+            return (json.dumps({'status': 'error', 'message': 'Failed to update Google Wallet pass'}), 500, headers)
+
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        return (json.dumps({'status': 'error', 'message': str(e)}), 500, headers)
+
+
+
+
+This is an exciting and powerful combination! Integrating Google Wallet with Google Cloud APIs (especially Gemini for AI) allows for highly personalized, dynamic, and intelligent user experiences.
+Here's a breakdown of the concepts, a conceptual architecture, and Python code examples for an advanced Google Wallet integration leveraging Google Cloud and Gemini.
+Core Idea:
+The goal is to use Gemini (Google's AI model) to enrich Google Wallet passes with dynamic, AI-generated content or to trigger actions based on user context. This can range from personalized offers on loyalty cards to real-time, AI-summarized event information on tickets.
+Conceptual Architecture:
++-------------------+      +-------------------------+      +---------------------+
+| User Interaction  |      |      Your Backend       |      |  Google Cloud AI    |
+| (e.g., App, Web)  |----->|   (e.g., Cloud Run,     |----->| (Gemini API, Vertex |
+|   (Triggers)      |      |   Cloud Functions)      |      |   AI, etc.)         |
++-------------------+      |                         |      +---------------------+
+                           |   - Google Wallet API   |<-----+
+                           |   - User Data (Firestore, |
+                           |     Cloud SQL, etc.)    |
+                           +-------------------------+
+                                        |
+                                        | (Updates Pass)
+                                        v
+                           +-------------------------+
+                           |     Google Wallet       |
+                           |   (Updated Pass for     |
+                           |       User)             |
+                           +-------------------------+
+
+Key Google Cloud Services Involved:
+ * Google Wallet API: The primary API for creating, updating, and managing various pass types (loyalty, offers, event tickets, boarding passes, generic passes).
+ * Gemini API: For generating text, code, or other modalities based on prompts. This is where the AI magic happens for personalization, summarization, or intelligent decision-making.
+ * Google Cloud Functions/Cloud Run/App Engine: Serverless compute options to host your backend logic that orchestrates the interactions between Google Wallet and Gemini.
+ * Firestore/Cloud SQL/Cloud Spanner: Databases to store user profiles, historical data, pass templates, and other relevant information.
+ * Cloud Pub/Sub: For asynchronous event-driven architectures (e.g., a new transaction triggers an AI analysis).
+ * Secret Manager: Securely store API keys (for Google Wallet, Gemini) and other sensitive credentials.
+ * IAM (Identity and Access Management): To control permissions for your services.
+Advanced Use Case Examples with Gemini:
+ * Personalized Loyalty Offers:
+   * Trigger: User makes a purchase, or a new loyalty tier is achieved.
+   * Gemini: Based on user's purchase history (from your database) and current promotions, Gemini generates a personalized offer message (e.g., "Hi [Name], based on your recent coffee purchases, here's 20% off your next large latte!").
+   * Google Wallet: Update the user's loyalty pass with this dynamically generated offer text and a relevant barcode/QR code.
+ * Dynamic Event Information & Recommendations:
+   * Trigger: User adds an event ticket, or event date approaches.
+   * Gemini: Fetch real-time data (weather, traffic, news about the event/artists). Gemini can summarize this info and even suggest related activities (e.g., "Weather for the concert: partly cloudy. Consider taking public transport due to expected traffic. Did you know [Artist] is doing a meet-and-greet at 6 PM?").
+   * Google Wallet: Update the event pass with these dynamic messages.
+ * Intelligent Customer Support Context:
+   * Trigger: User taps a "Help" button on a Wallet pass.
+   * Gemini: Analyze the pass details and potentially user interaction history. Generate context-aware suggestions or common FAQs specific to that pass type and user.
+   * Google Wallet: Present these AI-generated FAQs or direct links to relevant support within the Wallet pass or a linked web view.
+ * Custom Pass Generation from Images (Advanced): Google Wallet already has a "Custom Passes" feature that uses AI. If you wanted to build on this, Gemini could analyze user-provided text descriptions (e.g., "I need a gym membership pass with my name John Doe and membership ID 12345") and generate structured data to populate a Generic Pass, reducing manual input.
+Python Code Example (Google Cloud Function/Cloud Run):
+This example demonstrates generating a personalized offer using Gemini and then updating a Google Wallet Loyalty Pass.
+Prerequisites:
+ * Google Cloud Project Setup:
+   * Enable Google Wallet API.
+   * Enable Generative Language API (for Gemini).
+   * Enable Cloud Functions API (or Cloud Run).
+   * Create a Service Account with the following roles:
+     * Google Wallet API Editor
+     * Vertex AI User (for Gemini API access)
+     * Cloud Functions Invoker (if using API Gateway trigger)
+     * Secret Manager Secret Accessor (highly recommended for credentials)
+   * Download your Service Account JSON key.
+   * Store your Google Wallet API Issuer ID (available in the Google Pay & Wallet Console).
+   * Create a Loyalty Class in the Google Pay & Wallet Console first. Note its classId.
+ * Environment Setup:
+   * Install Google Cloud SDK: gcloud auth application-default login (for local testing)
+   * For deployment, use Secret Manager for your service account key.
+main.py for Google Cloud Function:
+import functions_framework
+import json
+import os
+from google.auth import jwt
+from google.auth.transport import requests
+from google.cloud import secretmanager
+from vertexai.preview.generative_models import GenerativeModel, Part
+
+# --- Configuration (Fetch securely from Secret Manager in production) ---
+# Project ID where Secret Manager and Gemini API are enabled
+PROJECT_ID = os.environ.get('GCP_PROJECT_ID', 'your-gcp-project-id')
+# Secret Manager secret ID for your Google Service Account Key JSON
+GOOGLE_SERVICE_ACCOUNT_SECRET_ID = os.environ.get('GOOGLE_SERVICE_ACCOUNT_SECRET_ID', 'google-wallet-service-account-key')
+# Your Google Wallet Issuer ID (from Google Pay & Wallet Console)
+ISSUER_ID = os.environ.get('GOOGLE_WALLET_ISSUER_ID', 'your-issuer-id')
+# Your pre-created Google Wallet Loyalty Class ID
+LOYALTY_CLASS_ID_SUFFIX = os.environ.get('LOYALTY_CLASS_ID_SUFFIX', 'your-loyalty-class-id-suffix') # e.g., "my-loyalty-program-class"
+
+# Global variables to store credentials and clients
+_google_wallet_credentials = None
+_gemini_model = None
+
+def _get_google_wallet_credentials():
+    global _google_wallet_credentials
+    if _google_wallet_credentials is None:
+        try:
+            client = secretmanager.SecretManagerServiceClient()
+            response = client.access_secret_version(
+                request={"name": f"projects/{PROJECT_ID}/secrets/{GOOGLE_SERVICE_ACCOUNT_SECRET_ID}/versions/latest"}
+            )
+            payload = response.payload.data.decode("UTF-8")
+            _google_wallet_credentials = json.loads(payload)
+        except Exception as e:
+            print(f"Error fetching Google Wallet credentials from Secret Manager: {e}")
+            raise RuntimeError("Failed to load Google Wallet credentials.")
+    return _google_wallet_credentials
+
+def _get_gemini_model():
+    global _gemini_model
+    if _gemini_model is None:
+        # Initialize Gemini GenerativeModel. Ensure Vertex AI API is enabled.
+        _gemini_model = GenerativeModel("gemini-pro") # Or "gemini-1.5-pro-latest" for more advanced
+    return _gemini_model
+
+def generate_personalized_offer_with_gemini(user_history, recent_activity):
+    """
+    Uses Gemini to generate a personalized offer based on user data.
+    """
+    model = _get_gemini_model()
+
+    prompt = f"""
+    You are an AI assistant for a loyalty program. Your goal is to create a compelling, personalized offer for a customer.
+    Here's the customer's purchase history: {user_history}.
+    Here's their most recent activity: {recent_activity}.
+    Based on this, suggest a concise and attractive offer they can use. Keep it under 20 words.
+    Example: "Enjoy 20% off your next coffee!" or "Get a free dessert with your next meal!"
+    """
+
+    try:
+        response = model.generate_content(prompt)
+        offer_text = response.candidates[0].content.parts[0].text.strip()
+        print(f"Gemini-generated offer: {offer_text}")
+        return offer_text
+    except Exception as e:
+        print(f"Error generating content with Gemini: {e}")
+        return "Enjoy a special discount on your next visit!" # Fallback offer
+
+def create_or_update_google_wallet_pass(user_id, offer_text):
+    """
+    Creates or updates a Google Wallet Loyalty Pass with the generated offer.
+    Requires Google Wallet API authentication and object manipulation.
+    """
+    credentials = _get_google_wallet_credentials()
+    service_account_email = credentials['client_email']
+    private_key = credentials['private_key']
+
+    # Google Wallet API endpoint for Loyalty Objects
+    wallet_api_url = f"https://walletobjects.googleapis.com/walletobjects/v1/loyaltyObject/batchUpdate" # Or POST for individual object update/creation
+    # For simplicity, we'll demonstrate updating a specific field.
+    # In a real scenario, you'd likely fetch the existing object first with a GET request
+    # and then PATCH it. For this example, we'll assume a new object or a full update.
+
+    # loyaltyObjectId is typically ISSUER_ID.EXTERNAL_ID
+    # For a new pass, you'd generate a unique external ID.
+    # For an existing pass, you'd use its known external ID.
+    loyalty_object_id = f"{ISSUER_ID}.{user_id}_loyalty_pass"
+    
+    # Construct the LoyaltyObject payload
+    # Note: This is a simplified example. Real LoyaltyObjects have many more fields.
+    # The 'textModulesData' is a good place to put dynamic text.
+    loyalty_object = {
+        "id": loyalty_object_id,
+        "classId": f"{ISSUER_ID}.{LOYALTY_CLASS_ID_SUFFIX}",
+        "state": "ACTIVE", # Can be ACTIVE, COMPLETED, EXPIRED, INACTIVE
+        "loyaltyPoints": { # Example, adjust as needed
+            "label": "Points",
+            "balance": {
+                "int": 1234
+            }
+        },
+        "textModulesData": [
+            {
+                "header": "Special Offer Just For You!",
+                "body": offer_text,
+                "id": "offer_text_module"
+            },
+            {
+                "header": "Membership Level",
+                "body": "Gold Tier",
+                "id": "membership_level_module"
+            }
+        ],
+        "barcode": {
+            "type": "QR_CODE",
+            "value": user_id # Or a specific loyalty number
+        }
+        # Add more fields as per your Loyalty Class definition and needs
+    }
+
+    # Create JWT for authentication
+    claimset = {
+        'iss': service_account_email,
+        'aud': 'google',
+        'iat': requests.datetime.datetime.utcnow(),
+        'exp': requests.datetime.datetime.utcnow() + requests.datetime.timedelta(minutes=5), # Expires in 5 minutes
+        'typ': 'savetowallet', # This is for "Add to Google Wallet" links.
+                               # For API calls, typically just 'iat', 'exp', 'aud', 'iss'
+        'origins': [os.environ.get('APP_URL', 'https://your-app-domain.com')] # Your app's origin
+    }
+    
+    # For API calls to update existing objects, the JWT structure might be simpler,
+    # often just including 'iss', 'aud', 'iat', 'exp'.
+    # The `walletobjects.googleapis.com` endpoint typically uses an Authorization: Bearer token.
+    # The `jwt.encode` part creates the signed token.
+
+    # Simulating a Google Wallet API call.
+    # You would typically use the `google-api-python-client` library or `requests` directly.
+    # Example using direct requests and JWT (simplified for bearer token):
+    
+    # For API authentication, the scope should be 'https://www.googleapis.com/auth/wallet_object.issuer'
+    # And the JWT payload would include 'scope'.
+    # A robust solution uses google.auth for API access tokens.
+    
+    signed_jwt = jwt.encode(credentials, claimset).decode('utf-8')
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {signed_jwt}' # This is incorrect for API calls, should be OAuth2 access token
+    }
+
+    # Correct way to get authenticated session using `google.auth.transport.requests`
+    # This requires `google-auth-oauthlib` and `google-api-python-client` in your environment.
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+
+    # Create credentials from the service account key
+    creds = service_account.Credentials.from_service_account_info(
+        credentials,
+        scopes=['https://www.googleapis.com/auth/wallet_object.issuer']
+    )
+    
+    # Build the Wallet Objects service client
+    service = build('walletobjects', 'v1', credentials=creds)
+
+    try:
+        # Create or update the loyalty object
+        # If the object exists, this will update it. If not, it will create it.
+        # For a more specific PATCH, you'd use service.loyaltyobject().patch(...)
+        # For simplicity, we are using the 'update' which replaces the entire object.
+        # For creating a new object, use service.loyaltyobject().insert(...)
+        request = service.loyaltyobject().update(
+            resourceId=loyalty_object_id,
+            body=loyalty_object
+        )
+        response = request.execute()
+        print(f"Google Wallet API response: {json.dumps(response, indent=2)}")
+        print(f"Successfully updated/created Google Wallet pass for user: {user_id}")
+        return True
+    except Exception as e:
+        print(f"Error updating Google Wallet pass: {e}")
+        return False
+
+@functions_framework.http
+def main(request):
+    """
+    Main entry point for the Google Cloud Function.
+    This function processes an HTTP request, triggers AI, and updates Google Wallet.
+    """
+    if request.method == 'OPTIONS':
+        # Handle CORS preflight request
+        headers = {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST',
+            'Access-Control-Allow-Headers': 'Content-Type',
+            'Access-Control-Max-Age': '3600'
+        }
+        return ('', 204, headers)
+
+    headers = {
+        'Access-Control-Allow-Origin': '*'
+    }
+
+    try:
+        request_json = request.get_json(silent=True)
+        if not request_json:
+            raise ValueError("Invalid JSON payload.")
+
+        user_id = request_json.get('userId')
+        user_history = request_json.get('userHistory', [])
+        recent_activity = request_json.get('recentActivity', '')
+
+        if not user_id:
+            return (json.dumps({'status': 'error', 'message': 'Missing userId'}), 400, headers)
+
+        print(f"Processing request for user: {user_id}")
+
+        # 1. Generate personalized offer using Gemini
+        personalized_offer = generate_personalized_offer_with_gemini(user_history, recent_activity)
+
+        # 2. Update Google Wallet pass
+        success = create_or_update_google_wallet_pass(user_id, personalized_offer)
+
+        if success:
+            return (json.dumps({
+                'status': 'success',
+                'message': 'Google Wallet pass updated with personalized offer',
+                'offer': personalized_offer,
+                'googleWalletPassId': f"{ISSUER_ID}.{user_id}_loyalty_pass"
+            }), 200, headers)
+        else:
+            return (json.dumps({'status': 'error', 'message': 'Failed to update Google Wallet pass'}), 500, headers)
+
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        return (json.dumps({'status': 'error', 'message': str(e)}), 500, headers)
+
+
+requirements.txt:
+functions-framework
+google-cloud-secret-manager
+google-auth
+google-auth-oauthlib
+google-api-python-client
+vertexai
+
+Deployment (Google Cloud Function):
+ * Save Files: Save the code above as main.py and requirements.txt in a directory.
+ * Service Account Key:
+   * Option A (Secure - Recommended): Create a secret in Secret Manager named google-wallet-service-account-key and paste your service account JSON key as the secret value. Set the GOOGLE_SERVICE_ACCOUNT_SECRET_ID environment variable in your Cloud Function to this name.
+   * Option B (Less Secure, Dev Only): Place your service_account_key.json directly in the deployment package (next to main.py). Then modify _get_google_wallet_credentials to load it directly:
+     def _get_google_wallet_credentials():
+    global _google_wallet_credentials
+    if _google_wallet_credentials is None:
+        # For development, loading directly from file. NOT recommended for production.
+        with open('service_account_key.json', 'r') as f:
+            _google_wallet_credentials = json.load(f)
+    return _google_wallet_credentials
+
+ * Deploy Cloud Function:
+   gcloud functions deploy advanced-google-wallet-ai \
+    --runtime python311 \
+    --trigger-http \
+    --allow-unauthenticated \ # Or configure IAM for authenticated calls
+    --entry-point main \
+    --region us-central1 \ # Or your preferred region
+    --set-env-vars GCP_PROJECT_ID=your-gcp-project-id,GOOGLE_WALLET_ISSUER_ID=your-issuer-id,LOYALTY_CLASS_ID_SUFFIX=your-loyalty-class-id-suffix,GOOGLE_SERVICE_ACCOUNT_SECRET_ID=google-wallet-service-account-key
+
+   * Replace your-gcp-project-id, your-issuer-id, and your-loyalty-class-id-suffix with your actual values.
+   * Adjust --allow-unauthenticated as per your security needs. For production, you'd likely restrict access via IAM or API Gateway authentication.
+Testing:
+Once deployed, get the trigger URL for your Cloud Function. You can test it using curl:
+curl -X POST YOUR_CLOUD_FUNCTION_URL \
+-H "Content-Type: application/json" \
+-d '{
+    "userId": "user12345",
+    "userHistory": ["coffee", "sandwich", "muffin", "latte", "bagel"],
+    "recentActivity": "Just bought a large cappuccino."
+}'
+
+Important Security & Best Practices:
+ * API Keys/Service Account Keys:
+   * NEVER hardcode sensitive credentials directly in your code.
+   * Use Google Cloud Secret Manager to store your service account key JSON. Your Cloud Function's service account should have permission to access this secret.
+   * For the Gemini API, if you're using an API key directly (instead of service account for Vertex AI), ensure it's securely stored and used only on the server-side.
+ * Least Privilege: Grant your Cloud Function's service account only the minimum necessary IAM roles.
+ * Error Handling & Logging: Implement robust try-except blocks and use print() statements (which go to Cloud Logging) for debugging.
+ * Idempotency: If your function can be triggered multiple times for the same event, design it to be idempotent (i.e., multiple identical requests have the same effect as a single request).
+ * Rate Limits and Quotas: Be mindful of the API rate limits for Google Wallet and Gemini. Implement exponential backoff for retries.
+ * User Consent: Ensure you have proper user consent for collecting and using their data for personalization, especially when dealing with sensitive information.
+ * Google Wallet API JWT: The JWT generation for Google Wallet API calls (especially for savetowallet links) is complex. The example uses google.auth and googleapiclient which handles a lot of the OAuth2 token exchange for API calls. For generating signed JWTs for "Add to Google Wallet" links, you'll need to explicitly construct and sign the JWT payload as per Google Wallet documentation.
+ * Pass Types: This example focuses on Loyalty Passes. Google Wallet supports various pass types (Event Ticket, Boarding Pass, Offer, Generic Pass, etc.). Each has specific fields and nuances. Adapt your loyalty_object payload accordingly.
+ * Asynchronous Processing: For complex AI tasks or high-volume scenarios, consider using Cloud Pub/Sub to decouple the request from the processing. A request can publish a message to Pub/Sub, and your Cloud Function/Cloud Run service can subscribe to it, processing the AI and Wallet update in the background.
+This comprehensive example provides a strong foundation for building advanced Google Wallet integrations with the power of Google Cloud and Gemini. Remember to adapt it to your specific business logic and ensure all security best practices are followed.
+
+
+
+def _get_google_wallet_credentials():
+    global _google_wallet_credentials
+    if _google_wallet_credentials is None:
+        # For development, loading directly from file. NOT recommended for production.
+        with open('service_account_key.json', 'r') as f:
+            _google_wallet_credentials = json.load(f)
+    return _google_wallet_credentials
+
+
+
+gcloud functions deploy advanced-google-wallet-ai \
+    --runtime python311 \
+    --trigger-http \
+    --allow-unauthenticated \ # Or configure IAM for authenticated calls
+    --entry-point main \
+    --region us-central1 \ # Or your preferred region
+    --set-env-vars GCP_PROJECT_ID=your-gcp-project-id,GOOGLE_WALLET_ISSUER_ID=your-issuer-id,LOYALTY_CLASS_ID_SUFFIX=your-loyalty-class-id-suffix,GOOGLE_SERVICE_ACCOUNT_SECRET_ID=google-wallet-service-account-key
+
+
+
+curl -X POST YOUR_CLOUD_FUNCTION_URL \
+-H "Content-Type: application/json" \
+-d '{
+    "userId": "user12345",
+    "userHistory": ["coffee", "sandwich", "muffin", "latte", "bagel"],
+    "recentActivity": "Just bought a large cappuccino."
+}'
+
+
+
+The following Node.js code demonstrates how to integrate Google Wallet with Google Cloud APIs, specifically leveraging Gemini for AI-driven personalization. This setup would typically run in a serverless environment like Google Cloud Functions or Cloud Run.
+This example focuses on a common scenario: generating a personalized offer using Gemini and updating a Google Wallet Loyalty Pass.
+Conceptual Architecture (Node.js):
++-------------------+      +-------------------------+      +---------------------+
+| User Interaction  |      |      Your Backend       |      |  Google Cloud AI    |
+| (e.g., App, Web)  |----->|   (Cloud Function/      |----->| (Gemini API, Vertex |
+|   (Triggers)      |      |     Cloud Run)          |      |   AI, etc.)         |
++-------------------+      |                         |      +---------------------+
+                           |   - Google Wallet API   |<-----+
+                           |   - User Data (Firestore)|
+                           +-------------------------+
+                                        |
+                                        | (Updates Pass)
+                                        v
+                           +-------------------------+
+                           |     Google Wallet       |
+                           |   (Updated Pass for     |
+                           |       User)             |
+                           +-------------------------+
+
+Key Google Cloud Services:
+ * Google Wallet API: For managing passes.
+ * Gemini API (via Vertex AI SDK): For AI generation.
+ * Google Cloud Functions / Cloud Run: Serverless compute for your backend.
+ * Secret Manager: Securely store credentials.
+ * IAM: Access control.
+index.js (Google Cloud Function/Cloud Run Service):
+/**
+ * Google Cloud Function/Cloud Run service to integrate Google Wallet with Gemini AI.
+ *
+ * This function:
+ * 1. Receives a request with user data (e.g., purchase history).
+ * 2. Uses Gemini to generate a personalized offer message.
+ * 3. Updates a Google Wallet Loyalty Pass with this new offer.
+ */
+
+const { GoogleAuth } = require('google-auth-library');
+const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
+const { WalletobjectsServiceClient } = require('@google-pay/passes'); // Google Pay Passes SDK for Node.js
+const { GenerativeModel, VertexAI } = require('@google-cloud/vertexai'); // Vertex AI SDK for Gemini
+
+// --- Configuration (Fetch securely from Secret Manager in production) ---
+// Project ID where Secret Manager, Vertex AI, and Google Wallet API are enabled
+const PROJECT_ID = process.env.GCP_PROJECT_ID || 'your-gcp-project-id';
+// Secret Manager secret ID for your Google Service Account Key JSON
+const GOOGLE_SERVICE_ACCOUNT_SECRET_ID = process.env.GOOGLE_SERVICE_ACCOUNT_SECRET_ID || 'google-wallet-service-account-key';
+// Your Google Wallet Issuer ID (from Google Pay & Wallet Console)
+const ISSUER_ID = process.env.GOOGLE_WALLET_ISSUER_ID || 'your-issuer-id';
+// Your pre-created Google Wallet Loyalty Class ID suffix
+const LOYALTY_CLASS_ID_SUFFIX = process.env.LOYALTY_CLASS_ID_SUFFIX || 'your-loyalty-class-id-suffix'; // e.g., "my-loyalty-program-class"
+// Google Cloud region for Vertex AI
+const VERTEX_AI_LOCATION = process.env.VERTEX_AI_LOCATION || 'us-central1'; // Choose a region where Gemini is available
+
+// Global clients (initialize once for performance)
+let _googleAuthClient = null;
+let _secretManagerClient = null;
+let _walletobjectsClient = null;
+let _geminiModel = null;
+
+/**
+ * Initializes and returns a Google Auth client based on service account credentials.
+ * Fetches credentials from Secret Manager.
+ * @returns {Promise<GoogleAuth>} The Google Auth client.
+ */
+async function getGoogleAuthClient() {
+    if (_googleAuthClient) {
+        return _googleAuthClient;
+    }
+
+    if (!_secretManagerClient) {
+        _secretManagerClient = new SecretManagerServiceClient();
+    }
+
+    try {
+        const [version] = await _secretManagerClient.accessSecretVersion({
+            name: `projects/${PROJECT_ID}/secrets/${GOOGLE_SERVICE_ACCOUNT_SECRET_ID}/versions/latest`,
+        });
+        const credentialsJson = version.payload.data.toString('utf8');
+        const credentials = JSON.parse(credentialsJson);
+
+        _googleAuthClient = new GoogleAuth({
+            credentials,
+            scopes: ['https://www.googleapis.com/auth/wallet_object.issuer'],
+        });
+        return _googleAuthClient;
+    } catch (error) {
+        console.error(`Error fetching service account credentials: ${error.message}`);
+        throw new Error('Failed to load Google service account credentials from Secret Manager.');
+    }
+}
+
+/**
+ * Initializes and returns the Google Wallet Objects client.
+ * @returns {Promise<WalletobjectsServiceClient>} The Wallet Objects client.
+ */
+async function getWalletobjectsClient() {
+    if (_walletobjectsClient) {
+        return _walletobjectsClient;
+    }
+    const auth = await getGoogleAuthClient();
+    _walletobjectsClient = new WalletobjectsServiceClient({ authClient: auth });
+    return _walletobjectsClient;
+}
+
+/**
+ * Initializes and returns the Gemini GenerativeModel client.
+ * @returns {GenerativeModel} The Gemini model client.
+ */
+function getGeminiModel() {
+    if (_geminiModel) {
+        return _geminiModel;
+    }
+    const vertex_ai = new VertexAI({ project: PROJECT_ID, location: VERTEX_AI_LOCATION });
+    _geminiModel = new GenerativeModel({ model: 'gemini-pro' }, vertex_ai); // Or 'gemini-1.5-pro-latest'
+    return _geminiModel;
+}
+
+/**
+ * Uses Gemini to generate a personalized offer based on user data.
+ * @param {string[]} userHistory - Array of past purchases/activities.
+ * @param {string} recentActivity - Description of recent user activity.
+ * @returns {Promise<string>} The AI-generated offer text.
+ */
+async function generatePersonalizedOfferWithGemini(userHistory, recentActivity) {
+    const model = getGeminiModel();
+
+    const prompt = `
+    You are an AI assistant for a loyalty program. Your goal is to create a compelling, personalized offer for a customer.
+    Here's the customer's purchase history: ${userHistory.join(', ')}.
+    Here's their most recent activity: ${recentActivity}.
+    Based on this, suggest a concise and attractive offer they can use. Keep it under 20 words.
+    Example: "Enjoy 20% off your next coffee!" or "Get a free dessert with your next meal!"
+    `;
+
+    try {
+        const response = await model.generateContent(prompt);
+        const offerText = response.response.candidates[0].content.parts[0].text.trim();
+        console.log(`Gemini-generated offer: "${offerText}"`);
+        return offerText;
+    } catch (error) {
+        console.error(`Error generating content with Gemini: ${error.message}`);
+        // Fallback offer if AI generation fails
+        return 'Enjoy a special discount on your next visit!';
+    }
+}
+
+/**
+ * Creates or updates a Google Wallet Loyalty Pass with the generated offer.
+ * @param {string} userId - The unique identifier for the user.
+ * @param {string} offerText - The personalized offer text from Gemini.
+ * @returns {Promise<boolean>} True if successful, false otherwise.
+ */
+async function createOrUpdateGoogleWalletPass(userId, offerText) {
+    const walletobjectsClient = await getWalletobjectsClient();
+
+    // loyaltyObjectId is typically ISSUER_ID.EXTERNAL_ID
+    // For a new pass, you'd generate a unique external ID.
+    // For an existing pass, you'd use its known external ID.
+    const loyaltyObjectId = `${ISSUER_ID}.${userId}_loyalty_pass`;
+    const loyaltyClassId = `${ISSUER_ID}.${LOYALTY_CLASS_ID_SUFFIX}`;
+
+    const loyaltyObject = {
+        id: loyaltyObjectId,
+        classId: loyaltyClassId,
+        state: 'ACTIVE',
+        loyaltyPoints: {
+            label: 'Points',
+            balance: {
+                int: 1234, // Example: dynamically fetch user's points
+            },
+        },
+        textModulesData: [
+            {
+                header: 'Special Offer Just For You!',
+                body: offerText,
+                id: 'offer_text_module',
+            },
+            {
+                header: 'Membership Level',
+                body: 'Gold Tier', // Example: dynamically fetch user's tier
+                id: 'membership_level_module',
+            },
+        ],
+        barcode: {
+            type: 'QR_CODE',
+            value: userId, // Or a specific loyalty number
+        },
+        // Add more fields as per your Loyalty Class definition and needs
+    };
+
+    try {
+        // Attempt to get the object first to check if it exists
+        try {
+            await walletobjectsClient.loyaltyobject.get({ resourceId: loyaltyObjectId });
+            console.log(`Loyalty object ${loyaltyObjectId} found. Attempting to update.`);
+            await walletobjectsClient.loyaltyobject.patch({
+                resourceId: loyaltyObjectId,
+                requestBody: loyaltyObject,
+            });
+            console.log(`Successfully patched Google Wallet pass for user: ${userId}`);
+        } catch (getError) {
+            // If get fails, assume object does not exist and insert it
+            if (getError.code === 404) {
+                console.log(`Loyalty object ${loyaltyObjectId} not found. Attempting to insert.`);
+                await walletobjectsClient.loyaltyobject.insert({ requestBody: loyaltyObject });
+                console.log(`Successfully inserted Google Wallet pass for user: ${userId}`);
+            } else {
+                throw getError; // Re-throw other errors from get
+            }
+        }
+        return true;
+    } catch (error) {
+        console.error(`Error creating/updating Google Wallet pass: ${error.message}`);
+        return false;
+    }
+}
+
+/**
+ * Main entry point for the Google Cloud Function/Cloud Run service.
+ * @param {object} req - Express.js request object.
+ * @param {object} res - Express.js response object.
+ */
+exports.main = async (req, res) => {
+    // Handle CORS preflight requests
+    if (req.method === 'OPTIONS') {
+        res.set('Access-Control-Allow-Origin', '*');
+        res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+        res.set('Access-Control-Allow-Headers', 'Content-Type');
+        res.set('Access-Control-Max-Age', '3600');
+        return res.status(204).send('');
+    }
+
+    res.set('Access-Control-Allow-Origin', '*'); // Allow all origins for simplicity in example
+
+    try {
+        const { userId, userHistory, recentActivity } = req.body;
+
+        if (!userId) {
+            return res.status(400).json({ status: 'error', message: 'Missing userId in request body.' });
+        }
+
+        console.log(`Processing request for user: ${userId}`);
+
+        // 1. Generate personalized offer using Gemini
+        const personalizedOffer = await generatePersonalizedOfferWithGemini(userHistory || [], recentActivity || '');
+
+        // 2. Create or Update Google Wallet pass
+        const success = await createOrUpdateGoogleWalletPass(userId, personalizedOffer);
+
+        if (success) {
+            return res.status(200).json({
+                status: 'success',
+                message: 'Google Wallet pass updated with personalized offer',
+                offer: personalizedOffer,
+                googleWalletPassId: `${ISSUER_ID}.${userId}_loyalty_pass`,
+            });
+        } else {
+            return res.status(500).json({ status: 'error', message: 'Failed to create/update Google Wallet pass.' });
+        }
+    } catch (error) {
+        console.error(`An unexpected error occurred: ${error.message}`);
+        return res.status(500).json({ status: 'error', message: `Internal server error: ${error.message}` });
+    }
+};
+
+package.json:
+{
+    "name": "advanced-google-wallet-ai",
+    "version": "1.0.0",
+    "description": "Google Wallet integration with Gemini AI using Node.js on Google Cloud Functions/Run",
+    "main": "index.js",
+    "scripts": {
+        "start": "functions-framework --target=main"
+    },
+    "dependencies": {
+        "@google-cloud/secret-manager": "^5.0.0",
+        "@google-cloud/vertexai": "^0.8.0",
+        "@google-pay/passes": "^1.2.0",
+        "google-auth-library": "^9.0.0"
+    },
+    "devDependencies": {
+        "@google-cloud/functions-framework": "^3.0.0"
+    }
+}
+
+Setup and Deployment Steps (Google Cloud Function):
+ * Google Cloud Project Setup:
+   * Enable APIs:
+     * Google Wallet API
+     * Generative Language API (for Gemini)
+     * Cloud Functions API (or Cloud Run API)
+     * Secret Manager API
+     * (Optional but Recommended) Cloud Logging API (for logs)
+   * Service Account: Create a new Service Account. Grant it the following roles:
+     * Google Wallet API Editor
+     * Vertex AI User
+     * Secret Manager Secret Accessor
+     * Cloud Functions Invoker (if you're triggering via HTTP, or appropriate role for other triggers)
+   * Download Service Account Key: Generate a new JSON key for this service account and download it.
+   * Google Wallet Issuer ID & Class ID: Go to the Google Pay & Wallet Console. Note your Issuer ID. Create a Loyalty Class (e.g., "MyBrandLoyalty") and note its Class ID suffix (e.g., my-loyalty-program-class).
+ * Secure Credentials with Secret Manager:
+   * Open Google Cloud Secret Manager.
+   * Create a new secret (e.g., google-wallet-service-account-key).
+   * Copy the entire content of your downloaded Service Account JSON key file and paste it as the secret value.
+ * Local Development (Optional but Recommended):
+   * Install Node.js.
+   * Create a directory for your function.
+   * Save index.js and package.json in that directory.
+   * Run npm install to install dependencies.
+   * To test locally, you'd typically set environment variables for GCP_PROJECT_ID, GOOGLE_SERVICE_ACCOUNT_SECRET_ID, GOOGLE_WALLET_ISSUER_ID, LOYALTY_CLASS_ID_SUFFIX, and VERTEX_AI_LOCATION. You might also need to set GOOGLE_APPLICATION_CREDENTIALS to point to your service account key file for local gcloud auth.
+   * Run npm start to test the Cloud Function locally.
+ * Deployment to Google Cloud Functions:
+   * Ensure you have the Google Cloud SDK installed and authenticated (gcloud auth login, gcloud config set project [PROJECT_ID]).
+   * Navigate to your function's directory in your terminal.
+   * Deploy the function:
+     gcloud functions deploy advanced-google-wallet-ai \
+    --runtime nodejs20 \
+    --trigger-http \
+    --allow-unauthenticated \
+    --entry-point main \
+    --region us-central1 \
+    --set-env-vars \
+    GCP_PROJECT_ID=${PROJECT_ID},\
+    GOOGLE_SERVICE_ACCOUNT_SECRET_ID=google-wallet-service-account-key,\
+    GOOGLE_WALLET_ISSUER_ID=${ISSUER_ID},\
+    LOYALTY_CLASS_ID_SUFFIX=${LOYALTY_CLASS_ID_SUFFIX},\
+    VERTEX_AI_LOCATION=${VERTEX_AI_LOCATION}
+
+     * Replace placeholders: Substitute ${PROJECT_ID}, ${ISSUER_ID}, ${LOYALTY_CLASS_ID_SUFFIX}, and ${VERTEX_AI_LOCATION} with your actual values.
+     * --allow-unauthenticated: For public access. For production, consider using IAM authentication or API Gateway with authentication.
+     * --region: Choose a region close to your users and where Gemini (Vertex AI) is available.
+ * Testing the Deployed Function:
+   * After deployment, you'll get a URL for the Cloud Function.
+   * Use curl or a tool like Postman/Insomnia to send a POST request to this URL:
+     curl -X POST YOUR_CLOUD_FUNCTION_URL \
+-H "Content-Type: application/json" \
+-d '{
+    "userId": "user_node_12345",
+    "userHistory": ["coffee", "sandwich", "muffin", "latte", "pizza"],
+    "recentActivity": "Just bought a large vanilla latte at our downtown store."
+}'
+
+     * Check the function logs in Google Cloud Logging for debugging.
+     * Verify in your Google Wallet app (if user_node_12345 is linked) or the Google Pay & Wallet Console that the pass was updated.
+Important Considerations and Enhancements:
+ * Error Handling: The code includes basic try-catch blocks. For production, add more specific error handling and robust logging.
+ * Authentication & Security:
+   * CORS: Adjust Access-Control-Allow-Origin for production to restrict it to your frontend domain.
+   * Function Access: For functions not directly exposed to the public internet, use IAM to control who can invoke them.
+ * Idempotency: If your function might be triggered multiple times for the same logical event, design it to be idempotent (e.g., using a transaction ID to prevent duplicate pass updates).
+ * Google Wallet Pass Management:
+   * Dynamic Pass Creation: The example patches or inserts a loyalty object. In a real application, you might first check if a pass for userId already exists using loyaltyobject.get().
+   * "Add to Google Wallet" Button/Link: For users to initially add the pass, you'll need to generate a signed JWT that contains the pass object data and include it in an "Add to Google Wallet" link on your website or app. This code focuses on updating an existing pass via the API.
+   * Other Pass Types: Adapt the loyaltyObject payload to eventObject, offerObject, boardingPassObject, etc., based on the type of pass you are managing.
+ * Gemini Usage:
+   * Prompt Engineering: The quality of the Gemini output heavily depends on the prompt. Experiment with different prompts to get desired results.
+   * Model Selection: gemini-pro is a general-purpose model. For more advanced multimodal capabilities, consider gemini-1.5-pro-latest if available in your region and use case.
+   * Safety Settings: The Gemini API has safety settings you can configure.
+ * Data Storage: For persistent user data (purchase history, loyalty points, etc.), you'd typically use a database like Firestore, Cloud SQL, or Cloud Spanner, and fetch data from there within your function.
+ * Asynchronous Processing: For scenarios where the AI generation might take longer, or if you have high volume, consider using Cloud Pub/Sub. Your frontend publishes a message to Pub/Sub, and the Cloud Function subscribes to that topic, processing the request asynchronously.
+This Node.js example provides a solid foundation for building intelligent and dynamic Google Wallet experiences using Google Cloud's AI capabilities.
+
+
+
+/**
+ * Google Cloud Function/Cloud Run service to integrate Google Wallet with Gemini AI.
+ *
+ * This function:
+ * 1. Receives a request with user data (e.g., purchase history).
+ * 2. Uses Gemini to generate a personalized offer message.
+ * 3. Updates a Google Wallet Loyalty Pass with this new offer.
+ */
+
+const { GoogleAuth } = require('google-auth-library');
+const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
+const { WalletobjectsServiceClient } = require('@google-pay/passes'); // Google Pay Passes SDK for Node.js
+const { GenerativeModel, VertexAI } = require('@google-cloud/vertexai'); // Vertex AI SDK for Gemini
+
+// --- Configuration (Fetch securely from Secret Manager in production) ---
+// Project ID where Secret Manager, Vertex AI, and Google Wallet API are enabled
+const PROJECT_ID = process.env.GCP_PROJECT_ID || 'your-gcp-project-id';
+// Secret Manager secret ID for your Google Service Account Key JSON
+const GOOGLE_SERVICE_ACCOUNT_SECRET_ID = process.env.GOOGLE_SERVICE_ACCOUNT_SECRET_ID || 'google-wallet-service-account-key';
+// Your Google Wallet Issuer ID (from Google Pay & Wallet Console)
+const ISSUER_ID = process.env.GOOGLE_WALLET_ISSUER_ID || 'your-issuer-id';
+// Your pre-created Google Wallet Loyalty Class ID suffix
+const LOYALTY_CLASS_ID_SUFFIX = process.env.LOYALTY_CLASS_ID_SUFFIX || 'your-loyalty-class-id-suffix'; // e.g., "my-loyalty-program-class"
+// Google Cloud region for Vertex AI
+const VERTEX_AI_LOCATION = process.env.VERTEX_AI_LOCATION || 'us-central1'; // Choose a region where Gemini is available
+
+// Global clients (initialize once for performance)
+let _googleAuthClient = null;
+let _secretManagerClient = null;
+let _walletobjectsClient = null;
+let _geminiModel = null;
+
+/**
+ * Initializes and returns a Google Auth client based on service account credentials.
+ * Fetches credentials from Secret Manager.
+ * @returns {Promise<GoogleAuth>} The Google Auth client.
+ */
+async function getGoogleAuthClient() {
+    if (_googleAuthClient) {
+        return _googleAuthClient;
+    }
+
+    if (!_secretManagerClient) {
+        _secretManagerClient = new SecretManagerServiceClient();
+    }
+
+    try {
+        const [version] = await _secretManagerClient.accessSecretVersion({
+            name: `projects/${PROJECT_ID}/secrets/${GOOGLE_SERVICE_ACCOUNT_SECRET_ID}/versions/latest`,
+        });
+        const credentialsJson = version.payload.data.toString('utf8');
+        const credentials = JSON.parse(credentialsJson);
+
+        _googleAuthClient = new GoogleAuth({
+            credentials,
+            scopes: ['https://www.googleapis.com/auth/wallet_object.issuer'],
+        });
+        return _googleAuthClient;
+    } catch (error) {
+        console.error(`Error fetching service account credentials: ${error.message}`);
+        throw new Error('Failed to load Google service account credentials from Secret Manager.');
+    }
+}
+
+/**
+ * Initializes and returns the Google Wallet Objects client.
+ * @returns {Promise<WalletobjectsServiceClient>} The Wallet Objects client.
+ */
+async function getWalletobjectsClient() {
+    if (_walletobjectsClient) {
+        return _walletobjectsClient;
+    }
+    const auth = await getGoogleAuthClient();
+    _walletobjectsClient = new WalletobjectsServiceClient({ authClient: auth });
+    return _walletobjectsClient;
+}
+
+/**
+ * Initializes and returns the Gemini GenerativeModel client.
+ * @returns {GenerativeModel} The Gemini model client.
+ */
+function getGeminiModel() {
+    if (_geminiModel) {
+        return _geminiModel;
+    }
+    const vertex_ai = new VertexAI({ project: PROJECT_ID, location: VERTEX_AI_LOCATION });
+    _geminiModel = new GenerativeModel({ model: 'gemini-pro' }, vertex_ai); // Or 'gemini-1.5-pro-latest'
+    return _geminiModel;
+}
+
+/**
+ * Uses Gemini to generate a personalized offer based on user data.
+ * @param {string[]} userHistory - Array of past purchases/activities.
+ * @param {string} recentActivity - Description of recent user activity.
+ * @returns {Promise<string>} The AI-generated offer text.
+ */
+async function generatePersonalizedOfferWithGemini(userHistory, recentActivity) {
+    const model = getGeminiModel();
+
+    const prompt = `
+    You are an AI assistant for a loyalty program. Your goal is to create a compelling, personalized offer for a customer.
+    Here's the customer's purchase history: ${userHistory.join(', ')}.
+    Here's their most recent activity: ${recentActivity}.
+    Based on this, suggest a concise and attractive offer they can use. Keep it under 20 words.
+    Example: "Enjoy 20% off your next coffee!" or "Get a free dessert with your next meal!"
+    `;
+
+    try {
+        const response = await model.generateContent(prompt);
+        const offerText = response.response.candidates[0].content.parts[0].text.trim();
+        console.log(`Gemini-generated offer: "${offerText}"`);
+        return offerText;
+    } catch (error) {
+        console.error(`Error generating content with Gemini: ${error.message}`);
+        // Fallback offer if AI generation fails
+        return 'Enjoy a special discount on your next visit!';
+    }
+}
+
+/**
+ * Creates or updates a Google Wallet Loyalty Pass with the generated offer.
+ * @param {string} userId - The unique identifier for the user.
+ * @param {string} offerText - The personalized offer text from Gemini.
+ * @returns {Promise<boolean>} True if successful, false otherwise.
+ */
+async function createOrUpdateGoogleWalletPass(userId, offerText) {
+    const walletobjectsClient = await getWalletobjectsClient();
+
+    // loyaltyObjectId is typically ISSUER_ID.EXTERNAL_ID
+    // For a new pass, you'd generate a unique external ID.
+    // For an existing pass, you'd use its known external ID.
+    const loyaltyObjectId = `${ISSUER_ID}.${userId}_loyalty_pass`;
+    const loyaltyClassId = `${ISSUER_ID}.${LOYALTY_CLASS_ID_SUFFIX}`;
+
+    const loyaltyObject = {
+        id: loyaltyObjectId,
+        classId: loyaltyClassId,
+        state: 'ACTIVE',
+        loyaltyPoints: {
+            label: 'Points',
+            balance: {
+                int: 1234, // Example: dynamically fetch user's points
+            },
+        },
+        textModulesData: [
+            {
+                header: 'Special Offer Just For You!',
+                body: offerText,
+                id: 'offer_text_module',
+            },
+            {
+                header: 'Membership Level',
+                body: 'Gold Tier', // Example: dynamically fetch user's tier
+                id: 'membership_level_module',
+            },
+        ],
+        barcode: {
+            type: 'QR_CODE',
+            value: userId, // Or a specific loyalty number
+        },
+        // Add more fields as per your Loyalty Class definition and needs
+    };
+
+    try {
+        // Attempt to get the object first to check if it exists
+        try {
+            await walletobjectsClient.loyaltyobject.get({ resourceId: loyaltyObjectId });
+            console.log(`Loyalty object ${loyaltyObjectId} found. Attempting to update.`);
+            await walletobjectsClient.loyaltyobject.patch({
+                resourceId: loyaltyObjectId,
+                requestBody: loyaltyObject,
+            });
+            console.log(`Successfully patched Google Wallet pass for user: ${userId}`);
+        } catch (getError) {
+            // If get fails, assume object does not exist and insert it
+            if (getError.code === 404) {
+                console.log(`Loyalty object ${loyaltyObjectId} not found. Attempting to insert.`);
+                await walletobjectsClient.loyaltyobject.insert({ requestBody: loyaltyObject });
+                console.log(`Successfully inserted Google Wallet pass for user: ${userId}`);
+            } else {
+                throw getError; // Re-throw other errors from get
+            }
+        }
+        return true;
+    } catch (error) {
+        console.error(`Error creating/updating Google Wallet pass: ${error.message}`);
+        return false;
+    }
+}
+
+/**
+ * Main entry point for the Google Cloud Function/Cloud Run service.
+ * @param {object} req - Express.js request object.
+ * @param {object} res - Express.js response object.
+ */
+exports.main = async (req, res) => {
+    // Handle CORS preflight requests
+    if (req.method === 'OPTIONS') {
+        res.set('Access-Control-Allow-Origin', '*');
+        res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+        res.set('Access-Control-Allow-Headers', 'Content-Type');
+        res.set('Access-Control-Max-Age', '3600');
+        return res.status(204).send('');
+    }
+
+    res.set('Access-Control-Allow-Origin', '*'); // Allow all origins for simplicity in example
+
+    try {
+        const { userId, userHistory, recentActivity } = req.body;
+
+        if (!userId) {
+            return res.status(400).json({ status: 'error', message: 'Missing userId in request body.' });
+        }
+
+        console.log(`Processing request for user: ${userId}`);
+
+        // 1. Generate personalized offer using Gemini
+        const personalizedOffer = await generatePersonalizedOfferWithGemini(userHistory || [], recentActivity || '');
+
+        // 2. Create or Update Google Wallet pass
+        const success = await createOrUpdateGoogleWalletPass(userId, personalizedOffer);
+
+        if (success) {
+            return res.status(200).json({
+                status: 'success',
+                message: 'Google Wallet pass updated with personalized offer',
+                offer: personalizedOffer,
+                googleWalletPassId: `${ISSUER_ID}.${userId}_loyalty_pass`,
+            });
+        } else {
+            return res.status(500).json({ status: 'error', message: 'Failed to create/update Google Wallet pass.' });
+        }
+    } catch (error) {
+        console.error(`An unexpected error occurred: ${error.message}`);
+        return res.status(500).json({ status: 'error', message: `Internal server error: ${error.message}` });
+    }
+};
+
+
+
+{
+    "name": "advanced-google-wallet-ai",
+    "version": "1.0.0",
+    "description": "Google Wallet integration with Gemini AI using Node.js on Google Cloud Functions/Run",
+    "main": "index.js",
+    "scripts": {
+        "start": "functions-framework --target=main"
+    },
+    "dependencies": {
+        "@google-cloud/secret-manager": "^5.0.0",
+        "@google-cloud/vertexai": "^0.8.0",
+        "@google-pay/passes": "^1.2.0",
+        "google-auth-library": "^9.0.0"
+    },
+    "devDependencies": {
+        "@google-cloud/functions-framework": "^3.0.0"
+    }
+}
+
+
+
+gcloud functions deploy advanced-google-wallet-ai \
+    --runtime nodejs20 \
+    --trigger-http \
+    --allow-unauthenticated \
+    --entry-point main \
+    --region us-central1 \
+    --set-env-vars \
+    GCP_PROJECT_ID=${PROJECT_ID},\
+    GOOGLE_SERVICE_ACCOUNT_SECRET_ID=google-wallet-service-account-key,\
+    GOOGLE_WALLET_ISSUER_ID=${ISSUER_ID},\
+    LOYALTY_CLASS_ID_SUFFIX=${LOYALTY_CLASS_ID_SUFFIX},\
+    VERTEX_AI_LOCATION=${VERTEX_AI_LOCATION}
+
+
+
+curl -X POST YOUR_CLOUD_FUNCTION_URL \
+-H "Content-Type: application/json" \
+-d '{
+    "userId": "user_node_12345",
+    "userHistory": ["coffee", "sandwich", "muffin", "latte", "pizza"],
+    "recentActivity": "Just bought a large vanilla latte at our downtown store."
+}'
+
+
+
+npx create-react-app google-wallet-ai-app
+cd google-wallet-ai-app
+npm install
+
+
+
+import React, { useState } from 'react';
+import './App.css';
+
+// Replace with your actual Cloud Function/Cloud Run URL
+const BACKEND_API_URL = 'YOUR_CLOUD_FUNCTION_HTTP_TRIGGER_URL';
+
+function App() {
+  const [userId, setUserId] = useState('user_react_001'); // Example user ID
+  const [userHistory, setUserHistory] = useState(['coffee', 'sandwich']);
+  const [recentActivity, setRecentActivity] = useState('Just browsed new coffee flavors.');
+  const [offer, setOffer] = useState('');
+  const [googleWalletPassId, setGoogleWalletPassId] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [jwtLink, setJwtLink] = useState(''); // State for the "Add to Google Wallet" JWT link
+
+  // Function to simulate fetching user data (in a real app, this would come from an auth system)
+  const fetchUserData = () => {
+    // In a real application, you'd get this from your user authentication system
+    setUserId('user_react_001');
+    setUserHistory(['latte', 'pastry', 'sandwich', 'juice']);
+    setRecentActivity('Just checked out new loyalty rewards.');
+  };
+
+  const handleGenerateOffer = async () => {
+    setLoading(true);
+    setError('');
+    setOffer('');
+    setGoogleWalletPassId('');
+
+    try {
+      const response = await fetch(BACKEND_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId,
+          userHistory,
+          recentActivity,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setOffer(data.offer);
+        setGoogleWalletPassId(data.googleWalletPassId);
+        // If your backend also returns a signed JWT for "Add to Google Wallet" (optional)
+        // setJwtLink(data.jwtLink);
+      } else {
+        setError(data.message || 'An unknown error occurred.');
+      }
+    } catch (err) {
+      console.error('Error calling backend:', err);
+      setError('Failed to connect to the backend. Please check your network or backend deployment.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Function to simulate getting a JWT link from the backend for "Add to Google Wallet"
+  // This would typically be a separate backend endpoint call
+  const getGoogleWalletJwtLink = async () => {
+    setLoading(true);
+    setError('');
+    setJwtLink('');
+    try {
+      // In a real app, you'd call a backend endpoint specifically to generate the JWT
+      // Example: const response = await fetch(`${BACKEND_API_URL}/generate-wallet-jwt`, {
+      //            method: 'POST', body: JSON.stringify({ userId, loyaltyClassId: 'your-class-id' })
+      //          });
+      //          const data = await response.json();
+      //          if (response.ok) { setJwtLink(data.jwtLink); } else { setError(...) }
+
+      // For demonstration, a placeholder JWT link.
+      // A real JWT would be much longer and signed by your service account.
+      // This JWT would typically lead to a 'save to wallet' flow in Google Wallet.
+      // Example structure: https://pay.google.com/gp/v/save/[JWT_STRING]
+      const dummyJwt = `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJ5b3VyLWlzc3Vlci1pZCIsImF1ZCI6Imdvb2dsZSIsImlhdCI6MTY3ODAwMDgwMCwiZXhwIjoxNjc4MDAzNjAwLCJ0eXAiOiJzYXZldG93YWxsZXQiLCJvcmlnaW5zIjpbImh0dHBzOi8vd2FsbGV0LmV4YW1wbGUuY29tIl0sInBheWxvYWQiOnsibG95YWx0eU9iamVjdHMiOlt7ImlkIjoi${userId}_loyalty_passI-AM-A-PLACEHOLDER`,
+      setJwtLink(`https://pay.google.com/gp/v/save/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJ5b3VyLWlzc3Vlci1pZCIsImF1ZCI6Imdvb2dsZSIsImlhdCI6MTY3ODAwMDgwMCwiZXhwIjoxNjc4MDAzNjAwLCJ0eXAiOiJzYXZldG93YWxsZXQiLCJvcmlnaW5zIjpbImh0dHBzOi8vd2FsbGV0LmV4YW1wbGUuY29tIl0sInBheWxvYWQiOnsibG95YWx0eU9iamVjdHMiOlt7ImlkIjoi${userId}_loyalty_passI-AM-A-PLACEHOLDER` + Math.random().toString(36).substring(7));
+
+    } catch (err) {
+      console.error('Error fetching JWT link:', err);
+      setError('Failed to generate Google Wallet link.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Recommended: Use the official Google Pay/Wallet button component
+  // npm install @google-pay/button-react
+  // import GooglePayButton from '@google-pay/button-react';
+
+  return (
+    <div className="App">
+      <header className="App-header">
+        <h1>Advanced Google Wallet Integration with Gemini AI</h1>
+        <p>This demonstrates fetching AI-generated offers from a backend and updating Google Wallet.</p>
+
+        <div className="user-info">
+          <h2>User Information</h2>
+          <p><strong>User ID:</strong> {userId}</p>
+          <p><strong>Purchase History:</strong> {userHistory.join(', ')}</p>
+          <p><strong>Recent Activity:</strong> {recentActivity}</p>
+        </div>
+
+        <button onClick={handleGenerateOffer} disabled={loading}>
+          {loading ? 'Generating Offer...' : 'Generate Personalized Offer & Update Wallet'}
+        </button>
+
+        {error && <p className="error-message">Error: {error}</p>}
+
+        {offer && (
+          <div className="offer-display">
+            <h2>Personalized Offer:</h2>
+            <p className="offer-text">"{offer}"</p>
+            <p className="small-text">
+              (This offer has been pushed to your Google Wallet pass with ID: {googleWalletPassId})
+            </p>
+          </div>
+        )}
+
+        <hr style={{ margin: '30px 0', width: '80%' }} />
+
+        {/* Section for "Add to Google Wallet" button */}
+        <h2>Initial Pass Setup (Add to Google Wallet)</h2>
+        <p>
+          For new users or for the initial addition of a pass, you'd provide an "Add to Google Wallet" button.
+          This button usually requires a signed JWT from your backend.
+        </p>
+        <button onClick={getGoogleWalletJwtLink} disabled={loading}>
+            {loading ? 'Generating Link...' : 'Generate "Add to Google Wallet" Link'}
+        </button>
+
+        {jwtLink && (
+            <div className="jwt-link-container">
+                <p>Click this link to add/save the pass to Google Wallet:</p>
+                <a href={jwtLink} target="_blank" rel="noopener noreferrer" className="wallet-link">
+                    Add to Google Wallet
+                </a>
+                <p className="small-text">
+                    (Note: This is a placeholder link. A real JWT is much longer and securely generated by your backend.)
+                </p>
+            </div>
+        )}
+
+        {/* You can also use the official @google-pay/button-react component for cleaner integration */}
+        {/*
+        <h3>Using @google-pay/button-react (for initial Add to Wallet)</h3>
+        <GooglePayButton
+            environment="TEST" // Or "PRODUCTION"
+            buttonType="add"
+            // You'd need to provide a JWT here that the button will use
+            // This JWT would typically be generated by your backend based on the pass data.
+            // Example for a GenericObject (replace with LoyaltyObject if applicable):
+            // buttonClick={(resolve) => {
+            //   // Call your backend to get the JWT
+            //   fetch('YOUR_BACKEND_GENERATE_JWT_ENDPOINT', { /* ... */ /* })
+            //     .then(response => response.json())
+            //     .then(data => {
+            //       resolve(data.jwt); // Backend returns the JWT
+            //     })
+            //     .catch(err => console.error(err));
+            // }}
+        />
+        */}
+      </header>
+    </div>
+  );
+}
+
+export default App;
+
+
+
+.App {
+  text-align: center;
+  font-family: Arial, sans-serif;
+  background-color: #f0f2f5;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.App-header {
+  background-color: #ffffff;
+  padding: 40px;
+  border-radius: 10px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  width: 90%;
+  max-width: 800px;
+  box-sizing: border-box;
+}
+
+h1 {
+  color: #34495e;
+  margin-bottom: 20px;
+}
+
+h2 {
+  color: #2c3e50;
+  margin-top: 25px;
+  margin-bottom: 15px;
+}
+
+p {
+  color: #555;
+  line-height: 1.6;
+}
+
+.user-info {
+  background-color: #ecf0f1;
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  text-align: left;
+}
+
+button {
+  background-color: #4285f4; /* Google Blue */
+  color: white;
+  padding: 12px 25px;
+  border: none;
+  border-radius: 5px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+  margin-top: 20px;
+}
+
+button:hover {
+  background-color: #3367d6;
+}
+
+button:disabled {
+  background-color: #aeb6bf;
+  cursor: not-allowed;
+}
+
+.offer-display {
+  background-color: #e8f5e9; /* Light Green for success */
+  border: 1px solid #4caf50;
+  padding: 20px;
+  border-radius: 8px;
+  margin-top: 25px;
+}
+
+.offer-text {
+  font-size: 1.2em;
+  font-weight: bold;
+  color: #2e7d32;
+}
+
+.small-text {
+  font-size: 0.8em;
+  color: #777;
+  margin-top: 10px;
+}
+
+.error-message {
+  color: #d32f2f; /* Red for error */
+  background-color: #ffebee;
+  border: 1px solid #ef9a9a;
+  padding: 10px;
+  border-radius: 5px;
+  margin-top: 20px;
+}
+
+.jwt-link-container {
+    background-color: #e3f2fd; /* Light blue */
+    border: 1px solid #90caf9;
+    padding: 20px;
+    border-radius: 8px;
+    margin-top: 25px;
+}
+
+.wallet-link {
+    display: inline-block;
+    background-color: #000; /* Black for Google Wallet button */
+    color: white;
+    padding: 10px 20px;
+    border-radius: 5px;
+    text-decoration: none;
+    font-weight: bold;
+    margin-top: 10px;
+    transition: background-color 0.3s ease;
+}
+
+.wallet-link:hover {
+    background-color: #333;
+}
+
+
+
+cd google-wallet-ai-app
+npm install
+
+
+
+
+npm start
+
+
+
+Okay, I've previously generated comprehensive Python code for advanced Google Wallet integration using Google Cloud APIs and Gemini. I will provide that code again, along with the necessary context, setup instructions, and best practices.
+This solution is designed to run in a serverless environment like Google Cloud Functions or Cloud Run, where it can securely interact with Google Wallet and Gemini APIs.
+Core Idea:
+The goal is to use Gemini (Google's AI model) to enrich Google Wallet passes with dynamic, AI-generated content or to trigger actions based on user context. This can range from personalized offers on loyalty cards to real-time, AI-summarized event information on tickets.
+Conceptual Architecture:
++-------------------+      +-------------------------+      +---------------------+
+| User Interaction  |      |      Your Backend       |      |  Google Cloud AI    |
+| (e.g., App, Web)  |----->|   (e.g., Cloud Run,     |----->| (Gemini API, Vertex |
+|   (Triggers)      |      |   Cloud Functions)      |      |   AI, etc.)         |
++-------------------+      |                         |      +---------------------+
+                           |   - Google Wallet API   |<-----+
+                           |   - User Data (Firestore, |
+                           |     Cloud SQL, etc.)    |
+                           +-------------------------+
+                                        |
+                                        | (Updates Pass)
+                                        v
+                           +-------------------------+
+                           |     Google Wallet       |
+                           |   (Updated Pass for     |
+                           |       User)             |
+                           +-------------------------+
+
+Key Google Cloud Services Involved:
+ * Google Wallet API: The primary API for creating, updating, and managing various pass types (loyalty, offers, event tickets, boarding passes, generic passes).
+ * Gemini API: For generating text, code, or other modalities based on prompts. This is where the AI magic happens for personalization, summarization, or intelligent decision-making.
+ * Google Cloud Functions/Cloud Run/App Engine: Serverless compute options to host your backend logic that orchestrates the interactions between Google Wallet and Gemini.
+ * Firestore/Cloud SQL/Cloud Spanner: Databases to store user profiles, historical data, pass templates, and other relevant information.
+ * Cloud Pub/Sub: For asynchronous event-driven architectures (e.g., a new transaction triggers an AI analysis).
+ * Secret Manager: Securely store API keys (for Google Wallet, Gemini) and other sensitive credentials.
+ * IAM (Identity and Access Management): To control permissions for your services.
+Python Code Example (Google Cloud Function/Cloud Run):
+This example demonstrates generating a personalized offer using Gemini and then updating a Google Wallet Loyalty Pass.
+Prerequisites:
+ * Google Cloud Project Setup:
+   * Enable Google Wallet API.
+   * Enable Generative Language API (for Gemini, typically through Vertex AI).
+   * Enable Cloud Functions API (or Cloud Run).
+   * Enable Secret Manager API.
+   * Create a Service Account with the following roles:
+     * Google Wallet API Editor
+     * Vertex AI User (for Gemini API access)
+     * Secret Manager Secret Accessor
+     * Cloud Functions Invoker (if using HTTP trigger)
+   * Download your Service Account JSON key.
+   * Store your Google Wallet API Issuer ID (available in the Google Pay & Wallet Console).
+   * Create a Loyalty Class in the Google Pay & Wallet Console first. Note its classId.
+main.py for Google Cloud Function:
+import functions_framework
+import json
+import os
+from google.auth import jwt
+from google.auth.transport import requests
+from google.cloud import secretmanager
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from vertexai.generative_models import GenerativeModel, Part # Updated import for Vertex AI SDK
+
+# --- Configuration (Fetch securely from Secret Manager in production) ---
+# Project ID where Secret Manager and Gemini API are enabled
+PROJECT_ID = os.environ.get('GCP_PROJECT_ID')
+# Secret Manager secret ID for your Google Service Account Key JSON
+GOOGLE_SERVICE_ACCOUNT_SECRET_ID = os.environ.get('GOOGLE_SERVICE_ACCOUNT_SECRET_ID')
+# Your Google Wallet Issuer ID (from Google Pay & Wallet Console)
+ISSUER_ID = os.environ.get('GOOGLE_WALLET_ISSUER_ID')
+# Your pre-created Google Wallet Loyalty Class ID suffix
+LOYALTY_CLASS_ID_SUFFIX = os.environ.get('LOYALTY_CLASS_ID_SUFFIX') # e.g., "my-loyalty-program-class"
+# Google Cloud region for Vertex AI
+VERTEX_AI_LOCATION = os.environ.get('VERTEX_AI_LOCATION', 'us-central1') # Choose a region where Gemini is available
+
+# Global variables to store credentials and clients (for warm start in serverless)
+_google_wallet_credentials = None
+_gemini_model = None
+_walletobjects_service = None
+
+def _get_google_wallet_credentials():
+    """Fetches Google Service Account credentials from Secret Manager."""
+    global _google_wallet_credentials
+    if _google_wallet_credentials is None:
+        if not all([PROJECT_ID, GOOGLE_SERVICE_ACCOUNT_SECRET_ID]):
+            raise ValueError("GCP_PROJECT_ID and GOOGLE_SERVICE_ACCOUNT_SECRET_ID environment variables must be set.")
+
+        try:
+            client = secretmanager.SecretManagerServiceClient()
+            response = client.access_secret_version(
+                request={"name": f"projects/{PROJECT_ID}/secrets/{GOOGLE_SERVICE_ACCOUNT_SECRET_ID}/versions/latest"}
+            )
+            payload = response.payload.data.decode("UTF-8")
+            _google_wallet_credentials = json.loads(payload)
+        except Exception as e:
+            print(f"Error fetching Google Wallet credentials from Secret Manager: {e}")
+            raise RuntimeError("Failed to load Google Wallet credentials.")
+    return _google_wallet_credentials
+
+def _get_walletobjects_service():
+    """Initializes and returns the Google Wallet Objects service client."""
+    global _walletobjects_service
+    if _walletobjects_service is None:
+        creds_info = _get_google_wallet_credentials()
+        creds = service_account.Credentials.from_service_account_info(
+            creds_info,
+            scopes=['https://www.googleapis.com/auth/wallet_object.issuer']
+        )
+        _walletobjects_service = build('walletobjects', 'v1', credentials=creds)
+    return _walletobjects_service
+
+def _get_gemini_model():
+    """Initializes and returns the Gemini GenerativeModel client."""
+    global _gemini_model
+    if _gemini_model is None:
+        if not PROJECT_ID:
+            raise ValueError("GCP_PROJECT_ID environment variable must be set for Gemini.")
+        # Initialize Gemini GenerativeModel. Ensure Vertex AI API is enabled.
+        # This implicitly uses Application Default Credentials from the Cloud Function's service account.
+        _gemini_model = GenerativeModel("gemini-pro") # Or "gemini-1.5-pro-latest" for more advanced
+    return _gemini_model
+
+async def generate_personalized_offer_with_gemini(user_history, recent_activity):
+    """
+    Uses Gemini to generate a personalized offer based on user data.
+    """
+    model = _get_gemini_model()
+
+    prompt = f"""
+    You are an AI assistant for a loyalty program. Your goal is to create a compelling, personalized offer for a customer.
+    Here's the customer's purchase history: {', '.join(user_history)}.
+    Here's their most recent activity: {recent_activity}.
+    Based on this, suggest a concise and attractive offer they can use. Keep it under 20 words.
+    Example: "Enjoy 20% off your next coffee!" or "Get a free dessert with your next meal!"
+    """
+
+    try:
+        # Use generate_content directly as it supports async
+        response = await model.generate_content_async(prompt)
+        offer_text = response.candidates[0].content.parts[0].text.strip()
+        print(f"Gemini-generated offer: \"{offer_text}\"")
+        return offer_text
+    except Exception as e:
+        print(f"Error generating content with Gemini: {e}")
+        return "Enjoy a special discount on your next visit!" # Fallback offer
+
+async def create_or_update_google_wallet_pass(user_id, offer_text):
+    """
+    Creates or updates a Google Wallet Loyalty Pass with the generated offer.
+    """
+    walletobjects_service = _get_walletobjects_service()
+
+    if not all([ISSUER_ID, LOYALTY_CLASS_ID_SUFFIX]):
+        raise ValueError("GOOGLE_WALLET_ISSUER_ID and LOYALTY_CLASS_ID_SUFFIX environment variables must be set.")
+
+    # loyaltyObjectId is typically ISSUER_ID.EXTERNAL_ID
+    # For a new pass, you'd generate a unique external ID.
+    # For an existing pass, you'd use its known external ID.
+    loyalty_object_id = f"{ISSUER_ID}.{user_id}_loyalty_pass"
+    loyalty_class_id = f"{ISSUER_ID}.{LOYALTY_CLASS_ID_SUFFIX}"
+    
+    # Construct the LoyaltyObject payload
+    # Note: This is a simplified example. Real LoyaltyObjects have many more fields.
+    # The 'textModulesData' is a good place to put dynamic text.
+    loyalty_object = {
+        "id": loyalty_object_id,
+        "classId": loyalty_class_id,
+        "state": "ACTIVE", # Can be ACTIVE, COMPLETED, EXPIRED, INACTIVE
+        "loyaltyPoints": { # Example, adjust as needed
+            "label": "Points",
+            "balance": {
+                "int": 1234
+            }
+        },
+        "textModulesData": [
+            {
+                "header": "Special Offer Just For You!",
+                "body": offer_text,
+                "id": "offer_text_module"
+            },
+            {
+                "header": "Membership Level",
+                "body": "Gold Tier", # You'd likely fetch this from your database
+                "id": "membership_level_module"
+            }
+        ],
+        "barcode": {
+            "type": "QR_CODE",
+            "value": user_id # Or a specific loyalty number
+        }
+        # Add more fields as per your Loyalty Class definition and needs
+    }
+
+    try:
+        # First, try to get the object. If it exists, we'll patch it.
+        # If it doesn't exist (404), we'll insert it.
+        try:
+            # Check if object exists
+            walletobjects_service.loyaltyobject().get(resourceId=loyalty_object_id).execute()
+            print(f"Loyalty object {loyalty_object_id} found. Attempting to update.")
+            request = walletobjects_service.loyaltyobject().patch(
+                resourceId=loyalty_object_id,
+                body=loyalty_object
+            )
+        except Exception as e:
+            if "404" in str(e): # Object not found
+                print(f"Loyalty object {loyalty_object_id} not found. Attempting to insert.")
+                request = walletobjects_service.loyaltyobject().insert(body=loyalty_object)
+            else:
+                raise # Re-raise other errors
+
+        response = request.execute()
+        print(f"Google Wallet API response: {json.dumps(response, indent=2)}")
+        print(f"Successfully updated/created Google Wallet pass for user: {user_id}")
+        return True
+    except Exception as e:
+        print(f"Error updating Google Wallet pass: {e}")
+        return False
+
+@functions_framework.http
+async def main(request):
+    """
+    Main entry point for the Google Cloud Function.
+    This function processes an HTTP request, triggers AI, and updates Google Wallet.
+    """
+    # Handle CORS preflight request
+    if request.method == 'OPTIONS':
+        headers = {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST',
+            'Access-Control-Allow-Headers': 'Content-Type',
+            'Access-Control-Max-Age': '3600'
+        }
+        return ('', 204, headers)
+
+    headers = {
+        'Access-Control-Allow-Origin': '*'
+    }
+
+    try:
+        request_json = request.get_json(silent=True)
+        if not request_json:
+            raise ValueError("Invalid JSON payload or empty request body.")
+
+        user_id = request_json.get('userId')
+        user_history = request_json.get('userHistory', [])
+        recent_activity = request_json.get('recentActivity', '')
+
+        if not user_id:
+            return (json.dumps({'status': 'error', 'message': 'Missing userId'}), 400, headers)
+
+        print(f"Processing request for user: {user_id}")
+
+        # 1. Generate personalized offer using Gemini
+        personalized_offer = await generate_personalized_offer_with_gemini(user_history, recent_activity)
+
+        # 2. Create or Update Google Wallet pass
+        success = await create_or_update_google_wallet_pass(user_id, personalized_offer)
+
+        if success:
+            return (json.dumps({
+                'status': 'success',
+                'message': 'Google Wallet pass updated with personalized offer',
+                'offer': personalized_offer,
+                'googleWalletPassId': f"{ISSUER_ID}.{user_id}_loyalty_pass"
+            }), 200, headers)
+        else:
+            return (json.dumps({'status': 'error', 'message': 'Failed to create/update Google Wallet pass'}), 500, headers)
+
+    except ValueError as e:
+        print(f"Client error: {e}")
+        return (json.dumps({'status': 'error', 'message': str(e)}), 400, headers)
+    except RuntimeError as e:
+        print(f"Configuration/Initialization error: {e}")
+        return (json.dumps({'status': 'error', 'message': str(e)}), 500, headers)
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        return (json.dumps({'status': 'error', 'message': f'Internal server error: {str(e)}'}), 500, headers)
+
+
+requirements.txt:
+functions-framework
+google-cloud-secret-manager
+google-auth
+google-auth-oauthlib
+google-api-python-client
+google-cloud-aiplatform # This includes Vertex AI SDK for Gemini
+
+Deployment Steps (Google Cloud Function):
+ * Google Cloud Project Setup:
+   * Enable APIs: Ensure Google Wallet API, Generative Language API (via Vertex AI), Cloud Functions API, and Secret Manager API are enabled in your Google Cloud Project.
+   * Service Account: Create a dedicated service account. Grant it the necessary IAM roles:
+     * Google Wallet API Editor
+     * Vertex AI User
+     * Secret Manager Secret Accessor
+     * Cloud Functions Invoker (if you're triggering via HTTP, or appropriate role for other triggers like Pub/Sub).
+   * Download Service Account Key: Generate and download the JSON key for this service account.
+   * Google Wallet Issuer ID & Class ID: Go to the Google Pay & Wallet Console. Note your Issuer ID. Create a Loyalty Class (e.g., "MyBrandLoyalty") and note its Class ID suffix (e.g., my-loyalty-program-class).
+ * Secure Credentials with Secret Manager:
+   * In your Google Cloud Project, navigate to Secret Manager.
+   * Create a new secret (e.g., google-wallet-service-account-key).
+   * Copy the entire content of your downloaded Service Account JSON key file and paste it as the secret value.
+ * Local Testing (Optional):
+   * Install Python and pip.
+   * Install functions-framework locally: pip install functions-framework
+   * Install dependencies: pip install -r requirements.txt
+   * Set environment variables:
+     export GCP_PROJECT_ID="your-gcp-project-id"
+export GOOGLE_SERVICE_ACCOUNT_SECRET_ID="google-wallet-service-account-key"
+export GOOGLE_WALLET_ISSUER_ID="your-issuer-id"
+export LOYALTY_CLASS_ID_SUFFIX="your-loyalty-class-id-suffix"
+export VERTEX_AI_LOCATION="us-central1"
+
+   * Run locally: functions-framework --target=main --signature-type=http
+   * Send a test request using curl to http://localhost:8080:
+     curl -X POST http://localhost:8080 \
+-H "Content-Type: application/json" \
+-d '{
+    "userId": "user_py_test_001",
+    "userHistory": ["pizza", "soda", "wings"],
+    "recentActivity": "Just ordered a large pepperoni pizza."
+}'
+
+ * Deployment to Google Cloud Functions:
+   * Ensure you have the Google Cloud SDK installed and authenticated (gcloud auth login, gcloud config set project [PROJECT_ID]).
+   * Navigate to your function's directory (where main.py and requirements.txt are) in your terminal.
+   * Deploy the function:
+     gcloud functions deploy advanced-google-wallet-ai \
+    --runtime python311 \
+    --trigger-http \
+    --allow-unauthenticated \
+    --entry-point main \
+    --region us-central1 \
+    --set-env-vars \
+    GCP_PROJECT_ID="your-gcp-project-id",\
+    GOOGLE_SERVICE_ACCOUNT_SECRET_ID="google-wallet-service-account-key",\
+    GOOGLE_WALLET_ISSUER_ID="your-issuer-id",\
+    LOYALTY_CLASS_ID_SUFFIX="your-loyalty-class-id-suffix",\
+    VERTEX_AI_LOCATION="us-central1"
+
+     * Replace placeholders: Substitute "your-gcp-project-id", "your-issuer-id", and "your-loyalty-class-id-suffix" with your actual values.
+     * --allow-unauthenticated: For public access. For production, strongly consider configuring IAM for authenticated calls or using API Gateway with authentication.
+     * --region: Choose a region close to your users and where Gemini (Vertex AI) is available.
+ * Testing the Deployed Function:
+   * After deployment, you'll get a URL for the Cloud Function.
+   * Use curl or a tool like Postman/Insomnia to send a POST request to this URL:
+     curl -X POST YOUR_CLOUD_FUNCTION_URL \
+-H "Content-Type: application/json" \
+-d '{
+    "userId": "user_py_deploy_001",
+    "userHistory": ["sushi", "ramen", "udon"],
+    "recentActivity": "Just searched for best Japanese restaurants."
+}'
+
+     * Check the function logs in Google Cloud Logging for debugging.
+     * Verify in your Google Wallet app (if user_py_deploy_001 is linked) or the Google Pay & Wallet Console that the pass was updated.
+Important Considerations and Enhancements:
+ * Error Handling: The code includes basic try-except blocks. For production, add more specific error handling and robust logging.
+ * Authentication & Security:
+   * CORS: Adjust Access-Control-Allow-Origin for production to restrict it to your frontend domain.
+   * Function Access: For functions not directly exposed to the public internet, use IAM to control who can invoke them.
+ * Idempotency: If your function might be triggered multiple times for the same logical event, design it to be idempotent (i.e., multiple identical requests have the same effect as a single request). The current patch/insert logic for loyaltyobject helps with this.
+ * Google Wallet Pass Management:
+   * "Add to Google Wallet" Button/Link: For users to initially add the pass, you'll need to generate a signed JWT that contains the pass object data and include it in an "Add to Google Wallet" link on your website or app. This code focuses on updating an existing pass via the API.
+   * Other Pass Types: Adapt the loyalty_object payload to eventObject, offerObject, boardingPassObject, etc., based on the type of pass you are managing. Each has specific fields and nuances.
+ * Gemini Usage:
+   * Prompt Engineering: The quality of the Gemini output heavily depends on the prompt. Experiment with different prompts to get desired results.
+   * Model Selection: gemini-pro is a general-purpose model. For more advanced multimodal capabilities, consider gemini-1.5-pro-latest if available in your region and use case.
+   * Safety Settings: The Gemini API has safety settings you can configure.
+ * Data Storage: For persistent user data (purchase history, loyalty points, etc.), you'd typically use a database like Firestore, Cloud SQL, or Cloud Spanner, and fetch data from there within your function.
+ * Asynchronous Processing: For scenarios where the AI generation might take longer, or if you have high volume, consider using Cloud Pub/Sub. Your frontend publishes a message to Pub/Sub, and the Cloud Function subscribes to that topic, processing the request asynchronously.
+This Python example provides a strong foundation for building intelligent and dynamic Google Wallet experiences using Google Cloud's AI capabilities.
+
+
+
+import functions_framework
+import json
+import os
+from google.auth import jwt
+from google.auth.transport import requests
+from google.cloud import secretmanager
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from vertexai.generative_models import GenerativeModel, Part # Updated import for Vertex AI SDK
+
+# --- Configuration (Fetch securely from Secret Manager in production) ---
+# Project ID where Secret Manager and Gemini API are enabled
+PROJECT_ID = os.environ.get('GCP_PROJECT_ID')
+# Secret Manager secret ID for your Google Service Account Key JSON
+GOOGLE_SERVICE_ACCOUNT_SECRET_ID = os.environ.get('GOOGLE_SERVICE_ACCOUNT_SECRET_ID')
+# Your Google Wallet Issuer ID (from Google Pay & Wallet Console)
+ISSUER_ID = os.environ.get('GOOGLE_WALLET_ISSUER_ID')
+# Your pre-created Google Wallet Loyalty Class ID suffix
+LOYALTY_CLASS_ID_SUFFIX = os.environ.get('LOYALTY_CLASS_ID_SUFFIX') # e.g., "my-loyalty-program-class"
+# Google Cloud region for Vertex AI
+VERTEX_AI_LOCATION = os.environ.get('VERTEX_AI_LOCATION', 'us-central1') # Choose a region where Gemini is available
+
+# Global variables to store credentials and clients (for warm start in serverless)
+_google_wallet_credentials = None
+_gemini_model = None
+_walletobjects_service = None
+
+def _get_google_wallet_credentials():
+    """Fetches Google Service Account credentials from Secret Manager."""
+    global _google_wallet_credentials
+    if _google_wallet_credentials is None:
+        if not all([PROJECT_ID, GOOGLE_SERVICE_ACCOUNT_SECRET_ID]):
+            raise ValueError("GCP_PROJECT_ID and GOOGLE_SERVICE_ACCOUNT_SECRET_ID environment variables must be set.")
+
+        try:
+            client = secretmanager.SecretManagerServiceClient()
+            response = client.access_secret_version(
+                request={"name": f"projects/{PROJECT_ID}/secrets/{GOOGLE_SERVICE_ACCOUNT_SECRET_ID}/versions/latest"}
+            )
+            payload = response.payload.data.decode("UTF-8")
+            _google_wallet_credentials = json.loads(payload)
+        except Exception as e:
+            print(f"Error fetching Google Wallet credentials from Secret Manager: {e}")
+            raise RuntimeError("Failed to load Google Wallet credentials.")
+    return _google_wallet_credentials
+
+def _get_walletobjects_service():
+    """Initializes and returns the Google Wallet Objects service client."""
+    global _walletobjects_service
+    if _walletobjects_service is None:
+        creds_info = _get_google_wallet_credentials()
+        creds = service_account.Credentials.from_service_account_info(
+            creds_info,
+            scopes=['https://www.googleapis.com/auth/wallet_object.issuer']
+        )
+        _walletobjects_service = build('walletobjects', 'v1', credentials=creds)
+    return _walletobjects_service
+
+def _get_gemini_model():
+    """Initializes and returns the Gemini GenerativeModel client."""
+    global _gemini_model
+    if _gemini_model is None:
+        if not PROJECT_ID:
+            raise ValueError("GCP_PROJECT_ID environment variable must be set for Gemini.")
+        # Initialize Gemini GenerativeModel. Ensure Vertex AI API is enabled.
+        # This implicitly uses Application Default Credentials from the Cloud Function's service account.
+        _gemini_model = GenerativeModel("gemini-pro") # Or "gemini-1.5-pro-latest" for more advanced
+    return _gemini_model
+
+async def generate_personalized_offer_with_gemini(user_history, recent_activity):
+    """
+    Uses Gemini to generate a personalized offer based on user data.
+    """
+    model = _get_gemini_model()
+
+    prompt = f"""
+    You are an AI assistant for a loyalty program. Your goal is to create a compelling, personalized offer for a customer.
+    Here's the customer's purchase history: {', '.join(user_history)}.
+    Here's their most recent activity: {recent_activity}.
+    Based on this, suggest a concise and attractive offer they can use. Keep it under 20 words.
+    Example: "Enjoy 20% off your next coffee!" or "Get a free dessert with your next meal!"
+    """
+
+    try:
+        # Use generate_content directly as it supports async
+        response = await model.generate_content_async(prompt)
+        offer_text = response.candidates[0].content.parts[0].text.strip()
+        print(f"Gemini-generated offer: \"{offer_text}\"")
+        return offer_text
+    except Exception as e:
+        print(f"Error generating content with Gemini: {e}")
+        return "Enjoy a special discount on your next visit!" # Fallback offer
+
+async def create_or_update_google_wallet_pass(user_id, offer_text):
+    """
+    Creates or updates a Google Wallet Loyalty Pass with the generated offer.
+    """
+    walletobjects_service = _get_walletobjects_service()
+
+    if not all([ISSUER_ID, LOYALTY_CLASS_ID_SUFFIX]):
+        raise ValueError("GOOGLE_WALLET_ISSUER_ID and LOYALTY_CLASS_ID_SUFFIX environment variables must be set.")
+
+    # loyaltyObjectId is typically ISSUER_ID.EXTERNAL_ID
+    # For a new pass, you'd generate a unique external ID.
+    # For an existing pass, you'd use its known external ID.
+    loyalty_object_id = f"{ISSUER_ID}.{user_id}_loyalty_pass"
+    loyalty_class_id = f"{ISSUER_ID}.{LOYALTY_CLASS_ID_SUFFIX}"
+    
+    # Construct the LoyaltyObject payload
+    # Note: This is a simplified example. Real LoyaltyObjects have many more fields.
+    # The 'textModulesData' is a good place to put dynamic text.
+    loyalty_object = {
+        "id": loyalty_object_id,
+        "classId": loyalty_class_id,
+        "state": "ACTIVE", # Can be ACTIVE, COMPLETED, EXPIRED, INACTIVE
+        "loyaltyPoints": { # Example, adjust as needed
+            "label": "Points",
+            "balance": {
+                "int": 1234
+            }
+        },
+        "textModulesData": [
+            {
+                "header": "Special Offer Just For You!",
+                "body": offer_text,
+                "id": "offer_text_module"
+            },
+            {
+                "header": "Membership Level",
+                "body": "Gold Tier", # You'd likely fetch this from your database
+                "id": "membership_level_module"
+            }
+        ],
+        "barcode": {
+            "type": "QR_CODE",
+            "value": user_id # Or a specific loyalty number
+        }
+        # Add more fields as per your Loyalty Class definition and needs
+    }
+
+    try:
+        # First, try to get the object. If it exists, we'll patch it.
+        # If it doesn't exist (404), we'll insert it.
+        try:
+            # Check if object exists
+            walletobjects_service.loyaltyobject().get(resourceId=loyalty_object_id).execute()
+            print(f"Loyalty object {loyalty_object_id} found. Attempting to update.")
+            request = walletobjects_service.loyaltyobject().patch(
+                resourceId=loyalty_object_id,
+                body=loyalty_object
+            )
+        except Exception as e:
+            if "404" in str(e): # Object not found
+                print(f"Loyalty object {loyalty_object_id} not found. Attempting to insert.")
+                request = walletobjects_service.loyaltyobject().insert(body=loyalty_object)
+            else:
+                raise # Re-raise other errors
+
+        response = request.execute()
+        print(f"Google Wallet API response: {json.dumps(response, indent=2)}")
+        print(f"Successfully updated/created Google Wallet pass for user: {user_id}")
+        return True
+    except Exception as e:
+        print(f"Error updating Google Wallet pass: {e}")
+        return False
+
+@functions_framework.http
+async def main(request):
+    """
+    Main entry point for the Google Cloud Function.
+    This function processes an HTTP request, triggers AI, and updates Google Wallet.
+    """
+    # Handle CORS preflight request
+    if request.method == 'OPTIONS':
+        headers = {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST',
+            'Access-Control-Allow-Headers': 'Content-Type',
+            'Access-Control-Max-Age': '3600'
+        }
+        return ('', 204, headers)
+
+    headers = {
+        'Access-Control-Allow-Origin': '*'
+    }
+
+    try:
+        request_json = request.get_json(silent=True)
+        if not request_json:
+            raise ValueError("Invalid JSON payload or empty request body.")
+
+        user_id = request_json.get('userId')
+        user_history = request_json.get('userHistory', [])
+        recent_activity = request_json.get('recentActivity', '')
+
+        if not user_id:
+            return (json.dumps({'status': 'error', 'message': 'Missing userId'}), 400, headers)
+
+        print(f"Processing request for user: {user_id}")
+
+        # 1. Generate personalized offer using Gemini
+        personalized_offer = await generate_personalized_offer_with_gemini(user_history, recent_activity)
+
+        # 2. Create or Update Google Wallet pass
+        success = await create_or_update_google_wallet_pass(user_id, personalized_offer)
+
+        if success:
+            return (json.dumps({
+                'status': 'success',
+                'message': 'Google Wallet pass updated with personalized offer',
+                'offer': personalized_offer,
+                'googleWalletPassId': f"{ISSUER_ID}.{user_id}_loyalty_pass"
+            }), 200, headers)
+        else:
+            return (json.dumps({'status': 'error', 'message': 'Failed to create/update Google Wallet pass'}), 500, headers)
+
+    except ValueError as e:
+        print(f"Client error: {e}")
+        return (json.dumps({'status': 'error', 'message': str(e)}), 400, headers)
+    except RuntimeError as e:
+        print(f"Configuration/Initialization error: {e}")
+        return (json.dumps({'status': 'error', 'message': str(e)}), 500, headers)
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        return (json.dumps({'status': 'error', 'message': f'Internal server error: {str(e)}'}), 500, headers)
+
+
+
+
+
+
+Okay, I've previously generated comprehensive Python code for advanced Google Wallet integration using Google Cloud APIs and Gemini. I will provide that code again, along with the necessary context, setup instructions, and best practices.
+This solution is designed to run in a serverless environment like Google Cloud Functions or Cloud Run, where it can securely interact with Google Wallet and Gemini APIs.
+Core Idea:
+The goal is to use Gemini (Google's AI model) to enrich Google Wallet passes with dynamic, AI-generated content or to trigger actions based on user context. This can range from personalized offers on loyalty cards to real-time, AI-summarized event information on tickets.
+Conceptual Architecture:
++-------------------+      +-------------------------+      +---------------------+
+| User Interaction  |      |      Your Backend       |      |  Google Cloud AI    |
+| (e.g., App, Web)  |----->|   (e.g., Cloud Run,     |----->| (Gemini API, Vertex |
+|   (Triggers)      |      |   Cloud Functions)      |      |   AI, etc.)         |
++-------------------+      |                         |      +---------------------+
+                           |   - Google Wallet API   |<-----+
+                           |   - User Data (Firestore, |
+                           |     Cloud SQL, etc.)    |
+                           +-------------------------+
+                                        |
+                                        | (Updates Pass)
+                                        v
+                           +-------------------------+
+                           |     Google Wallet       |
+                           |   (Updated Pass for     |
+                           |       User)             |
+                           +-------------------------+
+
+Key Google Cloud Services Involved:
+ * Google Wallet API: The primary API for creating, updating, and managing various pass types (loyalty, offers, event tickets, boarding passes, generic passes).
+ * Gemini API: For generating text, code, or other modalities based on prompts. This is where the AI magic happens for personalization, summarization, or intelligent decision-making.
+ * Google Cloud Functions/Cloud Run/App Engine: Serverless compute options to host your backend logic that orchestrates the interactions between Google Wallet and Gemini.
+ * Firestore/Cloud SQL/Cloud Spanner: Databases to store user profiles, historical data, pass templates, and other relevant information.
+ * Cloud Pub/Sub: For asynchronous event-driven architectures (e.g., a new transaction triggers an AI analysis).
+ * Secret Manager: Securely store API keys (for Google Wallet, Gemini) and other sensitive credentials.
+ * IAM (Identity and Access Management): To control permissions for your services.
+Python Code Example (Google Cloud Function/Cloud Run):
+This example demonstrates generating a personalized offer using Gemini and then updating a Google Wallet Loyalty Pass.
+Prerequisites:
+ * Google Cloud Project Setup:
+   * Enable Google Wallet API.
+   * Enable Generative Language API (for Gemini, typically through Vertex AI).
+   * Enable Cloud Functions API (or Cloud Run).
+   * Enable Secret Manager API.
+   * Create a Service Account with the following roles:
+     * Google Wallet API Editor
+     * Vertex AI User (for Gemini API access)
+     * Secret Manager Secret Accessor
+     * Cloud Functions Invoker (if using HTTP trigger)
+   * Download your Service Account JSON key.
+   * Store your Google Wallet API Issuer ID (available in the Google Pay & Wallet Console).
+   * Create a Loyalty Class in the Google Pay & Wallet Console first. Note its classId.
+main.py for Google Cloud Function:
+import functions_framework
+import json
+import os
+from google.auth import jwt
+from google.auth.transport import requests
+from google.cloud import secretmanager
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from vertexai.generative_models import GenerativeModel, Part # Updated import for Vertex AI SDK
+
+# --- Configuration (Fetch securely from Secret Manager in production) ---
+# Project ID where Secret Manager and Gemini API are enabled
+PROJECT_ID = os.environ.get('GCP_PROJECT_ID')
+# Secret Manager secret ID for your Google Service Account Key JSON
+GOOGLE_SERVICE_ACCOUNT_SECRET_ID = os.environ.get('GOOGLE_SERVICE_ACCOUNT_SECRET_ID')
+# Your Google Wallet Issuer ID (from Google Pay & Wallet Console)
+ISSUER_ID = os.environ.get('GOOGLE_WALLET_ISSUER_ID')
+# Your pre-created Google Wallet Loyalty Class ID suffix
+LOYALTY_CLASS_ID_SUFFIX = os.environ.get('LOYALTY_CLASS_ID_SUFFIX') # e.g., "my-loyalty-program-class"
+# Google Cloud region for Vertex AI
+VERTEX_AI_LOCATION = os.environ.get('VERTEX_AI_LOCATION', 'us-central1') # Choose a region where Gemini is available
+
+# Global variables to store credentials and clients (for warm start in serverless)
+_google_wallet_credentials = None
+_gemini_model = None
+_walletobjects_service = None
+
+def _get_google_wallet_credentials():
+    """Fetches Google Service Account credentials from Secret Manager."""
+    global _google_wallet_credentials
+    if _google_wallet_credentials is None:
+        if not all([PROJECT_ID, GOOGLE_SERVICE_ACCOUNT_SECRET_ID]):
+            raise ValueError("GCP_PROJECT_ID and GOOGLE_SERVICE_ACCOUNT_SECRET_ID environment variables must be set.")
+
+        try:
+            client = secretmanager.SecretManagerServiceClient()
+            response = client.access_secret_version(
+                request={"name": f"projects/{PROJECT_ID}/secrets/{GOOGLE_SERVICE_ACCOUNT_SECRET_ID}/versions/latest"}
+            )
+            payload = response.payload.data.decode("UTF-8")
+            _google_wallet_credentials = json.loads(payload)
+        except Exception as e:
+            print(f"Error fetching Google Wallet credentials from Secret Manager: {e}")
+            raise RuntimeError("Failed to load Google Wallet credentials.")
+    return _google_wallet_credentials
+
+def _get_walletobjects_service():
+    """Initializes and returns the Google Wallet Objects service client."""
+    global _walletobjects_service
+    if _walletobjects_service is None:
+        creds_info = _get_google_wallet_credentials()
+        creds = service_account.Credentials.from_service_account_info(
+            creds_info,
+            scopes=['https://www.googleapis.com/auth/wallet_object.issuer']
+        )
+        _walletobjects_service = build('walletobjects', 'v1', credentials=creds)
+    return _walletobjects_service
+
+def _get_gemini_model():
+    """Initializes and returns the Gemini GenerativeModel client."""
+    global _gemini_model
+    if _gemini_model is None:
+        if not PROJECT_ID:
+            raise ValueError("GCP_PROJECT_ID environment variable must be set for Gemini.")
+        # Initialize Gemini GenerativeModel. Ensure Vertex AI API is enabled.
+        # This implicitly uses Application Default Credentials from the Cloud Function's service account.
+        _gemini_model = GenerativeModel("gemini-pro") # Or "gemini-1.5-pro-latest" for more advanced
+    return _gemini_model
+
+async def generate_personalized_offer_with_gemini(user_history, recent_activity):
+    """
+    Uses Gemini to generate a personalized offer based on user data.
+    """
+    model = _get_gemini_model()
+
+    prompt = f"""
+    You are an AI assistant for a loyalty program. Your goal is to create a compelling, personalized offer for a customer.
+    Here's the customer's purchase history: {', '.join(user_history)}.
+    Here's their most recent activity: {recent_activity}.
+    Based on this, suggest a concise and attractive offer they can use. Keep it under 20 words.
+    Example: "Enjoy 20% off your next coffee!" or "Get a free dessert with your next meal!"
+    """
+
+    try:
+        # Use generate_content directly as it supports async
+        response = await model.generate_content_async(prompt)
+        offer_text = response.candidates[0].content.parts[0].text.strip()
+        print(f"Gemini-generated offer: \"{offer_text}\"")
+        return offer_text
+    except Exception as e:
+        print(f"Error generating content with Gemini: {e}")
+        return "Enjoy a special discount on your next visit!" # Fallback offer
+
+async def create_or_update_google_wallet_pass(user_id, offer_text):
+    """
+    Creates or updates a Google Wallet Loyalty Pass with the generated offer.
+    """
+    walletobjects_service = _get_walletobjects_service()
+
+    if not all([ISSUER_ID, LOYALTY_CLASS_ID_SUFFIX]):
+        raise ValueError("GOOGLE_WALLET_ISSUER_ID and LOYALTY_CLASS_ID_SUFFIX environment variables must be set.")
+
+    # loyaltyObjectId is typically ISSUER_ID.EXTERNAL_ID
+    # For a new pass, you'd generate a unique external ID.
+    # For an existing pass, you'd use its known external ID.
+    loyalty_object_id = f"{ISSUER_ID}.{user_id}_loyalty_pass"
+    loyalty_class_id = f"{ISSUER_ID}.{LOYALTY_CLASS_ID_SUFFIX}"
+    
+    # Construct the LoyaltyObject payload
+    # Note: This is a simplified example. Real LoyaltyObjects have many more fields.
+    # The 'textModulesData' is a good place to put dynamic text.
+    loyalty_object = {
+        "id": loyalty_object_id,
+        "classId": loyalty_class_id,
+        "state": "ACTIVE", # Can be ACTIVE, COMPLETED, EXPIRED, INACTIVE
+        "loyaltyPoints": { # Example, adjust as needed
+            "label": "Points",
+            "balance": {
+                "int": 1234
+            }
+        },
+        "textModulesData": [
+            {
+                "header": "Special Offer Just For You!",
+                "body": offer_text,
+                "id": "offer_text_module"
+            },
+            {
+                "header": "Membership Level",
+                "body": "Gold Tier", # You'd likely fetch this from your database
+                "id": "membership_level_module"
+            }
+        ],
+        "barcode": {
+            "type": "QR_CODE",
+            "value": user_id # Or a specific loyalty number
+        }
+        # Add more fields as per your Loyalty Class definition and needs
+    }
+
+    try:
+        # First, try to get the object. If it exists, we'll patch it.
+        # If it doesn't exist (404), we'll insert it.
+        try:
+            # Check if object exists
+            walletobjects_service.loyaltyobject().get(resourceId=loyalty_object_id).execute()
+            print(f"Loyalty object {loyalty_object_id} found. Attempting to update.")
+            request = walletobjects_service.loyaltyobject().patch(
+                resourceId=loyalty_object_id,
+                body=loyalty_object
+            )
+        except Exception as e:
+            if "404" in str(e): # Object not found
+                print(f"Loyalty object {loyalty_object_id} not found. Attempting to insert.")
+                request = walletobjects_service.loyaltyobject().insert(body=loyalty_object)
+            else:
+                raise # Re-raise other errors
+
+        response = request.execute()
+        print(f"Google Wallet API response: {json.dumps(response, indent=2)}")
+        print(f"Successfully updated/created Google Wallet pass for user: {user_id}")
+        return True
+    except Exception as e:
+        print(f"Error updating Google Wallet pass: {e}")
+        return False
+
+@functions_framework.http
+async def main(request):
+    """
+    Main entry point for the Google Cloud Function.
+    This function processes an HTTP request, triggers AI, and updates Google Wallet.
+    """
+    # Handle CORS preflight request
+    if request.method == 'OPTIONS':
+        headers = {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST',
+            'Access-Control-Allow-Headers': 'Content-Type',
+            'Access-Control-Max-Age': '3600'
+        }
+        return ('', 204, headers)
+
+    headers = {
+        'Access-Control-Allow-Origin': '*'
+    }
+
+    try:
+        request_json = request.get_json(silent=True)
+        if not request_json:
+            raise ValueError("Invalid JSON payload or empty request body.")
+
+        user_id = request_json.get('userId')
+        user_history = request_json.get('userHistory', [])
+        recent_activity = request_json.get('recentActivity', '')
+
+        if not user_id:
+            return (json.dumps({'status': 'error', 'message': 'Missing userId'}), 400, headers)
+
+        print(f"Processing request for user: {user_id}")
+
+        # 1. Generate personalized offer using Gemini
+        personalized_offer = await generate_personalized_offer_with_gemini(user_history, recent_activity)
+
+        # 2. Create or Update Google Wallet pass
+        success = await create_or_update_google_wallet_pass(user_id, personalized_offer)
+
+        if success:
+            return (json.dumps({
+                'status': 'success',
+                'message': 'Google Wallet pass updated with personalized offer',
+                'offer': personalized_offer,
+                'googleWalletPassId': f"{ISSUER_ID}.{user_id}_loyalty_pass"
+            }), 200, headers)
+        else:
+            return (json.dumps({'status': 'error', 'message': 'Failed to create/update Google Wallet pass'}), 500, headers)
+
+    except ValueError as e:
+        print(f"Client error: {e}")
+        return (json.dumps({'status': 'error', 'message': str(e)}), 400, headers)
+    except RuntimeError as e:
+        print(f"Configuration/Initialization error: {e}")
+        return (json.dumps({'status': 'error', 'message': str(e)}), 500, headers)
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        return (json.dumps({'status': 'error', 'message': f'Internal server error: {str(e)}'}), 500, headers)
+
+
+requirements.txt:
+functions-framework
+google-cloud-secret-manager
+google-auth
+google-auth-oauthlib
+google-api-python-client
+google-cloud-aiplatform # This includes Vertex AI SDK for Gemini
+
+Deployment Steps (Google Cloud Function):
+ * Google Cloud Project Setup:
+   * Enable APIs: Ensure Google Wallet API, Generative Language API (via Vertex AI), Cloud Functions API, and Secret Manager API are enabled in your Google Cloud Project.
+   * Service Account: Create a dedicated service account. Grant it the necessary IAM roles:
+     * Google Wallet API Editor
+     * Vertex AI User
+     * Secret Manager Secret Accessor
+     * Cloud Functions Invoker (if you're triggering via HTTP, or appropriate role for other triggers like Pub/Sub).
+   * Download Service Account Key: Generate and download the JSON key for this service account.
+   * Google Wallet Issuer ID & Class ID: Go to the Google Pay & Wallet Console. Note your Issuer ID. Create a Loyalty Class (e.g., "MyBrandLoyalty") and note its Class ID suffix (e.g., my-loyalty-program-class).
+ * Secure Credentials with Secret Manager:
+   * In your Google Cloud Project, navigate to Secret Manager.
+   * Create a new secret (e.g., google-wallet-service-account-key).
+   * Copy the entire content of your downloaded Service Account JSON key file and paste it as the secret value.
+ * Local Testing (Optional):
+   * Install Python and pip.
+   * Install functions-framework locally: pip install functions-framework
+   * Install dependencies: pip install -r requirements.txt
+   * Set environment variables:
+     export GCP_PROJECT_ID="your-gcp-project-id"
+export GOOGLE_SERVICE_ACCOUNT_SECRET_ID="google-wallet-service-account-key"
+export GOOGLE_WALLET_ISSUER_ID="your-issuer-id"
+export LOYALTY_CLASS_ID_SUFFIX="your-loyalty-class-id-suffix"
+export VERTEX_AI_LOCATION="us-central1"
+
+   * Run locally: functions-framework --target=main --signature-type=http
+   * Send a test request using curl to http://localhost:8080:
+     curl -X POST http://localhost:8080 \
+-H "Content-Type: application/json" \
+-d '{
+    "userId": "user_py_test_001",
+    "userHistory": ["pizza", "soda", "wings"],
+    "recentActivity": "Just ordered a large pepperoni pizza."
+}'
+
+ * Deployment to Google Cloud Functions:
+   * Ensure you have the Google Cloud SDK installed and authenticated (gcloud auth login, gcloud config set project [PROJECT_ID]).
+   * Navigate to your function's directory (where main.py and requirements.txt are) in your terminal.
+   * Deploy the function:
+     gcloud functions deploy advanced-google-wallet-ai \
+    --runtime python311 \
+    --trigger-http \
+    --allow-unauthenticated \
+    --entry-point main \
+    --region us-central1 \
+    --set-env-vars \
+    GCP_PROJECT_ID="your-gcp-project-id",\
+    GOOGLE_SERVICE_ACCOUNT_SECRET_ID="google-wallet-service-account-key",\
+    GOOGLE_WALLET_ISSUER_ID="your-issuer-id",\
+    LOYALTY_CLASS_ID_SUFFIX="your-loyalty-class-id-suffix",\
+    VERTEX_AI_LOCATION="us-central1"
+
+     * Replace placeholders: Substitute "your-gcp-project-id", "your-issuer-id", and "your-loyalty-class-id-suffix" with your actual values.
+     * --allow-unauthenticated: For public access. For production, strongly consider configuring IAM for authenticated calls or using API Gateway with authentication.
+     * --region: Choose a region close to your users and where Gemini (Vertex AI) is available.
+ * Testing the Deployed Function:
+   * After deployment, you'll get a URL for the Cloud Function.
+   * Use curl or a tool like Postman/Insomnia to send a POST request to this URL:
+     curl -X POST YOUR_CLOUD_FUNCTION_URL \
+-H "Content-Type: application/json" \
+-d '{
+    "userId": "user_py_deploy_001",
+    "userHistory": ["sushi", "ramen", "udon"],
+    "recentActivity": "Just searched for best Japanese restaurants."
+}'
+
+     * Check the function logs in Google Cloud Logging for debugging.
+     * Verify in your Google Wallet app (if user_py_deploy_001 is linked) or the Google Pay & Wallet Console that the pass was updated.
+Important Considerations and Enhancements:
+ * Error Handling: The code includes basic try-except blocks. For production, add more specific error handling and robust logging.
+ * Authentication & Security:
+   * CORS: Adjust Access-Control-Allow-Origin for production to restrict it to your frontend domain.
+   * Function Access: For functions not directly exposed to the public internet, use IAM to control who can invoke them.
+ * Idempotency: If your function might be triggered multiple times for the same logical event, design it to be idempotent (i.e., multiple identical requests have the same effect as a single request). The current patch/insert logic for loyaltyobject helps with this.
+ * Google Wallet Pass Management:
+   * "Add to Google Wallet" Button/Link: For users to initially add the pass, you'll need to generate a signed JWT that contains the pass object data and include it in an "Add to Google Wallet" link on your website or app. This code focuses on updating an existing pass via the API.
+   * Other Pass Types: Adapt the loyalty_object payload to eventObject, offerObject, boardingPassObject, etc., based on the type of pass you are managing. Each has specific fields and nuances.
+ * Gemini Usage:
+   * Prompt Engineering: The quality of the Gemini output heavily depends on the prompt. Experiment with different prompts to get desired results.
+   * Model Selection: gemini-pro is a general-purpose model. For more advanced multimodal capabilities, consider gemini-1.5-pro-latest if available in your region and use case.
+   * Safety Settings: The Gemini API has safety settings you can configure.
+ * Data Storage: For persistent user data (purchase history, loyalty points, etc.), you'd typically use a database like Firestore, Cloud SQL, or Cloud Spanner, and fetch data from there within your function.
+ * Asynchronous Processing: For scenarios where the AI generation might take longer, or if you have high volume, consider using Cloud Pub/Sub. Your frontend publishes a message to Pub/Sub, and the Cloud Function subscribes to that topic, processing the request asynchronously.
+This Python example provides a strong foundation for building intelligent and dynamic Google Wallet experiences using Google Cloud's AI capabilities.
+
+
+
+
+
+export GCP_PROJECT_ID="your-gcp-project-id"
+export GOOGLE_SERVICE_ACCOUNT_SECRET_ID="google-wallet-service-account-key"
+export GOOGLE_WALLET_ISSUER_ID="your-issuer-id"
+export LOYALTY_CLASS_ID_SUFFIX="your-loyalty-class-id-suffix"
+export VERTEX_AI_LOCATION="us-central1"
+
+
+
+
+curl -X POST http://localhost:8080 \
+-H "Content-Type: application/json" \
+-d '{
+    "userId": "user_py_test_001",
+    "userHistory": ["pizza", "soda", "wings"],
+    "recentActivity": "Just ordered a large pepperoni pizza."
+}'
+
+
+
+
+gcloud functions deploy advanced-google-wallet-ai \
+    --runtime python311 \
+    --trigger-http \
+    --allow-unauthenticated \
+    --entry-point main \
+    --region us-central1 \
+    --set-env-vars \
+    GCP_PROJECT_ID="your-gcp-project-id",\
+    GOOGLE_SERVICE_ACCOUNT_SECRET_ID="google-wallet-service-account-key",\
+    GOOGLE_WALLET_ISSUER_ID="your-issuer-id",\
+    LOYALTY_CLASS_ID_SUFFIX="your-loyalty-class-id-suffix",\
+    VERTEX_AI_LOCATION="us-central1"
+
+
+
+curl -X POST YOUR_CLOUD_FUNCTION_URL \
+-H "Content-Type: application/json" \
+-d '{
+    "userId": "user_py_deploy_001",
+    "userHistory": ["sushi", "ramen", "udon"],
+    "recentActivity": "Just searched for best Japanese restaurants."
+}'
