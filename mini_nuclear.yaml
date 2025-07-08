@@ -917,3 +917,325 @@ if __name__ == "__main__":
 
     plt.tight_layout()
     plt.show()
+
+
+
+import time
+import random
+import numpy as np
+from collections import deque
+
+class ReactorSensor:
+    def __init__(self, name, initial_value, noise_std_dev, drift_rate=0):
+        self.name = name
+        self.value = initial_value
+        self.noise_std_dev = noise_std_dev
+        self.drift_rate = drift_rate # For simulating sensor degradation
+
+    def get_reading(self):
+        """Returns the current value with added random noise and drift."""
+        return self.value + random.gauss(0, self.noise_std_dev) + self.drift_rate * time.time() # Simple time-based drift
+
+    def set_value(self, new_value):
+        self.value = new_value
+
+class FastCooler:
+    def __init__(self, name, max_cooling_power_mw):
+        self.name = name
+        self.max_cooling_power_mw = max_cooling_power_mw
+        self.is_active = False
+        self.current_power_percent = 0
+
+    def activate(self, power_percent=100):
+        if 0 <= power_percent <= 100:
+            self.is_active = True
+            self.current_power_percent = power_percent
+            # print(f"[COOLER] {self.name} activated at {power_percent}% power.")
+        else:
+            print("[COOLER] Invalid power percentage.")
+
+    def deactivate(self):
+        self.is_active = False
+        self.current_power_percent = 0
+        # print(f"[COOLER] {self.name} deactivated.")
+
+    def get_cooling_rate_mw(self):
+        if self.is_active:
+            return self.max_cooling_power_mw * (self.current_power_percent / 100.0)
+        return 0
+
+class MiniNuclearReactor:
+    def __init__(self, initial_temp_c=400, thermal_power_mw=50, heat_capacity_mj_c=100):
+        self.core_temperature_c = initial_temp_c
+        self.thermal_power_mw = thermal_power_mw
+        self.heat_capacity_mj_c = heat_capacity_mj_c
+
+        # Sensors with potential drift for AI anomaly detection
+        self.temp_sensor = ReactorSensor("Core Temp", initial_temp_c, noise_std_dev=0.5, drift_rate=0.001) # Small drift for AI
+        self.pressure_sensor = ReactorSensor("Primary Pressure", 1500, noise_std_dev=5, drift_rate=-0.005) # Small drift
+        self.flow_sensor = ReactorSensor("Coolant Flow", 100, noise_std_dev=1, drift_rate=0.002) # Small drift
+        self.vibration_sensor = ReactorSensor("Pump Vibration", 10, noise_std_dev=0.2) # New sensor for AI
+
+        self.fast_cooler = FastCooler("Main Fast Cooler", max_cooling_power_mw=70)
+
+        self.cooler_activation_temp_c = 420
+        self.cooler_deactivation_temp_c = 405
+        self.critical_temp_c = 480
+        self.scram_triggered = False
+        self.anomaly_introduced = False # Flag to introduce an anomaly
+
+    def introduce_anomaly(self):
+        """Simulates a pump degradation leading to increased vibration."""
+        if not self.anomaly_introduced:
+            print("\n!!! ANOMALY: Simulating pump degradation (increased vibration) !!!\n")
+            self.vibration_sensor.drift_rate = 0.5 # Significant increase in drift
+            self.anomaly_introduced = True
+
+    def update_state(self, time_step_s=1):
+        if self.scram_triggered:
+            heat_generated = self.thermal_power_mw * 0.1
+            heat_removed = self.fast_cooler.get_cooling_rate_mw() if self.fast_cooler.is_active else (self.thermal_power_mw * 0.3)
+        else:
+            heat_generated = self.thermal_power_mw
+            heat_removed = self.fast_cooler.get_cooling_rate_mw()
+
+        net_heat_change_mw = heat_generated - heat_removed
+        temp_change_c = (net_heat_change_mw * time_step_s) / self.heat_capacity_mj_c
+        self.core_temperature_c += temp_change_c
+
+        # Update sensor true values
+        self.temp_sensor.set_value(self.core_temperature_c)
+        self.pressure_sensor.set_value(self.pressure_sensor.value + random.uniform(-0.1, 0.1))
+        self.flow_sensor.set_value(self.flow_sensor.value + random.uniform(-0.05, 0.05))
+        # Vibration sensor's value will drift if anomaly is introduced
+        self.vibration_sensor.set_value(self.vibration_sensor.value + self.vibration_sensor.drift_rate * time_step_s)
+
+        if self.core_temperature_c < 300: self.core_temperature_c = 300
+        if self.pressure_sensor.value < 1400: self.pressure_sensor.value = 1400
+        if self.flow_sensor.value < 80: self.flow_sensor.value = 80
+        if self.flow_sensor.value > 110: self.flow_sensor.value = 110
+        if self.vibration_sensor.value < 5: self.vibration_sensor.value = 5
+
+
+    def run_control_logic(self):
+        current_temp_reading = self.temp_sensor.get_reading()
+
+        if current_temp_reading >= self.critical_temp_c and not self.scram_triggered:
+            self.trigger_scram("Core temperature critical!")
+            return
+
+        if self.scram_triggered:
+            if not self.fast_cooler.is_active:
+                self.fast_cooler.activate(100)
+            return
+
+        if current_temp_reading >= self.cooler_activation_temp_c and not self.fast_cooler.is_active:
+            self.fast_cooler.activate(100)
+        elif current_temp_reading <= self.cooler_deactivation_temp_c and self.fast_cooler.is_active:
+            self.fast_cooler.deactivate()
+
+    def trigger_scram(self, reason="Unknown"):
+        if not self.scram_triggered:
+            self.scram_triggered = True
+            print(f"\n!!! REACTOR SCRAM INITIATED !!! Reason: {reason}")
+            print("--- All control rods inserted. Reactor power rapidly decreasing. ---")
+            self.thermal_power_mw = 0
+            self.fast_cooler.activate(100)
+
+    def get_current_data(self):
+        return {
+            "timestamp": time.time(), # Use raw timestamp for ML features
+            "core_temp_C": self.temp_sensor.get_reading(),
+            "pressure_PSI": self.pressure_sensor.get_reading(),
+            "coolant_flow_percent": self.flow_sensor.get_reading(),
+            "pump_vibration": self.vibration_sensor.get_reading(), # New sensor data
+            "cooler_active": self.fast_cooler.is_active,
+            "cooler_power_percent": self.fast_cooler.current_power_percent,
+            "scram_triggered": self.scram_triggered
+        }
+
+# --- AI Component (Anomaly Detection) ---
+from sklearn.ensemble import IsolationForest
+
+class AnomalyDetector:
+    def __init__(self, contamination=0.01, random_state=42):
+        self.model = IsolationForest(contamination=contamination, random_state=random_state)
+        self.trained = False
+        self.features_to_monitor = ['core_temp_C', 'pressure_PSI', 'coolant_flow_percent', 'pump_vibration']
+        self.training_data = []
+
+    def collect_training_data(self, sensor_data_point):
+        """Collects data during 'normal' operation to train the model."""
+        if not self.trained:
+            self.training_data.append([sensor_data_point[f] for f in self.features_to_monitor])
+
+    def train_model(self):
+        """Trains the Isolation Forest model on collected 'normal' data."""
+        if self.training_data:
+            X_train = np.array(self.training_data)
+            self.model.fit(X_train)
+            self.trained = True
+            print(f"\n[AI] Anomaly Detector trained on {len(X_train)} normal data points.")
+        else:
+            print("[AI] Not enough training data for anomaly detector.")
+
+    def detect_anomaly(self, current_sensor_data):
+        """Predicts if the current data point is an anomaly."""
+        if not self.trained:
+            return "Untrained" # Model not ready
+        
+        # Prepare current data for prediction
+        X_predict = np.array([[current_sensor_data[f] for f in self.features_to_monitor]])
+        
+        prediction = self.model.predict(X_predict)
+        score = self.model.decision_function(X_predict)
+
+        if prediction == -1: # Isolation Forest predicts -1 for anomalies
+            return "Anomaly Detected", score[0]
+        else:
+            return "Normal", score[0]
+
+# --- Quantum-Inspired Optimization Component (Conceptual Example) ---
+# This is a very abstract example using Qiskit for a simple optimization problem.
+# In a real scenario, this would involve complex problem mapping (e.g., QUBO).
+from qiskit import QuantumCircuit, Aer, transpile
+from qiskit.algorithms import VQE, optimizers
+from qiskit.circuit.library import EfficientSU2
+from qiskit.opflow import PauliSumOp
+from qiskit.utils import QuantumInstance
+
+def conceptual_quantum_optimization(num_qubits=2):
+    """
+    Conceptual Quantum-Inspired Optimization for a *toy* problem.
+    This simulates finding the ground state of a very simple Hamiltonian.
+    In a real NPP context, this could be for:
+    - Optimal resource allocation (e.g., distributing power for auxiliary systems).
+    - Complex maintenance scheduling (e.g., minimizing downtime for multiple concurrent tasks).
+    - Advanced sensor calibration optimization.
+    It would NOT be for real-time control.
+    """
+    print("\n[QUANTUM] Running conceptual quantum optimization simulation...")
+    
+    # Define a simple Hamiltonian (cost function) for demonstration
+    # This represents a hypothetical operational parameter to minimize
+    # For example, (Z_0 * Z_1) could represent interaction cost between two systems
+    hamiltonian = PauliSumOp.from_list([("II", 0.5), ("ZI", -0.5), ("IZ", 0.5), ("ZZ", -0.5)])
+
+    # Setup the VQE (Variational Quantum Eigensolver) algorithm
+    # This is a hybrid quantum-classical algorithm for optimization
+    ansatz = EfficientSU2(num_qubits, reps=1)
+    optimizer = optimizers.SPSA(maxiter=100) # Stochastic Parallel Gradient Descent
+
+    quantum_instance = QuantumInstance(Aer.get_backend('qasm_simulator'), shots=1024)
+    vqe = VQE(ansatz, optimizer=optimizer, quantum_instance=quantum_instance)
+
+    # Execute the VQE algorithm
+    result = vqe.compute_minimum_eigenvalue(hamiltonian)
+    
+    optimal_value = result.eigenvalue.real # Extract the real part of the eigenvalue
+    
+    print(f"[QUANTUM] Optimal value found (eigenvalue): {optimal_value:.4f}")
+    # The optimal parameters (result.optimal_point) would define the solution to the problem.
+    print("[QUANTUM] Conceptual quantum optimization complete.")
+    return optimal_value
+
+# --- Simulation Main Loop ---
+if __name__ == "__main__":
+    reactor = MiniNuclearReactor()
+    anomaly_detector = AnomalyDetector()
+
+    simulation_duration_s = 900 # 15 minutes of simulation
+    time_step_s = 1 # Update every second
+
+    history = deque(maxlen=simulation_duration_s) # Store data for plotting
+
+    print("--- Starting Mini Nuclear Power Plant Simulation with AI & Quantum Concepts ---")
+    print("-" * 60)
+    print("Normal operation for first 5 minutes to train AI...")
+    print("-" * 60)
+
+    for current_sim_time in range(0, simulation_duration_s + time_step_s, time_step_s):
+        if reactor.scram_triggered and reactor.core_temperature_c < 350:
+            print("\nReactor stabilized after SCRAM. Ending simulation.")
+            break
+
+        reactor.run_control_logic()
+        reactor.update_state(time_step_s)
+
+        current_data = reactor.get_current_data()
+        history.append(current_data)
+
+        # AI: Collect training data or detect anomalies
+        if current_sim_time < 300: # Train AI for first 5 minutes (300 seconds)
+            anomaly_detector.collect_training_data(current_data)
+            if current_sim_time == 299: # Train at the end of the training period
+                anomaly_detector.train_model()
+        elif current_sim_time == 300: # Introduce anomaly right after training
+            reactor.introduce_anomaly()
+        elif current_sim_time > 300: # After training, start detecting
+            anomaly_status, anomaly_score = anomaly_detector.detect_anomaly(current_data)
+            if anomaly_status == "Anomaly Detected":
+                print(f"[AI ALERT] Anomaly Detected! Score: {anomaly_score:.2f} at T={current_sim_time}s. (Vibration: {current_data['pump_vibration']:.2f})")
+                # In a real system, this would trigger alerts for operators,
+                # but NOT an automatic SCRAM.
+
+        # Quantum: Run conceptual optimization periodically (e.g., every 5 minutes)
+        if current_sim_time > 0 and current_sim_time % 300 == 0:
+            conceptual_quantum_optimization()
+
+        # Print status periodically
+        if current_sim_time % 10 == 0 or reactor.scram_triggered:
+            status_msg = (
+                f"T: {current_sim_time:4d}s | "
+                f"Core Temp: {current_data['core_temp_C']:.2f}°C | "
+                f"Vib: {current_data['pump_vibration']:.2f} | "
+                f"Cooler: {'ON' if current_data['cooler_active'] else 'OFF'} "
+                f"({current_data['cooler_power_percent']}%) | "
+                f"SCRAM: {current_data['scram_triggered']}"
+            )
+            print(status_msg)
+
+        time.sleep(0.01) # Simulate real-time delay (adjust for faster/slower sim)
+
+    print("\n--- Simulation Finished ---")
+
+    # --- Plotting Results ---
+    import matplotlib.pyplot as plt
+
+    timestamps = [i['timestamp'] for i in history]
+    temps = [i['core_temp_C'] for i in history]
+    vibrations = [i['pump_vibration'] for i in history]
+    cooler_power_percent = [i['cooler_power_percent'] for i in history]
+    scram_status = [1 if i['scram_triggered'] else 0 for i in history]
+
+    fig, axes = plt.subplots(3, 1, figsize=(14, 10), sharex=True)
+    time_points = np.array([i - history[0]['timestamp'] for i in timestamps]) # Relative time
+
+    axes[0].plot(time_points, temps, label='Core Temperature (°C)', color='red')
+    axes[0].axhline(y=reactor.cooler_activation_temp_c, color='orange', linestyle='--', label='Cooler Activate Threshold')
+    axes[0].axhline(y=reactor.cooler_deactivation_temp_c, color='green', linestyle='--', label='Cooler Deactivate Threshold')
+    axes[0].axhline(y=reactor.critical_temp_c, color='purple', linestyle='-', label='SCRAM Threshold', linewidth=2)
+    axes[0].set_ylabel('Temperature (°C)')
+    axes[0].set_title('Mini NPP Core Temperature Over Time')
+    axes[0].legend()
+    axes[0].grid(True)
+
+    axes[1].plot(time_points, vibrations, label='Pump Vibration', color='blue')
+    # Indicate anomaly introduction point on plot
+    anomaly_start_time = 300
+    axes[1].axvline(x=anomaly_start_time, color='red', linestyle=':', label='Anomaly Introduced')
+    axes[1].set_ylabel('Vibration (AU)')
+    axes[1].set_title('Pump Vibration Data (with simulated anomaly)')
+    axes[1].legend()
+    axes[1].grid(True)
+
+    axes[2].plot(time_points, cooler_power_percent, label='Cooler Power (%)', color='green')
+    axes[2].fill_between(time_points, 0, cooler_power_percent, color='green', alpha=0.2)
+    axes[2].set_ylabel('Cooler Power (%)')
+    axes[2].set_title('Fast Cooler Activity')
+    axes[2].set_xlabel('Simulation Time (seconds)')
+    axes[2].legend()
+    axes[2].grid(True)
+
+    plt.tight_layout()
+    plt.show()
