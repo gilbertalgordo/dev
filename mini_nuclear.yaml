@@ -1,0 +1,919 @@
+# Pseudo-code for a simplified reactor core temperature monitoring and SCRAM (emergency shutdown)
+# This is a conceptual example and LACKS ALL REAL-WORLD COMPLEXITY AND SAFETY MECHANISMS.
+
+def monitor_core_temperature(current_temp_sensor_data, threshold_temp):
+    """
+    Simulates monitoring core temperature and initiating a SCRAM if threshold is exceeded.
+    In a real plant, this would involve multiple redundant sensors, diverse logic,
+    and highly robust, fault-tolerant systems.
+    """
+    if any(temp > threshold_temp for temp in current_temp_sensor_data):
+        print("CRITICAL: Core temperature exceeding threshold!")
+        initiate_scram_sequence()
+    else:
+        print("Core temperature within safe operating limits.")
+
+def initiate_scram_sequence():
+    """
+    Simulates the emergency shutdown (SCRAM) sequence.
+    This would involve rapid insertion of control rods, stopping coolant flow
+    (or activating passive cooling), and isolating the reactor.
+    """
+    print("SCRAM Initiated! Inserting control rods...")
+    # Logic for rapidly inserting control rods (e.g., electromagnet release)
+    # Activation of emergency core cooling systems (ECCS)
+    # Isolation of containment
+    print("Reactor shutdown sequence in progress.")
+
+# --- Main loop (conceptual) ---
+if __name__ == "__main__":
+    safety_temp_threshold = 700  # degrees Celsius (example value)
+    while True:
+        # In a real system, this would be read from physical sensors
+        current_temperatures = [650, 645, 660, 675] # Example sensor readings
+
+        monitor_core_temperature(current_temperatures, safety_temp_threshold)
+
+        # Simulate time passing and other plant operations
+        # In a real system, this loop would be driven by real-time operating systems
+        # and hardware interrupts.
+        import time
+        time.sleep(1) # Check every second (conceptual)
+
+
+
+
+! Pseudo-code for a simplified neutron flux calculation (conceptual)
+! This is a highly simplified illustration and does not represent
+! the complexity of actual neutronics codes.
+
+PROGRAM NEUTRON_FLUX_CALC
+  IMPLICIT NONE
+
+  REAL :: neutron_source, fission_rate, multiplication_factor
+  REAL :: current_flux, previous_flux
+  INTEGER :: time_step, max_time_steps
+
+  ! Parameters (highly simplified)
+  neutron_source = 1.0     ! Arbitrary initial neutron source
+  multiplication_factor = 1.0005 ! Example: slightly supercritical
+  max_time_steps = 100
+
+  current_flux = neutron_source
+  previous_flux = neutron_source
+
+  PRINT *, "Time Step | Neutron Flux"
+  PRINT *, "---------------------"
+
+  DO time_step = 1, max_time_steps
+    ! Simplified model: fission rate proportional to current flux
+    fission_rate = current_flux * multiplication_factor
+
+    ! Update flux based on fission and source
+    current_flux = fission_rate + neutron_source
+
+    PRINT *, time_step, current_flux
+
+    ! In a real simulation, much more complex physics, geometry,
+    ! and boundary conditions would be involved.
+    previous_flux = current_flux
+  END DO
+
+  PRINT *, "Simulation complete."
+
+END PROGRAM NEUTRON_FLUX_CALC
+
+
+
+mkdir mini-npp-monitor
+cd mini-npp-monitor
+npm init -y
+
+
+
+
+npm install express socket.io
+
+
+
+// server.js
+
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const path = require('path');
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
+
+const PORT = process.env.PORT || 3000;
+
+// Serve static files (HTML, CSS, JS for the dashboard)
+app.use(express.static(path.join(__dirname, 'public')));
+
+// --- Simulated Plant State and Parameters ---
+let reactorCoreTemp = 400; // degrees Celsius
+let primaryCoolantFlow = 100; // %
+let fastCoolerStatus = 'OFF';
+let fastCoolerPower = 0; // %
+let pressure = 1500; // PSI
+let neutronFlux = 50; // Arbitrary units
+
+const TEMP_LIMIT_HIGH = 450;
+const TEMP_LIMIT_CRITICAL = 480;
+const COOLER_ACTIVATION_TEMP = 420;
+const COOLER_DEACTIVATION_TEMP = 405;
+
+// --- Sensor Data Simulation ---
+function simulateSensorData() {
+    // Simulate Reactor Core Temperature fluctuation
+    if (reactorCoreTemp < COOLER_ACTIVATION_TEMP && fastCoolerStatus === 'OFF') {
+        reactorCoreTemp += Math.random() * 2 - 0.5; // Slowly increase
+    } else if (reactorCoreTemp >= COOLER_ACTIVATION_TEMP && fastCoolerStatus === 'OFF') {
+        console.log(`[ALERT] Core Temp (${reactorCoreTemp.toFixed(1)}°C) high, activating fast cooler.`);
+        fastCoolerStatus = 'ON';
+        fastCoolerPower = 100; // Full power for fast cooling
+    } else if (fastCoolerStatus === 'ON') {
+        reactorCoreTemp -= Math.random() * 5 + 1; // Decrease rapidly with cooler
+        if (reactorCoreTemp <= COOLER_DEACTIVATION_TEMP) {
+            console.log(`[INFO] Core Temp (${reactorCoreTemp.toFixed(1)}°C) stabilized, deactivating fast cooler.`);
+            fastCoolerStatus = 'OFF';
+            fastCoolerPower = 0;
+        }
+    }
+
+    // Basic Bounds
+    if (reactorCoreTemp < 380) reactorCoreTemp = 380;
+    if (reactorCoreTemp > 500) reactorCoreTemp = 500; // Cap for simulation, real plant would SCRAM
+
+    // Simulate other sensor data (slight fluctuations)
+    primaryCoolantFlow = 100 + (Math.random() * 5 - 2.5);
+    pressure = 1500 + (Math.random() * 10 - 5);
+    neutronFlux = 50 + (Math.random() * 2 - 1);
+
+    // Basic alerts (these would be much more sophisticated)
+    let alerts = [];
+    if (reactorCoreTemp > TEMP_LIMIT_HIGH) {
+        alerts.push(`High Core Temp: ${reactorCoreTemp.toFixed(1)}°C`);
+    }
+    if (reactorCoreTemp > TEMP_LIMIT_CRITICAL) {
+        alerts.push(`CRITICAL Core Temp: ${reactorCoreTemp.toFixed(1)}°C - Immediate Action Required!`);
+        // In a real system, this would trigger an automatic SCRAM
+    }
+    if (primaryCoolantFlow < 95) {
+        alerts.push(`Low Coolant Flow: ${primaryCoolantFlow.toFixed(1)}%`);
+    }
+
+    return {
+        timestamp: new Date().toISOString(),
+        coreTemperature: parseFloat(reactorCoreTemp.toFixed(2)),
+        coolantFlow: parseFloat(primaryCoolantFlow.toFixed(2)),
+        pressure: parseFloat(pressure.toFixed(2)),
+        neutronFlux: parseFloat(neutronFlux.toFixed(2)),
+        fastCoolerStatus: fastCoolerStatus,
+        fastCoolerPower: fastCoolerPower,
+        alerts: alerts
+    };
+}
+
+// --- WebSocket Communication ---
+io.on('connection', (socket) => {
+    console.log('A client connected for plant monitoring.');
+
+    // Send initial data
+    socket.emit('plantData', simulateSensorData());
+
+    // Send updated data every 1 second
+    const dataInterval = setInterval(() => {
+        const data = simulateSensorData();
+        socket.emit('plantData', data);
+        if (data.alerts.length > 0) {
+            console.warn(`[SERVER ALERT] ${data.alerts.join(', ')}`);
+        }
+    }, 1000); // Send data every 1000 ms (1 second)
+
+    socket.on('disconnect', () => {
+        console.log('A client disconnected.');
+        clearInterval(dataInterval); // Stop sending data when client disconnects
+    });
+
+    // Handle incoming commands (e.g., manual cooler override - highly simplified for demo)
+    socket.on('controlCooler', (command) => {
+        if (command === 'ON') {
+            console.log('Manual Cooler ON command received.');
+            fastCoolerStatus = 'ON';
+            fastCoolerPower = 100;
+        } else if (command === 'OFF') {
+            console.log('Manual Cooler OFF command received.');
+            fastCoolerStatus = 'OFF';
+            fastCoolerPower = 0;
+        }
+        // Immediately send updated state
+        io.emit('plantData', simulateSensorData());
+    });
+});
+
+// Start the server
+server.listen(PORT, () => {
+    console.log(`Mini NPP Monitor running on http://localhost:${PORT}`);
+});
+
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mini NPP Dashboard</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #1a1a2e; color: #e0e0e0; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        .container { background-color: #2a2a4a; padding: 30px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4); width: 80%; max-width: 900px; }
+        h1 { color: #8d8ddb; text-align: center; margin-bottom: 30px; }
+        .data-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .data-card { background-color: #3e3e6b; padding: 20px; border-radius: 8px; text-align: center; border-left: 5px solid #8d8ddb; }
+        .data-card h3 { color: #c4c4ed; margin-top: 0; font-size: 1.2em; }
+        .data-card p { font-size: 1.8em; font-weight: bold; margin: 5px 0; }
+        .unit { font-size: 0.7em; color: #a0a0c4; }
+        .alert-section { background-color: #5a2a2a; color: #ffcccc; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ff0000; display: none; }
+        .alert-section ul { list-style: none; padding: 0; margin: 0; }
+        .alert-section li { margin-bottom: 5px; }
+        .controls { text-align: center; margin-top: 20px; }
+        .controls button { background-color: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 1em; margin: 0 10px; }
+        .controls button:hover { opacity: 0.8; }
+        .controls button.off { background-color: #f44336; }
+        .status-indicator { font-size: 1.5em; font-weight: bold; }
+        .status-indicator.on { color: #4CAF50; }
+        .status-indicator.off { color: #f44336; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Mini Nuclear Power Plant Dashboard</h1>
+
+        <div id="alerts" class="alert-section">
+            <h3>System Alerts:</h3>
+            <ul id="alertList"></ul>
+        </div>
+
+        <div class="data-grid">
+            <div class="data-card">
+                <h3>Core Temperature</h3>
+                <p id="coreTemp">--.--<span class="unit">°C</span></p>
+            </div>
+            <div class="data-card">
+                <h3>Coolant Flow</h3>
+                <p id="coolantFlow">--.--<span class="unit">%</span></p>
+            </div>
+            <div class="data-card">
+                <h3>Pressure</h3>
+                <p id="pressure">----<span class="unit">PSI</span></p>
+            </div>
+            <div class="data-card">
+                <h3>Neutron Flux</h3>
+                <p id="neutronFlux">--.--<span class="unit">AU</span></p>
+            </div>
+            <div class="data-card">
+                <h3>Fast Cooler Status</h3>
+                <p id="coolerStatus" class="status-indicator">OFF</p>
+            </div>
+            <div class="data-card">
+                <h3>Fast Cooler Power</h3>
+                <p id="coolerPower">--<span class="unit">%</span></p>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button onclick="controlCooler('ON')">Activate Cooler</button>
+            <button class="off" onclick="controlCooler('OFF')">Deactivate Cooler</button>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+
+        // Get elements for updating
+        const coreTempEl = document.getElementById('coreTemp');
+        const coolantFlowEl = document.getElementById('coolantFlow');
+        const pressureEl = document.getElementById('pressure');
+        const neutronFluxEl = document.getElementById('neutronFlux');
+        const coolerStatusEl = document.getElementById('coolerStatus');
+        const coolerPowerEl = document.getElementById('coolerPower');
+        const alertsSection = document.getElementById('alerts');
+        const alertList = document.getElementById('alertList');
+
+        socket.on('plantData', (data) => {
+            console.log('Received plant data:', data);
+
+            coreTempEl.textContent = data.coreTemperature.toFixed(2);
+            coolantFlowEl.textContent = data.coolantFlow.toFixed(2);
+            pressureEl.textContent = data.pressure.toFixed(2);
+            neutronFluxEl.textContent = data.neutronFlux.toFixed(2);
+            coolerPowerEl.textContent = data.fastCoolerPower;
+
+            coolerStatusEl.textContent = data.fastCoolerStatus;
+            coolerStatusEl.className = `status-indicator ${data.fastCoolerStatus === 'ON' ? 'on' : 'off'}`;
+
+            // Update alerts
+            alertList.innerHTML = ''; // Clear previous alerts
+            if (data.alerts && data.alerts.length > 0) {
+                alertsSection.style.display = 'block';
+                data.alerts.forEach(alert => {
+                    const li = document.createElement('li');
+                    li.textContent = alert;
+                    alertList.appendChild(li);
+                });
+            } else {
+                alertsSection.style.display = 'none';
+            }
+
+            // Apply warning/critical styling for temperature
+            if (data.coreTemperature > 480) {
+                coreTempEl.parentNode.style.borderColor = '#ff0000'; // Critical
+                coreTempEl.style.color = '#ff0000';
+            } else if (data.coreTemperature > 450) {
+                coreTempEl.parentNode.style.borderColor = '#ffcc00'; // High warning
+                coreTempEl.style.color = '#ffcc00';
+            } else {
+                coreTempEl.parentNode.style.borderColor = '#8d8ddb'; // Normal
+                coreTempEl.style.color = '#e0e0e0';
+            }
+        });
+
+        function controlCooler(command) {
+            socket.emit('controlCooler', command);
+        }
+    </script>
+</body>
+</html>
+
+
+
+node server.js
+
+
+
+npx create-react-app mini-npp-dashboard
+cd mini-npp-dashboard
+
+
+
+npm install socket.io-client
+
+
+
+// src/components/DashboardCard.js
+import React from 'react';
+import './DashboardCard.css'; // We'll create this CSS next
+
+const DashboardCard = ({ title, value, unit, statusClass = '', textColor = '' }) => {
+  return (
+    <div className="data-card">
+      <h3>{title}</h3>
+      <p style={{ color: textColor }}>
+        {value}
+        <span className="unit">{unit}</span>
+      </p>
+      {statusClass && <span className={`status-indicator ${statusClass}`}></span>}
+    </div>
+  );
+};
+
+export default DashboardCard;
+
+
+
+/* src/components/DashboardCard.css */
+.data-card {
+  background-color: #3e3e6b;
+  padding: 20px;
+  border-radius: 8px;
+  text-align: center;
+  border-left: 5px solid #8d8ddb;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: all 0.3s ease;
+}
+
+.data-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 15px rgba(0, 0, 0, 0.4);
+}
+
+.data-card h3 {
+  color: #c4c4ed;
+  margin-top: 0;
+  font-size: 1.2em;
+}
+
+.data-card p {
+  font-size: 1.8em;
+  font-weight: bold;
+  margin: 5px 0;
+  color: #e0e0e0; /* Default text color */
+}
+
+.unit {
+  font-size: 0.7em;
+  color: #a0a0c4;
+  margin-left: 5px;
+}
+
+/* Specific status indicators (e.g., for cooler status) */
+.status-indicator {
+  display: inline-block;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  margin-left: 10px;
+  vertical-align: middle;
+}
+
+.status-indicator.on {
+  background-color: #4CAF50; /* Green */
+}
+
+.status-indicator.off {
+  background-color: #f44336; /* Red */
+}
+
+
+
+// src/components/AlertsDisplay.js
+import React from 'react';
+import './AlertsDisplay.css'; // We'll create this CSS next
+
+const AlertsDisplay = ({ alerts }) => {
+  if (!alerts || alerts.length === 0) {
+    return null; // Don't render if no alerts
+  }
+
+  return (
+    <div className="alert-section">
+      <h3>System Alerts:</h3>
+      <ul>
+        {alerts.map((alert, index) => (
+          <li key={index}>{alert}</li>
+        ))}
+      </ul>
+    </div>
+  );
+};
+
+export default AlertsDisplay;
+
+
+
+/* src/components/AlertsDisplay.css */
+.alert-section {
+  background-color: #5a2a2a;
+  color: #ffcccc;
+  padding: 15px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  border: 1px solid #ff0000;
+  width: 100%;
+}
+
+.alert-section h3 {
+  color: #ffcc00; /* Warning color for heading */
+  margin-top: 0;
+}
+
+.alert-section ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.alert-section li {
+  margin-bottom: 5px;
+  font-weight: 500;
+}
+
+
+
+// src/App.js
+import React, { useEffect, useState } from 'react';
+import io from 'socket.io-client';
+import DashboardCard from './components/DashboardCard';
+import AlertsDisplay from './components/AlertsDisplay';
+import './App.css'; // Main app styling
+
+// Establish WebSocket connection (ensure this matches your Node.js server port)
+const socket = io('http://localhost:3000'); // Connect to your Node.js server
+
+function App() {
+  const [plantData, setPlantData] = useState({
+    coreTemperature: null,
+    coolantFlow: null,
+    pressure: null,
+    neutronFlux: null,
+    fastCoolerStatus: 'OFF',
+    fastCoolerPower: 0,
+    alerts: []
+  });
+
+  useEffect(() => {
+    socket.on('plantData', (data) => {
+      setPlantData(data);
+    });
+
+    // Clean up on component unmount
+    return () => {
+      socket.off('plantData');
+    };
+  }, []); // Empty dependency array means this runs once on mount
+
+  const controlCooler = (command) => {
+    socket.emit('controlCooler', command);
+  };
+
+  // Determine text color for core temperature based on thresholds
+  const getTempTextColor = (temp) => {
+    if (temp > 480) { // Critical
+      return '#ff0000';
+    } else if (temp > 450) { // High warning
+      return '#ffcc00';
+    }
+    return ''; // Default
+  };
+
+  return (
+    <div className="app-container">
+      <h1>Mini Nuclear Power Plant Dashboard</h1>
+
+      <AlertsDisplay alerts={plantData.alerts} />
+
+      <div className="data-grid">
+        <DashboardCard
+          title="Core Temperature"
+          value={plantData.coreTemperature?.toFixed(2) || '--.--'}
+          unit="°C"
+          textColor={getTempTextColor(plantData.coreTemperature)}
+        />
+        <DashboardCard
+          title="Coolant Flow"
+          value={plantData.coolantFlow?.toFixed(2) || '--.--'}
+          unit="%"
+        />
+        <DashboardCard
+          title="Pressure"
+          value={plantData.pressure?.toFixed(2) || '----'}
+          unit="PSI"
+        />
+        <DashboardCard
+          title="Neutron Flux"
+          value={plantData.neutronFlux?.toFixed(2) || '--.--'}
+          unit="AU"
+        />
+        <DashboardCard
+          title="Fast Cooler Status"
+          value={plantData.fastCoolerStatus}
+          unit=""
+          statusClass={plantData.fastCoolerStatus === 'ON' ? 'on' : 'off'}
+        />
+        <DashboardCard
+          title="Fast Cooler Power"
+          value={plantData.fastCoolerPower}
+          unit="%"
+        />
+      </div>
+
+      <div className="controls">
+        <button onClick={() => controlCooler('ON')}>Activate Cooler</button>
+        <button className="off" onClick={() => controlCooler('OFF')}>Deactivate Cooler</button>
+      </div>
+    </div>
+  );
+}
+
+export default App;
+
+
+
+/* src/App.css */
+body {
+  margin: 0;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #1a1a2e; /* Dark background */
+  color: #e0e0e0; /* Light text */
+}
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px;
+  max-width: 1200px;
+  margin: 20px auto;
+  background-color: #2a2a4a;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+h1 {
+  color: #8d8ddb;
+  text-align: center;
+  margin-bottom: 30px;
+  font-size: 2.5em;
+  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.data-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 25px;
+  width: 100%;
+  margin-bottom: 30px;
+}
+
+.controls {
+  text-align: center;
+  margin-top: 20px;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+}
+
+.controls button {
+  background-color: #4CAF50; /* Green */
+  color: white;
+  padding: 12px 25px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1.1em;
+  font-weight: bold;
+  transition: background-color 0.3s ease, transform 0.2s ease;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+}
+
+.controls button:hover {
+  background-color: #45a049;
+  transform: translateY(-2px);
+}
+
+.controls button:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+}
+
+.controls button.off {
+  background-color: #f44336; /* Red */
+}
+
+.controls button.off:hover {
+  background-color: #da190b;
+}
+
+
+
+npm start
+
+
+
+import time
+import random
+import matplotlib.pyplot as plt
+from collections import deque # For storing recent sensor data
+
+class ReactorSensor:
+    """Simulates a sensor reading with some noise."""
+    def __init__(self, name, initial_value, noise_std_dev):
+        self.name = name
+        self.value = initial_value
+        self.noise_std_dev = noise_std_dev
+
+    def get_reading(self):
+        """Returns the current value with added random noise."""
+        return self.value + random.gauss(0, self.noise_std_dev)
+
+    def set_value(self, new_value):
+        """Sets the underlying true value of the sensor."""
+        self.value = new_value
+
+class FastCooler:
+    """Simulates a fast cooling system."""
+    def __init__(self, name, max_cooling_power_mw):
+        self.name = name
+        self.max_cooling_power_mw = max_cooling_power_mw # Max heat removal in MW
+        self.is_active = False
+        self.current_power_percent = 0 # 0-100%
+
+    def activate(self, power_percent=100):
+        if 0 <= power_percent <= 100:
+            self.is_active = True
+            self.current_power_percent = power_percent
+            print(f"[COOLER] {self.name} activated at {power_percent}% power.")
+        else:
+            print("[COOLER] Invalid power percentage.")
+
+    def deactivate(self):
+        self.is_active = False
+        self.current_power_percent = 0
+        print(f"[COOLER] {self.name} deactivated.")
+
+    def get_cooling_rate_mw(self):
+        """Returns the current heat removal rate in MW."""
+        if self.is_active:
+            return self.max_cooling_power_mw * (self.current_power_percent / 100.0)
+        return 0
+
+class MiniNuclearReactor:
+    """
+    Simulates a highly simplified mini nuclear reactor core.
+    This is a conceptual model and does NOT represent real nuclear physics.
+    """
+    def __init__(self, initial_temp_c=400, thermal_power_mw=50, heat_capacity_mj_c=100):
+        self.core_temperature_c = initial_temp_c
+        self.thermal_power_mw = thermal_power_mw  # Heat generated by reactor
+        self.heat_capacity_mj_c = heat_capacity_mj_c # Reactor's thermal inertia (MJ/C)
+
+        # Sensors
+        self.temp_sensor = ReactorSensor("Core Temp", initial_temp_c, noise_std_dev=0.5)
+        self.pressure_sensor = ReactorSensor("Primary Pressure", 1500, noise_std_dev=5) # PSI
+        self.flow_sensor = ReactorSensor("Coolant Flow", 100, noise_std_dev=1) # %
+
+        # Cooler
+        self.fast_cooler = FastCooler("Main Fast Cooler", max_cooling_power_mw=70) # Can remove more than reactor generates
+
+        # Control Parameters (simplified)
+        self.cooler_activation_temp_c = 420
+        self.cooler_deactivation_temp_c = 405
+        self.critical_temp_c = 480 # Temperature at which emergency shutdown would occur
+        self.scram_triggered = False
+
+    def update_state(self, time_step_s=1):
+        """
+        Updates the reactor state over a given time step.
+        Calculates heat balance and updates temperature.
+        """
+        if self.scram_triggered:
+            print("[REACTOR] SCRAM active. Temperature is decreasing.")
+            # Simulate residual heat or cooling after SCRAM
+            heat_generated = self.thermal_power_mw * 0.1 # Residual heat
+            heat_removed = self.fast_cooler.get_cooling_rate_mw() if self.fast_cooler.is_active else (self.thermal_power_mw * 0.3) # Passive cooling after scram
+        else:
+            heat_generated = self.thermal_power_mw
+            heat_removed = self.fast_cooler.get_cooling_rate_mw()
+
+        # Net heat change (MW)
+        net_heat_change_mw = heat_generated - heat_removed
+
+        # Temperature change (dT = (Q * dt) / C) where Q in MJ/s, C in MJ/C
+        # Convert MW to MJ/s (1 MW = 1 MJ/s)
+        temp_change_c = (net_heat_change_mw * time_step_s) / self.heat_capacity_mj_c
+
+        self.core_temperature_c += temp_change_c
+
+        # Update sensor true values
+        self.temp_sensor.set_value(self.core_temperature_c)
+        # Other sensors (for demo, keep them relatively stable)
+        self.pressure_sensor.set_value(self.pressure_sensor.value + random.uniform(-0.1, 0.1))
+        self.flow_sensor.set_value(self.flow_sensor.value + random.uniform(-0.05, 0.05))
+
+        # Ensure values stay within reasonable bounds for simulation
+        if self.core_temperature_c < 300: self.core_temperature_c = 300
+        if self.pressure_sensor.value < 1400: self.pressure_sensor.value = 1400
+        if self.flow_sensor.value < 80: self.flow_sensor.value = 80
+        if self.flow_sensor.value > 110: self.flow_sensor.value = 110
+
+
+    def run_control_logic(self):
+        """
+        Implements a very basic control logic for the cooler based on temperature.
+        In a real plant, this would be highly redundant and complex.
+        """
+        current_temp_reading = self.temp_sensor.get_reading()
+
+        # Check for critical temperature leading to SCRAM
+        if current_temp_reading >= self.critical_temp_c and not self.scram_triggered:
+            self.trigger_scram("Core temperature critical!")
+            return # Stop other control logic if SCRAM triggered
+
+        if self.scram_triggered:
+            # If SCRAM, ensure cooler is active if possible to aid cooling
+            if not self.fast_cooler.is_active:
+                self.fast_cooler.activate(100)
+            return
+
+        # Normal cooler control
+        if current_temp_reading >= self.cooler_activation_temp_c and not self.fast_cooler.is_active:
+            self.fast_cooler.activate(100)
+        elif current_temp_reading <= self.cooler_deactivation_temp_c and self.fast_cooler.is_active:
+            self.fast_cooler.deactivate()
+
+    def trigger_scram(self, reason="Unknown"):
+        """Simulates an emergency shutdown (SCRAM)."""
+        if not self.scram_triggered:
+            self.scram_triggered = True
+            print(f"\n!!! REACTOR SCRAM INITIATED !!! Reason: {reason}")
+            print("--- All control rods inserted. Reactor power rapidly decreasing. ---")
+            self.thermal_power_mw = 0 # Simulate immediate power reduction
+            self.fast_cooler.activate(100) # Max cooling during SCRAM
+            # In a real system, many other actions would occur (e.g., containment isolation)
+
+    def get_current_data(self):
+        """Returns a dictionary of current sensor readings and plant status."""
+        return {
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "core_temp_C": self.temp_sensor.get_reading(),
+            "pressure_PSI": self.pressure_sensor.get_reading(),
+            "coolant_flow_percent": self.flow_sensor.get_reading(),
+            "cooler_active": self.fast_cooler.is_active,
+            "cooler_power_percent": self.fast_cooler.current_power_percent,
+            "scram_triggered": self.scram_triggered
+        }
+
+# --- Simulation Main Loop ---
+if __name__ == "__main__":
+    reactor = MiniNuclearReactor()
+    simulation_duration_s = 600 # 10 minutes of simulation
+    time_step_s = 1 # Update every second
+
+    history = deque(maxlen=simulation_duration_s) # Store data for plotting
+
+    print("--- Starting Mini Nuclear Power Plant Simulation ---")
+    print(f"Initial Core Temp: {reactor.core_temperature_c:.2f}°C")
+    print(f"Cooler Activation Temp: {reactor.cooler_activation_temp_c}°C")
+    print(f"Cooler Deactivation Temp: {reactor.cooler_deactivation_temp_c}°C")
+    print(f"Critical Temp (SCRAM): {reactor.critical_temp_c}°C")
+    print("-" * 40)
+
+    for current_sim_time in range(0, simulation_duration_s + time_step_s, time_step_s):
+        if reactor.scram_triggered and reactor.core_temperature_c < 350:
+            print("Reactor stabilized after SCRAM. Ending simulation.")
+            break # End simulation if SCRAM and cooled down
+
+        reactor.run_control_logic()
+        reactor.update_state(time_step_s)
+
+        current_data = reactor.get_current_data()
+        history.append(current_data)
+
+        # Print status periodically
+        if current_sim_time % 10 == 0 or reactor.scram_triggered:
+            status_msg = (
+                f"T: {current_sim_time:4d}s | "
+                f"Core Temp: {current_data['core_temp_C']:.2f}°C | "
+                f"Cooler: {'ON' if current_data['cooler_active'] else 'OFF'} "
+                f"({current_data['cooler_power_percent']}%) | "
+                f"Pressure: {current_data['pressure_PSI']:.2f} PSI | "
+                f"Flow: {current_data['coolant_flow_percent']:.2f}% | "
+                f"SCRAM: {current_data['scram_triggered']}"
+            )
+            print(status_msg)
+
+        time.sleep(0.01) # Simulate real-time delay (adjust for faster/slower sim)
+
+    print("\n--- Simulation Finished ---")
+
+    # --- Plotting Results ---
+    timestamps = [i['timestamp'] for i in history]
+    temps = [i['core_temp_C'] for i in history]
+    pressures = [i['pressure_PSI'] for i in history]
+    flows = [i['coolant_flow_percent'] for i in history]
+    cooler_active_status = [1 if i['cooler_active'] else 0 for i in history]
+    scram_status = [1 if i['scram_triggered'] else 0 for i in history]
+    cooler_power_percent = [i['cooler_power_percent'] for i in history]
+
+    fig, axes = plt.subplots(4, 1, figsize=(12, 10), sharex=True)
+    time_points = list(range(len(temps))) # Use index as time for simpler plotting
+
+    axes[0].plot(time_points, temps, label='Core Temperature (°C)', color='red')
+    axes[0].axhline(y=reactor.cooler_activation_temp_c, color='orange', linestyle='--', label='Cooler Activate Threshold')
+    axes[0].axhline(y=reactor.cooler_deactivation_temp_c, color='green', linestyle='--', label='Cooler Deactivate Threshold')
+    axes[0].axhline(y=reactor.critical_temp_c, color='purple', linestyle='-', label='SCRAM Threshold', linewidth=2)
+    axes[0].set_ylabel('Temperature (°C)')
+    axes[0].set_title('Mini NPP Core Temperature Over Time')
+    axes[0].legend()
+    axes[0].grid(True)
+
+    axes[1].plot(time_points, cooler_power_percent, label='Cooler Power (%)', color='blue')
+    axes[1].fill_between(time_points, 0, cooler_power_percent, color='blue', alpha=0.2)
+    axes[1].set_ylabel('Cooler Power (%)')
+    axes[1].set_title('Fast Cooler Activity')
+    axes[1].legend()
+    axes[1].grid(True)
+
+    axes[2].plot(time_points, pressures, label='Primary Pressure (PSI)', color='purple')
+    axes[2].set_ylabel('Pressure (PSI)')
+    axes[2].set_title('Primary Coolant Pressure')
+    axes[2].legend()
+    axes[2].grid(True)
+
+    axes[3].plot(time_points, flows, label='Coolant Flow (%)', color='cyan')
+    axes[3].set_ylabel('Flow (%)')
+    axes[3].set_title('Coolant Flow Rate')
+    axes[3].set_xlabel('Simulation Time (seconds)')
+    axes[3].legend()
+    axes[3].grid(True)
+
+    plt.tight_layout()
+    plt.show()
