@@ -1,0 +1,996 @@
+# 1. Enable the Cloud SQL Admin API
+gcloud services enable sqladmin.googleapis.com
+
+# 2. Create a Cloud SQL instance (PostgreSQL)
+# Note: This is NOT free tier. Free tier offers are limited (e.g., only 1GB storage for Firestore).
+# Cloud SQL pricing applies for anything beyond very basic usage.
+# Replace 'your-project-id', 'your-instance-name', 'your-database-user', 'your-password'
+gcloud sql instances create your-instance-name \
+  --database-version=POSTGRES_14 \
+  --region=us-central1 \
+  --cpu=1 \
+  --memory=3840MB \
+  --root-password=your-password \
+  --database-flags=cloudsql.iam_authentication=Off \
+  --project=your-project-id
+
+# 3. Create a database within the instance
+gcloud sql databases create your-database-name \
+  --instance=your-instance-name \
+  --project=your-project-id
+
+# 4. Create a user for your database
+gcloud sql users create your-database-user \
+  --instance=your-instance-name \
+  --password=your-password \
+  --host=% \
+  --project=your-project-id
+
+# 5. Get the instance connection name (needed for connecting applications)
+gcloud sql instances describe your-instance-name \
+  --format="value(connectionName)" \
+  --project=your-project-id
+
+
+
+# 1. Enable the Cloud Storage API
+gcloud services enable storage.googleapis.com
+
+# 2. Create a Cloud Storage bucket in a free-tier eligible region (e.g., us-central1)
+# Note: This is for object storage, not directly part of a relational database like PostgreSQL.
+# Replace 'your-unique-bucket-name' and 'your-project-id'
+gsutil mb -p your-project-id -l us-central1 gs://your-unique-bucket-name
+
+# 3. Upload a file to your bucket
+# gsutil cp local-file.txt gs://your-unique-bucket-name/remote-file.txt
+
+
+
+from google.cloud import aiplatform
+from pg8000.dbapi import Connection # Or psycopg2, etc. for PostgreSQL
+
+# --- Database Connection (adjust with your Cloud SQL details) ---
+db_user = "your-database-user"
+db_password = "your-password"
+db_name = "your-database-name"
+db_host = "YOUR_CLOUD_SQL_PUBLIC_IP_ADDRESS_OR_PROXY" # Or use Cloud SQL Proxy for secure connection
+# For Cloud SQL Proxy: connection_name = "your-project-id:your-region:your-instance-name"
+
+try:
+    conn = Connection(user=db_user, password=db_password, host=db_host, database=db_name)
+    cursor = conn.cursor()
+    print("Successfully connected to Cloud SQL database!")
+
+    # Example: Create a table if it doesn't exist
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS articles (
+            id SERIAL PRIMARY KEY,
+            title VARCHAR(255),
+            content TEXT
+        );
+    """)
+    conn.commit()
+
+except Exception as e:
+    print(f"Error connecting to database: {e}")
+    conn = None
+
+# --- Vertex AI Setup ---
+project_id = "your-project-id"
+region = "us-central1" # Must match your Vertex AI model location
+aiplatform.init(project=project_id, location=region)
+
+# Initialize the embedding model
+# You might use text-embedding-004 or another suitable model
+embedding_model = aiplatform.language_models.TextEmbeddingModel.from_pretrained("text-embedding-gecko@003")
+
+def get_text_from_db():
+    if conn:
+        cursor.execute("SELECT id, content FROM articles LIMIT 5;") # Fetch some sample text
+        return cursor.fetchall()
+    return []
+
+def generate_embeddings(texts):
+    """Generates embeddings for a list of texts using Vertex AI."""
+    try:
+        embeddings = embedding_model.predict(texts)
+        return [embedding.values for embedding in embeddings.embeddings]
+    except Exception as e:
+        print(f"Error generating embeddings: {e}")
+        return []
+
+def store_embeddings_in_db(data_with_embeddings):
+    """Conceptual: Stores embeddings back into the database."""
+    if conn:
+        # You would typically add a new column for vector embeddings in your table
+        # For PostgreSQL, you might use 'vector' extension for efficient search
+        # ALTER TABLE articles ADD COLUMN embedding VECTOR(768); # Example if using pgvector
+        # Then update with the embeddings:
+        # For simplicity, this example just prints.
+        print("\n--- Storing Embeddings (Conceptual) ---")
+        for item_id, text, embedding in data_with_embeddings:
+            print(f"Article ID: {item_id}, Embedding: {embedding[:5]}...") # Print first 5 values
+            # In a real scenario, you'd update your database with the vector
+            # cursor.execute("UPDATE articles SET embedding = %s WHERE id = %s", (embedding, item_id))
+            # conn.commit()
+        print("Embeddings conceptually stored.")
+
+if __name__ == "__main__":
+    db_data = get_text_from_db()
+    if db_data:
+        ids = [row[0] for row in db_data]
+        contents = [row[1] for row in db_data]
+        embeddings = generate_embeddings(contents)
+
+        if embeddings:
+            # Pair original data with their generated embeddings
+            data_to_store = [(ids[i], contents[i], embeddings[i]) for i in range(len(ids))]
+            store_embeddings_in_db(data_to_store)
+
+    if conn:
+        conn.close()
+        print("Database connection closed.")
+
+
+
+
+# Example using Cirq (a very basic quantum circuit)
+import cirq
+
+# Pick a qubit.
+qubit = cirq.GridQubit(0, 0)
+
+# Create a circuit that entangles the qubit.
+circuit = cirq.Circuit(
+    cirq.H(qubit),  # Apply Hadamard gate
+    cirq.measure(qubit, key='result') # Measure the qubit
+)
+
+print("Circuit:")
+print(circuit)
+
+# Simulate the circuit
+simulator = cirq.Simulator()
+result = simulator.run(circuit, repetitions=10)
+
+print("\nMeasurement Results:")
+print(result)
+
+# For more complex quantum machine learning, you would explore TensorFlow Quantum.
+# from tensorflow_quantum.core.ops import circuit_op
+# import tensorflow as tf
+# import numpy as np
+# ... (complex quantum ML code)
+
+
+
+
+npm install @google-cloud/spanner @google-cloud/aiplatform
+
+
+
+
+// index.js
+
+// --- Configuration (Replace with your actual project details) ---
+const projectId = 'your-gcp-project-id'; // Your Google Cloud Project ID
+const instanceId = 'your-spanner-instance-id'; // e.g., 'test-instance'
+const databaseId = 'your-spanner-database-id'; // e.g., 'my-database'
+
+// --- Google Cloud Spanner Setup ---
+const {Spanner} = require('@google-cloud/spanner');
+const spanner = new Spanner({projectId});
+
+const instance = spanner.instance(instanceId);
+const database = instance.database(databaseId);
+
+// --- Google Cloud Vertex AI Setup (for Embeddings) ---
+const {TextEmbeddingModel} = require('@google-cloud/aiplatform');
+const aiPlatformClient = new TextEmbeddingModel({
+    project: projectId,
+    location: 'us-central1', // Or your preferred region for Vertex AI
+});
+// Using the 'text-embedding-gecko@003' model (ensure it's available in your region)
+const embeddingModel = aiPlatformClient.from_pretrained('text-embedding-gecko@003');
+
+// --- Spanner Database Operations ---
+
+async function createTableIfNotExists() {
+    console.log('Creating table if it does not exist...');
+    try {
+        await database.updateSchema([
+            `CREATE TABLE IF NOT EXISTS Documents (
+                DocumentId STRING(36) NOT NULL,
+                Title STRING(MAX),
+                Content STRING(MAX),
+                Embedding ARRAY<FLOAT64>, -- For storing AI-generated vector embeddings
+                CreatedAt TIMESTAMP OPTIONS (allow_commit_timestamp=true)
+            ) PRIMARY KEY (DocumentId)`
+        ]);
+        console.log('Table "Documents" created or already exists.');
+    } catch (err) {
+        console.error('ERROR: Could not create table:', err);
+    }
+}
+
+async function insertDocument(title, content) {
+    console.log(`Inserting document: "${title}"`);
+    const documentId = new Date().getTime().toString(); // Simple unique ID
+    let embedding = null;
+
+    try {
+        // Generate embedding for the content using Vertex AI
+        const prediction = await embeddingModel.predict({
+            instances: [{ content: content }]
+        });
+        embedding = prediction.predictions[0].embeddings.values;
+        console.log('Generated embedding for content.');
+    } catch (err) {
+        console.error('ERROR: Could not generate embedding:', err);
+        // Continue without embedding if AI call fails
+    }
+
+    try {
+        await database.runTransaction(async transaction => {
+            const [rowCount] = await transaction.insert('Documents', [
+                {
+                    DocumentId: documentId,
+                    Title: title,
+                    Content: content,
+                    Embedding: embedding, // Store the embedding
+                    CreatedAt: Spanner.commitTimestamp(),
+                },
+            ]);
+            await transaction.commit();
+            console.log(`Inserted ${rowCount} row(s) into Documents.`);
+        });
+        return documentId;
+    } catch (err) {
+        console.error('ERROR: Could not insert document:', err);
+        throw err;
+    }
+}
+
+async function queryDocuments() {
+    console.log('Querying all documents:');
+    try {
+        const [rows] = await database.run('SELECT DocumentId, Title, Content FROM Documents');
+        rows.forEach(row => {
+            const json = row.toJSON();
+            console.log(`  DocumentId: ${json.DocumentId}, Title: ${json.Title}`);
+        });
+        return rows;
+    } catch (err) {
+        console.error('ERROR: Could not query documents:', err);
+        throw err;
+    }
+}
+
+async function semanticSearch(queryText) {
+    console.log(`Performing semantic search for: "${queryText}"`);
+    let queryEmbedding = null;
+
+    try {
+        const prediction = await embeddingModel.predict({
+            instances: [{ content: queryText }]
+        });
+        queryEmbedding = prediction.predictions[0].embeddings.values;
+        console.log('Generated embedding for search query.');
+    } catch (err) {
+        console.error('ERROR: Could not generate query embedding:', err);
+        return []; // Return empty if embedding fails
+    }
+
+    // In a real application, you'd use a dedicated vector search index or
+    // a more optimized method for finding nearest neighbors.
+    // Spanner doesn't have native vector search like AlloyDB with pgvector,
+    // so this is a simplified conceptual comparison.
+    // For Spanner, you might export embeddings to Vertex AI Vector Search
+    // or perform this similarity calculation in your application layer for small datasets.
+    // For large-scale Spanner vector search, you'd integrate with BigQuery/Vertex AI Vector Search
+    // or build a custom solution.
+
+    const [rows] = await database.run('SELECT DocumentId, Title, Content, Embedding FROM Documents');
+
+    const results = rows
+        .map(row => {
+            const data = row.toJSON();
+            if (!data.Embedding || data.Embedding.length === 0) {
+                return null;
+            }
+            // Calculate cosine similarity (simplified for illustration)
+            // For proper vector similarity, use a dedicated library or service.
+            const similarity = calculateCosineSimilarity(queryEmbedding, data.Embedding);
+            return {
+                documentId: data.DocumentId,
+                title: data.Title,
+                content: data.Content,
+                similarity: similarity
+            };
+        })
+        .filter(Boolean) // Remove documents without embeddings
+        .sort((a, b) => b.similarity - a.similarity); // Sort by similarity
+
+    console.log('\n--- Semantic Search Results (Top 3) ---');
+    results.slice(0, 3).forEach(res => {
+        console.log(`  Title: ${res.title}, Similarity: ${res.similarity.toFixed(4)}`);
+    });
+
+    return results;
+}
+
+// Basic Cosine Similarity calculation (for demonstration purposes only)
+function calculateCosineSimilarity(vec1, vec2) {
+    if (vec1.length !== vec2.length) {
+        throw new Error('Vectors must be of the same length');
+    }
+    let dotProduct = 0;
+    let magnitude1 = 0;
+    let magnitude2 = 0;
+    for (let i = 0; i < vec1.length; i++) {
+        dotProduct += vec1[i] * vec2[i];
+        magnitude1 += vec1[i] * vec1[i];
+        magnitude2 += vec2[i] * vec2[i];
+    }
+    magnitude1 = Math.sqrt(magnitude1);
+    magnitude2 = Math.sqrt(magnitude2);
+
+    if (magnitude1 === 0 || magnitude2 === 0) {
+        return 0; // Avoid division by zero
+    }
+    return dotProduct / (magnitude1 * magnitude2);
+}
+
+
+// --- Main Execution Flow ---
+async function main() {
+    try {
+        await createTableIfNotExists();
+
+        await insertDocument(
+            'The Future of AI',
+            'Artificial intelligence is rapidly transforming industries, from healthcare to finance. Generative AI models are capable of creating new content like text, images, and code.'
+        );
+        await insertDocument(
+            'Quantum Computing Fundamentals',
+            'Quantum computing harnesses quantum-mechanical phenomena like superposition and entanglement to solve problems intractable for classical computers. Google is actively researching superconducting qubits.'
+        );
+        await insertDocument(
+            'Sustainable Energy Solutions',
+            'Renewable energy sources like solar and wind power are key to combating climate change. Battery storage and smart grids are essential for grid stability.'
+        );
+
+        await queryDocuments();
+
+        await semanticSearch('What are new developments in AI technology?');
+        await semanticSearch('How does quantum physics apply to computing?');
+        await semanticSearch('Energy alternatives for the environment.');
+
+        console.log('\nDemonstration complete.');
+
+    } catch (err) {
+        console.error('An error occurred during the demonstration:', err);
+    } finally {
+        // Close the database connection
+        await database.close();
+        console.log('Database connection closed.');
+    }
+}
+
+main();
+
+
+
+
+gcloud auth application-default login
+
+
+
+node index.js
+
+
+
+// functions/index.js
+const functions = require('@google-cloud/functions'); // Not standard, but illustrative
+const { TextEmbeddingModel } = require('@google-cloud/aiplatform');
+const { Firestore } = require('@google-cloud/firestore');
+
+const projectId = process.env.GCLOUD_PROJECT;
+const region = 'us-central1'; // Or your preferred Vertex AI region
+
+// Initialize Vertex AI client
+const aiPlatformClient = new TextEmbeddingModel({
+    project: projectId,
+    location: region,
+});
+const embeddingModel = aiPlatformClient.from_pretrained('text-embedding-gecko@003'); // Choose your model
+
+// Initialize Firestore client (for potential direct updates if needed, though usually frontend handles this for docs)
+const firestore = new Firestore({ projectId });
+
+/**
+ * Cloud Function to generate text embeddings using Vertex AI.
+ * This function should be called from your React app via an API.
+ */
+exports.generateEmbedding = functions.https.onCall(async (data, context) => {
+    // Optional: Authenticate the user if needed
+    // if (!context.auth) {
+    //     throw new functions.https.HttpsError('unauthenticated', 'The function must be called while authenticated.');
+    // }
+
+    const { text } = data;
+
+    if (!text || typeof text !== 'string') {
+        throw new functions.https.HttpsError('invalid-argument', 'The "text" argument is required and must be a string.');
+    }
+
+    try {
+        const prediction = await embeddingModel.predict({
+            instances: [{ content: text }]
+        });
+        const embedding = prediction.predictions[0].embeddings.values;
+        return { embedding };
+    } catch (error) {
+        console.error('Error generating embedding:', error);
+        throw new functions.https.HttpsError('internal', 'Failed to generate embedding.', error.message);
+    }
+});
+
+// Optional: Another function to handle semantic search if you want
+// to keep embedding similarity calculation on the backend
+// exports.semanticSearch = functions.https.onCall(async (data, context) => {
+//    // ... similar logic, fetch documents, calculate similarity, return results
+// });
+
+
+
+npx create-react-app google-db-app
+cd google-db-app
+npm install firebase
+
+
+
+// src/firebaseConfig.js
+const firebaseConfig = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_AUTH_DOMAIN",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_STORAGE_BUCKET",
+    messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+    appId: "YOUR_APP_ID"
+};
+
+export default firebaseConfig;
+
+
+
+// src/App.js
+import React, { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getFirestore, collection, addDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import firebaseConfig from './firebaseConfig';
+import './App.css'; // For basic styling
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const functions = getFunctions(app, 'us-central1'); // Replace with your Cloud Function region
+
+// Callable Cloud Function for embeddings
+const generateEmbeddingFunction = httpsCallable(functions, 'generateEmbedding');
+
+function App() {
+    const [title, setTitle] = useState('');
+    const [content, setContent] = useState('');
+    const [documents, setDocuments] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
+
+    // Fetch documents from Firestore in real-time
+    useEffect(() => {
+        const q = query(collection(db, 'documents'), orderBy('createdAt', 'desc'));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const docs = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            }));
+            setDocuments(docs);
+        }, (err) => {
+            console.error("Error fetching documents:", err);
+            setError("Failed to load documents.");
+        });
+
+        return () => unsubscribe(); // Cleanup subscription on unmount
+    }, []);
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+        setError(null);
+
+        if (!title || !content) {
+            setError("Title and Content cannot be empty.");
+            setLoading(false);
+            return;
+        }
+
+        try {
+            // Step 1: Call backend (Cloud Function) to get embedding
+            const result = await generateEmbeddingFunction({ text: content });
+            const embedding = result.data.embedding;
+            console.log("Embedding generated:", embedding);
+
+            // Step 2: Save document with embedding to Firestore
+            await addDoc(collection(db, 'documents'), {
+                title,
+                content,
+                embedding: embedding, // Store the embedding
+                createdAt: new Date(),
+            });
+            setTitle('');
+            setContent('');
+            console.log('Document added with embedding!');
+        } catch (err) {
+            console.error("Error adding document or generating embedding:", err);
+            setError(`Failed to add document: ${err.message}`);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div className="App">
+            <h1>Advanced Google Database (Firestore) with AI</h1>
+
+            <form onSubmit={handleSubmit} className="document-form">
+                <input
+                    type="text"
+                    placeholder="Document Title"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    required
+                />
+                <textarea
+                    placeholder="Document Content"
+                    value={content}
+                    onChange={(e) => setContent(e.target.value)}
+                    rows="5"
+                    required
+                ></textarea>
+                <button type="submit" disabled={loading}>
+                    {loading ? 'Adding...' : 'Add Document with AI Embedding'}
+                </button>
+                {error && <p className="error">{error}</p>}
+            </form>
+
+            <div className="document-list">
+                <h2>Your Documents</h2>
+                {documents.length === 0 ? (
+                    <p>No documents yet. Add one above!</p>
+                ) : (
+                    <ul>
+                        {documents.map((doc) => (
+                            <li key={doc.id} className="document-item">
+                                <h3>{doc.title}</h3>
+                                <p>{doc.content}</p>
+                                {/* Displaying embedding is not practical, but it's there */}
+                                {doc.embedding && (
+                                    <small>Embedding stored (first 5 values): {doc.embedding.slice(0, 5).map(v => v.toFixed(3)).join(', ')}...</small>
+                                )}
+                            </li>
+                        ))}
+                    </ul>
+                )}
+            </div>
+        </div>
+    );
+}
+
+export default App;
+
+
+
+
+/* src/App.css */
+.App {
+    font-family: sans-serif;
+    max-width: 800px;
+    margin: 20px auto;
+    padding: 20px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.document-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 20px;
+    padding: 15px;
+    border: 1px solid #eee;
+    border-radius: 5px;
+    background-color: #f9f9f9;
+}
+
+.document-form input[type="text"],
+.document-form textarea {
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 1rem;
+}
+
+.document-form button {
+    padding: 12px 20px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: background-color 0.3s ease;
+}
+
+.document-form button:hover:not(:disabled) {
+    background-color: #45a049;
+}
+
+.document-form button:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
+}
+
+.error {
+    color: red;
+    margin-top: 10px;
+}
+
+.document-list ul {
+    list-style: none;
+    padding: 0;
+}
+
+.document-item {
+    background-color: #fff;
+    border: 1px solid #eee;
+    border-radius: 5px;
+    padding: 15px;
+    margin-bottom: 10px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.document-item h3 {
+    margin-top: 0;
+    color: #333;
+}
+
+.document-item p {
+    color: #555;
+    line-height: 1.5;
+}
+
+.document-item small {
+    color: #777;
+    font-size: 0.8em;
+}
+
+
+
+npm start
+
+
+
+#include "google/cloud/spanner/client.h"
+#include "google/cloud/spanner/create_instance_request_builder.h"
+#include <iostream>
+#include <string>
+#include <vector>
+#include <future> // For async operations
+
+// --- For conceptual Vertex AI REST API call ---
+// In a real application, you'd use a robust HTTP client library (e.g., libcurl, Boost.Asio)
+// and a JSON parsing library (e.g., nlohmann/json).
+// This is a placeholder for demonstration purposes.
+#include <nlohmann/json.hpp> // You'd need to install this library (e.g., via vcpkg or Conan)
+// #include <curl/curl.h> // You'd need to install libcurl
+
+// Placeholder for Vertex AI endpoint and project details
+const std::string kVertexAiEndpoint = "https://us-central1-aiplatform.googleapis.com/v1/";
+const std::string kVertexAiModel = "projects/YOUR_PROJECT_ID/locations/us-central1/publishers/google/models/text-embedding-gecko@003:predict";
+
+// --- Function to simulate calling Vertex AI for embeddings ---
+// This function needs a real HTTP client and JSON parsing
+std::vector<double> CallVertexAiForEmbedding(const std::string& text) {
+    std::cout << "DEBUG: Simulating Vertex AI embedding for: '" << text.substr(0, 30) << "...'\n";
+    // *** IMPORTANT: This is a simplified placeholder. ***
+    // A real implementation would involve:
+    // 1. Obtaining an OAuth2 token for authentication (Google Cloud SDK handles this for client libraries).
+    //    For raw REST, you'd get an access token using `gcloud auth print-access-token` or a service account key.
+    // 2. Making an HTTP POST request to the Vertex AI endpoint.
+    // 3. Constructing the JSON request body.
+    // 4. Parsing the JSON response to extract the embedding vector.
+
+    // Example JSON payload for Vertex AI Text Embeddings:
+    // {
+    //   "instances": [
+    //     {"content": "Your text here"}
+    //   ]
+    // }
+    // Example JSON response:
+    // {
+    //   "predictions": [
+    //     {"embeddings": {"values": [0.1, 0.2, ...], "statistics": {...}}}
+    //   ]
+    // }
+
+    // For a real C++ implementation, you might do something like:
+    /*
+    CURL* curl = curl_easy_init();
+    if (curl) {
+        // Set URL, headers (Authorization: Bearer <token>, Content-Type: application/json),
+        // request body, and perform the request.
+        // Parse JSON response using nlohmann::json.
+        // ...
+        curl_easy_cleanup(curl);
+    }
+    */
+
+    // For now, return a dummy embedding
+    std::vector<double> dummy_embedding(768); // Typical size for text-embedding-gecko
+    for (int i = 0; i < 768; ++i) {
+        dummy_embedding[i] = static_cast<double>(i % 100) / 1000.0; // Dummy values
+    }
+    return dummy_embedding;
+}
+
+// --- Spanner Database Operations ---
+
+namespace spanner = ::google::cloud::spanner;
+
+// Helper to create a Spanner database (admin operation)
+void CreateSpannerDatabase(const std::string& project_id,
+                           const std::string& instance_id,
+                           const std::string& database_id) {
+    spanner::DatabaseAdminClient admin_client(
+        spanner::MakeDatabaseAdminConnection());
+    auto database_name = spanner::Database(project_id, instance_id, database_id);
+
+    std::cout << "Creating Spanner database: " << database_name.FullName() << "...\n";
+
+    // Define schema with an 'Embedding' ARRAY<FLOAT64> column
+    auto f = admin_client.CreateDatabase(
+        database_name.instance().FullName(),
+        "CREATE DATABASE `" + database_id + "`",
+        {
+            "CREATE TABLE Documents (",
+            "  DocumentId STRING(36) NOT NULL,",
+            "  Title STRING(MAX),",
+            "  Content STRING(MAX),",
+            "  Embedding ARRAY<FLOAT64>,", // Store the AI embedding here
+            "  CreatedAt TIMESTAMP OPTIONS (allow_commit_timestamp=true)",
+            ") PRIMARY KEY (DocumentId)"
+        }
+    );
+
+    auto db = f.get(); // Wait for the operation to complete
+    if (!db) {
+        std::cerr << "Error creating database: " << db.status() << "\n";
+        // If database already exists, this will fail. Handle gracefully in a real app.
+        // For this example, we'll assume it's created or exists.
+    } else {
+        std::cout << "Database created: " << db->name() << "\n";
+    }
+}
+
+// Function to insert a document with an embedding
+void InsertDocument(spanner::Client& client, const std::string& document_id,
+                    const std::string& title, const std::string& content,
+                    const std::vector<double>& embedding) {
+    std::cout << "Inserting document '" << title << "'...\n";
+    auto commit_timestamp = spanner::MakeCommitTimestamp();
+    auto mutation = spanner::InsertMutation(
+        "Documents",
+        {"DocumentId", "Title", "Content", "Embedding", "CreatedAt"},
+        {
+            spanner::Value(document_id),
+            spanner::Value(title),
+            spanner::Value(content),
+            spanner::Value(embedding), // Spanner supports ARRAY<FLOAT64>
+            spanner::Value(commit_timestamp)
+        });
+
+    auto commit_result = client.Commit(spanner::Mutations{mutation});
+    if (!commit_result) {
+        std::cerr << "Error inserting document: " << commit_result.status() << "\n";
+    } else {
+        std::cout << "Document inserted. Commit timestamp: " << commit_result->commit_timestamp << "\n";
+    }
+}
+
+// Function to query documents
+void QueryDocuments(spanner::Client& client) {
+    std::cout << "\nQuerying all documents:\n";
+    auto rows = client.ExecuteQuery(spanner::SqlStatement(
+        "SELECT DocumentId, Title, Content FROM Documents ORDER BY CreatedAt DESC"));
+
+    for (auto const& row : spanner::StreamOf<std::tuple<std::string, std::string, std::string>>(rows)) {
+        if (!row) {
+            std::cerr << "Error reading row: " << row.status() << "\n";
+            return;
+        }
+        std::cout << "  ID: " << std::get<0>(*row)
+                  << ", Title: " << std::get<1>(*row).substr(0, 50) << "...\n";
+    }
+}
+
+// Function for conceptual semantic search
+void SemanticSearch(spanner::Client& client, const std::string& query_text) {
+    std::cout << "\nPerforming semantic search for: '" << query_text << "'\n";
+
+    // Get embedding for the query text using the conceptual AI call
+    std::vector<double> query_embedding = CallVertexAiForEmbedding(query_text);
+
+    // Fetch all documents with their embeddings
+    auto rows = client.ExecuteQuery(spanner::SqlStatement(
+        "SELECT DocumentId, Title, Content, Embedding FROM Documents"));
+
+    std::vector<std::tuple<std::string, std::string, double>> results; // ID, Title, Similarity
+
+    for (auto const& row : spanner::StreamOf<std::tuple<std::string, std::string, std::string, spanner::Array<double>>>(rows)) {
+        if (!row) {
+            std::cerr << "Error reading row: " << row.status() << "\n";
+            continue;
+        }
+        std::string doc_id = std::get<0>(*row);
+        std::string doc_title = std::get<1>(*row);
+        // std::string doc_content = std::get<2>(*row); // Not used for similarity calculation here
+        spanner::Array<double> doc_embedding_array = std::get<3>(*row);
+
+        if (!doc_embedding_array.empty()) {
+            std::vector<double> doc_embedding(doc_embedding_array.begin(), doc_embedding_array.end());
+
+            // Calculate cosine similarity (basic implementation)
+            double dot_product = 0.0;
+            double mag1 = 0.0;
+            double mag2 = 0.0;
+
+            if (query_embedding.size() != doc_embedding.size() || query_embedding.empty()) {
+                std::cerr << "Warning: Embedding size mismatch or empty embedding for document " << doc_id << "\n";
+                continue;
+            }
+
+            for (size_t i = 0; i < query_embedding.size(); ++i) {
+                dot_product += query_embedding[i] * doc_embedding[i];
+                mag1 += query_embedding[i] * query_embedding[i];
+                mag2 += doc_embedding[i] * doc_embedding[i];
+            }
+
+            double similarity = 0.0;
+            if (mag1 > 0 && mag2 > 0) {
+                similarity = dot_product / (std::sqrt(mag1) * std::sqrt(mag2));
+            }
+            results.emplace_back(doc_id, doc_title, similarity);
+        }
+    }
+
+    // Sort by similarity (descending)
+    std::sort(results.begin(), results.end(), [](const auto& a, const auto& b) {
+        return std::get<2>(a) > std::get<2>(b);
+    });
+
+    std::cout << "\n--- Semantic Search Results (Top 3) ---\n";
+    for (size_t i = 0; i < std::min((size_t)3, results.size()); ++i) {
+        std::cout << "  Title: '" << std::get<1>(results[i])
+                  << "', Similarity: " << std::fixed << std::setprecision(4)
+                  << std::get<2>(results[i]) << "\n";
+    }
+}
+
+
+int main(int argc, char* argv[]) {
+    if (argc != 4) {
+        std::cerr << "Usage: " << argv[0]
+                  << " <project-id> <instance-id> <database-id>\n";
+        return 1;
+    }
+
+    const std::string project_id = argv[1];
+    const std::string instance_id = argv[2];
+    const std::string database_id = argv[3];
+
+    // IMPORTANT: Replace YOUR_PROJECT_ID in kVertexAiModel with your actual project ID.
+    // For a real application, consider using environment variables for sensitive info.
+    // Ensure you have authentication set up for your GCP project (e.g., `gcloud auth application-default login`).
+
+    spanner::Client client(spanner::MakeConnection(
+        spanner::Database(project_id, instance_id, database_id)));
+
+    // Create the database and table (this might fail if it already exists, which is fine for repeated runs)
+    try {
+        CreateSpannerDatabase(project_id, instance_id, database_id);
+        // Give Spanner a moment to fully provision the table, especially if new
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+    } catch (const google::cloud::Status& s) {
+        // Handle case where database/table already exists
+        if (s.code() == google::cloud::StatusCode::kAlreadyExists) {
+            std::cout << "Database or table already exists, proceeding.\n";
+        } else {
+            std::cerr << "Failed to create database/table: " << s.message() << "\n";
+            return 1;
+        }
+    }
+
+
+    try {
+        // Insert some documents with conceptual embeddings
+        InsertDocument(client, "doc1", "The Rise of Quantum Computing",
+                       "Quantum computing leverages superposition and entanglement to solve problems intractable for classical computers. Google is at the forefront of this research.",
+                       CallVertexAiForEmbedding("The Rise of Quantum Computing"));
+
+        InsertDocument(client, "doc2", "Sustainable Energy for the Future",
+                       "Renewable energy sources like solar and wind power are critical for mitigating climate change. Battery storage and smart grids improve energy efficiency.",
+                       CallVertexAiForEmbedding("Sustainable Energy for the Future"));
+
+        InsertDocument(client, "doc3", "Innovations in Artificial Intelligence",
+                       "AI continues to advance rapidly, with generative models creating new text, images, and code. Machine learning algorithms are transforming industries globally.",
+                       CallVertexAiForEmbedding("Innovations in Artificial Intelligence"));
+
+        QueryDocuments(client);
+
+        // Perform conceptual semantic searches
+        SemanticSearch(client, "What are the latest breakthroughs in AI?");
+        SemanticSearch(client, "How does quantum physics relate to computation?");
+        SemanticSearch(client, "New ways to produce clean energy.");
+
+    } catch (const std::exception& ex) {
+        std::cerr << "An unexpected error occurred: " << ex.what() << "\n";
+        return 1;
+    }
+
+    return 0;
+}
+
+
+
+git clone https://github.com/microsoft/vcpkg.git
+./vcpkg/bootstrap-vcpkg.sh
+./vcpkg/vcpkg install google-cloud-cpp[spanner]
+# You might also need nlohmann/json if you implement real HTTP calls
+./vcpkg/vcpkg install nlohmann-json
+# And optionally curl if using libcurl for HTTP
+./vcpkg/vcpkg install curl
+
+
+
+cmake_minimum_required(VERSION 3.10...3.27)
+project(SpannerAIExample CXX)
+
+# If using vcpkg, you might need:
+# set(CMAKE_TOOLCHAIN_FILE "/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
+
+find_package(google_cloud_cpp CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED) # If you use nlohmann/json
+# find_package(CURL REQUIRED) # If you use libcurl
+
+add_executable(spanner_ai_app main.cpp)
+
+target_link_libraries(spanner_ai_app PRIVATE
+    google_cloud_cpp::spanner
+    nlohmann_json::nlohmann_json # Link nlohmann/json
+    # CURL::libcurl # Link libcurl
+)
+
+
+
+mkdir build && cd build
+cmake ..
+cmake --build .
+
+
+
+./spanner_ai_app your-gcp-project-id your-spanner-instance-id your-spanner-database-id
+
+
+
