@@ -1,0 +1,1427 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.yourappname.electroshockprankster">
+
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" />
+    <uses-feature android:name="android.hardware.camera.flash" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.ElectroShockPrankster">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>
+
+
+
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".MainActivity"
+    android:background="@android:color/black">
+
+    <ImageView
+        android:id="@+id/taserImageView"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/taser_gun_image" // You'll need to add a taser image to your drawables
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintHeight_percent="0.7"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintVertical_bias="0.3" />
+
+    <Button
+        android:id="@+id/fireButton"
+        android:layout_width="150dp"
+        android:layout_height="150dp"
+        android:text="FIRE"
+        android:textSize="24sp"
+        android:backgroundTint="#FF0000"
+        app:cornerRadius="75dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/taserImageView"
+        app:layout_constraintVertical_bias="0.8" />
+
+    <RadioGroup
+        android:id="@+id/modeRadioGroup"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        android:layout_marginTop="16dp">
+        <RadioButton
+            android:id="@+id/modeStun"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Stun"
+            android:checked="true"/>
+        <RadioButton
+            android:id="@+id/modeArc"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Arc"/>
+        <RadioButton
+            android:id="@+id/modeOvercharge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Overcharge"/>
+    </RadioGroup>
+
+</androidx.constraintlayout.widget.ConstraintLayout>
+
+
+
+package com.yourappname.electroshockprankster
+
+import android.content.Context
+import android.hardware.camera2.CameraManager
+import android.media.MediaPlayer
+import android.os.Build
+import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.widget.Button
+import android.widget.ImageView
+import android.widget.RadioButton
+import android.widget.RadioGroup
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.* // For Coroutines for non-blocking UI
+
+class MainActivity : AppCompatActivity() {
+
+    private lateinit var taserImageView: ImageView
+    private lateinit var fireButton: Button
+    private lateinit var modeRadioGroup: RadioGroup
+    private lateinit var modeStun: RadioButton
+    private lateinit var modeArc: RadioButton
+    private lateinit var modeOvercharge: RadioButton
+
+    private var mediaPlayer: MediaPlayer? = null
+    private var vibrator: Vibrator? = null
+    private var cameraManager: CameraManager? = null
+    private var cameraId: String? = null
+
+    private var isFiring = false // To prevent overlapping sounds/vibrations
+
+    // Define different effects for modes
+    private val stunEffect = TaserEffect(
+        soundResId = R.raw.taser_sound_short, // Add your sound files to res/raw
+        vibrationPattern = longArrayOf(0, 100, 50, 100),
+        vibrationAmplitude = intArrayOf(0, 255, 0, 255),
+        duration = 300 // Milliseconds
+    )
+
+    private val arcEffect = TaserEffect(
+        soundResId = R.raw.taser_sound_long,
+        vibrationPattern = longArrayOf(0, 50, 20, 50, 20, 50),
+        vibrationAmplitude = intArrayOf(0, 150, 0, 150, 0, 150),
+        duration = 500
+    )
+
+    private val overchargeEffect = TaserEffect(
+        soundResId = R.raw.taser_sound_intense,
+        vibrationPattern = longArrayOf(0, 200, 30, 200),
+        vibrationAmplitude = intArrayOf(0, 255, 0, 255),
+        duration = 800
+    )
+
+    private var currentTaserEffect: TaserEffect = stunEffect
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        taserImageView = findViewById(R.id.taserImageView)
+        fireButton = findViewById(R.id.fireButton)
+        modeRadioGroup = findViewById(R.id.modeRadioGroup)
+        modeStun = findViewById(R.id.modeStun)
+        modeArc = findViewById(R.id.modeArc)
+        modeOvercharge = findViewById(R.id.modeOvercharge)
+
+        // Initialize vibrator service
+        vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+
+        // Initialize camera manager for flashlight
+        cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        try {
+            cameraId = cameraManager?.cameraIdList?.get(0) // Get the first camera ID
+        } catch (e: Exception) {
+            e.printStackTrace()
+            // Handle case where no camera or flashlight is available
+            // Perhaps disable flashlight feature or show a message
+        }
+
+        // Set initial effect
+        currentTaserEffect = stunEffect
+
+        modeRadioGroup.setOnCheckedChangeListener { _, checkedId ->
+            currentTaserEffect = when (checkedId) {
+                R.id.modeStun -> stunEffect
+                R.id.modeArc -> arcEffect
+                R.id.modeOvercharge -> overchargeEffect
+                else -> stunEffect
+            }
+        }
+
+        fireButton.setOnClickListener {
+            if (!isFiring) {
+                fireTaser()
+            }
+        }
+    }
+
+    private fun fireTaser() {
+        isFiring = true // Set firing flag
+        fireButton.isEnabled = false // Disable button during firing
+
+        // 1. Play Sound
+        mediaPlayer?.release() // Release any previous media player
+        mediaPlayer = MediaPlayer.create(this, currentTaserEffect.soundResId)
+        mediaPlayer?.start()
+
+        // 2. Vibrate
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val effect = VibrationEffect.createWaveform(
+                currentTaserEffect.vibrationPattern,
+                currentTaserEffect.vibrationAmplitude,
+                -1 // -1 means don't repeat
+            )
+            vibrator?.vibrate(effect)
+        } else {
+            // For older APIs, simple vibrate
+            vibrator?.vibrate(currentTaserEffect.duration.toLong())
+        }
+
+        // 3. Flashlight
+        if (cameraId != null) {
+            try {
+                cameraManager?.setTorchMode(cameraId!!, true)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        // 4. Simulate Recoil (Visual Shake - simplified for ImageView)
+        // You can use ObjectAnimator for more complex animations
+        taserImageView.animate()
+            .translationYBy(-20f) // Move up slightly
+            .setDuration(50)
+            .withEndAction {
+                taserImageView.animate()
+                    .translationYBy(20f) // Move back down
+                    .setDuration(50)
+                    .start()
+            }
+            .start()
+
+        // 5. "Recharge" (Reset state after effect duration)
+        // Using coroutines to handle delays without blocking the UI thread
+        CoroutineScope(Dispatchers.Main).launch {
+            delay(currentTaserEffect.duration.toLong()) // Wait for the effect to complete
+
+            // Turn off flashlight
+            if (cameraId != null) {
+                try {
+                    cameraManager?.setTorchMode(cameraId!!, false)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+
+            // Stop vibration if it's continuous (though our current pattern isn't)
+            vibrator?.cancel()
+
+            // Release media player
+            mediaPlayer?.stop()
+            mediaPlayer?.release()
+            mediaPlayer = null
+
+            isFiring = false // Reset firing flag
+            fireButton.isEnabled = true // Enable button for next shot
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        mediaPlayer?.release()
+        mediaPlayer = null
+        vibrator?.cancel()
+        // Ensure flashlight is off if app is paused unexpectedly
+        if (cameraId != null) {
+            try {
+                cameraManager?.setTorchMode(cameraId!!, false)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        mediaPlayer?.release()
+        mediaPlayer = null
+        vibrator?.cancel()
+        // Ensure flashlight is off on app destruction
+        if (cameraId != null) {
+            try {
+                cameraManager?.setTorchMode(cameraId!!, false)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    data class TaserEffect(
+        val soundResId: Int,
+        val vibrationPattern: LongArray,
+        val vibrationAmplitude: IntArray,
+        val duration: Int // Duration of the effect in milliseconds
+    )
+}
+
+
+
+mkdir taser-electron-app
+cd taser-electron-app
+npm init -y
+npm install electron
+
+
+
+{
+  "name": "taser-electron-app",
+  "version": "1.0.0",
+  "description": "A simulated taser gun app using Electron.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^latest_version" // Replace with the actual latest version
+  },
+  "dependencies": {
+    "play-sound": "^1.1.6" // For playing sounds
+  }
+}
+
+
+
+
+const { app, BrowserWindow, ipcMain } = require('electron');
+const path = require('path');
+const player = require('play-sound')({}); // Initialize play-sound
+
+let mainWindow;
+
+function createWindow() {
+    mainWindow = new BrowserWindow({
+        width: 800,
+        height: 600,
+        webPreferences: {
+            preload: path.join(__dirname, 'preload.js'), // For secure communication
+            contextIsolation: true, // Recommended for security
+            nodeIntegration: false // Recommended for security
+        },
+        fullscreenable: false,
+        resizable: false,
+        title: "ElectroShock Prankster"
+    });
+
+    mainWindow.loadFile('index.html');
+
+    // Open the DevTools.
+    // mainWindow.webContents.openDevTools();
+
+    mainWindow.on('closed', () => {
+        mainWindow = null;
+    });
+}
+
+app.whenReady().then(createWindow);
+
+app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+        app.quit();
+    }
+});
+
+app.on('activate', () => {
+    if (mainWindow === null) {
+        createWindow();
+    }
+});
+
+// IPC Main Handlers (Backend communication for UI actions)
+ipcMain.handle('taser-shot', async (event, effect) => {
+    console.log(`Taser fired with mode: ${effect.name}`);
+
+    // Play sound
+    player.play(path.join(__dirname, effect.soundPath), (err) => {
+        if (err) console.error('Error playing sound:', err);
+    });
+
+    // In a real mobile app, you'd trigger vibration here.
+    // For desktop, simulate recoil visually on the UI side.
+
+    // Simulate flashlight by sending a message to the renderer process
+    mainWindow.webContents.send('toggle-flashlight', true); // Turn on
+    await new Promise(resolve => setTimeout(resolve, effect.duration)); // Wait for effect duration
+    mainWindow.webContents.send('toggle-flashlight', false); // Turn off
+
+    return true; // Indicate success
+});
+
+
+
+
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('electronAPI', {
+    fireTaser: (effect) => ipcRenderer.invoke('taser-shot', effect),
+    onToggleFlashlight: (callback) => ipcRenderer.on('toggle-flashlight', (event, state) => callback(state))
+});
+
+
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ElectroShock Prankster</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="app-container">
+        <div id="flashlight-overlay" class="hidden"></div>
+        <img id="taser-image" src="taser_gun_image.png" alt="Taser Gun">
+
+        <div class="controls">
+            <div class="mode-selection">
+                <label><input type="radio" name="taserMode" value="stun" checked> Stun</label>
+                <label><input type="radio" name="taserMode" value="arc"> Arc</label>
+                <label><input type="radio" name="taserMode" value="overcharge"> Overcharge</label>
+            </div>
+            <button id="fire-button">FIRE</button>
+        </div>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+</html>
+
+
+
+body {
+    margin: 0;
+    overflow: hidden;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    background-color: #000;
+    font-family: sans-serif;
+    color: #fff;
+}
+
+#app-container {
+    position: relative;
+    width: 100%;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+#taser-image {
+    max-width: 80%;
+    max-height: 70%;
+    object-fit: contain;
+    transition: transform 0.05s ease-out; /* For recoil animation */
+}
+
+.controls {
+    margin-top: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.mode-selection label {
+    margin: 0 10px;
+}
+
+#fire-button {
+    width: 150px;
+    height: 150px;
+    border-radius: 50%;
+    background-color: #ff0000;
+    color: white;
+    font-size: 28px;
+    font-weight: bold;
+    border: none;
+    cursor: pointer;
+    box-shadow: 0 0 15px rgba(255, 0, 0, 0.7);
+    transition: background-color 0.1s ease, transform 0.1s ease;
+}
+
+#fire-button:active {
+    background-color: #cc0000;
+    transform: scale(0.98);
+}
+
+#fire-button:disabled {
+    background-color: #660000;
+    cursor: not-allowed;
+}
+
+/* Flashlight Overlay */
+#flashlight-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(255, 255, 0, 0.8); /* Yellowish flash */
+    opacity: 0;
+    transition: opacity 0.05s ease-out;
+    pointer-events: none; /* Allows clicks to pass through */
+    z-index: 100;
+}
+
+#flashlight-overlay.active {
+    opacity: 1;
+}
+
+.hidden {
+    display: none;
+}
+
+
+
+const taserImage = document.getElementById('taser-image');
+const fireButton = document.getElementById('fire-button');
+const modeRadios = document.querySelectorAll('input[name="taserMode"]');
+const flashlightOverlay = document.getElementById('flashlight-overlay');
+
+// Define different effects for modes
+const taserEffects = {
+    stun: {
+        name: 'Stun',
+        soundPath: 'sounds/taser_sound_short.mp3', // Path relative to main.js or resources
+        duration: 300, // Milliseconds
+        recoilStrength: 15 // Pixels for visual recoil
+    },
+    arc: {
+        name: 'Arc',
+        soundPath: 'sounds/taser_sound_long.mp3',
+        duration: 500,
+        recoilStrength: 25
+    },
+    overcharge: {
+        name: 'Overcharge',
+        soundPath: 'sounds/taser_sound_intense.mp3',
+        duration: 800,
+        recoilStrength: 40
+    }
+};
+
+let currentMode = 'stun'; // Default mode
+
+// Event listener for mode selection
+modeRadios.forEach(radio => {
+    radio.addEventListener('change', (event) => {
+        currentMode = event.target.value;
+    });
+});
+
+fireButton.addEventListener('click', async () => {
+    fireButton.disabled = true; // Disable button while firing
+
+    const effect = taserEffects[currentMode];
+
+    // Simulate Recoil (Visual Shake)
+    taserImage.style.transform = `translateY(-${effect.recoilStrength}px)`; // Move up
+    setTimeout(() => {
+        taserImage.style.transform = `translateY(0px)`; // Move back
+    }, effect.duration / 2);
+
+    // Communicate with main process to play sound and trigger "flashlight"
+    await window.electronAPI.fireTaser(effect);
+
+    fireButton.disabled = false; // Re-enable button after effect
+});
+
+// Listener for flashlight toggle from main process
+window.electronAPI.onToggleFlashlight((state) => {
+    if (state) {
+        flashlightOverlay.classList.add('active');
+        flashlightOverlay.classList.remove('hidden');
+    } else {
+        flashlightOverlay.classList.remove('active');
+        flashlightOverlay.classList.add('hidden');
+    }
+});
+
+
+
+
+npm install -g expo-cli
+
+
+
+expo init TaserPrankApp
+cd TaserPrankApp
+
+
+
+npx expo install expo-av expo-haptics expo-camera react-native-reanimated react-native-gesture-handler
+
+
+
+import React, { useState, useEffect, useRef } from 'react';
+import {
+    StyleSheet,
+    Text,
+    View,
+    TouchableOpacity,
+    Image,
+    SafeAreaView,
+    Platform,
+    Dimensions,
+} from 'react-native';
+import { RadioButton } from 'react-native-paper'; // For radio buttons, install: npx expo install react-native-paper
+import * as Haptics from 'expo-haptics';
+import { Audio } from 'expo-av';
+import { Camera } from 'expo-camera';
+import Animated, {
+    useSharedValue,
+    useAnimatedStyle,
+    withTiming,
+    withSequence,
+    withSpring,
+    Easing,
+} from 'react-native-reanimated';
+
+// Get screen dimensions for responsive styling
+const { width, height } = Dimensions.get('window');
+
+// Define different taser effects
+const taserEffects = {
+    stun: {
+        name: 'Stun',
+        sound: require('./assets/sounds/taser_short.mp3'), // Create this path and add sounds
+        hapticPattern: 'light', // 'light', 'medium', 'heavy' for Haptics.impactAsync
+        hapticDuration: 100, // Milliseconds for older Android or simple vibrate
+        flashDuration: 100, // Flash duration
+        recoilAmount: 20, // Pixels for recoil
+        duration: 300, // Total effect duration
+    },
+    arc: {
+        name: 'Arc',
+        sound: require('./assets/sounds/taser_long.mp3'),
+        hapticPattern: 'medium',
+        hapticDuration: 200,
+        flashDuration: 200,
+        recoilAmount: 35,
+        duration: 500,
+    },
+    overcharge: {
+        name: 'Overcharge',
+        sound: require('./assets/sounds/taser_intense.mp3'),
+        hapticPattern: 'heavy',
+        hapticDuration: 300,
+        flashDuration: 300,
+        recoilAmount: 50,
+        duration: 800,
+    },
+};
+
+export default function App() {
+    const [currentMode, setCurrentMode] = useState('stun');
+    const [isFiring, setIsFiring] = useState(false);
+    const [hasCameraPermission, setHasCameraPermission] = useState(null);
+    const soundObjectRef = useRef(new Audio.Sound());
+
+    // Reanimated shared value for taser image vertical position (recoil)
+    const taserTranslateY = useSharedValue(0);
+
+    // Animated style for recoil effect
+    const animatedTaserStyle = useAnimatedStyle(() => {
+        return {
+            transform: [{ translateY: taserTranslateY.value }],
+        };
+    });
+
+    // Request camera permission for flashlight
+    useEffect(() => {
+        (async () => {
+            const { status } = await Camera.requestCameraPermissionsAsync();
+            setHasCameraPermission(status === 'granted');
+        })();
+    }, []);
+
+    // Load sounds on component mount
+    useEffect(() => {
+        // You might pre-load all sounds here for faster playback
+        // For simplicity, we'll load on demand for this example.
+        return () => {
+            // Clean up sound object on unmount
+            soundObjectRef.current.unloadAsync();
+        };
+    }, []);
+
+    const fireTaser = async () => {
+        if (isFiring) return; // Prevent multiple simultaneous firings
+
+        setIsFiring(true);
+        const effect = taserEffects[currentMode];
+
+        try {
+            // 1. Play Sound
+            await soundObjectRef.current.unloadAsync(); // Unload previous sound if any
+            await soundObjectRef.current.loadAsync(effect.sound);
+            await soundObjectRef.current.playAsync();
+
+            // 2. Haptic Feedback (Vibration)
+            if (Platform.OS === 'ios') {
+                switch (effect.hapticPattern) {
+                    case 'light':
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        break;
+                    case 'medium':
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                        break;
+                    case 'heavy':
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                        break;
+                }
+            } else if (Platform.OS === 'android') {
+                // For Android, a simple vibrate for the duration
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); // Or use custom pattern if using react-native-haptic-feedback
+                // If expo-haptics isn't enough, you might need a different library for complex Android patterns.
+            }
+
+
+            // 3. Flashlight (Torch)
+            if (hasCameraPermission) {
+                await Camera.Constants.FlashMode.torch; // Ensure torch mode is available
+
+                // Start flashlight
+                await Camera.setFlashModeAsync(Camera.Constants.FlashMode.torch);
+                setTimeout(async () => {
+                    // Turn off flashlight after flashDuration
+                    await Camera.setFlashModeAsync(Camera.Constants.FlashMode.off);
+                }, effect.flashDuration);
+            }
+
+            // 4. Recoil Animation
+            taserTranslateY.value = withSequence(
+                withTiming(-effect.recoilAmount, { duration: effect.duration / 4, easing: Easing.out(Easing.ease) }),
+                withSpring(0, { damping: 10, stiffness: 100 }) // Spring back to original
+            );
+
+            // 5. "Recharge" - Reset state after effect duration
+            setTimeout(() => {
+                setIsFiring(false);
+                // Stop sound if it's still playing (e.g., for longer effects)
+                soundObjectRef.current.stopAsync();
+                soundObjectRef.current.unloadAsync();
+            }, effect.duration);
+
+        } catch (error) {
+            console.error('Error firing taser:', error);
+            setIsFiring(false); // Ensure button is re-enabled even on error
+            soundObjectRef.current.stopAsync();
+            soundObjectRef.current.unloadAsync();
+            // Optionally, show an alert to the user
+        }
+    };
+
+    if (hasCameraPermission === null) {
+        return <View style={styles.container}><Text>Requesting camera permission...</Text></View>;
+    }
+    if (hasCameraPermission === false) {
+        return <View style={styles.container}><Text>No access to camera for flashlight.</Text></View>;
+    }
+
+    return (
+        <SafeAreaView style={styles.container}>
+            <View style={styles.modeSelector}>
+                <RadioButton.Group onValueChange={newValue => setCurrentMode(newValue)} value={currentMode}>
+                    <View style={styles.radioOption}>
+                        <RadioButton value="stun" color="#FFD700" />
+                        <Text style={styles.radioText}>Stun</Text>
+                    </View>
+                    <View style={styles.radioOption}>
+                        <RadioButton value="arc" color="#FFD700" />
+                        <Text style={styles.radioText}>Arc</Text>
+                    </View>
+                    <View style={styles.radioOption}>
+                        <RadioButton value="overcharge" color="#FFD700" />
+                        <Text style={styles.radioText}>Overcharge</Text>
+                    </View>
+                </RadioButton.Group>
+            </View>
+
+            <Animated.Image
+                source={require('./assets/taser_gun_image.png')} // Place your taser image here
+                style={[styles.taserImage, animatedTaserStyle]}
+                resizeMode="contain"
+            />
+
+            <TouchableOpacity
+                style={[styles.fireButton, isFiring && styles.fireButtonDisabled]}
+                onPress={fireTaser}
+                disabled={isFiring}
+            >
+                <Text style={styles.buttonText}>FIRE</Text>
+            </TouchableOpacity>
+        </SafeAreaView>
+    );
+}
+
+const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+        backgroundColor: '#000',
+        alignItems: 'center',
+        justifyContent: 'space-around',
+        paddingVertical: 20,
+    },
+    modeSelector: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        width: '100%',
+        marginTop: 20,
+    },
+    radioOption: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginHorizontal: 10,
+    },
+    radioText: {
+        color: '#FFF',
+        fontSize: 16,
+    },
+    taserImage: {
+        width: width * 0.8, // 80% of screen width
+        height: height * 0.5, // 50% of screen height
+        resizeMode: 'contain',
+        marginBottom: 50, // Space below image
+    },
+    fireButton: {
+        width: width * 0.5, // 50% of screen width
+        height: width * 0.5, // Make it a circle
+        borderRadius: width * 0.25, // Half of width/height for circle
+        backgroundColor: '#FF0000',
+        justifyContent: 'center',
+        alignItems: 'center',
+        shadowColor: '#FF0000',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.8,
+        shadowRadius: 20,
+        elevation: 10, // For Android shadow
+    },
+    fireButtonDisabled: {
+        backgroundColor: '#660000',
+        opacity: 0.7,
+    },
+    buttonText: {
+        color: '#FFF',
+        fontSize: 32,
+        fontWeight: 'bold',
+    },
+});
+
+
+
+{
+  "expo": {
+    "name": "TaserPrankApp",
+    "slug": "TaserPrankApp",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.yourcompany.TaserPrankApp",
+      "infoPlist": {
+        "NSCameraUsageDescription": "This app needs camera access to control the flashlight for the taser effect."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "permissions": [
+        "CAMERA",
+        "VIBRATE"
+      ],
+      "package": "com.yourcompany.TaserPrankApp"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}
+
+
+
+
+pip install pygame
+
+
+
+import tkinter as tk
+from tkinter import PhotoImage
+import pygame.mixer # For playing sounds
+import os
+import time
+
+# --- Configuration ---
+ASSETS_DIR = 'assets' # Directory where your image and sounds are
+TAS_GUN_IMAGE_PATH = os.path.join(ASSETS_DIR, 'taser_gun_image.png')
+
+# Define different taser effects
+# sound_file, duration_ms (for flashlight/recoil effect), recoil_strength_pixels
+TASER_EFFECTS = {
+    "stun": {
+        "sound": os.path.join(ASSETS_DIR, 'taser_sound_short.mp3'),
+        "duration_ms": 300,
+        "recoil_strength": 20,
+        "flash_color": "#FFFF00" # Yellow flash
+    },
+    "arc": {
+        "sound": os.path.join(ASSETS_DIR, 'taser_sound_long.mp3'),
+        "duration_ms": 500,
+        "recoil_strength": 35,
+        "flash_color": "#FFA500" # Orange flash
+    },
+    "overcharge": {
+        "sound": os.path.join(ASSETS_DIR, 'taser_sound_intense.mp3'),
+        "duration_ms": 800,
+        "recoil_strength": 50,
+        "flash_color": "#FF0000" # Red flash
+    }
+}
+
+class TaserApp:
+    def __init__(self, master):
+        self.master = master
+        master.title("ElectroShock Prankster")
+        master.geometry("600x800") # Adjust window size as needed
+        master.resizable(False, False)
+        master.configure(bg='black')
+
+        # Initialize Pygame Mixer for sound
+        pygame.mixer.init()
+        self.sounds = {}
+        self._load_sounds()
+
+        self.is_firing = False
+        self.current_mode = tk.StringVar(value="stun") # Default mode
+
+        # --- GUI Elements ---
+        self.create_widgets()
+
+    def _load_sounds(self):
+        """Loads all sound files into memory."""
+        for mode, data in TASER_EFFECTS.items():
+            try:
+                self.sounds[mode] = pygame.mixer.Sound(data["sound"])
+            except pygame.error as e:
+                print(f"Error loading sound for mode '{mode}': {e}")
+                self.sounds[mode] = None # Set to None if loading fails
+
+    def create_widgets(self):
+        """Creates and places all GUI widgets."""
+        # Mode Selection
+        mode_frame = tk.Frame(self.master, bg='black')
+        mode_frame.pack(pady=10)
+
+        for mode_name in TASER_EFFECTS.keys():
+            rb = tk.Radiobutton(
+                mode_frame,
+                text=mode_name.capitalize(),
+                variable=self.current_mode,
+                value=mode_name,
+                command=self.on_mode_change,
+                bg='black',
+                fg='white',
+                selectcolor='gray', # Color when selected
+                font=('Arial', 14)
+            )
+            rb.pack(side=tk.LEFT, padx=10)
+
+        # Taser Image
+        try:
+            self.taser_image_original = PhotoImage(file=TAS_GUN_IMAGE_PATH)
+            # Resize image if too large (Tkinter PhotoImage doesn't scale well, better to resize externally)
+            # For dynamic resizing, you might need PIL (Pillow)
+            # from PIL import Image, ImageTk
+            # img = Image.open(TAS_GUN_IMAGE_PATH)
+            # img = img.resize((400, 400), Image.LANCZOS) # Example resize
+            # self.taser_image = ImageTk.PhotoImage(img)
+            self.taser_image_display = self.taser_image_original # Use original if not resizing
+        except Exception as e:
+            print(f"Error loading taser image: {e}")
+            self.taser_image_display = None # Fallback
+
+        self.taser_label = tk.Label(self.master, image=self.taser_image_display, bg='black')
+        self.taser_label.pack(pady=20)
+
+        # Fire Button
+        self.fire_button = tk.Button(
+            self.master,
+            text="FIRE",
+            command=self.fire_taser,
+            font=('Arial', 28, 'bold'),
+            bg='red',
+            fg='white',
+            activebackground='#cc0000',
+            activeforeground='white',
+            width=8, # Characters
+            height=4, # Lines
+            relief=tk.RAISED,
+            bd=5, # Border width
+            highlightbackground="red", # Highlight color when focused
+            highlightthickness=3, # Highlight thickness
+            wraplength=100 # For text wrapping if button is small
+        )
+        # Make button roundish (visual only, not truly round in Tkinter)
+        self.fire_button.configure(borderwidth=0, highlightbackground="red", highlightthickness=0)
+        self.fire_button.pack(pady=30)
+
+        # Store initial position for recoil
+        self.initial_taser_y = self.taser_label.winfo_y()
+
+    def on_mode_change(self):
+        """Handle mode selection change."""
+        print(f"Mode changed to: {self.current_mode.get()}")
+
+    def fire_taser(self):
+        """Simulates firing the taser."""
+        if self.is_firing:
+            return
+
+        self.is_firing = True
+        self.fire_button.config(state=tk.DISABLED, bg='#660000') # Disable button
+
+        mode_data = TASER_EFFECTS[self.current_mode.get()]
+        
+        # 1. Play Sound
+        if self.sounds.get(self.current_mode.get()):
+            self.sounds[self.current_mode.get()].play()
+
+        # 2. Simulate Flash (background color change)
+        original_bg = self.master.cget('bg')
+        self.master.config(bg=mode_data["flash_color"])
+
+        # 3. Simulate Recoil (move image up and down)
+        recoil_amount = mode_data["recoil_strength"]
+        # Get current position of the label within its parent
+        current_x = self.taser_label.winfo_x()
+        current_y = self.taser_label.winfo_y() # This gets its position relative to parent
+
+        # Move up
+        self.taser_label.place(x=current_x, y=current_y - recoil_amount)
+        self.master.update_idletasks() # Force GUI update
+
+        # Schedule reset after effect duration
+        self.master.after(mode_data["duration_ms"], self._reset_taser_state, original_bg, current_x, current_y)
+
+    def _reset_taser_state(self, original_bg, original_x, original_y):
+        """Resets the taser to its idle state."""
+        # Reset background color
+        self.master.config(bg=original_bg)
+
+        # Reset taser image position
+        self.taser_label.place(x=original_x, y=original_y) # Move back to original Y
+
+        self.is_firing = False
+        self.fire_button.config(state=tk.NORMAL, bg='red') # Re-enable button
+
+# --- Main Application ---
+if __name__ == "__main__":
+    # Check if assets directory exists
+    if not os.path.exists(ASSETS_DIR):
+        print(f"Error: Assets directory '{ASSETS_DIR}' not found.")
+        print("Please create an 'assets' folder and place 'taser_gun_image.png', 'taser_sound_short.mp3', etc. inside it.")
+    else:
+        # Check if essential files exist
+        missing_assets = []
+        if not os.path.exists(TAS_GUN_IMAGE_PATH):
+            missing_assets.append(TAS_GUN_IMAGE_PATH)
+        for mode, data in TASER_EFFECTS.items():
+            if not os.path.exists(data["sound"]):
+                missing_assets.append(data["sound"])
+
+        if missing_assets:
+            print(f"Error: Missing asset files: {', '.join(missing_assets)}")
+            print("Please ensure all required images and sound files are in the 'assets' folder.")
+        else:
+            root = tk.Tk()
+            app = TaserApp(root)
+            root.mainloop()
+
+
+
+
+cmake_minimum_required(VERSION 3.14)
+
+project(TaserApp LANGUAGES CXX)
+
+set(CMAKE_AUTOUIC ON)
+set(CMAKE_AUTORCC ON)
+set(CMAKE_AUTOMOC ON)
+
+# Find Qt modules
+find_package(Qt6 COMPONENTS Widgets Multimedia REQUIRED)
+
+# Add your source files
+add_executable(TaserApp
+    main.cpp
+    taserapp.h
+    taserapp.cpp
+    # You might need a Qt Resource File (.qrc) to embed assets,
+    # or ensure they are copied to the build directory.
+    # For simplicity, we'll assume they are in the build directory for this example.
+)
+
+# Link Qt libraries
+target_link_libraries(TaserApp PRIVATE Qt6::Widgets Qt6::Multimedia)
+
+# Set the output directory for the executable (optional)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
+
+
+
+#include <QApplication>
+#include "taserapp.h"
+
+int main(int argc, char *argv[]) {
+    QApplication a(argc, argv);
+    TaserApp w;
+    w.show();
+    return a.exec();
+}
+
+
+
+#ifndef TASERAPP_H
+#define TASERAPP_H
+
+#include <QMainWindow>
+#include <QPushButton>
+#include <QLabel>
+#include <QMediaPlayer>
+#include <QAudioOutput> // For QMediaPlayer in Qt6
+#include <QButtonGroup>
+#include <QRadioButton>
+#include <QPropertyAnimation> // For recoil animation
+#include <QScreen> // For screen flash
+
+class TaserApp : public QMainWindow {
+    Q_OBJECT
+
+public:
+    explicit TaserApp(QWidget *parent = nullptr);
+    ~TaserApp();
+
+private slots:
+    void onFireButtonClicked();
+    void onModeChanged(int id);
+    void resetTaserState();
+
+private:
+    void setupUi();
+    void loadSounds();
+    void createConnections();
+    void simulateFlash(const QColor& color, int durationMs);
+
+    QPushButton *fireButton;
+    QLabel *taserImageLabel;
+    QButtonGroup *modeButtonGroup;
+    QMediaPlayer *mediaPlayer;
+    QAudioOutput *audioOutput; // For Qt6, connects MediaPlayer to audio device
+    QPropertyAnimation *recoilAnimation;
+
+    bool isFiring;
+
+    struct TaserEffect {
+        QString name;
+        QString soundPath;
+        int durationMs;       // Total effect duration
+        int recoilAmount;     // Pixels for recoil animation
+        QColor flashColor;    // Color for screen flash
+    };
+
+    QMap<QString, TaserEffect> taserEffects;
+    TaserEffect currentEffect;
+    QColor originalBackgroundColor;
+    QPoint originalTaserImagePos;
+};
+
+#endif // TASERAPP_H
+
+
+
+
+#include "taserapp.h"
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QWidget>
+#include <QMessageBox>
+#include <QDebug>
+#include <QPixmap>
+#include <QDir>
+#include <QTimer>
+#include <QPalette> // For background color manipulation
+
+// Define paths to assets (adjust as needed for deployment)
+#ifdef Q_OS_MAC
+const QString ASSETS_DIR = QCoreApplication::applicationDirPath() + "/../Resources/assets";
+#elif defined(Q_OS_WIN)
+const QString ASSETS_DIR = QCoreApplication::applicationDirPath() + "/assets";
+#else // Linux and others
+const QString ASSETS_DIR = QCoreApplication::applicationDirPath() + "/assets";
+#endif
+
+TaserApp::TaserApp(QWidget *parent)
+    : QMainWindow(parent),
+      fireButton(nullptr),
+      taserImageLabel(nullptr),
+      modeButtonGroup(nullptr),
+      mediaPlayer(nullptr),
+      audioOutput(nullptr),
+      recoilAnimation(nullptr),
+      isFiring(false)
+{
+    // Define taser effects
+    taserEffects["stun"] = {"Stun", ASSETS_DIR + "/taser_sound_short.mp3", 300, 20, QColor("#FFFF00")};
+    taserEffects["arc"] = {"Arc", ASSETS_DIR + "/taser_sound_long.mp3", 500, 35, QColor("#FFA500")};
+    taserEffects["overcharge"] = {"Overcharge", ASSETS_DIR + "/taser_sound_intense.mp3", 800, 50, QColor("#FF0000")};
+
+    currentEffect = taserEffects["stun"]; // Default mode
+
+    setupUi();
+    loadSounds(); // Load sounds once at startup
+    createConnections();
+
+    // Store original background color
+    originalBackgroundColor = this->palette().window().color();
+}
+
+TaserApp::~TaserApp() {
+    if (mediaPlayer) {
+        mediaPlayer->stop();
+        delete mediaPlayer;
+    }
+    if (audioOutput) {
+        delete audioOutput;
+    }
+    if (recoilAnimation) {
+        delete recoilAnimation;
+    }
+}
+
+void TaserApp::setupUi() {
+    setWindowTitle("ElectroShock Prankster");
+    setFixedSize(600, 800); // Fixed window size
+    
+    // Set a dark background for the main window
+    QPalette pal = palette();
+    pal.setColor(QPalette::Window, Qt::black);
+    setPalette(pal);
+    setAutoFillBackground(true);
+
+    QWidget *centralWidget = new QWidget(this);
+    setCentralWidget(centralWidget);
+    QVBoxLayout *mainLayout = new QVBoxLayout(centralWidget);
+    mainLayout->setAlignment(Qt::AlignCenter);
+
+    // --- Mode Selection ---
+    QHBoxLayout *modeLayout = new QHBoxLayout();
+    modeLayout->setAlignment(Qt::AlignCenter);
+    mainLayout->addLayout(modeLayout);
+
+    modeButtonGroup = new QButtonGroup(this);
+    modeButtonGroup->setExclusive(true); // Only one radio button can be checked
+
+    int id = 0;
+    for (const auto& key : taserEffects.keys()) {
+        QRadioButton *rb = new QRadioButton(taserEffects[key].name, this);
+        rb->setObjectName(key); // Set object name for easy identification
+        rb->setStyleSheet("QRadioButton { color: white; font-size: 16px; }"
+                          "QRadioButton::indicator { width: 15px; height: 15px; }"
+                          "QRadioButton::indicator:checked { background-color: yellow; border-radius: 7px; }"
+                          "QRadioButton::indicator:unchecked { border: 1px solid gray; border-radius: 7px; }");
+        modeButtonGroup->addButton(rb, id++);
+        modeLayout->addWidget(rb);
+    }
+    modeButtonGroup->button(0)->setChecked(true); // Set initial mode
+
+    // --- Taser Image ---
+    taserImageLabel = new QLabel(this);
+    QPixmap taserPixmap(ASSETS_DIR + "/taser_gun_image.png");
+    if (taserPixmap.isNull()) {
+        qWarning() << "Could not load taser image:" << ASSETS_DIR + "/taser_gun_image.png";
+        taserImageLabel->setText("Taser Image Not Found!");
+        taserImageLabel->setStyleSheet("color: red; font-size: 20px;");
+    } else {
+        taserImageLabel->setPixmap(taserPixmap.scaled(400, 400, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        taserImageLabel->setAlignment(Qt::AlignCenter);
+    }
+    mainLayout->addWidget(taserImageLabel);
+
+    // --- Fire Button ---
+    fireButton = new QPushButton("FIRE", this);
+    fireButton->setFixedSize(150, 150);
+    fireButton->setStyleSheet(
+        "QPushButton {"
+        "   background-color: red;"
+        "   color: white;"
+        "   font-size: 32px;"
+        "   font-weight: bold;"
+        "   border-radius: 75px;" // Make it round
+        "   border: 3px solid rgba(255, 0, 0, 0.7);"
+        "}"
+        "QPushButton:pressed {"
+        "   background-color: #cc0000;" // Darker red on press
+        "}"
+        "QPushButton:disabled {"
+        "   background-color: #660000;" // Dimmed when disabled
+        "   color: #aaaaaa;"
+        "}"
+    );
+    mainLayout->addWidget(fireButton, 0, Qt::AlignCenter);
+
+    // Initialize QMediaPlayer and QAudioOutput
+    mediaPlayer = new QMediaPlayer(this);
+    audioOutput = new QAudioOutput(this); // Pass 'this' as parent
+    mediaPlayer->setAudioOutput(audioOutput); // Connect media player to audio output
+
+    // Setup recoil animation
+    recoilAnimation = new QPropertyAnimation(taserImageLabel, "pos", this);
+    recoilAnimation->setEasingCurve(QEasingCurve::OutSine); // Smooth acceleration then deceleration
+}
+
+void TaserApp::loadSounds() {
+    // No need to pre-load all sounds into QSoundEffect, QMediaPlayer handles it dynamically
+    // QMediaPlayer effectively streams or caches as needed.
+}
+
+void TaserApp::createConnections() {
+    connect(fireButton, &QPushButton::clicked, this, &TaserApp::onFireButtonClicked);
+    connect(modeButtonGroup, QOverload<int>::of(&QButtonGroup::idClicked), this, &TaserApp::onModeChanged);
+}
+
+void TaserApp::onModeChanged(int id) {
+    QString selectedModeName = modeButtonGroup->button(id)->objectName();
+    qDebug() << "Mode changed to:" << selectedModeName;
+    currentEffect = taserEffects[selectedModeName];
+}
+
+void TaserApp::onFireButtonClicked() {
+    if (isFiring) {
+        return; // Already firing
+    }
+
+    isFiring = true;
+    fireButton->setEnabled(false);
+
+    // Store original position for recoil animation (important to get current position after layout)
+    originalTaserImagePos = taserImageLabel->pos();
+
+    // 1. Play Sound
+    mediaPlayer->setSource(QUrl::fromLocalFile(currentEffect.soundPath));
+    audioOutput->setVolume(1.0); // Full volume
+    mediaPlayer->play();
+
+    // 2. Simulate Flash (background color)
+    simulateFlash(currentEffect.flashColor, currentEffect.flashColor.alpha() > 0 ? currentEffect.durationMs / 3 : 0); // Flash for 1/3 of duration
+
+    // 3. Simulate Recoil (Image Animation)
+    recoilAnimation->setStartValue(originalTaserImagePos);
+    recoilAnimation->setEndValue(originalTaserImagePos - QPoint(0, currentEffect.recoilAmount));
+    recoilAnimation->setDuration(currentEffect.durationMs / 4); // Quick move up
+
+    // After moving up, bring it back
+    connect(recoilAnimation, &QPropertyAnimation::finished, this, [this, originalTaserImagePos]() {
+        QPropertyAnimation *returnAnimation = new QPropertyAnimation(taserImageLabel, "pos", this);
+        returnAnimation->setStartValue(taserImageLabel->pos());
+        returnAnimation->setEndValue(originalTaserImagePos);
+        returnAnimation->setDuration(currentEffect.durationMs / 4); // Quick move back
+        returnAnimation->setEasingCurve(QEasingCurve::OutBack); // Slightly overshoots for snappy feel
+        connect(returnAnimation, &QPropertyAnimation::finished, returnAnimation, &QObject::deleteLater); // Clean up
+        returnAnimation->start();
+    });
+    recoilAnimation->start();
+
+    // 4. "Recharge" - Reset state after total effect duration
+    QTimer::singleShot(currentEffect.durationMs, this, &TaserApp::resetTaserState);
+}
+
+void TaserApp::simulateFlash(const QColor& color, int durationMs) {
+    if (durationMs <= 0) return;
+
+    QPalette pal = palette();
+    pal.setColor(QPalette::Window, color);
+    setPalette(pal); // Apply flash color
+
+    QTimer::singleShot(durationMs, this, [this]() {
+        // Restore original background color after flash
+        QPalette originalPal = palette();
+        originalPal.setColor(QPalette::Window, originalBackgroundColor);
+        setPalette(originalPal);
+    });
+}
+
+void TaserApp::resetTaserState() {
+    isFiring = false;
+    fireButton->setEnabled(true);
+    mediaPlayer->stop(); // Ensure sound stops for longer effects if user re-fires quickly
+    // Reset image position in case animation didn't fully finish or due to multiple clicks
+    taserImageLabel->setPos(originalTaserImagePos);
+}
+
