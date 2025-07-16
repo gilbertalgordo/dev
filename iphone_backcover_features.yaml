@@ -1,0 +1,2560 @@
+// MARK: - Light Control View
+
+import SwiftUI
+import CoreBluetooth // Assuming BLE for hardware communication
+
+struct LightControlView: View {
+    @ObservedObject var backCoverController = BackCoverController.shared
+
+    @State private var selectedColor: Color = .blue
+    @State private var brightness: Double = 0.5
+    @State private var animationMode: AnimationMode = .staticColor
+
+    var body: some View {
+        VStack {
+            Text("Back Cover Lights")
+                .font(.largeTitle)
+                .padding()
+
+            ColorPicker("Select Color", selection: $selectedColor)
+                .padding()
+                .onChange(of: selectedColor) { newColor in
+                    backCoverController.sendLightCommand(.setColor(newColor))
+                }
+
+            Slider(value: $brightness, in: 0...1.0) {
+                Text("Brightness")
+            }
+            .padding()
+            .onChange(of: brightness) { newBrightness in
+                backCoverController.sendLightCommand(.setBrightness(newBrightness))
+            }
+
+            Picker("Animation Mode", selection: $animationMode) {
+                ForEach(AnimationMode.allCases) { mode in
+                    Text(mode.rawValue.capitalized).tag(mode)
+                }
+            }
+            .pickerStyle(SegmentedPickerStyle())
+            .padding()
+            .onChange(of: animationMode) { newMode in
+                backCoverController.sendLightCommand(.setAnimation(newMode))
+            }
+
+            Spacer()
+
+            Button("Tap to Surface Action") {
+                // Simulate "Tap to Surface" - this would trigger some action on the back cover
+                backCoverController.sendActionCommand(.tapToSurfaceTriggered)
+            }
+            .buttonStyle(.borderedProminent)
+            .padding()
+        }
+    }
+}
+
+enum AnimationMode: String, CaseIterable, Identifiable {
+    case staticColor
+    case pulse
+    case rainbow
+    case customPattern
+
+    var id: String { self.rawValue }
+}
+
+// MARK: - Widget Configuration View
+
+struct WidgetConfigurationView: View {
+    @ObservedObject var backCoverController = BackCoverController.shared
+    @State private var selectedWidgetType: WidgetType = .time
+    @State private var showWeatherDetails: Bool = true
+
+    var body: some View {
+        VStack {
+            Text("Back Cover Widgets")
+                .font(.largeTitle)
+                .padding()
+
+            Picker("Select Widget Type", selection: $selectedWidgetType) {
+                ForEach(WidgetType.allCases) { type in
+                    Text(type.rawValue.capitalized).tag(type)
+                }
+            }
+            .pickerStyle(SegmentedPickerStyle())
+            .padding()
+            .onChange(of: selectedWidgetType) { newType in
+                backCoverController.sendWidgetCommand(.selectWidget(newType))
+            }
+
+            if selectedWidgetType == .weather {
+                Toggle("Show Weather Details", isOn: $showWeatherDetails)
+                    .padding()
+                    .onChange(of: showWeatherDetails) { newValue in
+                        backCoverController.sendWidgetCommand(.configureWeather(showDetails: newValue))
+                    }
+            }
+
+            Button("Update Widgets") {
+                backCoverController.sendWidgetCommand(.updateAllWidgets)
+            }
+            .buttonStyle(.borderedProminent)
+            .padding()
+
+            Spacer()
+        }
+    }
+}
+
+enum WidgetType: String, CaseIterable, Identifiable {
+    case time
+    case date
+    case weather
+    case notifications
+    case batteryLevel
+
+    var id: String { self.rawValue }
+}
+
+
+// MARK: - BackCoverController (Communication Layer)
+
+class BackCoverController: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeripheralDelegate {
+    static let shared = BackCoverController()
+
+    private var centralManager: CBCentralManager!
+    private var backCoverPeripheral: CBPeripheral?
+    private let backCoverServiceUUID = CBUUID(string: "YOUR_BACKCOVER_SERVICE_UUID") // Replace with your custom UUID
+    private let lightCharacteristicUUID = CBUUID(string: "YOUR_LIGHT_CHARACTERISTIC_UUID") // Replace with your custom UUID
+    private let widgetCharacteristicUUID = CBUUID(string: "YOUR_WIDGET_CHARACTERISTIC_UUID") // Replace with your custom UUID
+    private let actionCharacteristicUUID = CBUUID(string: "YOUR_ACTION_CHARACTERISTIC_UUID") // Replace with your custom UUID
+
+    private var lightCharacteristic: CBCharacteristic?
+    private var widgetCharacteristic: CBCharacteristic?
+    private var actionCharacteristic: CBCharacteristic?
+
+    @Published var isConnected: Bool = false
+
+    private override init() {
+        super.init()
+        centralManager = CBCentralManager(delegate: self, queue: nil)
+    }
+
+    // MARK: CBCentralManagerDelegate Methods
+
+    func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        if central.state == .poweredOn {
+            print("BLE is powered on. Scanning for back cover...")
+            centralManager.scanForPeripherals(withServices: [backCoverServiceUUID], options: nil)
+        } else {
+            print("BLE is not available: \(central.state.rawValue)")
+            isConnected = false
+        }
+    }
+
+    func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
+        if peripheral.name == "YourBackCoverDeviceName" { // Identify your specific device
+            print("Discovered Back Cover Peripheral: \(peripheral.name ?? "Unknown")")
+            centralManager.stopScan()
+            backCoverPeripheral = peripheral
+            backCoverPeripheral?.delegate = self
+            centralManager.connect(peripheral, options: nil)
+        }
+    }
+
+    func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        print("Connected to Back Cover Peripheral")
+        isConnected = true
+        peripheral.discoverServices([backCoverServiceUUID])
+    }
+
+    func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+        print("Failed to connect to Back Cover: \(error?.localizedDescription ?? "Unknown error")")
+        isConnected = false
+    }
+
+    func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        print("Disconnected from Back Cover: \(error?.localizedDescription ?? "Unknown error")")
+        isConnected = false
+        // Re-scan or alert user
+        centralManager.scanForPeripherals(withServices: [backCoverServiceUUID], options: nil)
+    }
+
+    // MARK: CBPeripheralDelegate Methods
+
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        guard let services = peripheral.services else { return }
+        for service in services where service.uuid == backCoverServiceUUID {
+            peripheral.discoverCharacteristics([lightCharacteristicUUID, widgetCharacteristicUUID, actionCharacteristicUUID], for: service)
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
+        guard let characteristics = service.characteristics else { return }
+        for characteristic in characteristics {
+            if characteristic.uuid == lightCharacteristicUUID {
+                lightCharacteristic = characteristic
+                print("Discovered Light Characteristic")
+            } else if characteristic.uuid == widgetCharacteristicUUID {
+                widgetCharacteristic = characteristic
+                print("Discovered Widget Characteristic")
+            } else if characteristic.uuid == actionCharacteristicUUID {
+                actionCharacteristic = characteristic
+                print("Discovered Action Characteristic")
+            }
+        }
+    }
+
+    // MARK: Sending Commands to Hardware
+
+    enum LightCommand {
+        case setColor(Color)
+        case setBrightness(Double)
+        case setAnimation(AnimationMode)
+    }
+
+    func sendLightCommand(_ command: LightCommand) {
+        guard let characteristic = lightCharacteristic, let peripheral = backCoverPeripheral else {
+            print("Light characteristic not available.")
+            return
+        }
+
+        var data: Data?
+        switch command {
+        case .setColor(let color):
+            // Convert SwiftUI Color to RGB bytes (example)
+            let uiColor = UIColor(color)
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            uiColor.getRed(&r, green: &g, blue: &b, alpha: &a)
+            let red = UInt8(r * 255)
+            let green = UInt8(g * 255)
+            let blue = UInt8(b * 255)
+            data = Data([0x01, red, green, blue]) // Command byte 0x01 for set color
+        case .setBrightness(let brightness):
+            let value = UInt8(brightness * 255)
+            data = Data([0x02, value]) // Command byte 0x02 for set brightness
+        case .setAnimation(let mode):
+            let modeByte: UInt8
+            switch mode {
+            case .staticColor: modeByte = 0x00
+            case .pulse: modeByte = 0x01
+            case .rainbow: modeByte = 0x02
+            case .customPattern: modeByte = 0x03
+            }
+            data = Data([0x03, modeByte]) // Command byte 0x03 for set animation
+        }
+
+        if let data = data {
+            peripheral.writeValue(data, for: characteristic, type: .withoutResponse) // Or .withResponse if you need confirmation
+            print("Sent light command: \(data.hexString)") // Add hexString extension for debugging
+        }
+    }
+
+    enum WidgetCommand {
+        case selectWidget(WidgetType)
+        case configureWeather(showDetails: Bool)
+        case updateAllWidgets // Request the back cover to refresh all active widgets
+    }
+
+    func sendWidgetCommand(_ command: WidgetCommand) {
+        guard let characteristic = widgetCharacteristic, let peripheral = backCoverPeripheral else {
+            print("Widget characteristic not available.")
+            return
+        }
+
+        var data: Data?
+        switch command {
+        case .selectWidget(let type):
+            let typeByte: UInt8
+            switch type {
+            case .time: typeByte = 0x00
+            case .date: typeByte = 0x01
+            case .weather: typeByte = 0x02
+            case .notifications: typeByte = 0x03
+            case .batteryLevel: typeByte = 0x04
+            }
+            data = Data([0x01, typeByte]) // Command byte 0x01 for select widget
+        case .configureWeather(let showDetails):
+            let detailByte = showDetails ? UInt8(0x01) : UInt8(0x00)
+            data = Data([0x02, detailByte]) // Command byte 0x02 for weather config
+        case .updateAllWidgets:
+            data = Data([0x03]) // Command byte 0x03 for update all
+        }
+
+        if let data = data {
+            peripheral.writeValue(data, for: characteristic, type: .withoutResponse)
+            print("Sent widget command: \(data.hexString)")
+        }
+    }
+
+    enum ActionCommand {
+        case tapToSurfaceTriggered
+        // Add other actions like shake, long press, etc.
+    }
+
+    func sendActionCommand(_ command: ActionCommand) {
+        guard let characteristic = actionCharacteristic, let peripheral = backCoverPeripheral else {
+            print("Action characteristic not available.")
+            return
+        }
+
+        var data: Data?
+        switch command {
+        case .tapToSurfaceTriggered:
+            data = Data([0x01]) // Simple trigger byte
+        }
+
+        if let data = data {
+            peripheral.writeValue(data, for: characteristic, type: .withoutResponse)
+            print("Sent action command: \(data.hexString)")
+        }
+    }
+}
+
+// Helper extension for Data to print hex strings (useful for debugging BLE)
+extension Data {
+    var hexString: String {
+        return map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+// MARK: - Main App Entry Point
+
+@main
+struct BackCoverApp: App {
+    var body: some Scene {
+        WindowGroup {
+            TabView {
+                LightControlView()
+                    .tabItem {
+                        Label("Lights", systemImage: "lightbulb.fill")
+                    }
+                WidgetConfigurationView()
+                    .tabItem {
+                        Label("Widgets", systemImage: "square.grid.2x2.fill")
+                    }
+            }
+        }
+    }
+}
+
+
+
+// This is pseudocode/conceptual C++ for a microcontroller (e.g., ESP32)
+// using a BLE library and FastLED for LED control.
+
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEServer.h>
+#include <FastLED.h> // For LED control
+
+// Define BLE UUIDs (must match iOS app)
+#define SERVICE_UUID        "YOUR_BACKCOVER_SERVICE_UUID" // Replace with actual UUID
+#define LIGHT_CHAR_UUID     "YOUR_LIGHT_CHARACTERISTIC_UUID" // Replace with actual UUID
+#define WIDGET_CHAR_UUID    "YOUR_WIDGET_CHARACTERISTIC_UUID" // Replace with actual UUID
+#define ACTION_CHAR_UUID    "YOUR_ACTION_CHARACTERISTIC_UUID" // Replace with actual UUID
+
+// LED Strip Configuration
+#define LED_PIN             D4 // Example pin
+#define NUM_LEDS            64 // Example for an 8x8 matrix
+CRGB leds[NUM_LEDS];
+
+// Global state variables for lights and widgets
+struct LightState {
+    uint8_t red = 0;
+    uint8_t green = 0;
+    uint8_t blue = 0;
+    uint8_t brightness = 255; // 0-255
+    uint8_t animationMode = 0; // 0: static, 1: pulse, etc.
+};
+
+struct WidgetState {
+    uint8_t activeWidgetType = 0; // 0: time, 1: date, etc.
+    bool showWeatherDetails = true; // For weather widget
+};
+
+LightState currentLightState;
+WidgetState currentWidgetState;
+
+BLECharacteristic *pLightCharacteristic;
+BLECharacteristic *pWidgetCharacteristic;
+BLECharacteristic *pActionCharacteristic;
+
+// BLE Callback for receiving data from iPhone
+class MyCallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+        std::string value = pCharacteristic->getValue();
+
+        if (value.length() > 0) {
+            uint8_t commandByte = value[0];
+
+            if (pCharacteristic == pLightCharacteristic) {
+                // Handle Light Commands
+                if (commandByte == 0x01 && value.length() >= 4) { // Set Color
+                    currentLightState.red = value[1];
+                    currentLightState.green = value[2];
+                    currentLightState.blue = value[3];
+                    Serial.printf("Set Color: R%d G%d B%d\n", currentLightState.red, currentLightState.green, currentLightState.blue);
+                    updateLights();
+                } else if (commandByte == 0x02 && value.length() >= 2) { // Set Brightness
+                    currentLightState.brightness = value[1];
+                    Serial.printf("Set Brightness: %d\n", currentLightState.brightness);
+                    updateLights();
+                } else if (commandByte == 0x03 && value.length() >= 2) { // Set Animation
+                    currentLightState.animationMode = value[1];
+                    Serial.printf("Set Animation Mode: %d\n", currentLightState.animationMode);
+                    // Animation logic would run in the main loop or a timer
+                }
+            } else if (pCharacteristic == pWidgetCharacteristic) {
+                // Handle Widget Commands
+                if (commandByte == 0x01 && value.length() >= 2) { // Select Widget
+                    currentWidgetState.activeWidgetType = value[1];
+                    Serial.printf("Select Widget Type: %d\n", currentWidgetState.activeWidgetType);
+                    updateDisplay();
+                } else if (commandByte == 0x02 && value.length() >= 2) { // Configure Weather
+                    currentWidgetState.showWeatherDetails = (value[1] == 0x01);
+                    Serial.printf("Show Weather Details: %d\n", currentWidgetState.showWeatherDetails);
+                    updateDisplay();
+                } else if (commandByte == 0x03) { // Update All Widgets
+                    Serial.println("Update All Widgets requested");
+                    updateDisplay();
+                }
+            } else if (pCharacteristic == pActionCharacteristic) {
+                // Handle Action Commands (e.g., "Tap to Surface")
+                if (commandByte == 0x01) {
+                    Serial.println("Tap to Surface Triggered!");
+                    // Trigger a specific light animation or widget change
+                    triggerTapAnimation();
+                }
+            }
+        }
+    }
+};
+
+void updateLights() {
+    // Apply current light state to LEDs
+    for (int i = 0; i < NUM_LEDS; i++) {
+        leds[i] = CRGB(currentLightState.red, currentLightState.green, currentLightState.blue);
+    }
+    FastLED.setBrightness(currentLightState.brightness);
+    FastLED.show();
+}
+
+void runLightAnimations() {
+    // This function would be called repeatedly in the loop()
+    switch (currentLightState.animationMode) {
+        case 0: // Static color (already handled by updateLights)
+            break;
+        case 1: // Pulse animation
+            // Example: Smoothly change brightness
+            static uint8_t pulseBrightness = 0;
+            static bool increasing = true;
+            if (increasing) {
+                pulseBrightness += 5;
+                if (pulseBrightness >= 255) increasing = false;
+            } else {
+                pulseBrightness -= 5;
+                if (pulseBrightness <= 0) increasing = true;
+            }
+            FastLED.setBrightness(pulseBrightness);
+            FastLED.show();
+            break;
+        // Add more animation cases
+    }
+}
+
+void updateDisplay() {
+    // Logic to draw widgets on a display (e.g., OLED)
+    // This would involve a display library (e.g., Adafruit_SSD1306)
+    // Clear display, draw text/icons based on currentWidgetState
+    Serial.printf("Rendering widget type: %d\n", currentWidgetState.activeWidgetType);
+    // Example:
+    // display.clearDisplay();
+    // if (currentWidgetState.activeWidgetType == 0) { // Time
+    //     display.setTextSize(2);
+    //     display.setCursor(0,0);
+    //     display.println("12:34"); // Get actual time from RTC or last received from phone
+    // }
+    // display.display();
+}
+
+void triggerTapAnimation() {
+    // Example: Flash all lights green quickly
+    for (int i = 0; i < NUM_LEDS; i++) {
+        leds[i] = CRGB::Green;
+    }
+    FastLED.setBrightness(255);
+    FastLED.show();
+    delay(100);
+    updateLights(); // Revert to previous state
+}
+
+
+void setup() {
+    Serial.begin(115200);
+
+    // Initialize FastLED
+    FastLED.addLeds<WS2812B, LED_PIN, GRB>(leds, NUM_LEDS);
+    updateLights(); // Set initial state
+
+    // Initialize BLE Server
+    BLEDevice::init("YourBackCoverDeviceName"); // Device name visible to iPhone
+    BLEServer *pServer = BLEDevice::pServer;
+    pServer->setCallbacks(new MyCallbacks()); // You might need a server callback too
+
+    BLEService *pService = pServer->createService(SERVICE_UUID);
+
+    pLightCharacteristic = pService->createCharacteristic(
+                                    LIGHT_CHAR_UUID,
+                                    BLECharacteristic::PROPERTY_WRITE
+                                );
+    pLightCharacteristic->setCallbacks(new MyCallbacks());
+
+    pWidgetCharacteristic = pService->createCharacteristic(
+                                    WIDGET_CHAR_UUID,
+                                    BLECharacteristic::PROPERTY_WRITE
+                                );
+    pWidgetCharacteristic->setCallbacks(new MyCallbacks());
+
+    pActionCharacteristic = pService->createCharacteristic(
+                                    ACTION_CHAR_UUID,
+                                    BLECharacteristic::PROPERTY_WRITE
+                                );
+    pActionCharacteristic->setCallbacks(new MyCallbacks());
+
+    pService->start();
+
+    BLEAdvertising *pAdvertising = pServer->getAdvertising();
+    pAdvertising->addServiceUUID(SERVICE_UUID);
+    pAdvertising->start();
+
+    Serial.println("Waiting for client connection...");
+
+    // Initialize Display (if applicable)
+    // display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+    // display.display();
+    // delay(2000);
+    // display.clearDisplay();
+    // display.setTextSize(1);
+    // display.setTextColor(SSD1306_WHITE);
+    // display.setCursor(0,0);
+    // display.println("Hello!");
+    // display.display();
+}
+
+void loop() {
+    // Put code here to run repeatedly
+    // For animations that need continuous updates
+    runLightAnimations();
+    // Potentially refresh widgets if they're time-based, etc.
+    delay(50); // Small delay
+}
+
+
+
+// Inside your loop() function on the microcontroller:
+void loop() {
+    // ... (existing code)
+
+    if (isTapDetectedBySensor()) { // Implement this function using your sensor
+        uint8_t tapData[] = {0x01}; // A simple byte indicating a tap
+        pActionCharacteristic->setValue(tapData, sizeof(tapData));
+        pActionCharacteristic->notify(); // Notify the iPhone
+        Serial.println("Sensor Tap Detected! Notifying iPhone.");
+        delay(500); // Debounce
+    }
+    runLightAnimations();
+    delay(50);
+}
+
+// On the iOS side, you'd need to enable notifications for the actionCharacteristic:
+// func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
+//     // ... existing code
+//     if characteristic.uuid == actionCharacteristicUUID {
+//         actionCharacteristic = characteristic
+//         peripheral.setNotifyValue(true, for: characteristic) // Enable notifications
+//     }
+// }
+
+// func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+//     if characteristic.uuid == actionCharacteristicUUID, let data = characteristic.value {
+//         // Process the incoming tap data from the back cover
+//         if data.count > 0 && data[0] == 0x01 {
+//             print("Received tap notification from back cover!")
+//             // Trigger UI changes, haptics, etc. on the iPhone
+//         }
+//     }
+// }
+
+
+
+npx react-native init BackCoverApp --template react-native-template-typescript
+cd BackCoverApp
+npm install @react-native-community/bluetooth-le # Or yarn add
+# For iOS, navigate to ios folder and run pod install
+cd ios && pod install && cd ..
+
+
+
+import React, { useState, useEffect, useRef } from 'react';
+import {
+    SafeAreaView,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    useColorScheme,
+    View,
+    Button,
+    Slider, // Note: Slider is deprecated, use @react-native-community/slider
+    Switch,
+    TouchableOpacity,
+    Platform,
+    Alert,
+    ActivityIndicator,
+} from 'react-native';
+
+// If Slider is deprecated, you might need to install:
+// npm install @react-native-community/slider
+// import Slider from '@react-native-community/slider';
+
+// If you need a color picker:
+// npm install react-native-color-picker
+// import { ColorPicker, toHsv } from 'react-native-color-picker'
+
+import { Colors } from 'react-native/Libraries/NewAppScreen';
+
+// BLE Library - This is a conceptual import.
+// You would use specific functions from the chosen BLE library.
+// For @react-native-community/bluetooth-le, it would be more like:
+import BleManager from 'react-native-ble-manager';
+import { NativeEventEmitter, NativeModules } from 'react-native';
+
+const BleManagerModule = NativeModules.BleManager;
+const bleManagerEmitter = new NativeEventEmitter(BleManagerModule);
+
+// --- Configuration Constants (MUST MATCH YOUR HARDWARE'S FIRMWARE) ---
+const SERVICE_UUID = 'YOUR_BACKCOVER_SERVICE_UUID'; // e.g., '4A987D00-0000-1000-8000-00805F9B34FB'
+const LIGHT_CHARACTERISTIC_UUID = 'YOUR_LIGHT_CHARACTERISTIC_UUID'; // e.g., '4A987D01-0000-1000-8000-00805F9B34FB'
+const WIDGET_CHARACTERISTIC_UUID = 'YOUR_WIDGET_CHARACTERISTIC_UUID'; // e.g., '4A987D02-0000-1000-8000-00805F9B34FB'
+const ACTION_CHARACTERISTIC_UUID = 'YOUR_ACTION_CHARACTERISTIC_UUID'; // e.g., '4A987D03-0000-1000-8000-00805F9B34FB'
+
+// --- Enums for Commands (Mirroring Firmware) ---
+enum LightCommand {
+    SetColor = 0x01,
+    SetBrightness = 0x02,
+    SetAnimation = 0x03,
+}
+
+enum AnimationMode {
+    StaticColor = 0x00,
+    Pulse = 0x01,
+    Rainbow = 0x02,
+    CustomPattern = 0x03,
+}
+
+enum WidgetCommand {
+    SelectWidget = 0x01,
+    ConfigureWeather = 0x02,
+    UpdateAllWidgets = 0x03,
+}
+
+enum WidgetType {
+    Time = 0x00,
+    Date = 0x01,
+    Weather = 0x02,
+    Notifications = 0x03,
+    BatteryLevel = 0x04,
+}
+
+enum ActionCommand {
+    TapToSurfaceTriggered = 0x01,
+}
+
+const App = () => {
+    const isDarkMode = useColorScheme() === 'dark';
+    const backgroundStyle = {
+        backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
+    };
+
+    // --- BLE State ---
+    const [isScanning, setIsScanning] = useState(false);
+    const [connectedPeripheralId, setConnectedPeripheralId] = useState<string | null>(null);
+    const [logMessages, setLogMessages] = useState<string[]>([]);
+    const peripheralRef = useRef<any | null>(null); // To store the connected peripheral object
+
+    // --- Light Control State ---
+    const [selectedColor, setSelectedColor] = useState({ r: 0, g: 0, b: 255 }); // Default blue
+    const [brightness, setBrightness] = useState(0.5); // 0.0 - 1.0
+    const [animationMode, setAnimationMode] = useState<AnimationMode>(AnimationMode.StaticColor);
+
+    // --- Widget Control State ---
+    const [selectedWidgetType, setSelectedWidgetType] = useState<WidgetType>(WidgetType.Time);
+    const [showWeatherDetails, setShowWeatherDetails] = useState(true);
+
+    const addLog = (message: string) => {
+        setLogMessages(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`].slice(-10)); // Keep last 10
+    };
+
+    // --- BLE Functions ---
+    const startScan = () => {
+        if (isScanning) return;
+        setIsScanning(true);
+        setLogMessages([]);
+        addLog('Starting scan...');
+        BleManager.scan([SERVICE_UUID], 5, true) // Scan for 5 seconds for our service
+            .then(() => {
+                addLog('Scan started successfully');
+            })
+            .catch(err => {
+                addLog(`Scan error: ${err}`);
+                setIsScanning(false);
+            });
+    };
+
+    const connectPeripheral = async (peripheralId: string) => {
+        addLog(`Attempting to connect to ${peripheralId}...`);
+        try {
+            await BleManager.connect(peripheralId);
+            addLog(`Connected to ${peripheralId}`);
+            setConnectedPeripheralId(peripheralId);
+            const peripheralInfo = await BleManager.retrieveServices(peripheralId, [SERVICE_UUID]);
+            peripheralRef.current = peripheralInfo; // Store peripheral info for later
+            addLog('Services retrieved. Ready to communicate.');
+        } catch (error) {
+            addLog(`Failed to connect or retrieve services: ${error}`);
+            setConnectedPeripheralId(null);
+        }
+    };
+
+    const disconnectPeripheral = async () => {
+        if (connectedPeripheralId) {
+            addLog(`Disconnecting from ${connectedPeripheralId}...`);
+            try {
+                await BleManager.disconnect(connectedPeripheralId);
+                addLog('Disconnected.');
+            } catch (error) {
+                addLog(`Error disconnecting: ${error}`);
+            } finally {
+                setConnectedPeripheralId(null);
+                peripheralRef.current = null;
+            }
+        }
+    };
+
+    const sendDataToCharacteristic = async (
+        data: number[],
+        characteristicUuid: string
+    ) => {
+        if (!connectedPeripheralId || !peripheralRef.current) {
+            addLog('Not connected to a peripheral.');
+            return;
+        }
+
+        try {
+            addLog(`Sending to ${characteristicUuid}: [${data.map(d => d.toString(16).padStart(2, '0')).join(', ')}]`);
+            await BleManager.writeWithoutResponse( // or .write if you need a response
+                connectedPeripheralId,
+                SERVICE_UUID,
+                characteristicUuid,
+                data
+            );
+            addLog('Data sent successfully.');
+        } catch (error) {
+            addLog(`Failed to send data to ${characteristicUuid}: ${error}`);
+        }
+    };
+
+    // --- Light Control Actions ---
+    const sendLightColor = (color: { r: number; g: number; b: number }) => {
+        const data = [
+            LightCommand.SetColor,
+            Math.round(color.r),
+            Math.round(color.g),
+            Math.round(color.b),
+        ];
+        sendDataToCharacteristic(data, LIGHT_CHARACTERISTIC_UUID);
+    };
+
+    const sendLightBrightness = (value: number) => {
+        setBrightness(value);
+        const data = [
+            LightCommand.SetBrightness,
+            Math.round(value * 255), // Scale 0-1 to 0-255
+        ];
+        sendDataToCharacteristic(data, LIGHT_CHARACTERISTIC_UUID);
+    };
+
+    const sendLightAnimation = (mode: AnimationMode) => {
+        setAnimationMode(mode);
+        const data = [
+            LightCommand.SetAnimation,
+            mode,
+        ];
+        sendDataToCharacteristic(data, LIGHT_CHARACTERISTIC_UUID);
+    };
+
+    // --- Widget Control Actions ---
+    const sendWidgetSelection = (type: WidgetType) => {
+        setSelectedWidgetType(type);
+        const data = [
+            WidgetCommand.SelectWidget,
+            type,
+        ];
+        sendDataToCharacteristic(data, WIDGET_CHARACTERISTIC_UUID);
+    };
+
+    const sendWeatherConfig = (showDetails: boolean) => {
+        setShowWeatherDetails(showDetails);
+        const data = [
+            WidgetCommand.ConfigureWeather,
+            showDetails ? 0x01 : 0x00,
+        ];
+        sendDataToCharacteristic(data, WIDGET_CHARACTERISTIC_UUID);
+    };
+
+    const requestWidgetUpdate = () => {
+        const data = [WidgetCommand.UpdateAllWidgets];
+        sendDataToCharacteristic(data, WIDGET_CHARACTERISTIC_UUID);
+    };
+
+    // --- "Tap to Surface" Action (Software Triggered) ---
+    const handleTapToSurface = () => {
+        addLog('Simulating "Tap to Surface" action.');
+        const data = [ActionCommand.TapToSurfaceTriggered];
+        sendDataToCharacteristic(data, ACTION_CHARACTERISTIC_UUID);
+    };
+
+    // --- BLE Lifecycle and Event Handling ---
+    useEffect(() => {
+        BleManager.start({ showAlert: false })
+            .then(() => {
+                addLog('BLE Manager initialized.');
+            })
+            .catch(error => {
+                addLog(`BLE Manager init error: ${error}`);
+            });
+
+        const handleDiscoverPeripheral = (peripheral: any) => {
+            addLog(`Discovered peripheral: ${peripheral.name || peripheral.id}`);
+            if (peripheral.name && peripheral.name.includes('YourBackCoverDeviceName')) { // Replace with your device name
+                BleManager.stopScan();
+                setIsScanning(false);
+                connectPeripheral(peripheral.id);
+            }
+        };
+
+        const handleStopScan = () => {
+            setIsScanning(false);
+            addLog('Scan stopped.');
+        };
+
+        const handleDisconnectPeripheral = (data: any) => {
+            addLog(`Disconnected from ${data.peripheral}`);
+            setConnectedPeripheralId(null);
+            peripheralRef.current = null;
+            // Optionally, rescan or show a reconnect button
+        };
+
+        const handleUpdateValueForCharacteristic = (data: any) => {
+            addLog(`Received data from ${data.peripheral} on characteristic ${data.characteristic}: ${data.value.join(', ')}`);
+            // Example: If the back cover sends a tap notification back
+            if (data.characteristic === ACTION_CHARACTERISTIC_UUID && data.value[0] === ActionCommand.TapToSurfaceTriggered) {
+                Alert.alert('Back Cover Tap!', 'The back cover detected a tap!');
+            }
+        };
+
+        const discoverPeripheralHandler = bleManagerEmitter.addListener(
+            'BleManagerDiscoverPeripheral',
+            handleDiscoverPeripheral
+        );
+        const stopScanHandler = bleManagerEmitter.addListener(
+            'BleManagerStopScan',
+            handleStopScan
+        );
+        const disconnectHandler = bleManagerEmitter.addListener(
+            'BleManagerDisconnectPeripheral',
+            handleDisconnectPeripheral
+        );
+        const updateCharacteristicHandler = bleManagerEmitter.addListener(
+            'BleManagerDidUpdateValueForCharacteristic',
+            handleUpdateValueForCharacteristic
+        );
+
+        // Clean up listeners on component unmount
+        return () => {
+            discoverPeripheralHandler.remove();
+            stopScanHandler.remove();
+            disconnectHandler.remove();
+            updateCharacteristicHandler.remove();
+        };
+    }, []);
+
+    const renderColorPicker = () => {
+        // This is a placeholder. For a real color picker, you'd use a library.
+        // For simplicity, let's use buttons for predefined colors.
+        const colors = [
+            { name: 'Red', r: 255, g: 0, b: 0 },
+            { name: 'Green', r: 0, g: 255, b: 0 },
+            { name: 'Blue', r: 0, g: 0, b: 255 },
+            { name: 'White', r: 255, g: 255, b: 255 },
+        ];
+        return (
+            <View style={styles.colorPickerContainer}>
+                {colors.map(color => (
+                    <TouchableOpacity
+                        key={color.name}
+                        style={[styles.colorBubble, { backgroundColor: `rgb(${color.r},${color.g},${color.b})` }]}
+                        onPress={() => {
+                            setSelectedColor(color);
+                            sendLightColor(color);
+                        }}
+                    />
+                ))}
+            </View>
+        );
+    };
+
+    return (
+        <SafeAreaView style={[backgroundStyle, { flex: 1 }]}>
+            <StatusBar
+                barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+                backgroundColor={backgroundStyle.backgroundColor}
+            />
+            <ScrollView
+                contentInsetAdjustmentBehavior="automatic"
+                style={backgroundStyle}>
+                <View style={styles.sectionContainer}>
+                    <Text style={styles.sectionTitle}>BLE Connection</Text>
+                    {!connectedPeripheralId ? (
+                        <View>
+                            <Button
+                                title={isScanning ? 'Scanning...' : 'Scan & Connect'}
+                                onPress={startScan}
+                                disabled={isScanning}
+                            />
+                            {isScanning && <ActivityIndicator size="small" color="#0000ff" />}
+                        </View>
+                    ) : (
+                        <View>
+                            <Text style={styles.sectionDescription}>
+                                Connected to: {connectedPeripheralId}
+                            </Text>
+                            <Button title="Disconnect" onPress={disconnectPeripheral} color="red" />
+                        </View>
+                    )}
+                </View>
+
+                {connectedPeripheralId && (
+                    <>
+                        <View style={styles.sectionContainer}>
+                            <Text style={styles.sectionTitle}>Back Cover Lights</Text>
+                            <Text style={styles.sectionDescription}>Color:</Text>
+                            {renderColorPicker()}
+                            {/* If you use react-native-color-picker, uncomment this: */}
+                            {/* <ColorPicker
+                                onColorChange={color => {
+                                    const { r, g, b } = toHsv(color); // toHsv gives r,g,b in 0-1 range
+                                    const rgb = { r: r * 255, g: g * 255, b: b * 255 };
+                                    setSelectedColor(rgb);
+                                    sendLightColor(rgb);
+                                }}
+                                style={{ flex: 1, height: 200, width: '100%' }}
+                            /> */}
+
+
+                            <Text style={styles.sectionDescription}>Brightness: {Math.round(brightness * 100)}%</Text>
+                            {/* Replaced deprecated Slider with a more modern approach or a note to install @react-native-community/slider */}
+                            <View style={{ width: '100%', paddingHorizontal: 20 }}>
+                                {Platform.OS === 'ios' ? (
+                                    <Slider
+                                        style={{ width: '100%', height: 40 }}
+                                        minimumValue={0}
+                                        maximumValue={1}
+                                        value={brightness}
+                                        onSlidingComplete={sendLightBrightness}
+                                        minimumTrackTintColor="#FFFFFF"
+                                        maximumTrackTintColor="#000000"
+                                    />
+                                ) : (
+                                    <Text style={{ textAlign: 'center', color: Colors.text }}>
+                                        Please install `@react-native-community/slider` for Android.
+                                        <Text>
+                                            Slider value: {brightness.toFixed(2)}
+                                        </Text>
+                                    </Text>
+                                )}
+                            </View>
+
+                            <Text style={styles.sectionDescription}>Animation Mode:</Text>
+                            <View style={styles.buttonRow}>
+                                {Object.keys(AnimationMode).filter(key => isNaN(Number(key))).map(modeName => (
+                                    <Button
+                                        key={modeName}
+                                        title={modeName}
+                                        onPress={() => sendLightAnimation(AnimationMode[modeName as keyof typeof AnimationMode])}
+                                        color={animationMode === AnimationMode[modeName as keyof typeof AnimationMode] ? 'purple' : 'gray'}
+                                    />
+                                ))}
+                            </View>
+                        </View>
+
+                        <View style={styles.sectionContainer}>
+                            <Text style={styles.sectionTitle}>Back Cover Widgets</Text>
+                            <Text style={styles.sectionDescription}>Select Widget Type:</Text>
+                            <View style={styles.buttonRow}>
+                                {Object.keys(WidgetType).filter(key => isNaN(Number(key))).map(widgetName => (
+                                    <Button
+                                        key={widgetName}
+                                        title={widgetName}
+                                        onPress={() => sendWidgetSelection(WidgetType[widgetName as keyof typeof WidgetType])}
+                                        color={selectedWidgetType === WidgetType[widgetName as keyof typeof WidgetType] ? 'teal' : 'gray'}
+                                    />
+                                ))}
+                            </View>
+
+                            {selectedWidgetType === WidgetType.Weather && (
+                                <View style={styles.toggleRow}>
+                                    <Text style={styles.sectionDescription}>Show Weather Details</Text>
+                                    <Switch
+                                        onValueChange={sendWeatherConfig}
+                                        value={showWeatherDetails}
+                                    />
+                                </View>
+                            )}
+
+                            <Button title="Request Widget Update" onPress={requestWidgetUpdate} />
+                        </View>
+
+                        <View style={styles.sectionContainer}>
+                            <Text style={styles.sectionTitle}>"Tap to Surface" (Simulated)</Text>
+                            <Button
+                                title="Trigger Tap Action"
+                                onPress={handleTapToSurface}
+                            />
+                            <Text style={styles.sectionDescription}>
+                                This button simulates a "tap" event, sending a command to your back cover.
+                                For a real "tap to surface" on the back, your hardware needs a sensor.
+                            </Text>
+                        </View>
+                    </>
+                )}
+
+                <View style={styles.sectionContainer}>
+                    <Text style={styles.sectionTitle}>BLE Log</Text>
+                    {logMessages.map((msg, index) => (
+                        <Text key={index} style={styles.logText}>{msg}</Text>
+                    ))}
+                </View>
+            </ScrollView>
+        </SafeAreaView>
+    );
+};
+
+const styles = StyleSheet.create({
+    sectionContainer: {
+        marginTop: 32,
+        paddingHorizontal: 24,
+        borderBottomWidth: 1,
+        borderBottomColor: '#eee',
+        paddingBottom: 20,
+    },
+    sectionTitle: {
+        fontSize: 24,
+        fontWeight: '600',
+        color: Colors.black,
+        marginBottom: 10,
+    },
+    sectionDescription: {
+        marginTop: 8,
+        fontSize: 18,
+        fontWeight: '400',
+        color: Colors.darkGray,
+    },
+    highlight: {
+        fontWeight: '700',
+    },
+    buttonRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'space-around',
+        marginTop: 10,
+    },
+    colorPickerContainer: {
+        flexDirection: 'row',
+        justifyContent: 'space-around',
+        paddingVertical: 10,
+    },
+    colorBubble: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: '#ccc',
+    },
+    toggleRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginTop: 10,
+    },
+    logText: {
+        fontSize: 12,
+        color: Colors.darkGray,
+        fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    },
+});
+
+export default App;
+
+
+
+<key>NSBluetoothAlwaysUsageDescription</key>
+<string>Our app uses Bluetooth to connect to your custom back cover accessories.</string>
+<key>NSBluetoothPeripheralUsageDescription</key>
+<string>Our app uses Bluetooth to find and connect to your custom back cover accessories.</string>
+
+
+
+<uses-permission android:name="android.permission.BLUETOOTH"/>
+<uses-permission android:name="android.permission.BLUETOOTH_ADMIN"/>
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+<uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
+<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+<uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+
+
+
+<service android:name="com.blemanager.BleBackgroundService" android:enabled="true" />
+
+
+
+mkdir backcover-controller
+cd backcover-controller
+npm init -y
+npm install noble # Or yarn add noble
+
+# Platform-specific Noble setup might be required.
+# For Linux (e.g., Raspberry Pi): sudo apt-get install bluetooth bluez libbluetooth-dev libusb-1.0-0-dev
+# For macOS/Windows, it usually works out of the box with Node.js and pre-installed drivers.
+
+
+
+// controller.js
+
+const noble = require('noble');
+
+// --- Configuration Constants (MUST MATCH YOUR HARDWARE'S FIRMWARE) ---
+const BACKCOVER_DEVICE_NAME = 'YourBackCoverDeviceName'; // Replace with the actual advertised name
+const SERVICE_UUID = 'YOUR_BACKCOVER_SERVICE_UUID'; // e.g., '4a987d00-0000-1000-8000-00805f9b34fb' (lowercase in noble)
+const LIGHT_CHARACTERISTIC_UUID = 'YOUR_LIGHT_CHARACTERISTIC_UUID'; // e.g., '4a987d01-0000-1000-8000-00805f9b34fb'
+const WIDGET_CHARACTERISTIC_UUID = 'YOUR_WIDGET_CHARACTERISTIC_UUID'; // e.g., '4a987d02-0000-1000-8000-00805f9b34fb'
+const ACTION_CHARACTERISTIC_UUID = 'YOUR_ACTION_CHARACTERISTIC_UUID'; // e.g., '4a987d03-0000-1000-8000-00805f9b34fb'
+
+// --- Enums for Commands (Mirroring Firmware) ---
+const LightCommand = {
+    SetColor: 0x01,
+    SetBrightness: 0x02,
+    SetAnimation: 0x03,
+};
+
+const AnimationMode = {
+    StaticColor: 0x00,
+    Pulse: 0x01,
+    Rainbow: 0x02,
+    CustomPattern: 0x03,
+};
+
+const WidgetCommand = {
+    SelectWidget: 0x01,
+    ConfigureWeather: 0x02,
+    UpdateAllWidgets: 0x03,
+};
+
+const WidgetType = {
+    Time: 0x00,
+    Date: 0x01,
+    Weather: 0x02,
+    Notifications: 0x03,
+    BatteryLevel: 0x04,
+};
+
+const ActionCommand = {
+    TapToSurfaceTriggered: 0x01,
+};
+
+let backCoverPeripheral = null;
+let lightCharacteristic = null;
+let widgetCharacteristic = null;
+let actionCharacteristic = null;
+
+// --- Helper Functions ---
+function log(message) {
+    console.log(`[${new Date().toLocaleTimeString()}] ${message}`);
+}
+
+async function sendDataToCharacteristic(characteristic, data) {
+    if (!characteristic) {
+        log(`Characteristic not available.`);
+        return;
+    }
+    if (!backCoverPeripheral || !backCoverPeripheral.connected) {
+        log(`Not connected to peripheral.`);
+        return;
+    }
+
+    try {
+        log(`Sending to ${characteristic.uuid}: [${data.toString('hex')}]`);
+        // noble's write method expects a Buffer
+        await characteristic.write(data, false); // false for withoutResponse, true for withResponse
+        log('Data sent successfully.');
+    } catch (error) {
+        log(`Failed to send data to ${characteristic.uuid}: ${error.message}`);
+    }
+}
+
+// --- Light Control Actions ---
+async function sendLightColor(r, g, b) {
+    const data = Buffer.from([
+        LightCommand.SetColor,
+        r, g, b
+    ]);
+    await sendDataToCharacteristic(lightCharacteristic, data);
+}
+
+async function sendLightBrightness(brightness) { // brightness: 0.0 - 1.0
+    const data = Buffer.from([
+        LightCommand.SetBrightness,
+        Math.round(brightness * 255)
+    ]);
+    await sendDataToCharacteristic(lightCharacteristic, data);
+}
+
+async function sendLightAnimation(mode) {
+    const data = Buffer.from([
+        LightCommand.SetAnimation,
+        mode
+    ]);
+    await sendDataToCharacteristic(lightCharacteristic, data);
+}
+
+// --- Widget Control Actions ---
+async function sendWidgetSelection(type) {
+    const data = Buffer.from([
+        WidgetCommand.SelectWidget,
+        type
+    ]);
+    await sendDataToCharacteristic(widgetCharacteristic, data);
+}
+
+async function sendWeatherConfig(showDetails) {
+    const data = Buffer.from([
+        WidgetCommand.ConfigureWeather,
+        showDetails ? 0x01 : 0x00
+    ]);
+    await sendDataToCharacteristic(widgetCharacteristic, data);
+}
+
+async function requestWidgetUpdate() {
+    const data = Buffer.from([WidgetCommand.UpdateAllWidgets]);
+    await sendDataToCharacteristic(widgetCharacteristic, data);
+}
+
+// --- "Tap to Surface" Action (Software Triggered) ---
+async function handleTapToSurface() {
+    log('Simulating "Tap to Surface" action.');
+    const data = Buffer.from([ActionCommand.TapToSurfaceTriggered]);
+    await sendDataToCharacteristic(actionCharacteristic, data);
+}
+
+// --- Noble BLE Event Handlers ---
+
+noble.on('stateChange', async (state) => {
+    if (state === 'poweredOn') {
+        log('BLE is powered on. Starting scan...');
+        noble.startScanning([SERVICE_UUID], false); // Scan for specific service UUID
+    } else {
+        log(`BLE state changed to: ${state}`);
+        noble.stopScanning();
+        if (backCoverPeripheral && backCoverPeripheral.connected) {
+            await backCoverPeripheral.disconnect();
+        }
+    }
+});
+
+noble.on('discover', async (peripheral) => {
+    // noble peripheral.name is often null initially, use advertisement.localName
+    const deviceName = peripheral.advertisement.localName || peripheral.id;
+    log(`Discovered: ${deviceName} (${peripheral.id})`);
+
+    if (deviceName === BACKCOVER_DEVICE_NAME) {
+        log(`Found target peripheral: ${deviceName}`);
+        noble.stopScanning();
+        backCoverPeripheral = peripheral;
+
+        backCoverPeripheral.on('connect', () => {
+            log(`Connected to ${deviceName}`);
+        });
+
+        backCoverPeripheral.on('disconnect', () => {
+            log(`Disconnected from ${deviceName}`);
+            backCoverPeripheral = null;
+            lightCharacteristic = null;
+            widgetCharacteristic = null;
+            actionCharacteristic = null;
+            // Optionally restart scan or alert
+            log('Restarting scan to find device again...');
+            noble.startScanning([SERVICE_UUID], false);
+        });
+
+        try {
+            await backCoverPeripheral.connectAsync();
+            log('Peripheral connected. Discovering services...');
+            const { services, characteristics } = await backCoverPeripheral.discoverAllServicesAndCharacteristicsAsync();
+
+            for (const service of services) {
+                if (service.uuid === SERVICE_UUID.replace(/-/g, '')) { // noble UUIDs are lowercase without hyphens
+                    log(`Discovered service: ${service.uuid}`);
+                    for (const char of characteristics) {
+                        if (char.uuid === LIGHT_CHARACTERISTIC_UUID.replace(/-/g, '')) {
+                            lightCharacteristic = char;
+                            log(`Found Light Characteristic: ${char.uuid}`);
+                        } else if (char.uuid === WIDGET_CHARACTERISTIC_UUID.replace(/-/g, '')) {
+                            widgetCharacteristic = char;
+                            log(`Found Widget Characteristic: ${char.uuid}`);
+                        } else if (char.uuid === ACTION_CHARACTERISTIC_UUID.replace(/-/g, '')) {
+                            actionCharacteristic = char;
+                            log(`Found Action Characteristic: ${char.uuid}`);
+                            // If the back cover sends data back (e.g., sensor taps),
+                            // you'd subscribe to notifications here:
+                            // await actionCharacteristic.subscribeAsync();
+                            // actionCharacteristic.on('data', (data, isNotification) => {
+                            //     log(`Received data from action characteristic: ${data.toString('hex')}, notification: ${isNotification}`);
+                            //     if (data[0] === ActionCommand.TapToSurfaceTriggered) {
+                            //         log("Back cover physically tapped!");
+                            //     }
+                            // });
+                        }
+                    }
+                    break; // Found our service, no need to check others
+                }
+            }
+
+            if (lightCharacteristic && widgetCharacteristic && actionCharacteristic) {
+                log('All required characteristics found. Ready for commands.');
+                // --- Perform example actions here ---
+                await new Promise(resolve => setTimeout(resolve, 2000)); // Give time for setup
+                await sendLightColor(255, 0, 0); // Set to Red
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                await sendLightBrightness(0.2); // Dim it
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                await sendLightAnimation(AnimationMode.Pulse); // Start pulsing
+                await new Promise(resolve => setTimeout(resolve, 2000));
+
+                await sendWidgetSelection(WidgetType.Time); // Show time widget
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                await requestWidgetUpdate(); // Request update
+
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                await handleTapToSurface(); // Simulate a tap
+                await new Promise(resolve => setTimeout(resolve, 1000));
+
+                log('Demo actions complete. Keeping connection open. Press Ctrl+C to exit.');
+
+            } else {
+                log('Could not find all required characteristics. Disconnecting.');
+                await backCoverPeripheral.disconnectAsync();
+            }
+
+        } catch (error) {
+            log(`Connection/discovery error: ${error.message}`);
+            if (backCoverPeripheral && backCoverPeripheral.connected) {
+                await backCoverPeripheral.disconnectAsync();
+            }
+        }
+    }
+});
+
+// Handle process exit to ensure clean disconnect
+process.on('SIGINT', async () => {
+    log('Exiting Node.js application.');
+    if (backCoverPeripheral && backCoverPeripheral.connected) {
+        log('Disconnecting from peripheral...');
+        try {
+            await backCoverPeripheral.disconnectAsync();
+        } catch (error) {
+            log(`Error during disconnect on exit: ${error.message}`);
+        }
+    }
+    noble.stopScanning();
+    process.exit(0);
+});
+
+
+
+
+node controller.js
+
+
+
+# Create a virtual environment (best practice)
+python3 -m venv venv
+source venv/bin/activate # On Windows: .\venv\Scripts\activate
+
+# Install Bleak
+pip install bleak
+
+# On some Linux systems, you might need to install OS-level dependencies for Bleak/BlueZ:
+# sudo apt-get update
+# sudo apt-get install bluez libbluetooth-dev
+
+# On Windows, ensure your Bluetooth drivers are up to date.
+
+
+
+import asyncio
+import struct
+from bleak import BleakClient, BleakScanner
+
+# --- Configuration Constants (MUST MATCH YOUR HARDWARE'S FIRMWARE) ---
+BACKCOVER_DEVICE_NAME = "YourBackCoverDeviceName"  # Replace with the actual advertised name
+SERVICE_UUID = "YOUR_BACKCOVER_SERVICE_UUID"  # e.g., "4A987D00-0000-1000-8000-00805F9B34FB"
+LIGHT_CHARACTERISTIC_UUID = "YOUR_LIGHT_CHARACTERISTIC_UUID"  # e.g., "4A987D01-0000-1000-8000-00805F9B34FB"
+WIDGET_CHARACTERISTIC_UUID = "YOUR_WIDGET_CHARACTERISTIC_UUID"  # e.g., "4A987D02-0000-1000-8000-00805F9B34FB"
+ACTION_CHARACTERISTIC_UUID = "YOUR_ACTION_CHARACTERISTIC_UUID"  # e.g., "4A987D03-0000-1000-8000-00805F9B34FB"
+
+# --- Enums for Commands (Mirroring Firmware) ---
+class LightCommand:
+    SET_COLOR = 0x01
+    SET_BRIGHTNESS = 0x02
+    SET_ANIMATION = 0x03
+
+class AnimationMode:
+    STATIC_COLOR = 0x00
+    PULSE = 0x01
+    RAINBOW = 0x02
+    CUSTOM_PATTERN = 0x03
+
+class WidgetCommand:
+    SELECT_WIDGET = 0x01
+    CONFIGURE_WEATHER = 0x02
+    UPDATE_ALL_WIDGETS = 0x03
+
+class WidgetType:
+    TIME = 0x00
+    DATE = 0x01
+    WEATHER = 0x02
+    NOTIFICATIONS = 0x03
+    BATTERY_LEVEL = 0x04
+
+class ActionCommand:
+    TAP_TO_SURFACE_TRIGGERED = 0x01
+
+# Global client object
+client = None
+
+# --- Helper Functions ---
+def log(message):
+    print(f"[{asyncio.current_task().get_name() or 'Main'}] {message}")
+
+async def send_data_to_characteristic(uuid: str, data: bytes):
+    if not client or not client.is_connected:
+        log("Not connected to a peripheral.")
+        return
+
+    try:
+        log(f"Sending to {uuid}: {data.hex()}")
+        await client.write_gatt_char(uuid, data)
+        log("Data sent successfully.")
+    except Exception as e:
+        log(f"Failed to send data to {uuid}: {e}")
+
+# --- Light Control Actions ---
+async def send_light_color(r: int, g: int, b: int):
+    # Pack bytes: command_byte, red, green, blue
+    data = struct.pack("<BBBB", LightCommand.SET_COLOR, r, g, b)
+    await send_data_to_characteristic(LIGHT_CHARACTERISTIC_UUID, data)
+
+async def send_light_brightness(brightness: float):  # brightness: 0.0 - 1.0
+    # Pack bytes: command_byte, brightness_value (0-255)
+    data = struct.pack("<BB", LightCommand.SET_BRIGHTNESS, int(brightness * 255))
+    await send_data_to_characteristic(LIGHT_CHARACTERISTIC_UUID, data)
+
+async def send_light_animation(mode: int):
+    # Pack bytes: command_byte, animation_mode
+    data = struct.pack("<BB", LightCommand.SET_ANIMATION, mode)
+    await send_data_to_characteristic(LIGHT_CHARACTERISTIC_UUID, data)
+
+# --- Widget Control Actions ---
+async def send_widget_selection(widget_type: int):
+    # Pack bytes: command_byte, widget_type
+    data = struct.pack("<BB", WidgetCommand.SELECT_WIDGET, widget_type)
+    await send_data_to_characteristic(WIDGET_CHARACTERISTIC_UUID, data)
+
+async def send_weather_config(show_details: bool):
+    # Pack bytes: command_byte, show_details (0 or 1)
+    data = struct.pack("<BB", WidgetCommand.CONFIGURE_WEATHER, 0x01 if show_details else 0x00)
+    await send_data_to_characteristic(WIDGET_CHARACTERISTIC_UUID, data)
+
+async def request_widget_update():
+    # Pack bytes: command_byte
+    data = struct.pack("<B", WidgetCommand.UPDATE_ALL_WIDGETS)
+    await send_data_to_characteristic(WIDGET_CHARACTERISTIC_UUID, data)
+
+# --- "Tap to Surface" Action (Software Triggered) ---
+async def handle_tap_to_surface():
+    log('Simulating "Tap to Surface" action.')
+    # Pack bytes: command_byte
+    data = struct.pack("<B", ActionCommand.TAP_TO_SURFACE_TRIGGERED)
+    await send_data_to_characteristic(ACTION_CHARACTERISTIC_UUID, data)
+
+# --- BLE Communication Logic ---
+async def notification_handler(characteristic, data: bytearray):
+    """Simple notification handler for BLE data."""
+    log(f"Received data from {characteristic.uuid}: {data.hex()}")
+    if characteristic.uuid.lower() == ACTION_CHARACTERISTIC_UUID.lower() and data[0] == ActionCommand.TAP_TO_SURFACE_TRIGGERED:
+        log("Back cover physically tapped!")
+        # You could trigger Python-side actions here, e.g., play a sound, log to file.
+
+async def run_ble_client():
+    global client
+    log("Starting BLE scan...")
+    device = None
+    try:
+        # Scan for devices advertising our service UUID or by name
+        devices = await BleakScanner.discover(timeout=10.0) # Scan for 10 seconds
+        for d in devices:
+            if d.name == BACKCOVER_DEVICE_NAME or SERVICE_UUID.lower() in d.metadata.get('uuids', []):
+                log(f"Found target device: {d.name} ({d.address})")
+                device = d
+                break
+        
+        if not device:
+            log(f"Device '{BACKCOVER_DEVICE_NAME}' or service '{SERVICE_UUID}' not found.")
+            return
+
+        client = BleakClient(device)
+        await client.connect()
+        log(f"Connected to {device.name} ({device.address})")
+
+        # Discover services and characteristics explicitly if needed,
+        # but BleakClient handles most of this when connecting if UUIDs are known.
+        # However, for notifications, you must explicitly start them.
+        try:
+            # Subscribe to notifications for the action characteristic if the hardware sends them
+            if ACTION_CHARACTERISTIC_UUID in client.characteristics: # Check if characteristic exists
+                await client.start_notify(ACTION_CHARACTERISTIC_UUID, notification_handler)
+                log(f"Subscribed to notifications for {ACTION_CHARACTERISTIC_UUID}")
+        except Exception as e:
+            log(f"Could not subscribe to notifications for {ACTION_CHARACTERISTIC_UUID}: {e}")
+
+        # --- Perform example actions ---
+        log("\n--- Starting demo actions ---")
+        await asyncio.sleep(2) # Give time for BLE setup
+
+        await send_light_color(255, 0, 0)  # Set to Red
+        await asyncio.sleep(1)
+        await send_light_brightness(0.2)   # Dim it
+        await asyncio.sleep(1)
+        await send_light_animation(AnimationMode.PULSE) # Start pulsing
+        await asyncio.sleep(3)
+
+        await send_widget_selection(WidgetType.TIME) # Show time widget
+        await asyncio.sleep(1)
+        await request_widget_update() # Request update
+        await asyncio.sleep(2)
+        
+        await send_weather_config(True) # Show weather details
+        await asyncio.sleep(1)
+        await send_widget_selection(WidgetType.WEATHER) # Switch to weather widget
+        await asyncio.sleep(2)
+
+        await handle_tap_to_surface() # Simulate a tap (software trigger)
+        await asyncio.sleep(1)
+
+        log("Demo actions complete. Keeping connection open. Press Ctrl+C to exit.")
+        # Keep the client connected indefinitely until interrupted
+        while True:
+            await asyncio.sleep(1)
+
+    except Exception as e:
+        log(f"An error occurred: {e}")
+    finally:
+        if client and client.is_connected:
+            log("Disconnecting from peripheral...")
+            await client.disconnect()
+            log("Disconnected.")
+        log("BLE client stopped.")
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(run_ble_client(), debug=True) # debug=True can help with troubleshooting
+    except KeyboardInterrupt:
+        log("Program interrupted by user.")
+    finally:
+        log("Exiting.")
+
+
+
+
+python controller.py
+
+
+
+<key>NSBluetoothAlwaysUsageDescription</key>
+<string>This app needs Bluetooth access to connect and control your custom iPhone back cover lights and widgets.</string>
+<key>NSBluetoothPeripheralUsageDescription</key>
+<string>This app uses Bluetooth to find and connect to your custom iPhone back cover accessory.</string>
+
+
+
+import SwiftUI
+
+@main
+struct BackCoverControllerApp: App {
+    // Instantiate the BLE controller here to make it available throughout the app
+    @StateObject var bleController = BLEBackCoverController()
+
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+                .environmentObject(bleController) // Make controller accessible to all views
+        }
+    }
+}
+
+
+
+import Foundation
+import CoreBluetooth
+import Combine
+import SwiftUI // For Color conversion if needed
+
+// MARK: - Configuration Constants (MUST MATCH YOUR HARDWARE'S FIRMWARE)
+// BLE UUIDs should be defined consistently.
+// Apple's CoreBluetooth uses CBUUID objects.
+struct BLEUUIDs {
+    static let BackCoverServiceUUID = CBUUID(string: "YOUR_BACKCOVER_SERVICE_UUID") // e.g., "4A987D00-0000-1000-8000-00805F9B34FB"
+    static let LightCharacteristicUUID = CBUUID(string: "YOUR_LIGHT_CHARACTERISTIC_UUID") // e.g., "4A987D01-0000-1000-8000-00805F9B34FB"
+    static let WidgetCharacteristicUUID = CBUUID(string: "YOUR_WIDGET_CHARACTERISTIC_UUID") // e.g., "4A987D02-0000-1000-8000-00805F9B34FB"
+    static let ActionCharacteristicUUID = CBUUID(string: "YOUR_ACTION_CHARACTERISTIC_UUID") // e.g., "4A987D03-0000-1000-8000-00805F9B34FB"
+
+    static let BackCoverDeviceName = "YourBackCoverDeviceName" // Replace with the actual advertised name
+}
+
+// MARK: - Enums for Commands (Mirroring Firmware)
+enum LightCommand: UInt8 {
+    case setColor = 0x01
+    case setBrightness = 0x02
+    case setAnimation = 0x03
+}
+
+enum AnimationMode: UInt8, CaseIterable, Identifiable, CustomStringConvertible {
+    case staticColor = 0x00
+    case pulse = 0x01
+    case rainbow = 0x02
+    case customPattern = 0x03
+
+    var id: UInt8 { self.rawValue }
+    var description: String {
+        switch self {
+        case .staticColor: return "Static"
+        case .pulse: return "Pulse"
+        case .rainbow: return "Rainbow"
+        case .customPattern: return "Custom"
+        }
+    }
+}
+
+enum WidgetCommand: UInt8 {
+    case selectWidget = 0x01
+    case configureWeather = 0x02
+    case updateAllWidgets = 0x03
+}
+
+enum WidgetType: UInt8, CaseIterable, Identifiable, CustomStringConvertible {
+    case time = 0x00
+    case date = 0x01
+    case weather = 0x02
+    case notifications = 0x03
+    case batteryLevel = 0x04
+
+    var id: UInt8 { self.rawValue }
+    var description: String {
+        switch self {
+        case .time: return "Time"
+        case .date: return "Date"
+        case .weather: return "Weather"
+        case .notifications: return "Notif."
+        case .batteryLevel: return "Battery"
+        }
+    }
+}
+
+enum ActionCommand: UInt8 {
+    case tapToSurfaceTriggered = 0x01
+}
+
+
+// MARK: - BLEBackCoverController (Central Manager)
+class BLEBackCoverController: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeripheralDelegate {
+
+    private var centralManager: CBCentralManager!
+    private var backCoverPeripheral: CBPeripheral?
+
+    // Published properties for UI to observe
+    @Published var connectionState: CBManagerState = .unknown
+    @Published var isConnected: Bool = false
+    @Published var currentPeripheralName: String = "No Device"
+
+    private var lightCharacteristic: CBCharacteristic?
+    private var widgetCharacteristic: CBCharacteristic?
+    private var actionCharacteristic: CBCharacteristic?
+
+    // Add a PassthroughSubject to send tap notifications to UI if desired
+    let backCoverTapPublisher = PassthroughSubject<Void, Never>()
+
+    override init() {
+        super.init()
+        centralManager = CBCentralManager(delegate: self, queue: nil)
+    }
+
+    // MARK: - Central Manager Delegate Methods
+
+    func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        self.connectionState = central.state
+        switch central.state {
+        case .poweredOn:
+            print("BLE is powered on. Scanning for back cover...")
+            startScanning()
+        case .poweredOff:
+            print("BLE is powered off.")
+            self.isConnected = false
+            self.backCoverPeripheral = nil
+        case .unsupported:
+            print("BLE is unsupported on this device.")
+        case .unauthorized:
+            print("BLE is unauthorized. Check permissions.")
+        case .resetting:
+            print("BLE is resetting.")
+        case .unknown:
+            print("BLE state is unknown.")
+        @unknown default:
+            print("Unknown BLE state.")
+        }
+    }
+
+    func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
+        // Filter by name and/or service UUID
+        if peripheral.name == BLEUUIDs.BackCoverDeviceName ||
+           (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID])?.contains(BLEUUIDs.BackCoverServiceUUID) == true {
+
+            print("Discovered Back Cover Peripheral: \(peripheral.name ?? "Unknown")")
+            centralManager.stopScan() // Stop scanning once found
+            backCoverPeripheral = peripheral
+            backCoverPeripheral?.delegate = self
+            centralManager.connect(peripheral, options: nil) // Attempt to connect
+        }
+    }
+
+    func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        print("Connected to Back Cover Peripheral: \(peripheral.name ?? "Unknown")")
+        self.isConnected = true
+        self.currentPeripheralName = peripheral.name ?? "Connected Device"
+        // Discover services for the connected peripheral
+        peripheral.discoverServices([BLEUUIDs.BackCoverServiceUUID])
+    }
+
+    func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+        print("Failed to connect to Back Cover: \(error?.localizedDescription ?? "Unknown error")")
+        self.isConnected = false
+        self.backCoverPeripheral = nil
+        self.currentPeripheralName = "Connection Failed"
+        startScanning() // Try scanning again
+    }
+
+    func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        print("Disconnected from Back Cover: \(error?.localizedDescription ?? "Unknown error")")
+        self.isConnected = false
+        self.backCoverPeripheral = nil
+        self.currentPeripheralName = "Disconnected"
+        lightCharacteristic = nil
+        widgetCharacteristic = nil
+        actionCharacteristic = nil
+        startScanning() // Re-scan to allow reconnection
+    }
+
+    // MARK: - Peripheral Delegate Methods
+
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        if let error = error {
+            print("Error discovering services: \(error.localizedDescription)")
+            return
+        }
+        guard let services = peripheral.services else { return }
+
+        for service in services where service.uuid == BLEUUIDs.BackCoverServiceUUID {
+            print("Discovered Back Cover Service: \(service.uuid)")
+            // Discover characteristics for our service
+            peripheral.discoverCharacteristics([
+                BLEUUIDs.LightCharacteristicUUID,
+                BLEUUIDs.WidgetCharacteristicUUID,
+                BLEUUIDs.ActionCharacteristicUUID
+            ], for: service)
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
+        if let error = error {
+            print("Error discovering characteristics: \(error.localizedDescription)")
+            return
+        }
+        guard let characteristics = service.characteristics else { return }
+
+        for characteristic in characteristics {
+            if characteristic.uuid == BLEUUIDs.LightCharacteristicUUID {
+                lightCharacteristic = characteristic
+                print("Found Light Characteristic: \(characteristic.uuid)")
+            } else if characteristic.uuid == BLEUUIDs.WidgetCharacteristicUUID {
+                widgetCharacteristic = characteristic
+                print("Found Widget Characteristic: \(characteristic.uuid)")
+            } else if characteristic.uuid == BLEUUIDs.ActionCharacteristicUUID {
+                actionCharacteristic = characteristic
+                print("Found Action Characteristic: \(characteristic.uuid)")
+                // Subscribe to notifications if the back cover sends data (e.g., tap events)
+                if characteristic.properties.contains(.notify) {
+                    peripheral.setNotifyValue(true, for: characteristic)
+                    print("Subscribed to notifications for Action Characteristic.")
+                }
+            }
+        }
+        print("All required characteristics discovered.")
+    }
+
+    // This method is called when the peripheral updates a characteristic's value (e.g., a notification)
+    func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        if let error = error {
+            print("Error updating value for characteristic \(characteristic.uuid): \(error.localizedDescription)")
+            return
+        }
+
+        guard let data = characteristic.value else { return }
+        print("Received data from \(characteristic.uuid): \(data.hexString)")
+
+        if characteristic.uuid == BLEUUIDs.ActionCharacteristicUUID {
+            // Assuming the first byte indicates the action command
+            if data.count > 0 && data[0] == ActionCommand.TAP_TO_SURFACE_TRIGGERED.rawValue {
+                print("Received 'Tap to Surface' notification from back cover!")
+                backCoverTapPublisher.send() // Notify UI/other parts of the app
+            }
+        }
+        // Handle other characteristic value updates here if applicable
+    }
+
+    // MARK: - Public Control Methods
+
+    func startScanning() {
+        guard centralManager.state == .poweredOn else {
+            print("BLE not powered on, cannot start scanning.")
+            return
+        }
+        // Scan for our specific service to optimize discovery
+        centralManager.scanForPeripherals(withServices: [BLEUUIDs.BackCoverServiceUUID], options: nil)
+        print("Scanning for peripherals...")
+    }
+
+    func stopScanning() {
+        centralManager.stopScan()
+        print("Stopped scanning.")
+    }
+
+    func disconnect() {
+        if let peripheral = backCoverPeripheral, peripheral.state == .connected {
+            centralManager.cancelPeripheralConnection(peripheral)
+        }
+    }
+
+    private func writeToCharacteristic(characteristic: CBCharacteristic?, data: Data) {
+        guard let char = characteristic, let peripheral = backCoverPeripheral, peripheral.state == .connected else {
+            print("Characteristic not ready or not connected.")
+            return
+        }
+        // .withoutResponse is faster but doesn't guarantee delivery
+        // .withResponse is slower but confirms delivery
+        peripheral.writeValue(data, for: char, type: .withoutResponse)
+        print("Sent \(data.hexString) to \(char.uuid)")
+    }
+
+    // MARK: Light Control
+    func setLightColor(color: Color) {
+        let uiColor = UIColor(color)
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        uiColor.getRed(&r, green: &g, blue: &b, alpha: &a)
+
+        let red = UInt8(r * 255)
+        let green = UInt8(g * 255)
+        let blue = UInt8(b * 255)
+
+        var data = Data()
+        data.append(LightCommand.setColor.rawValue)
+        data.append(red)
+        data.append(green)
+        data.append(blue)
+        writeToCharacteristic(characteristic: lightCharacteristic, data: data)
+    }
+
+    func setLightBrightness(brightness: Double) { // 0.0 - 1.0
+        let value = UInt8(brightness * 255)
+        var data = Data()
+        data.append(LightCommand.setBrightness.rawValue)
+        data.append(value)
+        writeToCharacteristic(characteristic: lightCharacteristic, data: data)
+    }
+
+    func setLightAnimation(mode: AnimationMode) {
+        var data = Data()
+        data.append(LightCommand.setAnimation.rawValue)
+        data.append(mode.rawValue)
+        writeToCharacteristic(characteristic: lightCharacteristic, data: data)
+    }
+
+    // MARK: Widget Control
+    func selectWidget(type: WidgetType) {
+        var data = Data()
+        data.append(WidgetCommand.selectWidget.rawValue)
+        data.append(type.rawValue)
+        writeToCharacteristic(characteristic: widgetCharacteristic, data: data)
+    }
+
+    func configureWeatherWidget(showDetails: Bool) {
+        var data = Data()
+        data.append(WidgetCommand.configureWeather.rawValue)
+        data.append(showDetails ? 0x01 : 0x00)
+        writeToCharacteristic(characteristic: widgetCharacteristic, data: data)
+    }
+
+    func requestWidgetUpdate() {
+        var data = Data()
+        data.append(WidgetCommand.updateAllWidgets.rawValue)
+        writeToCharacteristic(characteristic: widgetCharacteristic, data: data)
+    }
+
+    // MARK: Tap to Surface (Software Trigger)
+    func triggerTapToSurface() {
+        var data = Data()
+        data.append(ActionCommand.tapToSurfaceTriggered.rawValue)
+        writeToCharacteristic(characteristic: actionCharacteristic, data: data)
+    }
+}
+
+// MARK: - Helper Extension for Data (for debugging)
+extension Data {
+    var hexString: String {
+        return map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+
+
+import SwiftUI
+import Combine // Needed for sink on publisher
+
+struct ContentView: View {
+    @EnvironmentObject var bleController: BLEBackCoverController // Access the BLE controller
+
+    // State for Light Control
+    @State private var selectedColor: Color = .blue
+    @State private var brightness: Double = 0.5
+    @State private var animationMode: AnimationMode = .staticColor
+
+    // State for Widget Control
+    @State private var selectedWidgetType: WidgetType = .time
+    @State private var showWeatherDetails: Bool = true
+
+    // State for showing alerts (e.g., for hardware tap notification)
+    @State private var showAlert: Bool = false
+    @State private var alertTitle: String = ""
+    @State private var alertMessage: String = ""
+
+    var body: some View {
+        NavigationView {
+            Form {
+                // MARK: - Connection Status
+                Section("BLE Connection") {
+                    HStack {
+                        Text("Status:")
+                        Spacer()
+                        Text(bleController.isConnected ? "Connected" : "Disconnected")
+                            .foregroundColor(bleController.isConnected ? .green : .red)
+                    }
+                    HStack {
+                        Text("Device:")
+                        Spacer()
+                        Text(bleController.currentPeripheralName)
+                    }
+                    if !bleController.isConnected {
+                        Button("Scan & Connect") {
+                            bleController.startScanning()
+                        }
+                    } else {
+                        Button("Disconnect") {
+                            bleController.disconnect()
+                        }
+                        .foregroundColor(.red)
+                    }
+                }
+
+                // MARK: - Back Cover Lights
+                Section("Back Cover Lights") {
+                    ColorPicker("Select Color", selection: $selectedColor)
+                        .onChange(of: selectedColor) { newColor in
+                            bleController.setLightColor(color: newColor)
+                        }
+
+                    VStack(alignment: .leading) {
+                        Text("Brightness (\(Int(brightness * 100))%)")
+                        Slider(value: $brightness, in: 0...1.0) { editing in
+                            if !editing {
+                                bleController.setLightBrightness(brightness: brightness)
+                            }
+                        }
+                    }
+
+                    Picker("Animation Mode", selection: $animationMode) {
+                        ForEach(AnimationMode.allCases) { mode in
+                            Text(mode.description).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: animationMode) { newMode in
+                        bleController.setLightAnimation(mode: newMode)
+                    }
+                }
+
+                // MARK: - Back Cover Widgets
+                Section("Back Cover Widgets") {
+                    Picker("Select Widget Type", selection: $selectedWidgetType) {
+                        ForEach(WidgetType.allCases) { type in
+                            Text(type.description).tag(type)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .onChange(of: selectedWidgetType) { newType in
+                        bleController.selectWidget(type: newType)
+                    }
+
+                    if selectedWidgetType == .weather {
+                        Toggle("Show Weather Details", isOn: $showWeatherDetails)
+                            .onChange(of: showWeatherDetails) { newValue in
+                                bleController.configureWeatherWidget(showDetails: newValue)
+                            }
+                    }
+
+                    Button("Request Widget Update") {
+                        bleController.requestWidgetUpdate()
+                    }
+                }
+
+                // MARK: - "Tap to Surface"
+                Section("Tap to Surface (Simulated)") {
+                    Button("Trigger Tap Action") {
+                        bleController.triggerTapToSurface()
+                    }
+                    Text("This button simulates a 'tap' event, sending a command to your back cover. For a real 'tap to surface' from the back cover, your hardware needs a sensor that sends BLE notifications.")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
+            }
+            .navigationTitle("Back Cover Control")
+            .alert(isPresented: $showAlert) {
+                Alert(title: Text(alertTitle), message: Text(alertMessage), dismissButton: .default(Text("OK")))
+            }
+            .onReceive(bleController.backCoverTapPublisher) { _ in
+                alertTitle = "Back Cover Tapped!"
+                alertMessage = "The back cover hardware detected a physical tap!"
+                showAlert = true
+            }
+        }
+    }
+}
+
+// MARK: - Preview
+struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
+        ContentView()
+            .environmentObject(BLEBackCoverController()) // Provide a mock or real controller for preview
+    }
+}
+
+
+
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h> // For BLEDescriptor (e.g., Client Characteristic Configuration Descriptor)
+
+// For LED Control
+#include <FastLED.h>
+#define LED_PIN             27  // ESP32 GPIO pin connected to the LED data line (e.g., D4 for ESP8266 or common ESP32 pins like 2, 4, 16, 17, 27)
+#define NUM_LEDS            64  // Number of LEDs in your strip/matrix (e.g., 8x8 matrix = 64 LEDs)
+CRGB leds[NUM_LEDS]; // Array to hold LED color data
+
+// For OLED Display Control (Optional - uncomment if you have an SSD1306 OLED)
+/*
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#define OLED_SDA_PIN        21  // SDA pin for I2C (ESP32 default)
+#define OLED_SCL_PIN        22  // SCL pin for I2C (ESP32 default)
+#define OLED_RESET_PIN      -1  // -1 if sharing Arduino reset pin
+#define SCREEN_WIDTH        128 // OLED display width, in pixels
+#define SCREEN_HEIGHT       64  // OLED display height, in pixels
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET_PIN);
+*/
+
+// For Tap Sensor (Choose one method)
+// Method 1: Simple Button
+#define TAP_BUTTON_PIN      32  // GPIO pin for your tap button (e.g., 32, 33, 34, 35 for input only)
+bool lastButtonState = HIGH; // Assuming pull-up resistor, button LOW when pressed
+
+// Method 2: ESP32 Capacitive Touch Sensor
+#define TAP_TOUCH_PIN       T0  // ESP32 Touch pin (e.g., T0, T1, T2... mapped to GPIO 4, 0, 2...)
+#define TOUCH_THRESHOLD     40  // Adjust this value based on your touch sensitivity
+
+// --- BLE UUIDs (MUST MATCH YOUR iPhone APP) ---
+#define SERVICE_UUID        "4A987D00-0000-1000-8000-00805F9B34FB" // Replace with your generated UUIDs
+#define LIGHT_CHAR_UUID     "4A987D01-0000-1000-8000-00805F9B34FB"
+#define WIDGET_CHAR_UUID    "4A987D02-0000-1000-8000-00805F9B34FB"
+#define ACTION_CHAR_UUID    "4A987D03-0000-1000-8000-00805F9B34FB"
+
+// --- Global BLE Objects ---
+BLEServer* pServer = NULL;
+BLECharacteristic* pLightCharacteristic = NULL;
+BLECharacteristic* pWidgetCharacteristic = NULL;
+BLECharacteristic* pActionCharacteristic = NULL; // For tap notifications back to iPhone
+bool deviceConnected = false;
+bool oldDeviceConnected = false;
+
+// --- Global State Variables ---
+struct LightState {
+    uint8_t red = 0;
+    uint8_t green = 0;
+    uint8_t blue = 255; // Default blue
+    uint8_t brightness = 128; // 0-255
+    uint8_t animationMode = 0; // 0: static, 1: pulse, 2: rainbow, etc.
+};
+LightState currentLightState;
+
+struct WidgetState {
+    uint8_t activeWidgetType = 0; // 0: time, 1: date, 2: weather, etc.
+    bool showWeatherDetails = true; // Specific config for weather widget
+};
+WidgetState currentWidgetState;
+
+// --- Enums for Commands (Internal, matches app definitions) ---
+enum LightCommand : uint8_t {
+    SET_COLOR = 0x01,
+    SET_BRIGHTNESS = 0x02,
+    SET_ANIMATION = 0x03
+};
+
+enum AnimationModeEnum : uint8_t {
+    STATIC_COLOR = 0x00,
+    PULSE = 0x01,
+    RAINBOW = 0x02,
+    CUSTOM_PATTERN = 0x03
+};
+
+enum WidgetCommand : uint8_t {
+    SELECT_WIDGET = 0x01,
+    CONFIGURE_WEATHER = 0x02,
+    UPDATE_ALL_WIDGETS = 0x03
+};
+
+enum WidgetTypeEnum : uint8_t {
+    TIME = 0x00,
+    DATE = 0x01,
+    WEATHER = 0x02,
+    NOTIFICATIONS = 0x03,
+    BATTERY_LEVEL = 0x04
+};
+
+enum ActionCommand : uint8_t {
+    TAP_TO_SURFACE_TRIGGERED = 0x01
+};
+
+// --- Forward Declarations ---
+void updateLights();
+void runLightAnimations();
+void updateDisplay();
+void triggerTapAnimation();
+void displayTimeWidget();
+void displayDateWidget();
+void displayWeatherWidget();
+void displayNotificationsWidget();
+void displayBatteryWidget();
+
+
+// --- BLE Server Callbacks ---
+class MyServerCallbacks: public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+        deviceConnected = true;
+        Serial.println("Device connected!");
+        BLEDevice::startAdvertising(); // Restart advertising so other devices can see us
+    };
+
+    void onDisconnect(BLEServer* pServer) {
+        deviceConnected = false;
+        Serial.println("Device disconnected! Restarting advertising...");
+    }
+};
+
+// --- BLE Characteristic Callbacks for Write Operations ---
+class MyCharacteristicCallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+        std::string value = pCharacteristic->getValue();
+        uint8_t* data = (uint8_t*)value.data();
+        size_t len = value.length();
+
+        if (len == 0) return; // No data received
+
+        uint8_t commandByte = data[0];
+        Serial.printf("Received command: 0x%02X, length: %d\n", commandByte, len);
+
+        if (pCharacteristic == pLightCharacteristic) {
+            // Light Control Commands
+            if (commandByte == LightCommand::SET_COLOR && len >= 4) {
+                currentLightState.red = data[1];
+                currentLightState.green = data[2];
+                currentLightState.blue = data[3];
+                Serial.printf("Set Color: R%d G%d B%d\n", currentLightState.red, currentLightState.green, currentLightState.blue);
+                updateLights();
+            } else if (commandByte == LightCommand::SET_BRIGHTNESS && len >= 2) {
+                currentLightState.brightness = data[1];
+                Serial.printf("Set Brightness: %d\n", currentLightState.brightness);
+                updateLights();
+            } else if (commandByte == LightCommand::SET_ANIMATION && len >= 2) {
+                currentLightState.animationMode = data[1];
+                Serial.printf("Set Animation Mode: %d\n", currentLightState.animationMode);
+                // Animation logic will be handled in loop()
+            }
+        } else if (pCharacteristic == pWidgetCharacteristic) {
+            // Widget Control Commands
+            if (commandByte == WidgetCommand::SELECT_WIDGET && len >= 2) {
+                currentWidgetState.activeWidgetType = data[1];
+                Serial.printf("Select Widget Type: %d\n", currentWidgetState.activeWidgetType);
+                updateDisplay();
+            } else if (commandByte == WidgetCommand::CONFIGURE_WEATHER && len >= 2) {
+                currentWidgetState.showWeatherDetails = (data[1] == 0x01);
+                Serial.printf("Show Weather Details: %d\n", currentWidgetState.showWeatherDetails);
+                // No immediate display update, waits for updateAllWidgets or next time weather widget is selected
+            } else if (commandByte == WidgetCommand::UPDATE_ALL_WIDGETS) {
+                Serial.println("Update All Widgets requested");
+                updateDisplay();
+            }
+        } else if (pCharacteristic == pActionCharacteristic) {
+            // Action Commands (e.g., simulated tap from app)
+            if (commandByte == ActionCommand::TAP_TO_SURFACE_TRIGGERED) {
+                Serial.println("App triggered 'Tap to Surface'!");
+                // Optionally, trigger a light/display animation in response to software tap
+                triggerTapAnimation();
+            }
+        }
+    }
+};
+
+// --- LED Control Functions ---
+void updateLights() {
+    // Set all LEDs to the current static color and brightness
+    for (int i = 0; i < NUM_LEDS; i++) {
+        leds[i] = CRGB(currentLightState.red, currentLightState.green, currentLightState.blue);
+    }
+    FastLED.setBrightness(currentLightState.brightness);
+    FastLED.show();
+}
+
+void runLightAnimations() {
+    // This function will be called repeatedly in the loop()
+    switch (currentLightState.animationMode) {
+        case AnimationModeEnum::STATIC_COLOR:
+            // No continuous animation needed for static color
+            // updateLights() handles setting the color once
+            break;
+        case AnimationModeEnum::PULSE: {
+            // Simple sine wave pulse animation
+            static long lastPulseUpdate = 0;
+            if (millis() - lastPulseUpdate > 20) { // Update every 20ms
+                static float hue = 0;
+                hue += 5; // Change hue slowly
+                if (hue >= 360) hue = 0;
+
+                uint8_t pulseBrightness = beatsin8(10, 50, 255); // Pulse at 10 bpm, brightness between 50 and 255
+                FastLED.setBrightness(pulseBrightness);
+                for(int i = 0; i < NUM_LEDS; i++) {
+                    leds[i] = CHSV(hue, 255, 255); // Set full saturation, full value (brightness controlled by FastLED.setBrightness)
+                }
+                FastLED.show();
+                lastPulseUpdate = millis();
+            }
+            break;
+        }
+        case AnimationModeEnum::RAINBOW: {
+            static long lastRainbowUpdate = 0;
+            if (millis() - lastRainbowUpdate > 30) { // Update every 30ms
+                static uint8_t hue = 0;
+                hue++;
+                fill_rainbow(leds, NUM_LEDS, hue, 7); // Spread rainbow across LEDs
+                FastLED.setBrightness(currentLightState.brightness);
+                FastLED.show();
+                lastRainbowUpdate = millis();
+            }
+            break;
+        }
+        case AnimationModeEnum::CUSTOM_PATTERN:
+            // Implement your custom LED pattern here
+            // This could involve specific pixel addressing, chasing lights, etc.
+            break;
+    }
+}
+
+void triggerTapAnimation() {
+    // Quick flash green, then revert to current state
+    for (int i = 0; i < NUM_LEDS; i++) {
+        leds[i] = CRGB::Green;
+    }
+    FastLED.setBrightness(255);
+    FastLED.show();
+    delay(150); // Short flash
+    updateLights(); // Revert to previous state
+}
+
+// --- Display Control Functions (Optional - uncomment if using OLED) ---
+void updateDisplay() {
+    /*
+    if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3C for 128x64
+        Serial.println(F("SSD1306 allocation failed or not found"));
+        return; // Don't proceed if display not found
+    }
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0, 0);
+
+    switch (currentWidgetState.activeWidgetType) {
+        case WidgetTypeEnum::TIME:
+            displayTimeWidget();
+            break;
+        case WidgetTypeEnum::DATE:
+            displayDateWidget();
+            break;
+        case WidgetTypeEnum::WEATHER:
+            displayWeatherWidget();
+            break;
+        case WidgetTypeEnum::NOTIFICATIONS:
+            displayNotificationsWidget();
+            break;
+        case WidgetTypeEnum::BATTERY_LEVEL:
+            displayBatteryWidget();
+            break;
+        default:
+            display.println("Unknown Widget");
+            break;
+    }
+    display.display(); // Update the physical display
+    */
+}
+
+// Example Widget Functions
+void displayTimeWidget() {
+    /*
+    // In a real scenario, get time from NTP via Wi-Fi or from the phone
+    display.setTextSize(2);
+    display.setCursor(0, 10);
+    display.println("14:28:47"); // Placeholder
+    display.setTextSize(1);
+    display.setCursor(0, 30);
+    display.println("San Pedro, PH");
+    */
+}
+
+void displayDateWidget() {
+    /*
+    display.setTextSize(2);
+    display.setCursor(0, 10);
+    display.println("JUL 16");
+    display.setTextSize(1);
+    display.setCursor(0, 30);
+    display.println("WEDNESDAY, 2025");
+    */
+}
+
+void displayWeatherWidget() {
+    /*
+    display.setTextSize(2);
+    display.setCursor(0, 0);
+    display.println("30C Sunny"); // Placeholder
+    if (currentWidgetState.showWeatherDetails) {
+        display.setTextSize(1);
+        display.setCursor(0, 20);
+        display.println("Hum: 80%");
+        display.println("Wind: 5km/h");
+    }
+    */
+}
+
+void displayNotificationsWidget() {
+    /*
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.println("New Email (1)");
+    display.println("Missed Call (1)");
+    // This would likely be updated by receiving data from the phone app
+    */
+}
+
+void displayBatteryWidget() {
+    /*
+    // Read actual battery voltage/level
+    display.setTextSize(2);
+    display.setCursor(0, 10);
+    display.println("85% Bat"); // Placeholder
+    */
+}
+
+// --- Tap Sensor Functions ---
+void handleTapSensor() {
+    // Method 1: Simple Button
+    int buttonState = digitalRead(TAP_BUTTON_PIN);
+    if (buttonState != lastButtonState) {
+        if (buttonState == LOW) { // Button pressed
+            Serial.println("Physical Button Tap Detected!");
+            if (deviceConnected) {
+                uint8_t tapCmd[] = {ActionCommand::TAP_TO_SURFACE_TRIGGERED};
+                pActionCharacteristic->setValue(tapCmd, sizeof(tapCmd));
+                pActionCharacteristic->notify(); // Send notification to iPhone
+                Serial.println("BLE Notification sent for tap.");
+                triggerTapAnimation(); // Visual feedback on tap
+            }
+        }
+        delay(50); // Debounce
+    }
+    lastButtonState = buttonState;
+
+    // Method 2: ESP32 Capacitive Touch Sensor
+    /*
+    uint16_t touchValue = touchRead(TAP_TOUCH_PIN);
+    if (touchValue < TOUCH_THRESHOLD) { // Touch detected (lower value means more touch)
+        static long lastTouchTime = 0;
+        if (millis() - lastTouchTime > 300) { // Debounce touch
+            Serial.printf("Capacitive Touch Detected! Value: %d\n", touchValue);
+            if (deviceConnected) {
+                uint8_t tapCmd[] = {ActionCommand::TAP_TO_SURFACE_TRIGGERED};
+                pActionCharacteristic->setValue(tapCmd, sizeof(tapCmd));
+                pActionCharacteristic->notify(); // Send notification to iPhone
+                Serial.println("BLE Notification sent for tap.");
+                triggerTapAnimation();
+            }
+            lastTouchTime = millis();
+        }
+    }
+    */
+
+    // Method 3: Accelerometer (more complex, not fully shown here)
+    // You'd read acceleration data, detect a sudden change/impact.
+    // Example: Read MPU6050, if |ax|+|ay|+|az| > threshold, then tap.
+}
+
+
+// --- Setup Function (runs once) ---
+void setup() {
+    Serial.begin(115200);
+    Serial.println("Starting BLE Back Cover...");
+
+    // Initialize LEDs
+    FastLED.addLeds<WS2812B, LED_PIN, GRB>(leds, NUM_LEDS); // Adjust LED type (WS2812B or APA102) and color order (GRB, RGB)
+    FastLED.setBrightness(currentLightState.brightness);
+    updateLights(); // Set initial light state
+
+    // Initialize OLED Display (Optional)
+    /*
+    Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN); // Initialize I2C
+    if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+        Serial.println(F("SSD1306 allocation failed or not found."));
+    } else {
+        display.display(); // Show initial Adafruit logo
+        delay(2000);
+        display.clearDisplay();
+        updateDisplay(); // Show initial widget
+    }
+    */
+
+    // Initialize Tap Sensor Pin
+    pinMode(TAP_BUTTON_PIN, INPUT_PULLUP); // For button, assuming pull-up
+    // Or: touchAttachInterrupt(TAP_TOUCH_PIN, onTouch, TOUCH_THRESHOLD); // For capacitive touch (requires onTouch function)
+
+
+    // --- BLE Setup ---
+    BLEDevice::init("YourBackCoverDeviceName"); // BLE Device Name visible to iPhone
+    pServer = BLEDevice::createServer();
+    pServer->setCallbacks(new MyServerCallbacks());
+
+    // Create the BLE Service
+    BLEService *pService = pServer->createService(SERVICE_UUID);
+
+    // Create Light Control Characteristic
+    pLightCharacteristic = pService->createCharacteristic(
+                                        LIGHT_CHAR_UUID,
+                                        BLECharacteristic::PROPERTY_WRITE |
+                                        BLECharacteristic::PROPERTY_WRITE_WITHOUT_RESPONSE
+                                    );
+    pLightCharacteristic->setCallbacks(new MyCharacteristicCallbacks());
+
+    // Create Widget Control Characteristic
+    pWidgetCharacteristic = pService->createCharacteristic(
+                                        WIDGET_CHAR_UUID,
+                                        BLECharacteristic::PROPERTY_WRITE |
+                                        BLECharacteristic::PROPERTY_WRITE_WITHOUT_RESPONSE
+                                    );
+    pWidgetCharacteristic->setCallbacks(new MyCharacteristicCallbacks());
+
+    // Create Action Characteristic (for notifications back to iPhone)
+    pActionCharacteristic = pService->createCharacteristic(
+                                        ACTION_CHAR_UUID,
+                                        BLECharacteristic::PROPERTY_NOTIFY // Allow iPhone to subscribe
+                                    );
+    // Add a CCCD (Client Characteristic Configuration Descriptor) for notifications
+    pActionCharacteristic->addDescriptor(new BLE2902());
+    // No setCallbacks for read/write on this if it's only for notify from device to phone
+
+
+    // Start the service
+    pService->start();
+
+    // Start advertising (make the device discoverable)
+    BLEAdvertising *pAdvertising = BLEDevice::pAdvertising;
+    pAdvertising->addServiceUUID(SERVICE_UUID);
+    pAdvertising->setScanResponse(true);
+    pAdvertising->setMinPreferred(0x06);  // functions that help with iPhone connections
+    pAdvertising->setMinPreferred(0x12);
+    BLEDevice::startAdvertising();
+    Serial.println("BLE advertising started. Waiting for connections...");
+}
+
+// --- Loop Function (runs repeatedly) ---
+void loop() {
+    // Handle BLE connection state changes
+    if (deviceConnected) {
+        // Perform actions while connected
+        runLightAnimations(); // Continuously update animations
+        handleTapSensor();    // Continuously check for taps
+    }
+    if (!deviceConnected && oldDeviceConnected) {
+        delay(500); // Give the BLE stack a moment to clean up
+        BLEDevice::startAdvertising(); // Restart advertising to allow new connections
+        Serial.println("Restarting advertising after disconnect.");
+    }
+    oldDeviceConnected = deviceConnected;
+
+    // Small delay to prevent watchdog timer from firing
+    delay(1);
+}
