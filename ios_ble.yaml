@@ -1,0 +1,2623 @@
+import CoreBluetooth
+import Combine // For reactive programming (optional, but good for managing state)
+
+// Define your custom service and characteristic UUIDs
+enum MyBLEServiceUUIDs: String {
+    case deviceControlService = "YOUR_DEVICE_CONTROL_SERVICE_UUID" // e.g., "E2C56DB5-DFFB-48D2-B060-D0F5A71096E0"
+    case dataCharacteristic = "YOUR_DATA_CHARACTERISTIC_UUID"     // e.g., "C3F45DE9-FF12-42B1-8729-D3E4F5A67890"
+    case configCharacteristic = "YOUR_CONFIG_CHARACTERISTIC_UUID" // e.g., "A1B2C3D4-E5F6-7890-1234-567890ABCDEF"
+    // Add more as needed
+}
+
+class BluetoothManager: NSObject, ObservableObject { // Using ObservableObject for SwiftUI integration
+    static let shared = BluetoothManager() // Singleton instance
+
+    var centralManager: CBCentralManager!
+    @Published var discoveredPeripherals: [CBPeripheral] = []
+    @Published var connectedPeripheral: CBPeripheral?
+    @Published var connectionStatus: String = "Disconnected"
+
+    // Publishers for characteristic updates
+    let dataCharacteristicPublisher = PassthroughSubject<Data, Never>()
+    let configCharacteristicPublisher = PassthroughSubject<Data, Never>()
+
+    private var targetPeripheral: CBPeripheral?
+    private var dataCharacteristic: CBCharacteristic?
+    private var configCharacteristic: CBCharacteristic?
+
+    private override init() {
+        super.init()
+        centralManager = CBCentralManager(delegate: self, queue: nil, options: [CBCentralManagerOptionRestoreIdentifierKey: "myBluetoothManagerIdentifier"])
+    }
+
+    // MARK: - Scanning and Connection
+
+    func startScanning() {
+        guard centralManager.state == .poweredOn else {
+            print("Bluetooth is not powered on.")
+            connectionStatus = "Bluetooth Off"
+            return
+        }
+        print("Starting scan for peripherals...")
+        // Scan for specific services if known to save power
+        centralManager.scanForPeripherals(withServices: [CBUUID(string: MyBLEServiceUUIDs.deviceControlService.rawValue)], options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
+        connectionStatus = "Scanning..."
+    }
+
+    func stopScanning() {
+        centralManager.stopScan()
+        print("Stopped scanning.")
+        if connectedPeripheral == nil {
+            connectionStatus = "Disconnected"
+        }
+    }
+
+    func connect(to peripheral: CBPeripheral) {
+        centralManager.stopScan() // Stop scanning once target is found
+        targetPeripheral = peripheral
+        centralManager.connect(peripheral, options: nil)
+        connectionStatus = "Connecting to \(peripheral.name ?? "Unknown Device")..."
+    }
+
+    func disconnect() {
+        if let peripheral = connectedPeripheral {
+            centralManager.cancelPeripheralConnection(peripheral)
+        }
+        targetPeripheral = nil
+        connectedPeripheral = nil
+        dataCharacteristic = nil
+        configCharacteristic = nil
+        connectionStatus = "Disconnected"
+        print("Disconnected.")
+    }
+
+    // MARK: - Data Operations
+
+    func writeData(data: Data, to characteristic: CBCharacteristic, type: CBCharacteristicWriteType = .withResponse) {
+        guard let peripheral = connectedPeripheral else {
+            print("Not connected to a peripheral.")
+            return
+        }
+        peripheral.writeValue(data, for: characteristic, type: type)
+        print("Wrote data: \(data.base64EncodedString()) to \(characteristic.uuid.uuidString)")
+    }
+
+    func readData(from characteristic: CBCharacteristic) {
+        guard let peripheral = connectedPeripheral else {
+            print("Not connected to a peripheral.")
+            return
+        }
+        peripheral.readValue(for: characteristic)
+        print("Requested read for characteristic: \(characteristic.uuid.uuidString)")
+    }
+
+    func subscribeToNotifications(for characteristic: CBCharacteristic) {
+        guard let peripheral = connectedPeripheral else {
+            print("Not connected to a peripheral.")
+            return
+        }
+        if characteristic.properties.contains(.notify) || characteristic.properties.contains(.indicate) {
+            peripheral.setNotifyValue(true, for: characteristic)
+            print("Subscribed to notifications for characteristic: \(characteristic.uuid.uuidString)")
+        } else {
+            print("Characteristic \(characteristic.uuid.uuidString) does not support notifications/indications.")
+        }
+    }
+
+    func unsubscribeFromNotifications(for characteristic: CBCharacteristic) {
+        guard let peripheral = connectedPeripheral else {
+            print("Not connected to a peripheral.")
+            return
+        }
+        peripheral.setNotifyValue(false, for: characteristic)
+        print("Unsubscribed from notifications for characteristic: \(characteristic.uuid.uuidString)")
+    }
+}
+
+// MARK: - CBCentralManagerDelegate
+
+extension BluetoothManager: CBCentralManagerDelegate {
+    func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        switch central.state {
+        case .poweredOn:
+            print("Bluetooth is Powered On.")
+            connectionStatus = "Ready to scan"
+            // You might want to automatically start scanning or connect to known peripherals here
+            // centralManager.retrieveConnectedPeripherals(withServices: [CBUUID(string: MyBLEServiceUUIDs.deviceControlService.rawValue)])
+        case .poweredOff:
+            print("Bluetooth is Powered Off.")
+            connectionStatus = "Bluetooth Off"
+            discoveredPeripherals.removeAll()
+            connectedPeripheral = nil
+        case .resetting:
+            print("Bluetooth is Resetting.")
+            connectionStatus = "Resetting Bluetooth"
+        case .unauthorized:
+            print("Bluetooth is Unauthorized.")
+            connectionStatus = "Bluetooth Unauthorized"
+        case .unknown:
+            print("Bluetooth State Unknown.")
+            connectionStatus = "Bluetooth Unknown"
+        case .unsupported:
+            print("Bluetooth is Unsupported on this device.")
+            connectionStatus = "Bluetooth Unsupported"
+        @unknown default:
+            print("A new Bluetooth state was added that is not handled.")
+            connectionStatus = "Bluetooth Unknown State"
+        }
+    }
+
+    func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
+        if !discoveredPeripherals.contains(where: { $0.identifier == peripheral.identifier }) {
+            print("Discovered peripheral: \(peripheral.name ?? "Unknown"), RSSI: \(RSSI)")
+            discoveredPeripherals.append(peripheral)
+        }
+    }
+
+    func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        print("Connected to \(peripheral.name ?? "Unknown Device").")
+        connectionStatus = "Connected to \(peripheral.name ?? "Unknown Device")"
+        connectedPeripheral = peripheral
+        peripheral.delegate = self
+        peripheral.discoverServices([CBUUID(string: MyBLEServiceUUIDs.deviceControlService.rawValue)]) // Discover specific services
+    }
+
+    func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+        print("Failed to connect to \(peripheral.name ?? "Unknown Device"). Error: \(error?.localizedDescription ?? "Unknown error")")
+        connectionStatus = "Connection Failed"
+        disconnect() // Clean up on failure
+    }
+
+    func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        print("Disconnected from \(peripheral.name ?? "Unknown Device"). Error: \(error?.localizedDescription ?? "No error")")
+        connectionStatus = "Disconnected"
+        disconnect() // Clean up on disconnect
+    }
+    
+    // MARK: - State Restoration (Advanced)
+    func centralManager(_ central: CBCentralManager, willRestoreState dict: [String : Any]) {
+        if let peripherals = dict[CBCentralManagerRestoredPeripheralsKey] as? [CBPeripheral] {
+            // Restore previously connected or discovered peripherals
+            for peripheral in peripherals {
+                peripheral.delegate = self
+                if peripheral.state == .connected {
+                    connectedPeripheral = peripheral
+                    connectionStatus = "Restored Connection to \(peripheral.name ?? "Unknown Device")"
+                    // Re-discover services and characteristics if needed
+                    peripheral.discoverServices([CBUUID(string: MyBLEServiceUUIDs.deviceControlService.rawValue)])
+                } else if peripheral.state == .connecting {
+                    centralManager.connect(peripheral, options: nil)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - CBPeripheralDelegate
+
+extension BluetoothManager: CBPeripheralDelegate {
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        guard error == nil else {
+            print("Error discovering services: \(error!.localizedDescription)")
+            return
+        }
+
+        guard let services = peripheral.services else { return }
+        for service in services {
+            print("Discovered service: \(service.uuid.uuidString)")
+            // Discover characteristics for each service
+            if service.uuid == CBUUID(string: MyBLEServiceUUIDs.deviceControlService.rawValue) {
+                peripheral.discoverCharacteristics([
+                    CBUUID(string: MyBLEServiceUUIDs.dataCharacteristic.rawValue),
+                    CBUUID(string: MyBLEServiceUUIDs.configCharacteristic.rawValue)
+                ], for: service)
+            }
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
+        guard error == nil else {
+            print("Error discovering characteristics for service \(service.uuid.uuidString): \(error!.localizedDescription)")
+            return
+        }
+
+        guard let characteristics = service.characteristics else { return }
+        for characteristic in characteristics {
+            print("Discovered characteristic: \(characteristic.uuid.uuidString) for service: \(service.uuid.uuidString)")
+
+            if characteristic.uuid == CBUUID(string: MyBLEServiceUUIDs.dataCharacteristic.rawValue) {
+                dataCharacteristic = characteristic
+                subscribeToNotifications(for: characteristic) // Automatically subscribe to data updates
+            } else if characteristic.uuid == CBUUID(string: MyBLEServiceUUIDs.configCharacteristic.rawValue) {
+                configCharacteristic = characteristic
+                peripheral.readValue(for: characteristic) // Read initial config value
+            }
+            // You can also discover descriptors for characteristics here if needed
+            // peripheral.discoverDescriptors(for: characteristic)
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        guard error == nil else {
+            print("Error updating value for characteristic \(characteristic.uuid.uuidString): \(error!.localizedDescription)")
+            return
+        }
+
+        if let value = characteristic.value {
+            print("Received data from \(characteristic.uuid.uuidString): \(value.base64EncodedString())")
+            // Process the received data based on the characteristic
+            if characteristic.uuid == CBUUID(string: MyBLEServiceUUIDs.dataCharacteristic.rawValue) {
+                dataCharacteristicPublisher.send(value)
+            } else if characteristic.uuid == CBUUID(string: MyBLEServiceUUIDs.configCharacteristic.rawValue) {
+                configCharacteristicPublisher.send(value)
+            }
+            // You'll need to parse 'value' according to your device's protocol
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
+        guard error == nil else {
+            print("Error writing value for characteristic \(characteristic.uuid.uuidString): \(error!.localizedDescription)")
+            return
+        }
+        print("Successfully wrote value to characteristic: \(characteristic.uuid.uuidString)")
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
+        guard error == nil else {
+            print("Error changing notification state for characteristic \(characteristic.uuid.uuidString): \(error!.localizedDescription)")
+            return
+        }
+        if characteristic.isNotifying {
+            print("Notifications enabled for characteristic: \(characteristic.uuid.uuidString)")
+        } else {
+            print("Notifications disabled for characteristic: \(characteristic.uuid.uuidString)")
+        }
+    }
+
+    // MARK: - Discovering Descriptors (if needed)
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverDescriptorsFor characteristic: CBCharacteristic, error: Error?) {
+        guard error == nil else {
+            print("Error discovering descriptors for characteristic \(characteristic.uuid.uuidString): \(error!.localizedDescription)")
+            return
+        }
+        if let descriptors = characteristic.descriptors {
+            for descriptor in descriptors {
+                print("Discovered descriptor: \(descriptor.uuid.uuidString) for characteristic: \(characteristic.uuid.uuidString)")
+                // You can read descriptor values here if necessary
+                // peripheral.readValue(for: descriptor)
+            }
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor descriptor: CBDescriptor, error: Error?) {
+        guard error == nil else {
+            print("Error updating value for descriptor \(descriptor.uuid.uuidString): \(error!.localizedDescription)")
+            return
+        }
+        if let value = descriptor.value {
+            print("Received descriptor value for \(descriptor.uuid.uuidString): \(value)")
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didWriteValueFor descriptor: CBDescriptor, error: Error?) {
+        guard error == nil else {
+            print("Error writing value for descriptor \(descriptor.uuid.uuidString): \(error!.localizedDescription)")
+            return
+        }
+        print("Successfully wrote value to descriptor: \(descriptor.uuid.uuidString)")
+    }
+}
+
+
+
+import CoreBluetooth
+
+class MyBLEDevice: Identifiable, ObservableObject {
+    let id = UUID() // For Identifiable protocol
+    let cbPeripheral: CBPeripheral
+    @Published var name: String
+    @Published var rssi: NSNumber?
+    @Published var isConnected: Bool = false
+
+    // You might store discovered services/characteristics here for easier access
+    var deviceControlService: CBService?
+    var dataCharacteristic: CBCharacteristic?
+    var configCharacteristic: CBCharacteristic?
+
+    init(peripheral: CBPeripheral) {
+        self.cbPeripheral = peripheral
+        self.name = peripheral.name ?? "Unknown Device"
+        self.isConnected = peripheral.state == .connected
+    }
+
+    // Example function to update RSSI (could be called from BluetoothManager)
+    func updateRSSI(_ rssi: NSNumber) {
+        self.rssi = rssi
+    }
+
+    // You could add convenience methods here to interact with the BluetoothManager
+    func connect() {
+        BluetoothManager.shared.connect(to: cbPeripheral)
+    }
+
+    func disconnect() {
+        BluetoothManager.shared.disconnect()
+    }
+
+    // Add methods for specific device commands
+    func sendCommand(command: String) {
+        // Example: Convert command string to Data and write to configCharacteristic
+        if let char = configCharacteristic, let data = command.data(using: .utf8) {
+            BluetoothManager.shared.writeData(data: data, to: char)
+        }
+    }
+}
+
+
+import Foundation
+import CryptoKit // For strong encryption (iOS 13+)
+
+class AntiSpyProtection {
+
+    // MARK: - Application-Level Encryption/Decryption
+
+    // Example: Using AES-GCM for symmetric encryption
+    func encryptData(_ data: Data, using key: SymmetricKey) throws -> Data {
+        let sealedBox = try AES.GCM.seal(data, using: key)
+        guard let ciphertext = sealedBox.ciphertext,
+              let tag = sealedBox.tag,
+              let nonce = sealedBox.nonce?.withUnsafeBytes({ Data($0) }) else {
+            throw AntiSpyError.encryptionFailed
+        }
+        // Combine nonce, ciphertext, and tag for transmission
+        return nonce + ciphertext + tag
+    }
+
+    func decryptData(_ encryptedData: Data, using key: SymmetricKey) throws -> Data {
+        guard encryptedData.count > AES.GCM.Nonce.byteCount + AES.GCM.tagByteCount else {
+            throw AntiSpyError.decryptionFailed // Data too short
+        }
+
+        let nonceData = encryptedData.prefix(AES.GCM.Nonce.byteCount)
+        let ciphertextAndTag = encryptedData.suffix(from: AES.GCM.Nonce.byteCount)
+
+        let ciphertext = ciphertextAndTag.dropLast(AES.GCM.tagByteCount)
+        let tag = ciphertextAndTag.suffix(AES.GCM.tagByteCount)
+
+        let nonce = try AES.GCM.Nonce(data: nonceData)
+        let sealedBox = try AES.GCM.SealedBox(nonce: nonce, ciphertext: ciphertext, tag: tag)
+
+        return try AES.GCM.open(sealedBox, using: key)
+    }
+
+    // MARK: - Key Management (Critical for Security)
+
+    // How you exchange or derive keys is crucial.
+    // Options:
+    // 1. Pre-shared keys (hardcoded - generally not recommended for real-world products unless securely managed)
+    // 2. Key exchange protocols (e.g., Diffie-Hellman over an initial secure channel or even over BLE if authenticated)
+    // 3. Device-specific key derivation from hardware unique identifiers
+
+    // Example: Generate a new random key (for demonstration)
+    static func generateNewSymmetricKey() -> SymmetricKey {
+        return SymmetricKey(size: .bits256)
+    }
+
+    // Error handling for anti-spy operations
+    enum AntiSpyError: Error, LocalizedError {
+        case encryptionFailed
+        case decryptionFailed
+        case keyDerivationFailed
+        case invalidDataFormat
+
+        var errorDescription: String? {
+            switch self {
+            case .encryptionFailed: return "Data encryption failed."
+            case .decryptionFailed: return "Data decryption failed. Invalid key or corrupted data."
+            case .keyDerivationFailed: return "Failed to derive a secure key."
+            case .invalidDataFormat: return "The data format is incorrect for decryption."
+            }
+        }
+    }
+
+    // MARK: - Obfuscation / Anti-Tampering (Conceptual)
+    // While difficult to implement fully on iOS without jailbreak,
+    // you can apply minor obfuscation techniques to your binary or
+    // data transformations to make it harder for casual analysis.
+    // For BLE, consider:
+    // - Custom data serialization/deserialization beyond standard UUIDs.
+    // - Simple XOR ciphers or shifting (easily broken but adds a tiny hurdle).
+    // - Varying data packet sizes or timing to confuse simple sniffers.
+
+    // MARK: - Preventing Passive Spying
+    // - Always use secure pairing (LE Secure Connections) if supported by your hardware.
+    //   This ensures the link is encrypted at the BLE protocol level.
+    // - Minimize advertising data: Don't broadcast sensitive information in advertising packets.
+    // - Change advertising parameters (e.g., intervals, data) to make tracking harder.
+
+    // MARK: - Preventing Active Spying / Man-in-the-Middle (MITM)
+    // - Implement strong authentication mechanisms at the application layer.
+    //   (e.g., challenge-response using shared secrets, digital signatures).
+    // - Validate device identity: If your device has a unique identifier or certificate,
+    //   verify it during the connection process.
+}
+
+
+
+import SwiftUI
+import CoreBluetooth
+
+struct BLEDeviceListView: View {
+    @ObservedObject var bluetoothManager = BluetoothManager.shared
+    @State private var encryptedData: Data?
+    @State private var decryptedData: String?
+    @State private var encryptionKey: SymmetricKey?
+
+    var body: some View {
+        NavigationView {
+            List {
+                Section(header: Text("Bluetooth Status")) {
+                    Text(bluetoothManager.connectionStatus)
+                }
+
+                Section(header: Text("Actions")) {
+                    Button("Start Scan") {
+                        bluetoothManager.startScanning()
+                    }
+                    Button("Stop Scan") {
+                        bluetoothManager.stopScanning()
+                    }
+                    Button("Disconnect") {
+                        bluetoothManager.disconnect()
+                    }
+                    Button("Generate Encryption Key") {
+                        encryptionKey = AntiSpyProtection.generateNewSymmetricKey()
+                        print("Generated new encryption key.")
+                    }
+                }
+
+                Section(header: Text("Discovered Peripherals")) {
+                    if bluetoothManager.discoveredPeripherals.isEmpty {
+                        Text("No peripherals found. Make sure your BLE device is advertising.")
+                    } else {
+                        ForEach(bluetoothManager.discoveredPeripherals, id: \.identifier) { peripheral in
+                            HStack {
+                                Text(peripheral.name ?? "Unknown Device")
+                                Spacer()
+                                Text(peripheral.state == .connected ? "Connected" : "Disconnected")
+                                Button("Connect") {
+                                    bluetoothManager.connect(to: peripheral)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if let connectedPeripheral = bluetoothManager.connectedPeripheral {
+                    Section(header: Text("Connected Device: \(connectedPeripheral.name ?? "Unknown")")) {
+                        // Example for writing data (you'd link this to specific characteristics)
+                        Button("Send Encrypted Test Data") {
+                            guard let key = encryptionKey else {
+                                print("No encryption key available.")
+                                return
+                            }
+                            let testString = "Hello BLE from iOS!"
+                            do {
+                                let encrypted = try AntiSpyProtection().encryptData(testString.data(using: .utf8)!, using: key)
+                                encryptedData = encrypted
+                                print("Encrypted data: \(encrypted.base64EncodedString())")
+                                // In a real app, you'd get the correct characteristic from your BluetoothManager
+                                // For demonstration, let's assume `dataCharacteristic` is available for writing.
+                                if let dataChar = connectedPeripheral.services?.first(where: { $0.uuid == CBUUID(string: MyBLEServiceUUIDs.deviceControlService.rawValue) })?.characteristics?.first(where: { $0.uuid == CBUUID(string: MyBLEServiceUUIDs.dataCharacteristic.rawValue) }) {
+                                    bluetoothManager.writeData(data: encrypted, to: dataChar)
+                                } else {
+                                    print("Data characteristic not found for writing.")
+                                }
+                            } catch {
+                                print("Encryption error: \(error.localizedDescription)")
+                            }
+                        }
+
+                        // Example for decrypting received data
+                        Text("Received Encrypted: \(encryptedData?.base64EncodedString() ?? "N/A")")
+                        Text("Decrypted: \(decryptedData ?? "N/A")")
+                            .onReceive(bluetoothManager.dataCharacteristicPublisher) { receivedData in
+                                guard let key = encryptionKey else {
+                                    print("No encryption key for decryption.")
+                                    decryptedData = "No Key"
+                                    return
+                                }
+                                do {
+                                    let decrypted = try AntiSpyProtection().decryptData(receivedData, using: key)
+                                    decryptedData = String(data: decrypted, encoding: .utf8)
+                                    print("Decrypted received data: \(decryptedData ?? "N/A")")
+                                } catch {
+                                    print("Decryption error: \(error.localizedDescription)")
+                                    decryptedData = "Decryption Failed"
+                                }
+                            }
+                    }
+                }
+            }
+            .navigationTitle("Advanced BLE")
+        }
+        .onAppear {
+            // Optional: Start scanning on app launch, or based on user action
+        }
+    }
+}
+
+
+
+<key>NSBluetoothAlwaysUsageDescription</key>
+<string>This app uses Bluetooth to connect to your devices for advanced features.</string>
+<key>UIBackgroundModes</key>
+<array>
+    <string>bluetooth-central</string>
+    </array>
+
+
+
+# Install Node.js (if not already installed, use nvm for better management)
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+source ~/.bashrc
+nvm install node
+nvm use node
+
+# Install system-level Bluetooth dependencies
+sudo apt-get update
+sudo apt-get install bluetooth bluez libbluetooth-dev libudev-dev
+
+# Grant Node.js capabilities to access Bluetooth (IMPORTANT!)
+sudo setcap cap_net_raw+eip $(eval readlink -f `which node`)
+
+# Create your project directory and initialize npm
+mkdir node-ble-app
+cd node-ble-app
+npm init -y
+
+# Install noble
+npm install noble crypto
+
+
+
+const noble = require('@abandonware/noble'); // Use @abandonware/noble for better maintenance
+const crypto = require('crypto'); // Node.js built-in cryptography module
+
+// --- Configuration ---
+const TARGET_DEVICE_NAME = 'MySecureBLEDevice'; // Replace with your device's advertised name
+const TARGET_SERVICE_UUID = 'YOUR_DEVICE_CONTROL_SERVICE_UUID'; // Replace with your BLE device's service UUID
+const DATA_CHARACTERISTIC_UUID = 'YOUR_DATA_CHARACTERISTIC_UUID'; // Replace with a characteristic for data exchange
+const CONFIG_CHARACTERISTIC_UUID = 'YOUR_CONFIG_CHARACTERISTIC_UUID'; // Replace with a characteristic for configuration/commands
+
+// --- Application-level Symmetric Key for Encryption (Illustrative) ---
+// In a real application, this key should be securely exchanged/derived,
+// not hardcoded or transmitted in plain text.
+// For demonstration, we'll generate one, but it should be consistent.
+let encryptionKey; // Stored as a Buffer
+
+function generateSymmetricKey() {
+    return crypto.randomBytes(32); // AES-256 key
+}
+
+// --- Encryption/Decryption Functions (AES-256-GCM) ---
+// This adds an extra layer of security on top of BLE's link-layer encryption.
+function encryptData(data, key) {
+    if (!key) throw new Error("Encryption key is not set.");
+    const iv = crypto.randomBytes(16); // Initialization Vector
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    let encrypted = cipher.update(data, 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    const tag = cipher.getAuthTag();
+    return {
+        iv: iv.toString('hex'),
+        encryptedData: encrypted,
+        tag: tag.toString('hex')
+    };
+}
+
+function decryptData(encryptedObj, key) {
+    if (!key) throw new Error("Decryption key is not set.");
+    try {
+        const iv = Buffer.from(encryptedObj.iv, 'hex');
+        const encryptedText = Buffer.from(encryptedObj.encryptedData, 'hex');
+        const tag = Buffer.from(encryptedObj.tag, 'hex');
+
+        const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+        decipher.setAuthTag(tag);
+
+        let decrypted = decipher.update(encryptedText, 'buffer', 'utf8');
+        decrypted += decipher.final('utf8');
+        return decrypted;
+    } catch (error) {
+        console.error("Decryption failed:", error.message);
+        return null;
+    }
+}
+
+// --- BLE Manager Logic ---
+let targetPeripheral = null;
+let dataCharacteristic = null;
+let configCharacteristic = null;
+
+noble.on('stateChange', async (state) => {
+    console.log(`Bluetooth state changed to: ${state}`);
+    if (state === 'poweredOn') {
+        console.log('Starting scan for BLE devices...');
+        // Scan for specific service UUIDs to reduce noise and find relevant devices
+        noble.startScanning([TARGET_SERVICE_UUID], false);
+    } else {
+        console.log('Stopping scan. Bluetooth is not powered on.');
+        noble.stopScanning();
+        if (targetPeripheral) {
+            targetPeripheral.disconnect();
+        }
+    }
+});
+
+noble.on('discover', (peripheral) => {
+    // Check if the discovered peripheral is our target device
+    if (peripheral.advertisement.localName === TARGET_DEVICE_NAME ||
+        peripheral.id === 'YOUR_DEVICE_MAC_ADDRESS') { // Or match by MAC address if known
+        noble.stopScanning();
+        console.log(`Discovered target peripheral: ${peripheral.advertisement.localName} (${peripheral.id})`);
+        targetPeripheral = peripheral;
+        connectToPeripheral(peripheral);
+    }
+});
+
+async function connectToPeripheral(peripheral) {
+    try {
+        console.log(`Attempting to connect to ${peripheral.advertisement.localName}...`);
+        await peripheral.connect();
+        console.log(`Connected to ${peripheral.advertisement.localName}`);
+
+        peripheral.on('disconnect', () => {
+            console.log(`Disconnected from ${peripheral.advertisement.localName}.`);
+            targetPeripheral = null;
+            dataCharacteristic = null;
+            configCharacteristic = null;
+            // Optionally, restart scanning or attempt to reconnect
+            noble.startScanning([TARGET_SERVICE_UUID], false);
+        });
+
+        console.log('Discovering services...');
+        const { services } = await peripheral.discoverServices([TARGET_SERVICE_UUID]);
+
+        for (const service of services) {
+            console.log(`  Discovered service: ${service.uuid}`);
+            console.log('  Discovering characteristics...');
+            const { characteristics } = await service.discoverCharacteristics();
+
+            for (const characteristic of characteristics) {
+                console.log(`    Characteristic: ${characteristic.uuid}`);
+                if (characteristic.uuid === DATA_CHARACTERISTIC_UUID.toLowerCase()) {
+                    dataCharacteristic = characteristic;
+                    console.log(`    Found Data Characteristic. Properties: ${characteristic.properties.join(', ')}`);
+                    if (characteristic.properties.includes('notify') || characteristic.properties.includes('indicate')) {
+                        console.log('    Subscribing to notifications for Data Characteristic...');
+                        await dataCharacteristic.subscribe();
+                        dataCharacteristic.on('data', (data, isNotification) => {
+                            console.log(`    Received data (isNotification: ${isNotification}): ${data.toString('hex')}`);
+                            // Attempt to decrypt received data
+                            try {
+                                const decryptedPayload = decryptData({
+                                    iv: data.slice(0, 16).toString('hex'), // Assuming IV is first 16 bytes
+                                    encryptedData: data.slice(16, data.length - 16).toString('hex'), // Ciphertext between IV and Tag
+                                    tag: data.slice(data.length - 16).toString('hex') // Assuming Tag is last 16 bytes
+                                }, encryptionKey);
+
+                                if (decryptedPayload) {
+                                    console.log('    Decrypted Data:', decryptedPayload);
+                                } else {
+                                    console.warn('    Could not decrypt received data.');
+                                }
+                            } catch (e) {
+                                console.error("Error during decryption of received data:", e.message);
+                            }
+                        });
+                    }
+                } else if (characteristic.uuid === CONFIG_CHARACTERISTIC_UUID.toLowerCase()) {
+                    configCharacteristic = characteristic;
+                    console.log(`    Found Config Characteristic. Properties: ${characteristic.properties.join(', ')}`);
+                    // Read initial config value
+                    if (characteristic.properties.includes('read')) {
+                        const value = await characteristic.read();
+                        console.log(`    Initial Config Value: ${value.toString('utf8')}`);
+                    }
+                }
+            }
+        }
+
+        // --- Post-Connection Operations ---
+        if (dataCharacteristic && configCharacteristic) {
+            console.log('Device setup complete. Ready for interaction.');
+
+            // Generate an encryption key for this session
+            encryptionKey = generateSymmetricKey();
+            console.log("Session encryption key generated.");
+
+            // Example: Write an encrypted command
+            const command = "SET_MODE:HIGH_POWER";
+            try {
+                const encryptedCommand = encryptData(command, encryptionKey);
+                // Combine IV, encryptedData, and Tag into a single Buffer for transmission
+                const payload = Buffer.concat([
+                    Buffer.from(encryptedCommand.iv, 'hex'),
+                    Buffer.from(encryptedCommand.encryptedData, 'hex'),
+                    Buffer.from(encryptedCommand.tag, 'hex')
+                ]);
+
+                if (configCharacteristic.properties.includes('write')) {
+                    console.log(`Writing encrypted command: "${command}" (payload: ${payload.toString('hex')})`);
+                    await configCharacteristic.write(payload, true); // true for 'withoutResponse' or false for 'withResponse'
+                    console('Command sent.');
+                } else {
+                    console.warn("Config characteristic does not support write operations.");
+                }
+            } catch (e) {
+                console.error("Failed to encrypt/send command:", e.message);
+            }
+
+            // Example: Read from data characteristic if it doesn't notify
+            // if (dataCharacteristic.properties.includes('read') && !dataCharacteristic.properties.includes('notify')) {
+            //     const value = await dataCharacteristic.read();
+            //     console.log('Read from Data Characteristic:', value.toString('utf8'));
+            // }
+
+        } else {
+            console.warn("Required characteristics not found on the device.");
+            peripheral.disconnect();
+        }
+
+    } catch (error) {
+        console.error(`Connection or discovery error: ${error}`);
+        if (targetPeripheral) {
+            targetPeripheral.disconnect();
+        }
+        noble.startScanning([TARGET_SERVICE_UUID], false); // Restart scan
+    }
+}
+
+// --- Graceful Shutdown ---
+process.on('SIGINT', () => {
+    console.log('Shutting down BLE application...');
+    if (targetPeripheral) {
+        targetPeripheral.disconnect();
+    }
+    noble.stopScanning();
+    process.exit();
+});
+
+
+
+{
+  "name": "node-ble-app",
+  "version": "1.0.0",
+  "description": "Advanced BLE communication with Node.js",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@abandonware/noble": "^1.9.2-12",
+    "crypto": "^1.0.1"
+  }
+}
+
+
+
+npx react-native init BLEApp --template react-native-template-typescript
+cd BLEApp
+
+
+
+npm install react-native-ble-plx
+cd ios && pod install && cd .. # Install iOS dependencies
+
+
+
+npm install react-native-keychain
+cd ios && pod install && cd ..
+
+
+
+npm install react-native-crypto
+npm install --save-dev rn-nodeify # To polyfill Node.js crypto in React Native
+
+
+
+npx rn-nodeify --install --hack
+
+
+
+<key>NSBluetoothAlwaysUsageDescription</key>
+<string>This app uses Bluetooth to connect to your devices for advanced features.</string>
+<key>UIBackgroundModes</key>
+<array>
+    <string>bluetooth-central</string>
+    </array>
+
+
+
+import {
+  BleManager,
+  Device,
+  Characteristic,
+  Service,
+  State,
+} from 'react-native-ble-plx';
+import {PermissionsAndroid, Platform} from 'react-native';
+import * as Keychain from 'react-native-keychain';
+import crypto from 'crypto'; // Polyfilled by rn-nodeify
+
+// Define your custom service and characteristic UUIDs
+export enum MyBLEServiceUUIDs {
+  DeviceControlService = 'YOUR_DEVICE_CONTROL_SERVICE_UUID', // e.g., "E2C56DB5-DFFB-48D2-B060-D0F5A71096E0"
+  DataCharacteristic = 'YOUR_DATA_CHARACTERISTIC_UUID', // e.g., "C3F45DE9-FF12-42B1-8729-D3E4F5A67890"
+  ConfigCharacteristic = 'YOUR_CONFIG_CHARACTERISTIC_UUID', // e.g., "A1B2C3D4-E5F6-7890-1234-567890ABCDEF"
+  // Add more as needed
+}
+
+// Keychain service identifier for storing encryption keys
+const ENCRYPTION_KEY_SERVICE = 'bleAppEncryptionKeys';
+const ENCRYPTION_KEY_ACCOUNT = 'mainBLEKey';
+
+interface EncryptedPayload {
+  iv: string;
+  encryptedData: string;
+  tag: string;
+}
+
+class BleService {
+  private manager: BleManager;
+  private device: Device | null = null;
+  private dataCharacteristic: Characteristic | null = null;
+  private configCharacteristic: Characteristic | null = null;
+  private encryptionKey: Buffer | null = null; // Stored as Buffer for crypto operations
+
+  constructor() {
+    this.manager = new BleManager();
+    this.checkBluetoothState();
+    this.setupStateListener();
+  }
+
+  // MARK: - Bluetooth State & Permissions
+
+  private setupStateListener() {
+    this.manager.onStateChange(state => {
+      console.log('Bluetooth state changed:', state);
+      if (state === State.PoweredOn) {
+        console.log('Bluetooth is powered on. Ready to scan.');
+        // Optionally start scan automatically
+      } else {
+        console.log('Bluetooth is not powered on or unavailable.');
+        // Handle UI updates or prompt user to enable Bluetooth
+      }
+    }, true); // The 'true' makes it run immediately on listener setup
+  }
+
+  private async checkBluetoothState() {
+    const state = await this.manager.state();
+    console.log('Initial Bluetooth state:', state);
+    if (state !== State.PoweredOn) {
+      console.warn('Bluetooth is not powered on. Please enable Bluetooth.');
+      // You might want to show an alert to the user
+    }
+  }
+
+  public async requestPermissions(): Promise<boolean> {
+    if (Platform.OS === 'ios') {
+      // iOS permissions are generally handled by Info.plist description
+      // and are implicitly requested when BLE operations are attempted.
+      // However, you can check authorization status if needed.
+      const status = await this.manager.isClientAuthorized();
+      if (!status) {
+        console.warn('Bluetooth permissions might not be granted on iOS.');
+        // On iOS, users typically grant permissions via a popup when the app first tries to use BLE.
+        // You can't programmatically request again if denied, only guide to settings.
+        return false;
+      }
+      return true;
+    } else if (Platform.OS === 'android') {
+      const granted = await PermissionsAndroid.requestMultiple([
+        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION, // Needed for scanning
+        PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN, // Android 12+
+        PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT, // Android 12+
+      ]);
+
+      const allGranted =
+        granted['android.permission.ACCESS_FINE_LOCATION'] ===
+          PermissionsAndroid.RESULTS.GRANTED &&
+        (Platform.Version < 31 ||
+          (granted['android.permission.BLUETOOTH_SCAN'] ===
+            PermissionsAndroid.RESULTS.GRANTED &&
+            granted['android.permission.BLUETOOTH_CONNECT'] ===
+              PermissionsAndroid.RESULTS.GRANTED));
+
+      if (allGranted) {
+        console.log('Bluetooth permissions granted on Android.');
+        return true;
+      } else {
+        console.warn('Bluetooth permissions denied on Android.');
+        return false;
+      }
+    }
+    return false;
+  }
+
+  // MARK: - Scanning and Connection
+
+  public startScan(onDeviceFound: (device: Device) => void) {
+    console.log('Starting BLE scan...');
+    this.manager.startDeviceScan(
+      [MyBLEServiceUUIDs.DeviceControlService], // Scan for specific service UUIDs
+      null, // Scan options (e.g., allowDuplicates: true for RSSI updates)
+      (error, device) => {
+        if (error) {
+          console.error('BLE Scan Error:', error);
+          // Handle error (e.g., permissions not granted)
+          return;
+        }
+        if (device) {
+          // Filter devices further if needed, e.g., by name
+          // if (device.name?.includes('MyDevice')) {
+          onDeviceFound(device);
+          // }
+        }
+      },
+    );
+  }
+
+  public stopScan() {
+    console.log('Stopping BLE scan.');
+    this.manager.stopDeviceScan();
+  }
+
+  public async connectToDevice(device: Device): Promise<Device | null> {
+    try {
+      this.stopScan(); // Stop scanning once we're connecting
+      console.log(`Connecting to ${device.name || device.id}...`);
+      this.device = await device.connect();
+      console.log(`Connected to ${this.device.name || this.device.id}`);
+
+      // Handle device disconnection
+      this.device.onDisconnected((error, disconnectedDevice) => {
+        console.log(
+          `Disconnected from ${disconnectedDevice?.name || disconnectedDevice?.id}. Error:`,
+          error,
+        );
+        this.device = null;
+        this.dataCharacteristic = null;
+        this.configCharacteristic = null;
+        // Optionally, restart scanning or notify the UI
+      });
+
+      console.log('Discovering services and characteristics...');
+      await this.device.discoverAllServicesAndCharacteristics();
+      const services = await this.device.services();
+
+      for (const service of services) {
+        console.log(`Discovered service: ${service.uuid}`);
+        if (service.uuid.toLowerCase() === MyBLEServiceUUIDs.DeviceControlService.toLowerCase()) {
+          const characteristics = await service.characteristics();
+          for (const characteristic of characteristics) {
+            console.log(`  Characteristic: ${characteristic.uuid}`);
+            if (characteristic.uuid.toLowerCase() === MyBLEServiceUUIDs.DataCharacteristic.toLowerCase()) {
+              this.dataCharacteristic = characteristic;
+              // Subscribe to notifications if supported
+              if (characteristic.isNotifiable || characteristic.isIndictable) {
+                console.log('  Subscribing to Data Characteristic notifications...');
+                this.device.monitorCharacteristicForService(
+                  service.uuid,
+                  characteristic.uuid,
+                  (error, char) => {
+                    if (error) {
+                      console.error(
+                        `Error monitoring Data Characteristic: ${error.message}`,
+                      );
+                      return;
+                    }
+                    if (char?.value) {
+                      console.log(
+                        `  Received data from Data Characteristic: ${char.value}`,
+                      );
+                      this.handleReceivedData(char.value);
+                    }
+                  },
+                );
+              }
+            } else if (characteristic.uuid.toLowerCase() === MyBLEServiceUUIDs.ConfigCharacteristic.toLowerCase()) {
+              this.configCharacteristic = characteristic;
+              // Read initial config value
+              if (characteristic.isReadable) {
+                const configValue = await this.device.readCharacteristicForService(
+                  service.uuid,
+                  characteristic.uuid,
+                );
+                console.log(
+                  `  Initial Config Value: ${Buffer.from(configValue.value!, 'base64').toString('utf8')}`,
+                );
+              }
+            }
+          }
+        }
+      }
+      return this.device;
+    } catch (error) {
+      console.error('Failed to connect or discover services:', error);
+      this.device?.cancelConnection();
+      this.device = null;
+      return null;
+    }
+  }
+
+  public async disconnectDevice() {
+    if (this.device) {
+      console.log(`Disconnecting from ${this.device.name || this.device.id}`);
+      await this.device.cancelConnection();
+      this.device = null;
+      this.dataCharacteristic = null;
+      this.configCharacteristic = null;
+    }
+  }
+
+  // MARK: - Data Operations (with Anti-Spy / Encryption)
+
+  private async getOrGenerateEncryptionKey(): Promise<Buffer | null> {
+    try {
+      const credentials = await Keychain.getGenericPassword({
+        service: ENCRYPTION_KEY_SERVICE,
+        accessGroup: ENCRYPTION_KEY_ACCOUNT, // for shared access between apps if needed
+      });
+
+      if (credentials && credentials.password) {
+        this.encryptionKey = Buffer.from(credentials.password, 'base64');
+        console.log('Encryption key loaded from Keychain.');
+        return this.encryptionKey;
+      } else {
+        console.log('No encryption key found. Generating a new one...');
+        this.encryptionKey = crypto.randomBytes(32); // AES-256 key
+        await Keychain.setGenericPassword(
+          ENCRYPTION_KEY_SERVICE,
+          ENCRYPTION_KEY_ACCOUNT,
+          this.encryptionKey.toString('base64'),
+        );
+        console.log('New encryption key generated and saved to Keychain.');
+        return this.encryptionKey;
+      }
+    } catch (error) {
+      console.error('Keychain operation failed:', error);
+      return null;
+    }
+  }
+
+  private encryptData(data: string | Buffer): EncryptedPayload {
+    if (!this.encryptionKey) {
+      throw new Error('Encryption key is not available.');
+    }
+    const dataBuffer = typeof data === 'string' ? Buffer.from(data, 'utf8') : data;
+    const iv = crypto.randomBytes(16); // Initialization Vector
+    const cipher = crypto.createCipheriv('aes-256-gcm', this.encryptionKey, iv);
+    let encrypted = cipher.update(dataBuffer);
+    encrypted = Buffer.concat([encrypted, cipher.final()]);
+    const tag = cipher.getAuthTag();
+
+    return {
+      iv: iv.toString('base64'),
+      encryptedData: encrypted.toString('base64'),
+      tag: tag.toString('base64'),
+    };
+  }
+
+  private decryptData(encryptedPayload: EncryptedPayload): Buffer | null {
+    if (!this.encryptionKey) {
+      console.error('Decryption key is not available.');
+      return null;
+    }
+    try {
+      const iv = Buffer.from(encryptedPayload.iv, 'base64');
+      const encryptedText = Buffer.from(encryptedPayload.encryptedData, 'base64');
+      const tag = Buffer.from(encryptedPayload.tag, 'base64');
+
+      const decipher = crypto.createDecipheriv('aes-256-gcm', this.encryptionKey, iv);
+      decipher.setAuthTag(tag);
+
+      let decrypted = decipher.update(encryptedText);
+      decrypted = Buffer.concat([decrypted, decipher.final()]);
+      return decrypted;
+    } catch (error) {
+      console.error('Decryption failed:', error);
+      return null;
+    }
+  }
+
+  public async writeEncryptedConfig(data: string) {
+    if (!this.device || !this.configCharacteristic) {
+      console.warn('Not connected or config characteristic not found.');
+      return;
+    }
+    await this.getOrGenerateEncryptionKey(); // Ensure key is available
+
+    try {
+      const encrypted = this.encryptData(data);
+      // Combine IV, encryptedData, and Tag into a single Buffer for transmission
+      // The peripheral must know how to parse this combined buffer
+      const payload = Buffer.concat([
+        Buffer.from(encrypted.iv, 'base64'),
+        Buffer.from(encrypted.encryptedData, 'base64'),
+        Buffer.from(encrypted.tag, 'base64'),
+      ]);
+      console.log(`Writing encrypted config: ${payload.toString('base64')}`);
+      await this.device.writeCharacteristicWithResponseForService(
+        this.configCharacteristic.serviceUUID,
+        this.configCharacteristic.uuid,
+        payload.toString('base64'), // BLE-PLX expects base64 string
+      );
+      console.log('Encrypted config written successfully.');
+    } catch (error) {
+      console.error('Failed to write encrypted config:', error);
+    }
+  }
+
+  private handleReceivedData(base64Data: string) {
+    try {
+      // Assuming the received data is the combined encrypted payload (IV + Ciphertext + Tag)
+      const fullPayload = Buffer.from(base64Data, 'base64');
+      const iv = fullPayload.slice(0, 16).toString('base64');
+      const tag = fullPayload.slice(fullPayload.length - 16).toString('base64');
+      const encryptedData = fullPayload.slice(16, fullPayload.length - 16).toString('base64');
+
+      const decryptedBuffer = this.decryptData({ iv, encryptedData, tag });
+      if (decryptedBuffer) {
+        const decryptedString = decryptedBuffer.toString('utf8');
+        console.log('Decrypted received data:', decryptedString);
+        // Dispatch an event or update state to notify the UI
+      } else {
+        console.warn('Failed to decrypt received data.');
+      }
+    } catch (error) {
+      console.error('Error handling received data:', error);
+    }
+  }
+}
+
+export const bleService = new BleService();
+
+
+
+import 'react-native-gesture-handler'; // Required for some navigators
+import React, {useEffect, useState, useCallback} from 'react';
+import {
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  useColorScheme,
+  View,
+  Button,
+  FlatList,
+  Alert,
+  TextInput,
+} from 'react-native';
+
+import {Colors} from 'react-native/Libraries/NewAppScreen';
+import {Device} from 'react-native-ble-plx';
+import {bleService} from './src/ble/BleManager';
+
+function App(): React.JSX.Element {
+  const isDarkMode = useColorScheme() === 'dark';
+  const backgroundStyle = {
+    backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
+  };
+
+  const [bluetoothEnabled, setBluetoothEnabled] = useState(false);
+  const [scannedDevices, setScannedDevices] = useState<Device[]>([]);
+  const [connectedDevice, setConnectedDevice] = useState<Device | null>(null);
+  const [configText, setConfigText] = useState('');
+  const [logMessages, setLogMessages] = useState<string[]>([]);
+
+  // Custom logger to capture logs in UI
+  const log = useCallback((message: string, isError: boolean = false) => {
+    const timestamp = new Date().toLocaleTimeString();
+    setLogMessages(prev => [`[${timestamp}] ${isError ? 'ERROR: ' : ''}${message}`, ...prev.slice(0, 49)]); // Keep last 50
+    if (isError) {
+      console.error(message);
+    } else {
+      console.log(message);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Override console.log/error to capture logs in UI
+    const originalLog = console.log;
+    const originalError = console.error;
+
+    console.log = (...args) => {
+      originalLog(...args);
+      log(args.join(' '));
+    };
+    console.error = (...args) => {
+      originalError(...args);
+      log(args.join(' '), true);
+    };
+
+    return () => {
+      console.log = originalLog;
+      console.error = originalError;
+    };
+  }, [log]);
+
+
+  useEffect(() => {
+    // Request permissions on app start
+    const setupBle = async () => {
+      const granted = await bleService.requestPermissions();
+      setBluetoothEnabled(granted);
+      if (!granted) {
+        Alert.alert(
+          'Bluetooth Permissions Required',
+          'Please enable Bluetooth permissions in app settings to use this feature.',
+          [{text: 'OK'}],
+        );
+      }
+    };
+    setupBle();
+
+    // Clean up on unmount
+    return () => {
+      bleService.disconnectDevice();
+      bleService.stopScan();
+    };
+  }, []);
+
+  const handleStartScan = () => {
+    if (!bluetoothEnabled) {
+      Alert.alert('Bluetooth is not enabled.', 'Please enable Bluetooth.');
+      return;
+    }
+    setScannedDevices([]);
+    bleService.startScan(device => {
+      // Add device if not already in the list
+      if (!scannedDevices.some(d => d.id === device.id)) {
+        setScannedDevices(prev => [...prev, device]);
+      }
+    });
+  };
+
+  const handleStopScan = () => {
+    bleService.stopScan();
+  };
+
+  const handleConnect = async (device: Device) => {
+    log(`Attempting to connect to ${device.name || device.id}`);
+    const connected = await bleService.connectToDevice(device);
+    if (connected) {
+      setConnectedDevice(connected);
+      log(`Successfully connected to ${connected.name || connected.id}`);
+    } else {
+      log(`Failed to connect to ${device.name || device.id}`, true);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    log(`Disconnecting from ${connectedDevice?.name || connectedDevice?.id}`);
+    await bleService.disconnectDevice();
+    setConnectedDevice(null);
+    log('Disconnected.');
+  };
+
+  const handleSendConfig = async () => {
+    if (!connectedDevice) {
+      Alert.alert('Not Connected', 'Please connect to a device first.');
+      return;
+    }
+    if (!configText.trim()) {
+      Alert.alert('Empty Command', 'Please enter a command to send.');
+      return;
+    }
+    log(`Sending encrypted config: ${configText}`);
+    await bleService.writeEncryptedConfig(configText);
+    setConfigText('');
+  };
+
+  return (
+    <SafeAreaView style={[styles.container, backgroundStyle]}>
+      <StatusBar
+        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+        backgroundColor={backgroundStyle.backgroundColor}
+      />
+      <ScrollView contentInsetAdjustmentBehavior="automatic">
+        <View style={styles.sectionContainer}>
+          <Text style={styles.sectionTitle}>Bluetooth Status</Text>
+          <Text>
+            Status: {bluetoothEnabled ? 'Enabled' : 'Disabled / Permissions Denied'}
+          </Text>
+          <Text>
+            Connection:{' '}
+            {connectedDevice
+              ? `Connected to ${connectedDevice.name || connectedDevice.id}`
+              : 'Disconnected'}
+          </Text>
+        </View>
+
+        <View style={styles.sectionContainer}>
+          <Text style={styles.sectionTitle}>Actions</Text>
+          <View style={styles.buttonRow}>
+            <Button title="Start Scan" onPress={handleStartScan} disabled={connectedDevice !== null} />
+            <Button title="Stop Scan" onPress={handleStopScan} />
+            <Button title="Disconnect" onPress={handleDisconnect} disabled={connectedDevice === null} />
+          </View>
+        </View>
+
+        <View style={styles.sectionContainer}>
+          <Text style={styles.sectionTitle}>Discovered Devices</Text>
+          {scannedDevices.length === 0 ? (
+            <Text>No devices found. Tap 'Start Scan' to search.</Text>
+          ) : (
+            <FlatList
+              data={scannedDevices}
+              keyExtractor={item => item.id}
+              renderItem={({item}) => (
+                <View style={styles.deviceItem}>
+                  <Text>{item.name || 'Unknown Device'}</Text>
+                  <Text style={styles.deviceId}>{item.id}</Text>
+                  <Button
+                    title="Connect"
+                    onPress={() => handleConnect(item)}
+                    disabled={connectedDevice !== null && connectedDevice.id === item.id}
+                  />
+                </View>
+              )}
+            />
+          )}
+        </View>
+
+        {connectedDevice && (
+          <View style={styles.sectionContainer}>
+            <Text style={styles.sectionTitle}>Device Control</Text>
+            <TextInput
+              style={styles.textInput}
+              placeholder="Enter command (e.g., SET_MODE:LOW)"
+              value={configText}
+              onChangeText={setConfigText}
+            />
+            <Button title="Send Encrypted Command" onPress={handleSendConfig} />
+          </View>
+        )}
+
+        <View style={styles.sectionContainer}>
+          <Text style={styles.sectionTitle}>Application Logs</Text>
+          <View style={styles.logContainer}>
+            {logMessages.map((msg, index) => (
+              <Text key={index} style={styles.logText}>{msg}</Text>
+            ))}
+          </View>
+        </View>
+
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  sectionContainer: {
+    marginTop: 20,
+    paddingHorizontal: 24,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ccc',
+    paddingBottom: 15,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    marginBottom: 10,
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginTop: 10,
+  },
+  deviceItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  deviceId: {
+    fontSize: 12,
+    color: 'gray',
+  },
+  textInput: {
+    height: 40,
+    borderColor: 'gray',
+    borderWidth: 1,
+    marginBottom: 10,
+    paddingHorizontal: 10,
+    borderRadius: 5,
+  },
+  logContainer: {
+    backgroundColor: '#f0f0f0',
+    padding: 10,
+    borderRadius: 5,
+    maxHeight: 200,
+  },
+  logText: {
+    fontSize: 10,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', // Monospaced font for logs
+    color: '#333',
+  },
+});
+
+export default App;
+
+
+
+// MUST BE THE FIRST LINE
+import './shim';
+import {AppRegistry} from 'react-native';
+import App from './App';
+import {name as appName} from './app.json';
+
+AppRegistry.registerComponent(appName, () => App);
+
+
+
+npm run ios
+
+
+
+pip install bleak cryptography
+
+
+
+import asyncio
+from bleak import BleakClient, BleakScanner
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import padding
+import os
+import json
+
+# --- Configuration ---
+# Replace with your actual BLE peripheral's details
+TARGET_DEVICE_NAME = "MySecureBLEDevice" # Name advertised by your peripheral
+TARGET_SERVICE_UUID = "YOUR-DEVICE-CONTROL-SERVICE-UUID" # e.g., "E2C56DB5-DFFB-48D2-B060-D0F5A71096E0"
+DATA_CHARACTERISTIC_UUID = "YOUR-DATA-CHARACTERISTIC-UUID" # For receiving notifications
+CONFIG_CHARACTERISTIC_UUID = "YOUR-CONFIG-CHARACTERISTIC-UUID" # For sending commands
+
+# --- Application-Level Encryption (AES-256-GCM) ---
+# This adds a layer of security on top of BLE's link-layer encryption.
+# In a real system, this key must be securely exchanged and stored,
+# NOT hardcoded or transmitted in plain text.
+# For demonstration, we'll generate and "store" it in a file.
+ENCRYPTION_KEY_FILE = "ble_encryption_key.bin"
+_encryption_key = None
+
+def get_or_generate_encryption_key():
+    """Retrieves or generates a 256-bit AES encryption key."""
+    global _encryption_key
+    if _encryption_key is not None:
+        return _encryption_key
+
+    if os.path.exists(ENCRYPTION_KEY_FILE):
+        with open(ENCRYPTION_KEY_FILE, 'rb') as f:
+            _encryption_key = f.read()
+        print(f"Loaded encryption key from {ENCRYPTION_KEY_FILE}")
+    else:
+        _encryption_key = os.urandom(32)  # 32 bytes = 256 bits
+        with open(ENCRYPTION_KEY_FILE, 'wb') as f:
+            f.write(_encryption_key)
+        print(f"Generated new encryption key and saved to {ENCRYPTION_KEY_FILE}")
+    return _encryption_key
+
+def encrypt_data(plaintext: str) -> bytes:
+    """Encrypts data using AES-256-GCM. Returns IV + Ciphertext + Tag."""
+    key = get_or_generate_encryption_key()
+    iv = os.urandom(12)  # GCM recommended IV size is 12 bytes
+    encryptor = Cipher(algorithms.AES(key), modes.GCM(iv), backend=default_backend()).encryptor
+
+    # Pad the plaintext to a multiple of 16 bytes for AES (though GCM doesn't strictly require it, good practice)
+    padder = padding.PKCS7(algorithms.AES.block_size).padder()
+    padded_data = padder.update(plaintext.encode('utf-8')) + padder.finalize()
+
+    ciphertext = encryptor.update(padded_data) + encryptor.finalize()
+    tag = encryptor.tag
+    
+    # Combine IV, ciphertext, and tag for transmission
+    return iv + ciphertext + tag
+
+def decrypt_data(encrypted_bytes: bytes) -> str:
+    """Decrypts data using AES-256-GCM. Expects IV + Ciphertext + Tag."""
+    key = get_or_generate_encryption_key()
+    
+    # Assuming the structure is IV (12 bytes) + Ciphertext + Tag (16 bytes)
+    if len(encrypted_bytes) < 28: # 12 (IV) + 16 (Tag)
+        raise ValueError("Encrypted data is too short for decryption.")
+
+    iv = encrypted_bytes[0:12]
+    ciphertext_with_tag = encrypted_bytes[12:]
+    
+    # GCM tag is typically the last 16 bytes of the combined ciphertext and tag
+    ciphertext = ciphertext_with_tag[:-16]
+    tag = ciphertext_with_tag[-16:]
+
+    decryptor = Cipher(algorithms.AES(key), modes.GCM(iv), backend=default_backend()).decryptor
+    decryptor.authenticate_tag(tag) # Authenticate tag before decryption
+
+    padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+
+    # Unpad the plaintext
+    unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
+    plaintext_bytes = unpadder.update(padded_plaintext) + unpadder.finalize()
+
+    return plaintext_bytes.decode('utf-8')
+
+# --- BLE Callbacks ---
+
+async def notification_handler(characteristic: Characteristic, data: bytearray):
+    """Handler for characteristic notifications."""
+    print(f"Received notification from {characteristic.uuid}: {data.hex()}")
+    try:
+        decrypted_message = decrypt_data(bytes(data))
+        print(f"  Decrypted Message: {decrypted_message}")
+    except Exception as e:
+        print(f"  Error decrypting notification data: {e}")
+
+# --- Main BLE Logic ---
+
+async def run_ble_client():
+    print(f"Searching for device: {TARGET_DEVICE_NAME}...")
+    device = await BleakScanner.find_device_by_name(TARGET_DEVICE_NAME, timeout=20.0)
+
+    if not device:
+        print(f"Could not find device '{TARGET_DEVICE_NAME}'. Exiting.")
+        return
+
+    print(f"Found device: {device.name} ({device.address})")
+
+    async with BleakClient(device) as client:
+        if not client.is_connected:
+            print("Failed to connect.")
+            return
+
+        print(f"Connected to {client.address}")
+
+        # Discover services and characteristics
+        print("Discovering services and characteristics...")
+        for service in client.services:
+            print(f"  Service: {service.uuid}")
+            for char in service.characteristics:
+                print(f"    Characteristic: {char.uuid}, Properties: {char.properties}")
+
+        # Get characteristic objects
+        data_char = None
+        config_char = None
+        for service in client.services:
+            if service.uuid.lower() == TARGET_SERVICE_UUID.lower():
+                for char in service.characteristics:
+                    if char.uuid.lower() == DATA_CHARACTERISTIC_UUID.lower():
+                        data_char = char
+                    elif char.uuid.lower() == CONFIG_CHARACTERISTIC_UUID.lower():
+                        config_char = char
+        
+        if not data_char:
+            print(f"Error: Data Characteristic '{DATA_CHARACTERISTIC_UUID}' not found.")
+            return
+        if not config_char:
+            print(f"Error: Config Characteristic '{CONFIG_CHARACTERISTIC_UUID}' not found.")
+            return
+
+        print("Subscribing to data characteristic notifications...")
+        await client.start_notify(data_char.uuid, notification_handler)
+        print("Subscribed. Waiting for data...")
+
+        # --- "Driver Installer" / Configuration ---
+        # This part simulates initial setup or configuration.
+        # In a real "driver installer" scenario, you'd present options to the user.
+        print("\n--- Device Configuration ---")
+        try:
+            # Read initial configuration
+            if "read" in config_char.properties:
+                initial_config_bytes = await client.read_gatt_char(config_char.uuid)
+                try:
+                    initial_config_decrypted = decrypt_data(initial_config_bytes)
+                    print(f"Initial config (decrypted): {initial_config_decrypted}")
+                except Exception as e:
+                    print(f"Initial config (raw hex): {initial_config_bytes.hex()}")
+                    print(f"Could not decrypt initial config: {e}")
+            else:
+                print("Config characteristic is not readable.")
+
+            # Write an encrypted command
+            command = input("Enter command to send (e.g., SET_MODE:HIGH_POWER): ")
+            if command:
+                print(f"Encrypting and sending command: '{command}'")
+                encrypted_command = encrypt_data(command)
+                if "write" in config_char.properties:
+                    await client.write_gatt_char(config_char.uuid, encrypted_command, response=True)
+                    print("Encrypted command sent.")
+                else:
+                    print("Config characteristic does not support write operations.")
+        except Exception as e:
+            print(f"Error during configuration: {e}")
+
+        print("\n--- Waiting for Notifications ---")
+        print("Press Ctrl+C to exit.")
+        while True:
+            await asyncio.sleep(1) # Keep the client connected and listening for notifications
+
+# --- Run the client ---
+if __name__ == "__main__":
+    # Define a simple event handler for the scanner for debugging
+    async def scan_for_debug(device, advertisement_data):
+        # This will print every device found, useful for debugging if your device name isn't recognized
+        # print(f"Discovered: {device.name} ({device.address})")
+        pass
+
+    async def main():
+        # Start the debug scanner in the background if you want to see all devices
+        # scanner_task = asyncio.create_task(BleakScanner.start(scan_for_debug))
+        await run_ble_client()
+        # await BleakScanner.stop() # Stop the scanner if it was started for debug purposes
+
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nDisconnected by user.")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+
+
+
+
+python ble_client.py
+
+
+
+#ifndef CryptoService_hpp
+#define CryptoService_hpp
+
+#include <string>
+#include <vector>
+#include <stdexcept>
+#include <cstdint>
+
+// Forward declaration of the secret key (managed externally or derived)
+// In a real app, this key would be securely loaded from Keychain or derived.
+// For demonstration, it's just a placeholder.
+extern const std::vector<uint8_t> ENCRYPTION_KEY;
+
+namespace CryptoService {
+
+    // Structure to hold encrypted data components (IV + Ciphertext + Tag)
+    struct EncryptedData {
+        std::vector<uint8_t> iv;         // Initialization Vector (12 bytes for GCM)
+        std::vector<uint8_t> ciphertext; // Encrypted data
+        std::vector<uint8_t> tag;        // Authentication Tag (16 bytes for GCM)
+
+        // Combines all parts into a single buffer for transmission over BLE
+        std::vector<uint8_t> toCombinedBytes() const {
+            std::vector<uint8_t> combined;
+            combined.insert(combined.end(), iv.begin(), iv.end());
+            combined.insert(combined.end(), ciphertext.begin(), ciphertext.end());
+            combined.insert(combined.end(), tag.begin(), tag.end());
+            return combined;
+        }
+
+        // Parses a combined buffer into EncryptedData components
+        static EncryptedData fromCombinedBytes(const std::vector<uint8_t>& combined) {
+            if (combined.size() < 12 + 16) { // IV (12) + Tag (16) minimum
+                throw std::runtime_error("Combined data too short for decryption.");
+            }
+            EncryptedData data;
+            data.iv.assign(combined.begin(), combined.begin() + 12);
+            data.ciphertext.assign(combined.begin() + 12, combined.end() - 16);
+            data.tag.assign(combined.end() - 16, combined.end());
+            return data;
+        }
+    };
+
+    // Encrypts plaintext data using AES-256 GCM.
+    // Throws std::runtime_error on failure.
+    EncryptedData encrypt(const std::vector<uint8_t>& plaintext);
+
+    // Decrypts encrypted data (IV + Ciphertext + Tag) using AES-256 GCM.
+    // Throws std::runtime_error on failure (e.g., authentication failed, invalid data).
+    std::vector<uint8_t> decrypt(const EncryptedData& encryptedData);
+
+} // namespace CryptoService
+
+#endif /* CryptoService_hpp */
+
+
+
+#include "CryptoService.hpp"
+#include <openssl/evp.h>
+#include <openssl/rand.h>
+#include <openssl/err.h>
+#include <iostream> // For error logging, replace with proper logging in production
+
+// --- IMPORTANT: KEY MANAGEMENT ---
+// This is a placeholder. In a real iOS app:
+// 1. Generate a strong key securely (e.g., cryptographically random, or derived).
+// 2. Store it securely in the iOS Keychain.
+// 3. Retrieve it from the Keychain at runtime and pass it to your C++ crypto functions.
+// NEVER hardcode sensitive keys in source code for production apps.
+const std::vector<uint8_t> ENCRYPTION_KEY = {
+    0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+    0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10,
+    0x10, 0x32, 0x54, 0x76, 0x98, 0xba, 0xdc, 0xfe,
+    0xef, 0xcd, 0xab, 0x89, 0x67, 0x45, 0x23, 0x01 // 32 bytes (256 bits)
+};
+
+namespace CryptoService {
+
+    // Helper to print OpenSSL errors
+    void handleOpenSSLError(const std::string& msg) {
+        char errBuf[256];
+        ERR_error_string_n(ERR_get_error(), errBuf, sizeof(errBuf));
+        std::cerr << "OpenSSL Error (" << msg << "): " << errBuf << std::endl;
+        throw std::runtime_error(msg + ": " + std::string(errBuf));
+    }
+
+    EncryptedData encrypt(const std::vector<uint8_t>& plaintext) {
+        if (ENCRYPTION_KEY.size() != 32) {
+            throw std::runtime_error("Encryption key must be 32 bytes (AES-256).");
+        }
+
+        EVP_CIPHER_CTX* ctx;
+        int len;
+        EncryptedData result;
+        int plaintext_len = plaintext.size();
+
+        // Generate IV (12 bytes for GCM recommended)
+        result.iv.resize(12);
+        if (RAND_bytes(result.iv.data(), result.iv.size()) != 1) {
+            handleOpenSSLError("IV generation failed");
+        }
+
+        // Create and initialize the context
+        if (!(ctx = EVP_CIPHER_CTX_new())) {
+            handleOpenSSLError("EVP_CIPHER_CTX_new failed");
+        }
+
+        // Initialize encryption operation.
+        // EVP_aes_256_gcm() selects AES 256 GCM cipher.
+        if (1 != EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL, NULL)) {
+            handleOpenSSLError("EVP_EncryptInit_ex failed");
+        }
+
+        // Set IV
+        if (1 != EVP_EncryptInit_ex(ctx, NULL, NULL, ENCRYPTION_KEY.data(), result.iv.data())) {
+            handleOpenSSLError("EVP_EncryptInit_ex (set IV) failed");
+        }
+
+        // Provide the message to be encrypted, and obtain the encrypted output.
+        // EVP_EncryptUpdate can be called multiple times if necessary.
+        result.ciphertext.resize(plaintext_len + EVP_CIPHER_block_size(EVP_aes_256_gcm())); // Allocate enough space
+        if (1 != EVP_EncryptUpdate(ctx, result.ciphertext.data(), &len, plaintext.data(), plaintext_len)) {
+            handleOpenSSLError("EVP_EncryptUpdate failed");
+        }
+        int ciphertext_len = len;
+
+        // Finalize encryption.
+        if (1 != EVP_EncryptFinal_ex(ctx, result.ciphertext.data() + len, &len)) {
+            handleOpenSSLError("EVP_EncryptFinal_ex failed");
+        }
+        ciphertext_len += len;
+        result.ciphertext.resize(ciphertext_len); // Trim to actual size
+
+        // Get the GCM tag
+        result.tag.resize(16); // GCM tag is 16 bytes
+        if (1 != EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, result.tag.size(), result.tag.data())) {
+            handleOpenSSLError("EVP_CTRL_GCM_GET_TAG failed");
+        }
+
+        EVP_CIPHER_CTX_free(ctx);
+        return result;
+    }
+
+    std::vector<uint8_t> decrypt(const EncryptedData& encryptedData) {
+        if (ENCRYPTION_KEY.size() != 32) {
+            throw std::runtime_error("Encryption key must be 32 bytes (AES-256).");
+        }
+        if (encryptedData.iv.size() != 12) {
+            throw std::runtime_error("IV must be 12 bytes for GCM.");
+        }
+        if (encryptedData.tag.size() != 16) {
+            throw std::runtime_error("Tag must be 16 bytes for GCM.");
+        }
+
+        EVP_CIPHER_CTX* ctx;
+        int len;
+        std::vector<uint8_t> plaintext_bytes;
+        int ciphertext_len = encryptedData.ciphertext.size();
+
+        // Create and initialize the context
+        if (!(ctx = EVP_CIPHER_CTX_new())) {
+            handleOpenSSLError("EVP_CIPHER_CTX_new failed");
+        }
+
+        // Initialize decryption operation.
+        if (1 != EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL, NULL)) {
+            handleOpenSSLError("EVP_DecryptInit_ex failed");
+        }
+
+        // Set IV
+        if (1 != EVP_DecryptInit_ex(ctx, NULL, NULL, ENCRYPTION_KEY.data(), encryptedData.iv.data())) {
+            handleOpenSSLError("EVP_DecryptInit_ex (set IV) failed");
+        }
+
+        // Provide the message to be decrypted, and obtain the plaintext output.
+        plaintext_bytes.resize(ciphertext_len + EVP_CIPHER_block_size(EVP_aes_256_gcm()));
+        if (1 != EVP_DecryptUpdate(ctx, plaintext_bytes.data(), &len, encryptedData.ciphertext.data(), ciphertext_len)) {
+            handleOpenSSLError("EVP_DecryptUpdate failed");
+        }
+        int plaintext_len = len;
+
+        // Set the GCM tag
+        if (1 != EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, encryptedData.tag.size(), encryptedData.tag.data())) {
+            handleOpenSSLError("EVP_CTRL_GCM_SET_TAG failed");
+        }
+
+        // Finalize decryption. A positive return value indicates success, anything else is authentication failure.
+        if (1 != EVP_DecryptFinal_ex(ctx, plaintext_bytes.data() + len, &len)) {
+            EVP_CIPHER_CTX_free(ctx);
+            throw std::runtime_error("Authentication failed or corrupted data.");
+        }
+        plaintext_len += len;
+        plaintext_bytes.resize(plaintext_len); // Trim to actual size
+
+        EVP_CIPHER_CTX_free(ctx);
+        return plaintext_bytes;
+    }
+
+} // namespace CryptoService
+
+
+
+
+// This file can be used as part of your bridging header.
+// It exposes the C++ functions to Objective-C and then to Swift.
+
+#import <Foundation/Foundation.h>
+
+NS_ASSUME_NONNULL_BEGIN
+
+@interface BLECriptoBridge : NSObject
+
+// Encrypts NSData and returns an NSDictionary with base64 encoded IV, ciphertext, and tag.
++ (NSDictionary<NSString *, NSString *> *)encryptData:(NSData *)data error:(NSError **)error;
+
+// Decrypts NSData (from a combined IV+Ciphertext+Tag) and returns decrypted NSData.
++ (nullable NSData *)decryptCombinedData:(NSData *)combinedData error:(NSError **)error;
+
+@end
+
+NS_ASSUME_NONNULL_END
+
+
+
+#import "BLECryptoBridge.h"
+#import "CryptoService.hpp" // Include your C++ header
+
+@implementation BLECriptoBridge
+
++ (NSDictionary<NSString *, NSString *> *)encryptData:(NSData *)data error:(NSError **)error {
+    @try {
+        // Convert NSData to std::vector<uint8_t>
+        const uint8_t* bytes = (const uint8_t*)data.bytes;
+        std::vector<uint8_t> plaintext(bytes, bytes + data.length);
+
+        CryptoService::EncryptedData encrypted = CryptoService::encrypt(plaintext);
+
+        // Convert std::vector<uint8_t> to NSData for each component, then base64 encode
+        NSData *ivData = [NSData dataWithBytes:encrypted.iv.data() length:encrypted.iv.size()];
+        NSData *ciphertextData = [NSData dataWithBytes:encrypted.ciphertext.data() length:encrypted.ciphertext.size()];
+        NSData *tagData = [NSData dataWithBytes:encrypted.tag.data() length:encrypted.tag.size()];
+
+        return @{
+            @"iv": [ivData base64EncodedStringWithOptions:0],
+            @"ciphertext": [ciphertextData base64EncodedStringWithOptions:0],
+            @"tag": [tagData base64EncodedStringWithOptions:0]
+        };
+    } @catch (const std::runtime_error& e) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"BLECryptoErrorDomain" code:100 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithUTF8String:e.what()]}];
+        }
+        return nil;
+    } @catch (const std::exception& e) {
+         if (error) {
+            *error = [NSError errorWithDomain:@"BLECryptoErrorDomain" code:101 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithUTF8String:e.what()]}];
+        }
+        return nil;
+    } @catch (...) {
+         if (error) {
+            *error = [NSError errorWithDomain:@"BLECryptoErrorDomain" code:102 userInfo:@{NSLocalizedDescriptionKey: @"Unknown C++ encryption error."}];
+        }
+        return nil;
+    }
+}
+
++ (nullable NSData *)decryptCombinedData:(NSData *)combinedData error:(NSError **)error {
+    @try {
+        // Convert NSData to std::vector<uint8_t>
+        const uint8_t* bytes = (const uint8_t*)combinedData.bytes;
+        std::vector<uint8_t> combinedVec(bytes, bytes + combinedData.length);
+
+        CryptoService::EncryptedData encryptedInput = CryptoService::EncryptedData::fromCombinedBytes(combinedVec);
+        std::vector<uint8_t> decrypted = CryptoService::decrypt(encryptedInput);
+
+        // Convert std::vector<uint8_t> to NSData
+        return [NSData dataWithBytes:decrypted.data() length:decrypted.size()];
+    } @catch (const std::runtime_error& e) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"BLECryptoErrorDomain" code:200 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithUTF81String:e.what()]}];
+        }
+        return nil;
+    } @catch (const std::exception& e) {
+         if (error) {
+            *error = [NSError errorWithDomain:@"BLECryptoErrorDomain" code:201 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithUTF8String:e.what()]}];
+        }
+        return nil;
+    } @catch (...) {
+         if (error) {
+            *error = [NSError errorWithDomain:@"BLECryptoErrorDomain" code:202 userInfo:@{NSLocalizedDescriptionKey: @"Unknown C++ decryption error."}];
+        }
+        return nil;
+    }
+}
+
+@end
+
+
+import CoreBluetooth // For BLE operations
+import Foundation    // For NSData, etc.
+
+// Make sure your Bridging Header (e.g., YourAppName-Bridging-Header.h)
+// includes #import "BLECryptoBridge.h"
+
+class BluetoothManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
+    var centralManager: CBCentralManager!
+    var connectedPeripheral: CBPeripheral?
+    var configCharacteristic: CBCharacteristic? // Assume this is discovered
+
+    override init() {
+        super.init()
+        centralManager = CBCentralManager(delegate: self, queue: nil)
+        // ... rest of init
+    }
+
+    // MARK: - Core Bluetooth Delegate Methods (Simplified)
+
+    func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        // Handle Bluetooth state changes
+    }
+
+    func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        connectedPeripheral = peripheral
+        peripheral.delegate = self
+        peripheral.discoverServices([CBUUID(string: "YOUR_DEVICE_CONTROL_SERVICE_UUID")])
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        // Find your target service
+        if let service = peripheral.services?.first(where: { $0.uuid == CBUUID(string: "YOUR_DEVICE_CONTROL_SERVICE_UUID") }) {
+            peripheral.discoverCharacteristics([CBUUID(string: "YOUR_CONFIG_CHARACTERISTIC_UUID")], for: service)
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
+        // Find your config characteristic
+        if let char = service.characteristics?.first(where: { $0.uuid == CBUUID(string: "YOUR_CONFIG_CHARACTERISTIC_UUID") }) {
+            configCharacteristic = char
+            print("Config characteristic found.")
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        if let value = characteristic.value {
+            var nsError: NSError?
+            let decryptedData = BLECriptoBridge.decryptCombinedData(value, error: &nsError)
+            if let decrypted = decryptedData, let text = String(data: decrypted, encoding: .utf8) {
+                print("Received and decrypted: \(text)")
+            } else if let error = nsError {
+                print("Decryption failed: \(error.localizedDescription)")
+            } else {
+                print("Received un-decryptable or empty data.")
+            }
+        }
+    }
+
+    // MARK: - Application-Level Crypto Usage
+
+    func sendEncryptedCommand(command: String) {
+        guard let peripheral = connectedPeripheral, let characteristic = configCharacteristic else {
+            print("Not connected or characteristic not ready.")
+            return
+        }
+
+        let commandData = command.data(using: .utf8)!
+        var nsError: NSError?
+        let encryptedDict = BLECriptoBridge.encryptData(commandData, error: &nsError)
+
+        if let encrypted = encryptedDict,
+           let iv = Data(base64Encoded: encrypted["iv"]!),
+           let ciphertext = Data(base64Encoded: encrypted["ciphertext"]!),
+           let tag = Data(base64Encoded: encrypted["tag"]!) {
+
+            // Combine the components for sending over BLE
+            var combinedData = Data()
+            combinedData.append(iv)
+            combinedData.append(ciphertext)
+            combinedData.append(tag)
+
+            print("Sending encrypted data (combined length: \(combinedData.count) bytes)")
+            peripheral.writeValue(combinedData, for: characteristic, type: .withResponse)
+        } else if let error = nsError {
+            print("Encryption failed: \(error.localizedDescription)")
+        } else {
+            print("Encryption failed with unknown error.")
+        }
+    }
+
+    // Call this to initiate sending a command
+    func exampleUsage() {
+        // ... (your code to scan and connect) ...
+        // Once connected and characteristics discovered:
+        sendEncryptedCommand(command: "SET_MODE:HIGH_SECURITY")
+    }
+}
+
+
+
+import Foundation
+import CoreBluetooth
+import Combine // For @Published and Cancellables
+import Security // For Keychain access
+import CryptoKit // For AES-GCM encryption
+
+// MARK: - Constants & UUIDs
+
+struct BLEConstants {
+    // Replace with your peripheral's actual Service and Characteristic UUIDs
+    static let serviceUUID = CBUUID(string: "E2C56DB5-DFFB-48D2-B060-D0F5A71096E0") // Your Device Control Service
+    static let dataCharacteristicUUID = CBUUID(string: "C3F45DE9-FF12-42B1-8729-D3E4F5A67890") // For notifications/data
+    static let configCharacteristicUUID = CBUUID(string: "A1B2C3D4-E5F6-7890-1234-567890ABCDEF") // For commands/config
+    static let targetDeviceName = "MySecureBLEDevice" // The advertised name of your peripheral
+
+    // Keychain constants for storing the symmetric key
+    static let keychainService = "com.yourcompany.BLESecureApp"
+    static let keychainAccount = "bleEncryptionKey"
+}
+
+// MARK: - BluetoothManager Class
+
+class BluetoothManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeripheralDelegate {
+
+    // MARK: - Published Properties (for SwiftUI Updates)
+    @Published var bluetoothState: CBManagerState = .unknown
+    @Published var discoveredPeripherals: [CBPeripheral] = []
+    @Published var connectedPeripheral: CBPeripheral?
+    @Published var logMessages: [String] = []
+    @Published var receivedDecryptedData: String?
+
+    // MARK: - Private Properties
+    private var centralManager: CBCentralManager!
+    private var dataCharacteristic: CBCharacteristic?
+    private var configCharacteristic: CBCharacteristic?
+    private var symmetricEncryptionKey: SymmetricKey? // AES-256 key
+
+    // Combine Cancellables for async operations if needed
+    private var cancellables = Set<AnyCancellable>()
+
+    // MARK: - Initialization
+    override init() {
+        super.init()
+        centralManager = CBCentralManager(delegate: self, queue: nil)
+        loadEncryptionKey() // Attempt to load key on init
+        log("BluetoothManager initialized.")
+    }
+
+    // MARK: - Logging Helper
+    private func log(_ message: String, isError: Bool = false) {
+        let timestamp = Date().formatted(date: .none, time: .standard)
+        let logEntry = "[\(timestamp)] \(isError ? "ERROR: " : "")\(message)"
+        DispatchQueue.main.async {
+            self.logMessages.insert(logEntry, at: 0) // Add to top
+            if self.logMessages.count > 100 { // Keep logs from growing indefinitely
+                self.logMessages.removeLast()
+            }
+        }
+        if isError {
+            print("ERROR: \(message)")
+        } else {
+            print(message)
+        }
+    }
+
+    // MARK: - Bluetooth State Management
+
+    func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        bluetoothState = central.state
+        switch central.state {
+        case .poweredOn:
+            log("Bluetooth is Powered On.")
+            startScanning()
+        case .poweredOff:
+            log("Bluetooth is Powered Off. Please enable it.", isError: true)
+            // Handle disconnect if connected
+            if connectedPeripheral != nil {
+                centralManager.cancelPeripheralConnection(connectedPeripheral!)
+            }
+            discoveredPeripherals.removeAll()
+        case .unauthorized:
+            log("Bluetooth usage is unauthorized. Check app permissions.", isError: true)
+        case .unsupported:
+            log("Bluetooth Low Energy is not supported on this device.", isError: true)
+        case .resetting:
+            log("Bluetooth is resetting.")
+        case .unknown:
+            log("Bluetooth state is unknown.")
+        @unknown default:
+            log("A new, unhandled Bluetooth state occurred: \(central.state.rawValue)", isError: true)
+        }
+    }
+
+    // MARK: - Scanning
+
+    func startScanning() {
+        guard centralManager.state == .poweredOn else {
+            log("Cannot scan: Bluetooth is not powered on.", isError: true)
+            return
+        }
+        log("Starting scan for peripherals...")
+        // Scan for specific service UUIDs to limit discovered devices and save power
+        centralManager.scanForPeripherals(withServices: [BLEConstants.serviceUUID], options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
+        // Stop scanning after a timeout to save battery
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) { [weak self] in
+            self?.stopScanning()
+        }
+    }
+
+    func stopScanning() {
+        if centralManager.isScanning {
+            centralManager.stopScan()
+            log("Stopped scanning for peripherals.")
+        }
+    }
+
+    func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
+        // Filter by name or other advertisement data if needed
+        if let name = advertisementData[CBAdvertisementDataLocalNameKey] as? String, name == BLEConstants.targetDeviceName {
+            if !discoveredPeripherals.contains(where: { $0.identifier == peripheral.identifier }) {
+                log("Discovered target peripheral: \(name) (\(peripheral.identifier.uuidString))")
+                discoveredPeripherals.append(peripheral)
+                // Optionally auto-connect here if it's a known device
+            }
+        } else if peripheral.name == BLEConstants.targetDeviceName && !discoveredPeripherals.contains(where: { $0.identifier == peripheral.identifier }) {
+            // Fallback for devices that don't put name in advertisementData
+            log("Discovered target peripheral (by name property): \(peripheral.name ?? "N/A") (\(peripheral.identifier.uuidString))")
+            discoveredPeripherals.append(peripheral)
+        }
+    }
+
+    // MARK: - Connection
+
+    func connect(to peripheral: CBPeripheral) {
+        stopScanning() // Stop scanning when connecting
+        log("Attempting to connect to \(peripheral.name ?? peripheral.identifier.uuidString)...")
+        // Use options to be notified on connection/disconnection even when app is in background
+        centralManager.connect(peripheral, options: [CBConnectPeripheralOptionNotifyOnConnectionKey: true,
+                                                    CBConnectPeripheralOptionNotifyOnDisconnectionKey: true,
+                                                    CBConnectPeripheralOptionNotifyOnNotificationKey: true])
+    }
+
+    func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        log("Successfully connected to \(peripheral.name ?? peripheral.identifier.uuidString). Discovering services...")
+        connectedPeripheral = peripheral
+        peripheral.delegate = self
+        // Discover only the services you need to optimize
+        peripheral.discoverServices([BLEConstants.serviceUUID])
+    }
+
+    func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+        log("Failed to connect to \(peripheral.name ?? peripheral.identifier.uuidString). Error: \(error?.localizedDescription ?? "Unknown error").", isError: true)
+        connectedPeripheral = nil
+        // Optionally restart scan or inform user
+        startScanning()
+    }
+
+    func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        log("Disconnected from \(peripheral.name ?? peripheral.identifier.uuidString). Error: \(error?.localizedDescription ?? "No error").")
+        connectedPeripheral = nil
+        dataCharacteristic = nil
+        configCharacteristic = nil
+        // Optionally restart scan or try to auto-reconnect
+        startScanning()
+    }
+
+    // MARK: - Service & Characteristic Discovery
+
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        if let error = error {
+            log("Error discovering services: \(error.localizedDescription)", isError: true)
+            return
+        }
+        guard let services = peripheral.services else { return }
+
+        for service in services {
+            log("Discovered service: \(service.uuid)")
+            if service.uuid == BLEConstants.serviceUUID {
+                log("  Discovering characteristics for \(service.uuid)...")
+                // Discover only the characteristics you need
+                peripheral.discoverCharacteristics([BLEConstants.dataCharacteristicUUID, BLEConstants.configCharacteristicUUID], for: service)
+            }
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
+        if let error = error {
+            log("Error discovering characteristics for service \(service.uuid): \(error.localizedDescription)", isError: true)
+            return
+        }
+        guard let characteristics = service.characteristics else { return }
+
+        for characteristic in characteristics {
+            log("  Discovered characteristic: \(characteristic.uuid) (Properties: \(characteristic.properties.rawValue))")
+            if characteristic.uuid == BLEConstants.dataCharacteristicUUID {
+                dataCharacteristic = characteristic
+                if characteristic.properties.contains(.notify) {
+                    log("    Subscribing to notifications for Data Characteristic.")
+                    peripheral.setNotifyValue(true, for: characteristic)
+                } else if characteristic.properties.contains(.read) {
+                    // If not notifiable, try reading
+                    log("    Data Characteristic is readable, reading initial value.")
+                    peripheral.readValue(for: characteristic)
+                }
+            } else if characteristic.uuid == BLEConstants.configCharacteristicUUID {
+                configCharacteristic = characteristic
+                log("    Config Characteristic found.")
+                // You might read an initial config value here if available
+                if characteristic.properties.contains(.read) {
+                    log("    Config Characteristic is readable, reading initial value.")
+                    peripheral.readValue(for: characteristic)
+                }
+            }
+        }
+        log("Device setup complete. Ready for interaction.")
+    }
+
+    // MARK: - Read & Write Operations
+
+    func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        if let error = error {
+            log("Error updating value for characteristic \(characteristic.uuid): \(error.localizedDescription)", isError: true)
+            return
+        }
+        guard let value = characteristic.value else {
+            log("Received nil value for characteristic \(characteristic.uuid).")
+            return
+        }
+
+        log("Received raw data from \(characteristic.uuid): \(value.hexEncodedString())")
+
+        if characteristic.uuid == BLEConstants.dataCharacteristicUUID || characteristic.uuid == BLEConstants.configCharacteristicUUID {
+            // Attempt to decrypt the received data
+            do {
+                guard let key = symmetricEncryptionKey else {
+                    log("Encryption key not available for decryption.", isError: true)
+                    return
+                }
+                
+                // Assuming the incoming data is the combined IV + Ciphertext + Tag
+                // Extract components based on fixed sizes or a known format
+                // Example: IV (12 bytes) | Ciphertext | Tag (16 bytes)
+                if value.count >= 12 + 16 { // Minimum size for IV + Tag
+                    let ivData = value.subdata(in: 0..<12)
+                    let ciphertextData = value.subdata(in: 12..<(value.count - 16))
+                    let tagData = value.subdata(in: (value.count - 16)..<value.count)
+
+                    let sealedBox = try AES.GCM.SealedBox(nonce: AES.GCM.Nonce(data: ivData),
+                                                         ciphertext: ciphertextData,
+                                                         tag: tagData)
+
+                    let decrypted = try AES.GCM.open(sealedBox, using: key)
+                    if let decryptedString = String(data: decrypted, encoding: .utf8) {
+                        log("Decrypted Data: \(decryptedString)")
+                        receivedDecryptedData = decryptedString // Update UI
+                    } else {
+                        log("Decrypted data is not valid UTF-8 string.", isError: true)
+                    }
+                } else {
+                    log("Received data is too short for decryption (expected IV + Ciphertext + Tag). Raw data: \(value.hexEncodedString())", isError: true)
+                }
+            } catch let decryptionError {
+                log("Decryption failed: \(decryptionError.localizedDescription)", isError: true)
+            }
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
+        if let error = error {
+            log("Error writing value to characteristic \(characteristic.uuid): \(error.localizedDescription)", isError: true)
+        } else {
+            log("Successfully wrote value to characteristic \(characteristic.uuid).")
+        }
+    }
+
+    // MARK: - Application-Level Encryption & Key Management (Anti-Spy)
+
+    private func loadEncryptionKey() {
+        // Attempt to load key from Keychain
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: BLEConstants.keychainService,
+            kSecAttrAccount as String: BLEConstants.keychainAccount,
+            kSecReturnData as String: kCFBooleanTrue!,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+
+        if status == errSecSuccess, let data = item as? Data {
+            symmetricEncryptionKey = SymmetricKey(data: data)
+            log("Encryption key loaded from Keychain.")
+        } else if status == errSecItemNotFound {
+            log("No encryption key found. Generating a new one...")
+            generateAndStoreEncryptionKey()
+        } else {
+            log("Error loading key from Keychain: \(SecCopyErrorMessageString(status, nil) as String? ?? "Unknown Error")", isError: true)
+            // Consider critical error handling if key cannot be loaded/generated
+        }
+    }
+
+    private func generateAndStoreEncryptionKey() {
+        // Generate a new 256-bit (32-byte) key
+        symmetricEncryptionKey = SymmetricKey(size: .bits256)
+        guard let keyData = symmetricEncryptionKey?.withUnsafeBytes({ Data(Array($0)) }) else {
+            log("Failed to generate key data.", isError: true)
+            return
+        }
+
+        // Store key in Keychain
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: BLEConstants.keychainService,
+            kSecAttrAccount as String: BLEConstants.keychainAccount,
+            kSecValueData as String: keyData,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly // Strongest accessibility
+        ]
+
+        let status = SecItemAdd(query as CFDictionary, nil)
+        if status == errSecSuccess {
+            log("New encryption key generated and stored in Keychain.")
+        } else {
+            log("Error storing key in Keychain: \(SecCopyErrorMessageString(status, nil) as String? ?? "Unknown Error")", isError: true)
+        }
+    }
+    
+    // Public function to send encrypted data
+    func sendEncryptedConfigCommand(command: String) {
+        guard let peripheral = connectedPeripheral,
+              let characteristic = configCharacteristic,
+              characteristic.properties.contains(.write) || characteristic.properties.contains(.writeWithoutResponse),
+              let key = symmetricEncryptionKey else {
+            log("Cannot send command: Not connected, characteristic not found/writable, or key not available.", isError: true)
+            return
+        }
+
+        do {
+            let plaintextData = command.data(using: .utf8)!
+            
+            // Encrypt using AES-GCM
+            let sealedBox = try AES.GCM.seal(plaintextData, using: key)
+            
+            // Combine IV, ciphertext, and tag into a single Data object for transmission
+            // The peripheral needs to know how to parse this format.
+            var combinedData = Data()
+            combinedData.append(sealedBox.nonce.withUnsafeBytes { Data($0) }) // 12 bytes
+            combinedData.append(sealedBox.ciphertext)
+            combinedData.append(sealedBox.tag) // 16 bytes
+
+            log("Sending encrypted command: '\(command)' (raw hex: \(combinedData.hexEncodedString()))")
+            
+            // Choose write type based on characteristic properties
+            let writeType: CBCharacteristicWriteType = characteristic.properties.contains(.write) ? .withResponse : .withoutResponse
+            peripheral.writeValue(combinedData, for: characteristic, type: writeType)
+
+        } catch let encryptionError {
+            log("Encryption failed for command '\(command)': \(encryptionError.localizedDescription)", isError: true)
+        }
+    }
+}
+
+// MARK: - Helper Extension for Data to Hex String Conversion
+extension Data {
+    func hexEncodedString() -> String {
+        return map { String(format: "%02hhx", $0) }.joined()
+    }
+}
+
+
+import SwiftUI
+
+@main
+struct BLESecureApp: App {
+    // Instantiate BluetoothManager as a StateObject to manage its lifecycle
+    @StateObject private var bluetoothManager = BluetoothManager()
+
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+                .environmentObject(bluetoothManager) // Make it available to ContentView
+        }
+    }
+}
+
+
+
+import SwiftUI
+
+struct ContentView: View {
+    @EnvironmentObject var bluetoothManager: BluetoothManager
+    @State private var commandText: String = ""
+
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 15) {
+                // MARK: - Bluetooth Status
+                Group {
+                    Text("Bluetooth Status: \(bluetoothManager.bluetoothState.displayString())")
+                        .font(.headline)
+                        .foregroundColor(bluetoothManager.bluetoothState == .poweredOn ? .green : .red)
+
+                    Text("Connection: \(bluetoothManager.connectedPeripheral?.name ?? "Disconnected")")
+                        .font(.subheadline)
+                        .foregroundColor(bluetoothManager.connectedPeripheral != nil ? .blue : .gray)
+                }
+                .padding(.horizontal)
+
+                // MARK: - Actions
+                HStack {
+                    Button("Start Scan") {
+                        bluetoothManager.startScanning()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(bluetoothManager.connectedPeripheral != nil || bluetoothManager.bluetoothState != .poweredOn)
+
+                    Button("Stop Scan") {
+                        bluetoothManager.stopScanning()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!bluetoothManager.centralManager.isScanning)
+
+                    Button("Disconnect") {
+                        if let peripheral = bluetoothManager.connectedPeripheral {
+                            bluetoothManager.centralManager.cancelPeripheralConnection(peripheral)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .disabled(bluetoothManager.connectedPeripheral == nil)
+                }
+                .padding(.horizontal)
+
+                // MARK: - Discovered Devices
+                Text("Discovered Devices")
+                    .font(.title2)
+                    .padding(.top)
+
+                List {
+                    if bluetoothManager.discoveredPeripherals.isEmpty && !bluetoothManager.centralManager.isScanning {
+                        Text("No devices found. Tap 'Start Scan' to search.")
+                            .foregroundColor(.gray)
+                    } else {
+                        ForEach(bluetoothManager.discoveredPeripherals, id: \.identifier) { peripheral in
+                            HStack {
+                                VStack(alignment: .leading) {
+                                    Text(peripheral.name ?? "Unknown Device")
+                                        .font(.headline)
+                                    Text(peripheral.identifier.uuidString)
+                                        .font(.caption)
+                                        .foregroundColor(.gray)
+                                }
+                                Spacer()
+                                Button("Connect") {
+                                    bluetoothManager.connect(to: peripheral)
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(bluetoothManager.connectedPeripheral != nil)
+                            }
+                        }
+                    }
+                }
+                .listStyle(.plain)
+
+                // MARK: - Device Control
+                if bluetoothManager.connectedPeripheral != nil {
+                    VStack {
+                        Text("Send Encrypted Command")
+                            .font(.title2)
+                            .padding(.top)
+
+                        TextField("Enter command (e.g., SET_MODE:SECURE)", text: $commandText)
+                            .textFieldStyle(.roundedBorder)
+                            .padding(.horizontal)
+
+                        Button("Send") {
+                            if !commandText.isEmpty {
+                                bluetoothManager.sendEncryptedConfigCommand(command: commandText)
+                                commandText = "" // Clear input after sending
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .padding(.horizontal)
+                    }
+                    
+                    if let receivedData = bluetoothManager.receivedDecryptedData {
+                        Text("Received Decrypted: \(receivedData)")
+                            .font(.subheadline)
+                            .foregroundColor(.purple)
+                            .padding()
+                            .multilineTextAlignment(.center)
+                    }
+                }
+
+                // MARK: - Application Logs
+                Text("Logs")
+                    .font(.title2)
+                    .padding(.top)
+                
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 5) {
+                        ForEach(bluetoothManager.logMessages, id: \.self) { logMessage in
+                            Text(logMessage)
+                                .font(.system(.footnote, design: .monospaced))
+                                .foregroundColor(logMessage.contains("ERROR") ? .red : .primary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+                    .background(Color.gray.opacity(0.1))
+                    .cornerRadius(8)
+                }
+                .frame(maxHeight: 200) // Limit log view height
+                .padding(.horizontal)
+
+                Spacer()
+            }
+            .navigationTitle("Secure BLE App")
+        }
+    }
+}
+
+// MARK: - Helper Extension for CBManagerState
+extension CBManagerState {
+    func displayString() -> String {
+        switch self {
+        case .unknown: return "Unknown"
+        case .resetting: return "Resetting"
+        case .unsupported: return "Unsupported"
+        case .unauthorized: return "Unauthorized"
+        case .poweredOff: return "Powered Off"
+        case .poweredOn: return "Powered On"
+        @unknown default: return "Unknown State"
+        }
+    }
+}
+
+
+
