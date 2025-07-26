@@ -1,0 +1,4575 @@
+import UIKit
+import CoreMotion // For potential motion-based effects
+import AVFoundation // For potential audio/video elements
+
+class ScreensaverViewController: UIViewController {
+
+    // MARK: - UI Elements (Example)
+    let screensaverLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Advanced iOS Screensaver"
+        label.font = UIFont.systemFont(ofSize: 30, weight: .bold)
+        label.textColor = .white
+        label.textAlignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    let animationView: UIView = {
+        let view = UIView()
+        view.backgroundColor = .clear // Will contain animated subviews
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
+    }()
+
+    // MARK: - Properties
+    var isPowerSaverModeActive: Bool = false {
+        didSet {
+            updatePowerSaverUI()
+        }
+    }
+    var animationTimer: Timer?
+    var screenBrightness: CGFloat = UIScreen.main.brightness // Store initial brightness
+
+    // MARK: - Lifecycle
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
+        setupUI()
+        setupGestures()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        startScreensaverAnimation()
+        // Optionally dim screen immediately on appearance
+        if isPowerSaverModeActive {
+            setScreenBrightness(to: 0.1) // Dim to a low level
+        }
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        stopScreensaverAnimation()
+        restoreScreenBrightness() // Restore brightness when leaving
+    }
+
+    // MARK: - UI Setup
+    private func setupUI() {
+        view.addSubview(screensaverLabel)
+        view.addSubview(animationView)
+
+        NSLayoutConstraint.activate([
+            screensaverLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            screensaverLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: -50),
+
+            animationView.topAnchor.constraint(equalTo: view.topAnchor),
+            animationView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            animationView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            animationView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+    }
+
+    // MARK: - Screensaver Animation (Example: Moving Circles)
+    private func startScreensaverAnimation() {
+        animationTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            self?.addRandomCircle()
+        }
+    }
+
+    private func stopScreensaverAnimation() {
+        animationTimer?.invalidate()
+        animationTimer = nil
+        animationView.subviews.forEach { $0.removeFromSuperview() } // Clear circles
+    }
+
+    private func addRandomCircle() {
+        let circleSize: CGFloat = CGFloat.random(in: 50...150)
+        let circle = UIView(frame: CGRect(x: 0, y: 0, width: circleSize, height: circleSize))
+        circle.backgroundColor = UIColor(
+            red: CGFloat.random(in: 0...1),
+            green: CGFloat.random(in: 0...1),
+            blue: CGFloat.random(in: 0...1),
+            alpha: 0.7
+        )
+        circle.layer.cornerRadius = circleSize / 2
+        circle.center = CGPoint(
+            x: CGFloat.random(in: 0...view.bounds.width),
+            y: CGFloat.random(in: 0...view.bounds.height)
+        )
+        animationView.addSubview(circle)
+
+        // Animate movement
+        let duration = TimeInterval.random(in: 5...15)
+        let targetX = CGFloat.random(in: 0...view.bounds.width)
+        let targetY = CGFloat.random(in: 0...view.bounds.height)
+
+        UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseInOut, .allowUserInteraction], animations: {
+            circle.center = CGPoint(x: targetX, y: targetY)
+            circle.alpha = 0.0 // Fade out
+        }) { _ in
+            circle.removeFromSuperview() // Remove when animation completes
+        }
+    }
+
+    // MARK: - Power Saver Features
+    private func updatePowerSaverUI() {
+        if isPowerSaverModeActive {
+            screensaverLabel.alpha = 0.5 // Dim text
+            // Reduce animation frequency or complexity
+            animationTimer?.invalidate()
+            animationTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+                self?.addRandomCircle() // Less frequent
+            }
+            setScreenBrightness(to: 0.1) // Dim screen
+        } else {
+            screensaverLabel.alpha = 1.0
+            // Restore original animation frequency
+            stopScreensaverAnimation()
+            startScreensaverAnimation()
+            restoreScreenBrightness()
+        }
+    }
+
+    private func setScreenBrightness(to value: CGFloat) {
+        // This affects the *system* brightness, which can be disruptive.
+        // For an in-app solution, consider an overlay view with alpha.
+        UIScreen.main.brightness = max(0.0, min(1.0, value))
+    }
+
+    private func restoreScreenBrightness() {
+        UIScreen.main.brightness = screenBrightness
+    }
+
+
+    // MARK: - Developer Tools Integration
+    private func setupGestures() {
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        view.addGestureRecognizer(tapGesture)
+
+        let longPressGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
+        view.addGestureRecognizer(longPressGesture)
+    }
+
+    @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+        // Toggle power saver mode with a single tap (example)
+        isPowerSaverModeActive.toggle()
+        print("Power Saver Mode: \(isPowerSaverModeActive ? "ON" : "OFF")")
+    }
+
+    @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+        if gesture.state == .began {
+            // Present developer tools on long press
+            let developerVC = DeveloperToolsViewController()
+            developerVC.modalPresentationStyle = .fullScreen // or .formSheet
+            present(developerVC, animated: true, completion: nil)
+        }
+    }
+}
+
+
+
+
+import UIKit
+import Foundation // For DateFormatter
+import os.log // For unified logging
+
+class DeveloperToolsViewController: UIViewController {
+
+    // MARK: - UI Elements
+    let stackView: UIStackView = {
+        let stack = UIStackView()
+        stack.axis = .vertical
+        stack.spacing = 10
+        stack.alignment = .leading
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
+    }()
+
+    let closeButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("Close", for: .normal)
+        button.titleLabel?.font = UIFont.systemFont(ofSize: 20, weight: .bold)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
+    }()
+
+    let cpuLabel = UILabel()
+    let memoryLabel = UILabel()
+    let batteryLabel = UILabel()
+    let appVersionLabel = UILabel()
+    let buildNumberLabel = UILabel()
+    let deviceModelLabel = UILabel()
+    let osVersionLabel = UILabel()
+    let timestampLabel = UILabel()
+    let logTextView: UITextView = {
+        let textView = UITextView()
+        textView.isEditable = false
+        textView.backgroundColor = .darkGray
+        textView.textColor = .green
+        textView.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        textView.layer.cornerRadius = 8
+        textView.textContainerInset = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        return textView
+    }()
+
+
+    // MARK: - Lifecycle
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+        setupUI()
+        updateSystemInfo()
+        setupLogObserver()
+    }
+
+    // MARK: - UI Setup
+    private func setupUI() {
+        view.addSubview(stackView)
+        view.addSubview(closeButton)
+
+        stackView.addArrangedSubview(createHeaderLabel("System Information"))
+        stackView.addArrangedSubview(cpuLabel)
+        stackView.addArrangedSubview(memoryLabel)
+        stackView.addArrangedSubview(batteryLabel)
+        stackView.addArrangedSubview(createHeaderLabel("App Information"))
+        stackView.addArrangedSubview(appVersionLabel)
+        stackView.addArrangedSubview(buildNumberLabel)
+        stackView.addArrangedSubview(createHeaderLabel("Device Information"))
+        stackView.addArrangedSubview(deviceModelLabel)
+        stackView.addArrangedSubview(osVersionLabel)
+        stackView.addArrangedSubview(createHeaderLabel("Current Time"))
+        stackView.addArrangedSubview(timestampLabel)
+        stackView.addArrangedSubview(createHeaderLabel("App Logs"))
+        stackView.addArrangedSubview(logTextView)
+
+        // Constraints
+        NSLayoutConstraint.activate([
+            closeButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
+            closeButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+
+            stackView.topAnchor.constraint(equalTo: closeButton.bottomAnchor, constant: 20),
+            stackView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
+            stackView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+            stackView.bottomAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
+
+            logTextView.heightAnchor.constraint(equalToConstant: 200), // Fixed height for log
+            logTextView.widthAnchor.constraint(equalTo: stackView.widthAnchor) // Match stack view width
+        ])
+
+        closeButton.addTarget(self, action: #selector(closeButtonTapped), for: .touchUpInside)
+
+        // Style labels
+        [cpuLabel, memoryLabel, batteryLabel, appVersionLabel, buildNumberLabel, deviceModelLabel, osVersionLabel, timestampLabel].forEach {
+            $0.font = UIFont.systemFont(ofSize: 15)
+            $0.textColor = .label // Adapts to light/dark mode
+        }
+    }
+
+    private func createHeaderLabel(_ text: String) -> UILabel {
+        let label = UILabel()
+        label.text = text
+        label.font = UIFont.systemFont(ofSize: 18, weight: .semibold)
+        label.textColor = .systemBlue
+        label.textAlignment = .left
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }
+
+    // MARK: - Data Updates
+    private func updateSystemInfo() {
+        // CPU Usage (Highly complex to get accurate real-time per-app CPU on iOS without private APIs)
+        // For demonstration, we'll just show a placeholder.
+        cpuLabel.text = "CPU Usage: Not directly accessible per-app"
+
+        // Memory Usage
+        let processInfo = ProcessInfo.processInfo
+        let memoryUsage = processInfo.physicalMemory / (1024 * 1024) // Convert to MB
+        memoryLabel.text = String(format: "Memory Usage: %.2f MB (App)", Double(memoryUsage)) // This is total system memory, not app-specific RSS.
+        // For actual app memory, you'd need vm_stat or similar, which is complex and often requires special entitlements or private APIs.
+
+        // Battery Level
+        UIDevice.current.isBatteryMonitoringEnabled = true
+        let batteryLevel = UIDevice.current.batteryLevel * 100
+        let batteryState: String
+        switch UIDevice.current.batteryState {
+        case .unknown: batteryState = "Unknown"
+        case .unplugged: batteryState = "Unplugged"
+        case .charging: batteryState = "Charging"
+        case .full: batteryState = "Full"
+        @unknown default: batteryState = "Unknown"
+        }
+        batteryLabel.text = String(format: "Battery: %.0f%% (%@)", batteryLevel, batteryState)
+
+        // App Version
+        if let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
+            appVersionLabel.text = "App Version: \(appVersion)"
+        }
+        if let buildNumber = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
+            buildNumberLabel.text = "Build Number: \(buildNumber)"
+        }
+
+        // Device Info
+        deviceModelLabel.text = "Device Model: \(UIDevice.current.model)"
+        osVersionLabel.text = "OS Version: iOS \(UIDevice.current.systemVersion)"
+
+        // Timestamp
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        timestampLabel.text = "Current Time: \(dateFormatter.string(from: Date()))"
+    }
+
+    // MARK: - Logging (Simplified)
+    // In a real app, you'd integrate a robust logging framework.
+    // This is a basic example of capturing `os.log` output.
+    private func setupLogObserver() {
+        // Capturing os.log is not directly exposed to apps for security reasons.
+        // For in-app logs, you'd typically implement your own logging mechanism
+        // that writes to a file or an array that this TextView can display.
+        // For demonstration purposes, we'll simulate some logs.
+
+        // Simulating log messages
+        Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
+            let logMessage = "[\(DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .medium))] Simulated Log: Event occurred. Value: \(Int.random(in: 100...999))"
+            self?.appendLog(message: logMessage)
+        }
+        appendLog(message: "App started. Developer tools active.")
+    }
+
+    private func appendLog(message: String) {
+        DispatchQueue.main.async {
+            self.logTextView.text += message + "\n"
+            // Scroll to bottom
+            let bottom = self.logTextView.contentSize.height - self.logTextView.bounds.size.height
+            if bottom > 0 {
+                self.logTextView.setContentOffset(CGPoint(x: 0, y: bottom), animated: true)
+            }
+        }
+    }
+
+    // MARK: - Actions
+    @objc private func closeButtonTapped() {
+        dismiss(animated: true, completion: nil)
+    }
+}
+
+
+
+// In SceneDelegate.swift
+
+import UIKit
+
+class SceneDelegate: UIResponder, UIWindowSceneDelegate {
+
+    var window: UIWindow?
+
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
+        guard let windowScene = (scene as? UIWindowScene) else { return }
+
+        let window = UIWindow(windowScene: windowScene)
+        window.rootViewController = ScreensaverViewController() // Set ScreensaverVC as root
+        self.window = window
+        window.makeKeyAndVisible()
+    }
+
+    // ... other SceneDelegate methods
+}
+
+
+
+# Create a new directory for your Node.js project
+mkdir ios-screensaver-backend
+cd ios-screensaver-backend
+
+# Initialize npm and install necessary packages
+npm init -y
+npm install express body-parser cors
+
+
+
+
+const express = require('express');
+const bodyParser = require('body-parser');
+const cors = require('cors'); // For allowing requests from your iOS app during development
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Middleware
+app.use(bodyParser.json()); // To parse JSON request bodies
+app.use(cors()); // Enable CORS for all routes (important for cross-origin requests from your app)
+
+// --- Simulated Data Storage (In-memory for simplicity) ---
+let screensaverContent = {
+    images: [
+        { id: 'img1', url: 'https://picsum.photos/800/600?random=1', description: 'Scenic landscape' },
+        { id: 'img2', url: 'https://picsum.photos/800/600?random=2', description: 'Abstract art' },
+        { id: 'img3', url: 'https://picsum.photos/800/600?random=3', description: 'City lights' }
+    ],
+    quotes: [
+        { id: 'q1', text: 'The only way to do great work is to love what you do.', author: 'Steve Jobs' },
+        { id: 'q2', text: 'Innovation distinguishes between a leader and a follower.', author: 'Steve Jobs' },
+        { id: 'q3', text: 'Stay hungry, stay foolish.', author: 'Steve Jobs' }
+    ],
+    animationData: {
+        type: 'particles',
+        colorPalette: ['#FF6347', '#4682B4', '#3CB371', '#EE82EE'],
+        particleCount: 100,
+        speed: 1.5
+    }
+};
+
+let userSettings = {
+    // This could be per-user in a real app, but for simplicity, global settings
+    powerSaverEnabled: false,
+    selectedTheme: 'minimalist', // 'dynamic', 'photos', 'quotes'
+    screensaverDuration: 300 // seconds before going dark in power saver
+};
+
+let appLogs = []; // Stores logs sent from the iOS app
+
+// --- API Endpoints ---
+
+// 1. Get Dynamic Screensaver Content
+app.get('/api/screensaver/content', (req, res) => {
+    const { theme } = req.query; // Allow filtering by theme
+    let content = {};
+
+    switch (theme) {
+        case 'photos':
+            content = { type: 'images', data: screensaverContent.images };
+            break;
+        case 'quotes':
+            content = { type: 'quotes', data: screensaverContent.quotes };
+            break;
+        case 'animation':
+            content = { type: 'animation', data: screensaverContent.animationData };
+            break;
+        default: // 'dynamic' or default
+            const randomType = ['images', 'quotes', 'animation'][Math.floor(Math.random() * 3)];
+            content = { type: randomType, data: screensaverContent[randomType === 'images' ? 'images' : (randomType === 'quotes' ? 'quotes' : 'animationData')] };
+            break;
+    }
+    res.json(content);
+});
+
+// 2. Get User Settings
+app.get('/api/settings', (req, res) => {
+    res.json(userSettings);
+});
+
+// 3. Update User Settings
+app.post('/api/settings', (req, res) => {
+    const { powerSaverEnabled, selectedTheme, screensaverDuration } = req.body;
+    if (typeof powerSaverEnabled === 'boolean') {
+        userSettings.powerSaverEnabled = powerSaverEnabled;
+    }
+    if (selectedTheme) {
+        userSettings.selectedTheme = selectedTheme;
+    }
+    if (typeof screensaverDuration === 'number' && screensaverDuration > 0) {
+        userSettings.screensaverDuration = screensaverDuration;
+    }
+    console.log('User settings updated:', userSettings);
+    res.json({ message: 'Settings updated successfully', settings: userSettings });
+});
+
+// 4. Get Simulated Developer Metrics
+app.get('/api/dev-metrics', (req, res) => {
+    // In a real scenario, this would come from actual monitoring tools or device APIs.
+    // For iOS, this is purely illustrative and would be hard to get real data for in-app.
+    const metrics = {
+        timestamp: new Date().toISOString(),
+        cpuUsage: (Math.random() * 50 + 10).toFixed(2) + '%', // Simulated 10-60%
+        memoryUsageMB: (Math.random() * 200 + 50).toFixed(2), // Simulated 50-250MB
+        batteryLevel: (Math.random() * 100).toFixed(0) + '%', // Simulated 0-100%
+        networkLatencyMs: (Math.random() * 100 + 10).toFixed(0), // Simulated 10-110ms
+        appVersion: '1.0.2',
+        buildNumber: '1005',
+        deviceModel: 'iPhone 15 Pro Max (Simulated)',
+        osVersion: 'iOS 17.5.1 (Simulated)'
+    };
+    res.json(metrics);
+});
+
+// 5. Log Receiving Endpoint from iOS App
+app.post('/api/logs', (req, res) => {
+    const { level, message, timestamp, ...meta } = req.body;
+    const logEntry = {
+        level: level || 'INFO',
+        message: message || 'No message provided',
+        timestamp: timestamp || new Date().toISOString(),
+        ...meta
+    };
+    appLogs.push(logEntry);
+    console.log(`[APP LOG] [${logEntry.level}] ${logEntry.timestamp}: ${logEntry.message}`);
+    // Keep logs array from growing indefinitely in a real app
+    if (appLogs.length > 500) {
+        appLogs.shift(); // Remove oldest log
+    }
+    res.status(200).json({ status: 'Log received' });
+});
+
+// 6. Get Stored Logs
+app.get('/api/logs', (req, res) => {
+    res.json(appLogs);
+});
+
+// Start the server
+app.listen(PORT, () => {
+    console.log(`Node.js backend server running on http://localhost:${PORT}`);
+    console.log('Connect your iOS app to this address (e.g., http://<your_machine_ip_address>:3000)');
+});
+
+
+
+// Example in a React Native component
+
+import React, { useState, useEffect } from 'react';
+import { View, Text, Button, ActivityIndicator, StyleSheet, Switch } from 'react-native';
+
+const BACKEND_URL = 'http://YOUR_MACHINE_IP_ADDRESS:3000'; // IMPORTANT: Use your actual machine's IP, not localhost
+
+const ScreensaverApp = () => {
+    const [screensaverContent, setScreensaverContent] = useState(null);
+    const [settings, setSettings] = useState({});
+    const [devMetrics, setDevMetrics] = useState({});
+    const [logs, setLogs] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [showDevTools, setShowDevTools] = useState(false);
+
+    useEffect(() => {
+        fetchContentAndSettings();
+        const interval = setInterval(() => {
+            fetchDevMetrics();
+            fetchLogs(); // Optionally fetch logs if server maintains them
+        }, 5000); // Update metrics every 5 seconds
+        return () => clearInterval(interval);
+    }, []);
+
+    const fetchContentAndSettings = async () => {
+        try {
+            const contentResponse = await fetch(`${BACKEND_URL}/api/screensaver/content?theme=${settings.selectedTheme || 'dynamic'}`);
+            const contentData = await contentResponse.json();
+            setScreensaverContent(contentData);
+
+            const settingsResponse = await fetch(`${BACKEND_URL}/api/settings`);
+            const settingsData = await settingsResponse.json();
+            setSettings(settingsData);
+        } catch (error) {
+            console.error('Error fetching initial data:', error);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const updatePowerSaver = async (newValue) => {
+        try {
+            const response = await fetch(`${BACKEND_URL}/api/settings`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ powerSaverEnabled: newValue })
+            });
+            const data = await response.json();
+            setSettings(data.settings);
+            // In a real app, you'd also change UI behavior based on powerSaverEnabled
+        } catch (error) {
+            console.error('Error updating power saver:', error);
+        }
+    };
+
+    const fetchDevMetrics = async () => {
+        try {
+            const response = await fetch(`${BACKEND_URL}/api/dev-metrics`);
+            const data = await response.json();
+            setDevMetrics(data);
+        } catch (error) {
+            console.error('Error fetching dev metrics:', error);
+        }
+    };
+
+    const fetchLogs = async () => {
+        try {
+            const response = await fetch(`${BACKEND_URL}/api/logs`);
+            const data = await response.json();
+            setLogs(data);
+        } catch (error) {
+            console.error('Error fetching logs:', error);
+        }
+    };
+
+    const sendAppLog = async (message, level = 'INFO') => {
+        try {
+            await fetch(`${BACKEND_URL}/api/logs`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message, level, timestamp: new Date().toISOString() })
+            });
+        } catch (error) {
+            console.error('Error sending log:', error);
+        }
+    };
+
+    if (isLoading) {
+        return (
+            <View style={styles.container}>
+                <ActivityIndicator size="large" color="#0000ff" />
+                <Text>Loading screensaver...</Text>
+            </View>
+        );
+    }
+
+    return (
+        <View style={styles.container}>
+            {/* Screensaver UI */}
+            {!showDevTools && (
+                <View style={styles.screensaverDisplay}>
+                    {screensaverContent?.type === 'images' && (
+                        <View>
+                            {screensaverContent.data.map((item) => (
+                                <Text key={item.id} style={styles.imagePlaceholder}>{item.description}</Text>
+                                // In a real app, use <Image source={{ uri: item.url }} style={...} />
+                            ))}
+                        </View>
+                    )}
+                    {screensaverContent?.type === 'quotes' && (
+                        <View>
+                            {screensaverContent.data.map((item) => (
+                                <Text key={item.id} style={styles.quoteText}>"{item.text}" - {item.author}</Text>
+                            ))}
+                        </View>
+                    )}
+                    {screensaverContent?.type === 'animation' && (
+                        <Text style={styles.animationText}>
+                            Animated Particles (simulated: {screensaverContent.data.particleCount} particles)
+                        </Text>
+                    )}
+                    <Text style={styles.screensaverTitle}>
+                        {settings.powerSaverEnabled ? 'Power Saver ON' : 'Screensaver Active'}
+                    </Text>
+                    <Text style={styles.hintText}>Tap to toggle Power Saver. Long press for Dev Tools.</Text>
+                </View>
+            )}
+
+            {/* Developer Tools UI */}
+            {showDevTools && (
+                <View style={styles.devToolsContainer}>
+                    <Text style={styles.devToolsHeader}>Developer Tools</Text>
+                    <Text>Power Saver:
+                        <Switch
+                            value={settings.powerSaverEnabled}
+                            onValueChange={updatePowerSaver}
+                        />
+                    </Text>
+                    <Text>CPU Usage: {devMetrics.cpuUsage || 'N/A'}</Text>
+                    <Text>Memory Usage: {devMetrics.memoryUsageMB || 'N/A'} MB</Text>
+                    <Text>Battery Level: {devMetrics.batteryLevel || 'N/A'}</Text>
+                    <Text>Network Latency: {devMetrics.networkLatencyMs || 'N/A'} ms</Text>
+                    <Text>App Version: {devMetrics.appVersion || 'N/A'}</Text>
+                    <Text>Build Number: {devMetrics.buildNumber || 'N/A'}</Text>
+                    <Text>Device Model: {devMetrics.deviceModel || 'N/A'}</Text>
+                    <Text>OS Version: {devMetrics.osVersion || 'N/A'}</Text>
+                    <Text style={styles.logsHeader}>App Logs:</Text>
+                    <View style={styles.logContainer}>
+                        {logs.slice(-10).map((log, index) => ( // Show last 10 logs
+                            <Text key={index} style={styles.logText}>[{log.timestamp}] {log.level}: {log.message}</Text>
+                        ))}
+                    </View>
+                    <Button title="Close Dev Tools" onPress={() => setShowDevTools(false)} />
+                    <Button title="Send Test Log" onPress={() => sendAppLog("User clicked test log button", "DEBUG")} />
+                </View>
+            )}
+
+            {/* Hidden button for toggling dev tools (long press simulation) */}
+            {!showDevTools && (
+                <Button
+                    title=""
+                    onLongPress={() => setShowDevTools(true)}
+                    style={styles.hiddenButton}
+                />
+            )}
+        </View>
+    );
+};
+
+const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+        backgroundColor: 'black',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    screensaverDisplay: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        width: '100%',
+        padding: 20,
+    },
+    screensaverTitle: {
+        fontSize: 30,
+        fontWeight: 'bold',
+        color: 'white',
+        marginTop: 50,
+        textAlign: 'center',
+    },
+    hintText: {
+        fontSize: 14,
+        color: 'gray',
+        marginTop: 20,
+        textAlign: 'center',
+    },
+    imagePlaceholder: {
+        color: 'white',
+        fontSize: 20,
+        marginBottom: 10,
+    },
+    quoteText: {
+        color: 'white',
+        fontSize: 22,
+        fontStyle: 'italic',
+        textAlign: 'center',
+        marginBottom: 10,
+    },
+    animationText: {
+        color: 'white',
+        fontSize: 25,
+        textAlign: 'center',
+    },
+    devToolsContainer: {
+        flex: 1,
+        backgroundColor: 'white',
+        padding: 20,
+        width: '100%',
+    },
+    devToolsHeader: {
+        fontSize: 24,
+        fontWeight: 'bold',
+        marginBottom: 20,
+        color: 'black',
+    },
+    logsHeader: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        marginTop: 20,
+        marginBottom: 10,
+        color: 'black',
+    },
+    logContainer: {
+        backgroundColor: '#eee',
+        padding: 10,
+        borderRadius: 5,
+        maxHeight: 200,
+        overflow: 'scroll',
+        marginBottom: 20,
+    },
+    logText: {
+        fontFamily: 'Menlo', // Monospaced font for logs
+        fontSize: 12,
+        color: '#333',
+    },
+    hiddenButton: { // Style for the invisible long press trigger
+        position: 'absolute',
+        width: '100%',
+        height: '100%',
+        backgroundColor: 'transparent',
+        zIndex: 1, // Ensure it's on top
+    }
+});
+
+export default ScreensaverApp;
+
+
+
+
+# Create a new directory for your Python project
+mkdir ios-screensaver-python-backend
+cd ios-screensaver-python-backend
+
+# Create a virtual environment (recommended)
+python3 -m venv venv
+source venv/bin/activate # On Windows: .\venv\Scripts\activate
+
+# Install Flask
+pip install Flask
+
+
+
+from flask import Flask, request, jsonify
+from datetime import datetime
+import random
+import os
+
+app = Flask(__name__)
+
+# --- Simulated Data Storage (In-memory for simplicity) ---
+# In a real application, you would use a database (SQLite, PostgreSQL, MongoDB, etc.)
+screensaver_content = {
+    "images": [
+        {"id": "img1", "url": "https://picsum.photos/800/600?random=1", "description": "Lush Forest"},
+        {"id": "img2", "url": "https://picsum.photos/800/600?random=2", "description": "Mountain View"},
+        {"id": "img3", "url": "https://picsum.photos/800/600?random=3", "description": "Ocean Sunset"}
+    ],
+    "quotes": [
+        {"id": "q1", "text": "The only way to do great work is to love what you do.", "author": "Steve Jobs"},
+        {"id": "q2", "text": "Innovation distinguishes between a leader and a follower.", "author": "Steve Jobs"},
+        {"id": "q3", "text": "Logic will get you from A to B. Imagination will take you everywhere.", "author": "Albert Einstein"}
+    ],
+    "animation_data": {
+        "type": "fluid_particles",
+        "color_palette": ["#FF6F61", "#6B5B95", "#88B04B", "#F7CAC9"],
+        "particle_count": 150,
+        "speed_multiplier": 1.2
+    }
+}
+
+user_settings = {
+    # This could be per-user in a real app, but for simplicity, global settings
+    "power_saver_enabled": False,
+    "selected_theme": "dynamic", # Options: "dynamic", "photos", "quotes", "animation"
+    "screensaver_idle_duration_seconds": 300 # Time before entering deeper power save
+}
+
+app_logs = [] # Stores logs sent from the iOS app
+
+# --- API Endpoints ---
+
+@app.route('/api/screensaver/content', methods=['GET'])
+def get_screensaver_content():
+    """
+    Provides dynamic screensaver content to the iOS app.
+    Can be filtered by theme.
+    """
+    theme = request.args.get('theme', 'dynamic')
+    content = {}
+
+    if theme == "photos":
+        content = {"type": "images", "data": screensaver_content["images"]}
+    elif theme == "quotes":
+        content = {"type": "quotes", "data": screensaver_content["quotes"]}
+    elif theme == "animation":
+        content = {"type": "animation", "data": screensaver_content["animation_data"]}
+    else: # "dynamic" or default
+        content_types = ["images", "quotes", "animation"]
+        random_type = random.choice(content_types)
+        if random_type == "images":
+            content = {"type": "images", "data": screensaver_content["images"]}
+        elif random_type == "quotes":
+            content = {"type": "quotes", "data": screensaver_content["quotes"]}
+        elif random_type == "animation":
+            content = {"type": "animation", "data": screensaver_content["animation_data"]}
+            
+    return jsonify(content)
+
+@app.route('/api/settings', methods=['GET'])
+def get_user_settings():
+    """Retrieves current user settings."""
+    return jsonify(user_settings)
+
+@app.route('/api/settings', methods=['POST'])
+def update_user_settings():
+    """Updates user settings based on the provided JSON payload."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Invalid JSON payload"}), 400
+
+    if 'power_saver_enabled' in data and isinstance(data['power_saver_enabled'], bool):
+        user_settings['power_saver_enabled'] = data['power_saver_enabled']
+    if 'selected_theme' in data and data['selected_theme'] in ["dynamic", "photos", "quotes", "animation"]:
+        user_settings['selected_theme'] = data['selected_theme']
+    if 'screensaver_idle_duration_seconds' in data and isinstance(data['screensaver_idle_duration_seconds'], int) and data['screensaver_idle_duration_seconds'] > 0:
+        user_settings['screensaver_idle_duration_seconds'] = data['screensaver_idle_duration_seconds']
+    
+    print(f"User settings updated: {user_settings}")
+    return jsonify({"message": "Settings updated successfully", "settings": user_settings})
+
+@app.route('/api/dev-metrics', methods=['GET'])
+def get_developer_metrics():
+    """
+    Provides simulated developer metrics.
+    Note: Real-time, per-app iOS metrics are heavily restricted.
+    """
+    metrics = {
+        "timestamp": datetime.now().isoformat(),
+        "cpu_usage_percent": round(random.uniform(10.0, 60.0), 2),
+        "memory_usage_mb": round(random.uniform(50.0, 250.0), 2),
+        "battery_level_percent": random.randint(0, 100),
+        "network_latency_ms": random.randint(10, 150),
+        "app_version": "1.0.3",
+        "build_number": "1015",
+        "device_model": "iPhone 16 Pro (Simulated)",
+        "os_version": "iOS 18.2 (Simulated)"
+    }
+    return jsonify(metrics)
+
+@app.route('/api/logs', methods=['POST'])
+def receive_app_log():
+    """Receives log messages sent from the iOS application."""
+    log_entry = request.get_json()
+    if not log_entry:
+        return jsonify({"error": "Invalid JSON payload"}), 400
+
+    # Add timestamp if not provided by client
+    if 'timestamp' not in log_entry:
+        log_entry['timestamp'] = datetime.now().isoformat()
+    
+    app_logs.append(log_entry)
+    print(f"[APP LOG] [{log_entry.get('level', 'INFO')}] {log_entry.get('timestamp')}: {log_entry.get('message', 'No message')}")
+
+    # Keep logs from growing indefinitely (e.g., max 500 logs)
+    if len(app_logs) > 500:
+        app_logs.pop(0) # Remove the oldest log
+
+    return jsonify({"status": "Log received"}), 200
+
+@app.route('/api/logs', methods=['GET'])
+def get_app_logs():
+    """Retrieves stored application logs."""
+    return jsonify(app_logs)
+
+# --- Run the Flask app ---
+if __name__ == '__main__':
+    # When deploying, use a more robust WSGI server like Gunicorn or uWSGI
+    # For local development:
+    app.run(debug=True, host='0.0.0.0', port=5000)
+
+
+
+
+package screensaverlib
+
+import (
+	"fmt"
+	"math/rand"
+	"time"
+)
+
+// Exported functions for Swift
+
+// ScreensaverContent represents dynamic content for the screensaver.
+type ScreensaverContent struct {
+	Type          string            // e.g., "image", "quote", "animation"
+	Data          map[string]string // Key-value pairs for content (e.g., "url", "text", "author")
+	AnimationData map[string]float64 // Parameters for animations (e.g., "speed", "particleCount")
+}
+
+// UserSettings represents the user's preferences for the screensaver.
+type UserSettings struct {
+	PowerSaverEnabled       bool // If power saver mode is active
+	SelectedTheme           string // "dynamic", "photos", "quotes", "animation"
+	IdleDurationSeconds     int    // How long before deep power save
+}
+
+// DevMetrics represents simulated or aggregated developer-related metrics.
+type DevMetrics struct {
+	Timestamp          string  // ISO 8601 format
+	CPUUsagePercent    float64 // Simulated CPU usage
+	MemoryUsageMB      float64 // Simulated Memory usage
+	BatteryLevelPercent int     // Simulated Battery level
+	NetworkLatencyMs   int     // Simulated network latency
+	AppVersion         string  // App version (from Go logic, or passed from Swift)
+	BuildNumber        string  // Build number
+	DeviceModel        string  // Simulated device model
+	OSVersion          string  // Simulated OS version
+}
+
+// LogEntry represents a single log message.
+type LogEntry struct {
+	Level     string // e.g., "INFO", "WARN", "ERROR", "DEBUG"
+	Message   string
+	Timestamp string // ISO 8601 format
+	Context   map[string]string // Additional key-value pairs for context
+}
+
+// Global (in-memory) state for simplicity. In a real app, use persistent storage.
+var (
+	currentSettings = UserSettings{
+		PowerSaverEnabled:       false,
+		SelectedTheme:           "dynamic",
+		IdleDurationSeconds:     300,
+	}
+	appLogs []LogEntry
+	contentPool = map[string][]map[string]string{
+		"images": {
+			{"url": "https://picsum.photos/800/600?random=1", "description": "Lush Forest"},
+			{"url": "https://picsum.photos/800/600?random=2", "description": "Mountain View"},
+			{"url": "https://picsum.photos/800/600?random=3", "description": "Ocean Sunset"},
+		},
+		"quotes": {
+			{"text": "The only way to do great work is to love what you do.", "author": "Steve Jobs"},
+			{"text": "Innovation distinguishes between a leader and a follower.", "author": "Steve Jobs"},
+			{"text": "Logic will get you from A to B. Imagination will take you everywhere.", "author": "Albert Einstein"},
+		},
+	}
+	animationDefaultData = map[string]float64{
+		"particleCount":    150.0,
+		"speedMultiplier": 1.2,
+		"spreadRadius":    50.0,
+	}
+)
+
+// InitGoLibrary initializes the Go library. Call this once from Swift.
+func InitGoLibrary() {
+	rand.Seed(time.Now().UnixNano())
+	fmt.Println("Go Screensaver Library Initialized!")
+}
+
+// GetRandomScreensaverContent returns a piece of dynamic content based on the current theme.
+func GetRandomScreensaverContent() ScreensaverContent {
+	theme := currentSettings.SelectedTheme
+	if theme == "dynamic" {
+		themes := []string{"image", "quote", "animation"}
+		theme = themes[rand.Intn(len(themes))]
+	}
+
+	switch theme {
+	case "image":
+		img := contentPool["images"][rand.Intn(len(contentPool["images"]))]
+		return ScreensaverContent{Type: "image", Data: img}
+	case "quote":
+		quote := contentPool["quotes"][rand.Intn(len(contentPool["quotes"]))]
+		return ScreensaverContent{Type: "quote", Data: quote}
+	case "animation":
+		return ScreensaverContent{Type: "animation", AnimationData: animationDefaultData}
+	default:
+		// Fallback
+		return ScreensaverContent{Type: "quote", Data: contentPool["quotes"][0]}
+	}
+}
+
+// GetUserSettings returns the current stored user settings.
+func GetUserSettings() UserSettings {
+	return currentSettings
+}
+
+// UpdateUserSettings updates the user settings.
+func UpdateUserSettings(powerSaverEnabled bool, selectedTheme string, idleDurationSeconds int) {
+	currentSettings.PowerSaverEnabled = powerSaverEnabled
+	if selectedTheme != "" {
+		currentSettings.SelectedTheme = selectedTheme
+	}
+	if idleDurationSeconds > 0 {
+		currentSettings.IdleDurationSeconds = idleDurationSeconds
+	}
+	fmt.Printf("Go: Settings updated: %+v\n", currentSettings)
+}
+
+// GetSimulatedDevMetrics returns simulated developer metrics.
+// In a real app, some of these might be passed from Swift,
+// or fetched from a Go backend server.
+func GetSimulatedDevMetrics() DevMetrics {
+	return DevMetrics{
+		Timestamp:          time.Now().Format(time.RFC3339),
+		CPUUsagePercent:    round(rand.Float64()*50 + 10, 2), // 10-60%
+		MemoryUsageMB:      round(rand.Float64()*200 + 50, 2), // 50-250MB
+		BatteryLevelPercent: randomInt(0, 100),
+		NetworkLatencyMs:   randomInt(10, 150),
+		AppVersion:         "1.0.3",
+		BuildNumber:        "1015",
+		DeviceModel:        "iPhone 16 Pro (Go-Simulated)",
+		OSVersion:          "iOS 18.2 (Go-Simulated)",
+	}
+}
+
+// LogAppMessage logs a message from the iOS app to Go's internal log.
+func LogAppMessage(level, message string, context map[string]string) {
+	entry := LogEntry{
+		Level:     level,
+		Message:   message,
+		Timestamp: time.Now().Format(time.RFC3339),
+		Context:   context,
+	}
+	appLogs = append(appLogs, entry)
+	fmt.Printf("Go-Log: [%s] %s: %s %+v\n", level, entry.Timestamp, message, context)
+	// Basic log rotation
+	if len(appLogs) > 100 {
+		appLogs = appLogs[len(appLogs)-100:]
+	}
+}
+
+// GetAppLogs returns the last N stored log entries.
+func GetAppLogs(count int) []LogEntry {
+	if count <= 0 || count > len(appLogs) {
+		return appLogs
+	}
+	return appLogs[len(appLogs)-count:]
+}
+
+// Helper functions (not exported via gomobile automatically unless explicitly bound)
+func round(val float64, precision int) float64 {
+	p := float64(1)
+	for i := 0; i < precision; i++ {
+		p *= 10
+	}
+	return float64(int(val*p+0.5)) / p
+}
+
+func randomInt(min, max int) int {
+	return min + rand.Intn(max-min+1)
+}
+
+
+
+
+
+go get golang.org/x/mobile/cmd/gomobile
+gomobile init
+
+
+
+
+gomobile bind -target=ios screensaverlib
+
+
+
+// ScreensaverViewController.swift (Simplified)
+import UIKit
+import screensaverlib // Import your Go framework
+import AVFoundation // For actual screen dimming and power features
+
+class ScreensaverViewController: UIViewController {
+
+    private var goInitialized = false
+    private var screensaverLabel = UILabel()
+    private var currentContent: ScreensaverlibScreensaverContent?
+    private var isPowerSaverActive: Bool = false {
+        didSet {
+            updatePowerSaverUI()
+        }
+    }
+    private var timer: Timer?
+
+    // MARK: - Lifecycle
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
+        setupUI()
+        setupGestures()
+
+        // Initialize Go library
+        if !goInitialized {
+            screensaverlib.InitGoLibrary()
+            goInitialized = true
+            print("Swift: Go library initialized.")
+        }
+
+        // Load initial settings and content from Go
+        let settings = screensaverlib.GetUserSettings()
+        self.isPowerSaverActive = settings.PowerSaverEnabled
+        loadScreensaverContent()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        startScreensaverTimer()
+        // Prevent screen dimming and lock while the app is foreground
+        UIApplication.shared.isIdleTimerDisabled = true
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        stopScreensaverTimer()
+        UIApplication.shared.isIdleTimerDisabled = false // Allow screen to lock again
+    }
+
+    // MARK: - UI Setup
+    private func setupUI() {
+        screensaverLabel.text = "Loading..."
+        screensaverLabel.font = UIFont.systemFont(ofSize: 30, weight: .bold)
+        screensaverLabel.textColor = .white
+        screensaverLabel.textAlignment = .center
+        screensaverLabel.numberOfLines = 0
+        screensaverLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(screensaverLabel)
+
+        NSLayoutConstraint.activate([
+            screensaverLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            screensaverLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            screensaverLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            screensaverLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20)
+        ])
+    }
+
+    // MARK: - Screensaver Logic
+    private func loadScreensaverContent() {
+        currentContent = screensaverlib.GetRandomScreensaverContent()
+        DispatchQueue.main.async {
+            if let content = self.currentContent {
+                switch content.Type_ { // Note: 'Type' is a reserved keyword in Swift, gomobile converts it to 'Type_'
+                case "image":
+                    // In a real app, you'd load the image from content.Data["url"]
+                    self.screensaverLabel.text = content.Data?["description"] ?? "Dynamic Image Placeholder"
+                    // Add UIImageView to display image
+                case "quote":
+                    self.screensaverLabel.text = "\"\(content.Data?["text"] ?? "")\" - \(content.Data?["author"] ?? "")"
+                case "animation":
+                    self.screensaverLabel.text = "Complex Animation (Go-driven logic with Swift rendering)"
+                    // Here, you might use content.AnimationData to drive a SwiftUI/SpriteKit/CoreAnimation view
+                default:
+                    self.screensaverLabel.text = "Unknown Content Type"
+                }
+            }
+        }
+    }
+
+    private func startScreensaverTimer() {
+        timer?.invalidate()
+        let interval = isPowerSaverActive ? 10.0 : 5.0 // Slower updates in power saver
+        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            self?.loadScreensaverContent()
+        }
+    }
+
+    private func stopScreensaverTimer() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    // MARK: - Power Saver Features (Swift handles direct device interactions)
+    private func updatePowerSaverUI() {
+        let settings = screensaverlib.GetUserSettings() // Get latest settings from Go
+        if settings.PowerSaverEnabled {
+            screensaverLabel.alpha = 0.5 // Dim text
+            UIScreen.main.brightness = 0.1 // Dim actual screen
+            stopScreensaverTimer()
+            startScreensaverTimer() // Restart with new interval
+            print("Swift: Power Saver ON. Screen dimmed.")
+        } else {
+            screensaverLabel.alpha = 1.0
+            UIScreen.main.brightness = 0.5 // Restore to a moderate level, or original brightness
+            stopScreensaverTimer()
+            startScreensaverTimer() // Restart with new interval
+            print("Swift: Power Saver OFF. Brightness restored.")
+        }
+    }
+
+    // MARK: - Developer Tools Integration
+    private func setupGestures() {
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        view.addGestureRecognizer(tapGesture)
+
+        let longPressGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
+        longPressGesture.minimumPressDuration = 1.0 // 1-second long press
+        view.addGestureRecognizer(longPressGesture)
+    }
+
+    @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+        // Toggle power saver mode
+        let currentSettings = screensaverlib.GetUserSettings()
+        screensaverlib.UpdateUserSettings(
+            !currentSettings.PowerSaverEnabled,
+            currentSettings.SelectedTheme,
+            Int(currentSettings.IdleDurationSeconds) // Convert to Go int32
+        )
+        isPowerSaverActive = screensaverlib.GetUserSettings().PowerSaverEnabled // Update local state
+        screensaverlib.LogAppMessage("INFO", "Power Saver Toggled by User", ["new_state": isPowerSaverActive ? "ON" : "OFF"])
+    }
+
+    @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+        if gesture.state == .began {
+            // Present developer tools on long press
+            let devToolsVC = DeveloperToolsViewController()
+            devToolsVC.modalPresentationStyle = .fullScreen
+            present(devToolsVC, animated: true, completion: nil)
+        }
+    }
+}
+
+// DeveloperToolsViewController.swift
+import UIKit
+import screensaverlib // Import your Go framework
+
+class DeveloperToolsViewController: UIViewController {
+
+    private var metricsLabel = UILabel()
+    private var logsTextView = UITextView()
+    private var metricsTimer: Timer?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+        setupUI()
+        fetchAndDisplayMetrics()
+        fetchAndDisplayLogs()
+        startMetricsTimer()
+
+        // Example: Log an event from Swift to Go's logger
+        screensaverlib.LogAppMessage("DEBUG", "Developer tools opened.", ["user_id": "test_user_123"])
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        stopMetricsTimer()
+        screensaverlib.LogAppMessage("DEBUG", "Developer tools closed.", nil)
+    }
+
+    private func setupUI() {
+        let closeButton = UIButton(type: .system)
+        closeButton.setTitle("Close", for: .normal)
+        closeButton.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(closeButton)
+
+        metricsLabel.numberOfLines = 0
+        metricsLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(metricsLabel)
+
+        logsTextView.isEditable = false
+        logsTextView.backgroundColor = .secondarySystemBackground
+        logsTextView.textColor = .label
+        logsTextView.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        logsTextView.layer.cornerRadius = 8
+        logsTextView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(logsTextView)
+
+
+        NSLayoutConstraint.activate([
+            closeButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
+            closeButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+
+            metricsLabel.topAnchor.constraint(equalTo: closeButton.bottomAnchor, constant: 20),
+            metricsLabel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
+            metricsLabel.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+
+            logsTextView.topAnchor.constraint(equalTo: metricsLabel.bottomAnchor, constant: 20),
+            logsTextView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
+            logsTextView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+            logsTextView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
+            logsTextView.heightAnchor.constraint(equalToConstant: 250) // Fixed height
+        ])
+    }
+
+    private func fetchAndDisplayMetrics() {
+        let metrics = screensaverlib.GetSimulatedDevMetrics()
+        DispatchQueue.main.async {
+            self.metricsLabel.text = """
+            --- Simulated Device Metrics ---
+            Timestamp: \(metrics.Timestamp ?? "N/A")
+            CPU Usage: \(String(format: "%.2f", metrics.CPUUsagePercent))%
+            Memory (App): \(String(format: "%.2f", metrics.MemoryUsageMB)) MB
+            Battery: \(metrics.BatteryLevelPercent)%
+            Network Latency: \(metrics.NetworkLatencyMs) ms
+            App Version: \(metrics.AppVersion ?? "N/A") (Build: \(metrics.BuildNumber ?? "N/A"))
+            Device: \(metrics.DeviceModel ?? "N/A")
+            OS: \(metrics.OSVersion ?? "N/A")
+            """
+        }
+    }
+
+    private func fetchAndDisplayLogs() {
+        let logs = screensaverlib.GetAppLogs(50) // Get last 50 logs from Go
+        DispatchQueue.main.async {
+            let logText = logs.map { log in
+                return "[\(log.Timestamp ?? "N/A")] [\(log.Level ?? "INFO")] \(log.Message ?? "No message")"
+            }.joined(separator: "\n")
+            self.logsTextView.text = logText
+            self.logsTextView.scrollRangeToVisible(NSMakeRange(self.logsTextView.text.count - 1, 0)) // Scroll to bottom
+        }
+    }
+
+    private func startMetricsTimer() {
+        metricsTimer?.invalidate()
+        metricsTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
+            self?.fetchAndDisplayMetrics()
+            self?.fetchAndDisplayLogs()
+        }
+    }
+
+    private func stopMetricsTimer() {
+        metricsTimer?.invalidate()
+        metricsTimer = nil
+    }
+
+    @objc private func closeTapped() {
+        dismiss(animated: true, completion: nil)
+    }
+}
+
+
+
+# Install Node.js and npm/yarn if you haven't
+# npx react-native@latest init AdvancedScreensaverApp
+# cd AdvancedScreensaverApp
+
+# If you use Yarn:
+# yarn add react-native-safe-area-context
+# yarn add @react-native-community/netinfo # For network info (optional but good for dev tools)
+# yarn add react-native-device-info # For device info (optional but good for dev tools)
+
+# If you use npm:
+npm install react-native-safe-area-context
+npm install @react-native-community/netinfo
+npm install react-native-device-info
+
+# Link native modules (for older RN versions or if auto-linking fails)
+# npx react-native link react-native-safe-area-context
+# npx react-native link @react-native-community/netinfo
+# npx react-native link react-native-device-info
+
+# Install pods for iOS (very important step)
+cd ios && pod install && cd ..
+
+
+
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  StyleSheet,
+  View,
+  Text,
+  TouchableOpacity,
+  Dimensions,
+  StatusBar,
+  Animated,
+  Easing,
+  LogBox // To ignore specific warnings during dev
+} from 'react-native';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import DeveloperToolsModal from './DeveloperToolsModal'; // We'll create this file
+
+// Ignore the "Setting a timer for a long period of time" warning, common with setTimeout/setInterval in RN dev
+LogBox.ignoreLogs(['Setting a timer for a long period of time']);
+
+const { width, height } = Dimensions.get('window');
+
+const ScreensaverScreen = () => {
+  const insets = useSafeAreaInsets();
+  const [isPowerSaverMode, setIsPowerSaverMode] = useState(false);
+  const [showDeveloperTools, setShowDeveloperTools] = useState(false);
+
+  // Screensaver Content State (example: dynamic color)
+  const [screensaverColor, setScreensaverColor] = useState('black');
+  const colorAnim = useRef(new Animated.Value(0)).current; // For color animation
+
+  // Screen dimming overlay (simulates power saving)
+  const dimOverlayOpacity = useRef(new Animated.Value(0)).current;
+
+  // Function to generate a random hex color
+  const getRandomColor = () => {
+    const letters = '0123456789ABCDEF';
+    let color = '#';
+    for (let i = 0; i < 6; i++) {
+      color += letters[Math.floor(Math.random() * 16)];
+    }
+    return color;
+  };
+
+  // Screensaver animation effect
+  useEffect(() => {
+    let intervalId;
+    const animateColor = () => {
+      Animated.timing(colorAnim, {
+        toValue: 1,
+        duration: isPowerSaverMode ? 5000 : 2000, // Slower change in power saver
+        easing: Easing.linear,
+        useNativeDriver: false, // Color animation requires JS thread
+      }).start(() => {
+        setScreensaverColor(getRandomColor());
+        colorAnim.setValue(0);
+      });
+    };
+
+    // Initial animation call
+    animateColor();
+
+    intervalId = setInterval(() => {
+      animateColor();
+    }, isPowerSaverMode ? 6000 : 3000); // More frequent updates when not in power saver
+
+    return () => clearInterval(intervalId);
+  }, [isPowerSaverMode, colorAnim]);
+
+  // Power Saver effect: screen dimming
+  useEffect(() => {
+    Animated.timing(dimOverlayOpacity, {
+      toValue: isPowerSaverMode ? 0.7 : 0, // 0.7 for dim, 0 for clear
+      duration: 500,
+      easing: Easing.ease,
+      useNativeDriver: true, // Opacity is performant with native driver
+    }).start();
+  }, [isPowerSaverMode, dimOverlayOpacity]);
+
+  // Power Saver: Prevent screen lock (only when app is in foreground)
+  useEffect(() => {
+    // This is typically handled by native modules or specific flags in Xcode (e.g., UIRequiresFullScreen=YES in Info.plist)
+    // For React Native, you might use a library like 'react-native-keep-awake' if explicit control is needed.
+    // For this example, we'll assume the app is kept awake by being the foreground app.
+    // console.log(`Idle timer disabled: ${!isPowerSaverMode}`);
+  }, [isPowerSaverMode]);
+
+
+  // Handle taps for power saver toggle
+  const handleTap = () => {
+    setIsPowerSaverMode(prev => !prev);
+  };
+
+  // Handle long press for developer tools
+  const handleLongPress = () => {
+    setShowDeveloperTools(true);
+  };
+
+  const interpolatedColor = colorAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['#000000', screensaverColor], // Animate from black to new color
+  });
+
+  return (
+    <SafeAreaProvider>
+      <StatusBar hidden /> {/* Hide status bar for full screen effect */}
+      <View style={styles.container}>
+        <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: interpolatedColor }]} />
+
+        {/* Text / dynamic content */}
+        <View style={[styles.contentContainer, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+          <Text style={styles.screensaverTitle}>
+            Advanced iOS Screensaver
+          </Text>
+          <Text style={styles.statusText}>
+            {isPowerSaverMode ? 'Power Saver ON' : 'Running'}
+          </Text>
+          <Text style={styles.hintText}>
+            Tap to Toggle Power Saver. Long Press for Dev Tools.
+          </Text>
+        </View>
+
+        {/* Power Saver Dimming Overlay */}
+        <Animated.View style={[styles.dimOverlay, { opacity: dimOverlayOpacity }]} />
+
+        {/* Transparent Touchable covering the screen for gestures */}
+        <TouchableOpacity
+          style={styles.fullScreenTouchable}
+          activeOpacity={1}
+          onPress={handleTap}
+          onLongPress={handleLongPress}
+        />
+
+        {/* Developer Tools Modal */}
+        <DeveloperToolsModal
+          isVisible={showDeveloperTools}
+          onClose={() => setShowDeveloperTools(false)}
+          isPowerSaverMode={isPowerSaverMode}
+          onTogglePowerSaver={() => setIsPowerSaverMode(prev => !prev)}
+        />
+      </View>
+    </SafeAreaProvider>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: 'black',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  contentContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    paddingHorizontal: 20,
+    zIndex: 1, // Ensure content is above the animated background
+  },
+  screensaverTitle: {
+    fontSize: 34,
+    fontWeight: 'bold',
+    color: 'white',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  statusText: {
+    fontSize: 22,
+    color: 'lightgray',
+    marginBottom: 50,
+  },
+  hintText: {
+    fontSize: 16,
+    color: 'gray',
+    textAlign: 'center',
+    marginTop: 50,
+  },
+  dimOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'black',
+    zIndex: 2, // Above content, below touchable
+  },
+  fullScreenTouchable: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 3, // On top for gesture detection
+  },
+});
+
+export default ScreensaverScreen;
+
+
+
+import React, { useState, useEffect } from 'react';
+import {
+  Modal,
+  View,
+  Text,
+  Button,
+  StyleSheet,
+  ScrollView,
+  Switch,
+  Platform
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import NetInfo from '@react-native-community/netinfo'; // For network info
+import DeviceInfo from 'react-native-device-info'; // For device info
+
+const DeveloperToolsModal = ({ isVisible, onClose, isPowerSaverMode, onTogglePowerSaver }) => {
+  const [metrics, setMetrics] = useState({
+    cpuUsage: 'N/A',
+    memoryUsage: 'N/A',
+    batteryLevel: 'N/A',
+    networkType: 'N/A',
+    ipAddress: 'N/A',
+    appVersion: 'N/A',
+    buildNumber: 'N/A',
+    deviceName: 'N/A',
+    systemVersion: 'N/A',
+    timestamp: new Date().toLocaleTimeString(),
+  });
+  const [logs, setLogs] = useState([]);
+  const logCounter = React.useRef(0);
+
+  // Function to simulate or get metrics
+  const updateMetrics = async () => {
+    const currentTimestamp = new Date().toLocaleTimeString();
+
+    // Simulated CPU/Memory (real-time per-app metrics are very limited on iOS via RN)
+    const simulatedCPU = `${(Math.random() * 50 + 10).toFixed(2)}%`; // 10-60%
+    const simulatedMemory = `${(Math.random() * 200 + 50).toFixed(2)} MB`; // 50-250MB
+
+    // Battery Info
+    let batteryLevel = 'N/A';
+    try {
+      batteryLevel = `${Math.floor(await DeviceInfo.getBatteryLevel() * 100)}%`;
+    } catch (e) {
+      console.log("Couldn't get battery level:", e);
+    }
+
+    // Network Info
+    let networkType = 'N/A';
+    let ipAddress = 'N/A';
+    try {
+      const netState = await NetInfo.fetch();
+      networkType = netState.type;
+      ipAddress = netState.details?.ipAddress || 'N/A';
+    } catch (e) {
+      console.log("Couldn't get network info:", e);
+    }
+
+    // Device Info
+    const appVersion = DeviceInfo.getVersion();
+    const buildNumber = DeviceInfo.getBuildNumber();
+    const deviceName = await DeviceInfo.getDeviceName();
+    const systemVersion = DeviceInfo.getSystemVersion();
+
+    setMetrics({
+      cpuUsage: simulatedCPU,
+      memoryUsage: simulatedMemory,
+      batteryLevel,
+      networkType,
+      ipAddress,
+      appVersion,
+      buildNumber,
+      deviceName,
+      systemVersion,
+      timestamp: currentTimestamp,
+    });
+  };
+
+  // Function to add a log entry
+  const addLog = (message, level = 'INFO') => {
+    logCounter.current += 1;
+    const newLog = {
+      id: logCounter.current,
+      timestamp: new Date().toLocaleTimeString(),
+      level: level.toUpperCase(),
+      message,
+    };
+    setLogs(prevLogs => {
+      const updatedLogs = [...prevLogs, newLog];
+      // Keep only the last 50 logs for performance
+      return updatedLogs.slice(Math.max(updatedLogs.length - 50, 0));
+    });
+  };
+
+  // Effects for updating metrics and logs
+  useEffect(() => {
+    if (isVisible) {
+      addLog("Developer tools opened.");
+      updateMetrics(); // Initial fetch
+      const metricsInterval = setInterval(updateMetrics, 3000); // Update every 3 seconds
+      return () => clearInterval(metricsInterval);
+    } else {
+      addLog("Developer tools closed.");
+    }
+  }, [isVisible]);
+
+
+  if (!isVisible) {
+    return null;
+  }
+
+  return (
+    <Modal
+      animationType="slide"
+      transparent={false}
+      visible={isVisible}
+      onRequestClose={onClose}
+    >
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.modalContainer}>
+          <Text style={styles.modalTitle}>Developer Tools</Text>
+
+          {/* Power Saver Toggle */}
+          <View style={styles.row}>
+            <Text style={styles.metricLabel}>Power Saver:</Text>
+            <Switch
+              value={isPowerSaverMode}
+              onValueChange={onTogglePowerSaver}
+              trackColor={{ false: "#767577", true: "#81b0ff" }}
+              thumbColor={isPowerSaverMode ? "#f5dd4b" : "#f4f3f4"}
+            />
+            <Text style={styles.metricValue}>{isPowerSaverMode ? 'ON' : 'OFF'}</Text>
+          </View>
+
+          {/* Metrics */}
+          <ScrollView style={styles.metricsScrollView}>
+            <Text style={styles.sectionHeader}>System Metrics ({metrics.timestamp})</Text>
+            <Text style={styles.metricItem}>CPU Usage: <Text style={styles.metricValue}>{metrics.cpuUsage}</Text></Text>
+            <Text style={styles.metricItem}>Memory Usage (App): <Text style={styles.metricValue}>{metrics.memoryUsage}</Text></Text>
+            <Text style={styles.metricItem}>Battery Level: <Text style={styles.metricValue}>{metrics.batteryLevel}</Text></Text>
+            <Text style={styles.metricItem}>Network Type: <Text style={styles.metricValue}>{metrics.networkType}</Text></Text>
+            <Text style={styles.metricItem}>IP Address: <Text style={styles.metricValue}>{metrics.ipAddress}</Text></Text>
+
+            <Text style={styles.sectionHeader}>App & Device Info</Text>
+            <Text style={styles.metricItem}>App Version: <Text style={styles.metricValue}>{metrics.appVersion} (Build: {metrics.buildNumber})</Text></Text>
+            <Text style={styles.metricItem}>Device Name: <Text style={styles.metricValue}>{metrics.deviceName}</Text></Text>
+            <Text style={styles.metricItem}>OS Version: <Text style={styles.metricValue}>iOS {metrics.systemVersion}</Text></Text>
+
+            {/* In-App Logs */}
+            <Text style={styles.sectionHeader}>App Logs</Text>
+            <View style={styles.logContainer}>
+              {logs.map(log => (
+                <Text key={log.id} style={[styles.logText, styles[`logText${log.level}`]]}>
+                  [{log.timestamp}] {log.level}: {log.message}
+                </Text>
+              ))}
+            </View>
+          </ScrollView>
+
+          <View style={styles.buttonContainer}>
+            <Button title="Send Test Log (INFO)" onPress={() => addLog("A test information log was sent.", "INFO")} />
+            <Button title="Send Test Log (WARN)" onPress={() => addLog("A test warning log was sent.", "WARN")} color="orange" />
+            <Button title="Send Test Log (ERROR)" onPress={() => addLog("A test error log was sent.", "ERROR")} color="red" />
+            <Button title="Close Developer Tools" onPress={onClose} color="#007AFF" />
+          </View>
+        </View>
+      </SafeAreaView>
+    </Modal>
+  );
+};
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#f8f8f8',
+  },
+  modalContainer: {
+    flex: 1,
+    padding: 20,
+  },
+  modalTitle: {
+    fontSize: 26,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    color: '#333',
+    textAlign: 'center',
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  metricLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#555',
+    marginRight: 10,
+  },
+  metricValue: {
+    fontSize: 16,
+    color: '#000',
+    fontWeight: 'normal',
+  },
+  sectionHeader: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginTop: 20,
+    marginBottom: 10,
+    color: '#333',
+  },
+  metricsScrollView: {
+    flex: 1,
+  },
+  metricItem: {
+    fontSize: 15,
+    marginBottom: 5,
+    color: '#666',
+  },
+  logContainer: {
+    backgroundColor: '#e0e0e0',
+    borderRadius: 8,
+    padding: 10,
+    minHeight: 150,
+    maxHeight: 300,
+  },
+  logText: {
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', // Monospaced font for logs
+    fontSize: 11,
+    lineHeight: 16,
+    color: '#333',
+  },
+  logTextINFO: {
+    color: '#333',
+  },
+  logTextWARN: {
+    color: '#FFA500', // Orange
+  },
+  logTextERROR: {
+    color: '#FF0000', // Red
+    fontWeight: 'bold',
+  },
+  buttonContainer: {
+    marginTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+    paddingTop: 10,
+  },
+});
+
+export default DeveloperToolsModal;
+
+
+
+
+npm run ios
+# or yarn ios
+
+
+
+import UIKit
+import CoreMotion // Optional: For motion-based effects
+import AVFoundation // For managing audio (if any) or potentially dimming (less common)
+
+class ScreensaverViewController: UIViewController {
+
+    // MARK: - UI Elements
+    private let dynamicContentLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Initializing Screensaver..."
+        label.font = UIFont.systemFont(ofSize: 38, weight: .bold)
+        label.textColor = .white
+        label.textAlignment = .center
+        label.numberOfLines = 0
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private let hintLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Tap once to toggle Power Saver\nLong press for Developer Tools"
+        label.font = UIFont.systemFont(ofSize: 16, weight: .regular)
+        label.textColor = .lightGray
+        label.textAlignment = .center
+        label.numberOfLines = 2
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private let dimmingOverlay: UIView = {
+        let view = UIView()
+        view.backgroundColor = .black
+        view.alpha = 0.0 // Initially transparent
+        view.isUserInteractionEnabled = false // Allow touches to pass through
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
+    }()
+
+    // MARK: - Properties
+    private var screensaverTimer: Timer?
+    private var contentUpdateInterval: TimeInterval = 3.0 // Default update interval
+    private var originalBrightness: CGFloat = UIScreen.main.brightness // Store original system brightness
+
+    var isPowerSaverModeActive: Bool = false {
+        didSet {
+            // Update UI and behavior when power saver mode changes
+            applyPowerSaverSettings(isPowerSaverModeActive)
+            updateHintLabel()
+            if isPowerSaverModeActive {
+                LogManager.shared.log("Power Saver Mode: ON", level: .info)
+            } else {
+                LogManager.shared.log("Power Saver Mode: OFF", level: .info)
+            }
+        }
+    }
+
+    private var currentBackgroundColor: UIColor = .black // For dynamic background
+
+    // MARK: - Lifecycle
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setupView()
+        setupUI()
+        setupGestures()
+        LogManager.shared.log("ScreensaverViewController loaded.", level: .debug)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // Ensure the screen stays awake while this app is in the foreground
+        UIApplication.shared.isIdleTimerDisabled = true
+        startScreensaverAnimation()
+        // Apply initial power saver settings based on default or loaded state
+        applyPowerSaverSettings(isPowerSaverModeActive)
+        LogManager.shared.log("ScreensaverViewController appeared. Idle timer disabled.", level: .debug)
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        // Allow the screen to dim/lock again when the app is no longer foreground
+        UIApplication.shared.isIdleTimerDisabled = false
+        stopScreensaverAnimation()
+        restoreScreenBrightness() // Always restore brightness on exit
+        LogManager.shared.log("ScreensaverViewController disappeared. Idle timer enabled.", level: .debug)
+    }
+
+    // MARK: - Setup
+    private func setupView() {
+        self.view.backgroundColor = currentBackgroundColor // Initial background
+    }
+
+    private func setupUI() {
+        view.addSubview(dynamicContentLabel)
+        view.addSubview(hintLabel)
+        view.addSubview(dimmingOverlay) // Add dimming overlay
+
+        NSLayoutConstraint.activate([
+            dynamicContentLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            dynamicContentLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: -50),
+            dynamicContentLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 30),
+            dynamicContentLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -30),
+
+            hintLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            hintLabel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
+            hintLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            hintLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+
+            dimmingOverlay.topAnchor.constraint(equalTo: view.topAnchor),
+            dimmingOverlay.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            dimmingOverlay.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            dimmingOverlay.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+    }
+
+    private func setupGestures() {
+        let singleTap = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap))
+        view.addGestureRecognizer(singleTap)
+
+        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress))
+        longPress.minimumPressDuration = 1.0 // 1 second press
+        view.addGestureRecognizer(longPress)
+    }
+
+    // MARK: - Screensaver Animation / Content Update
+    private func startScreensaverAnimation() {
+        stopScreensaverAnimation() // Invalidate any existing timer
+
+        // Set initial interval based on power saver mode
+        contentUpdateInterval = isPowerSaverModeActive ? 6.0 : 3.0 // Slower updates in power saver
+
+        screensaverTimer = Timer.scheduledTimer(withTimeInterval: contentUpdateInterval, repeats: true) { [weak self] _ in
+            self?.updateScreensaverContent()
+        }
+        // Immediately update content on start
+        updateScreensaverContent()
+    }
+
+    private func stopScreensaverAnimation() {
+        screensaverTimer?.invalidate()
+        screensaverTimer = nil
+    }
+
+    private func updateScreensaverContent() {
+        let colors: [UIColor] = [.red, .green, .blue, .purple, .orange, .cyan, .magenta]
+        let quotes = [
+            "The only way to do great work is to love what you do. - Steve Jobs",
+            "Innovation distinguishes between a leader and a follower. - Steve Jobs",
+            "Stay hungry, stay foolish. - Steve Jobs",
+            "Your time is limited, don't waste it living someone else's life. - Steve Jobs",
+            "Design is not just what it looks like and feels like. Design is how it works. - Steve Jobs"
+        ]
+        let messages = [
+            "Hello from iOS!",
+            "Welcome to the Future!",
+            "System Status: OK",
+            "Dream Big!",
+            "Coding in Swift!",
+            "Enjoy the tranquility."
+        ]
+
+        let currentOption = Int.random(in: 0...2)
+
+        if currentOption == 0 {
+            // Dynamic Background Color
+            let newColor = colors.randomElement()!
+            UIView.animate(withDuration: 1.5, animations: {
+                self.view.backgroundColor = newColor
+            })
+            currentBackgroundColor = newColor
+            dynamicContentLabel.text = messages.randomElement()
+        } else if currentOption == 1 {
+            // Dynamic Quote
+            dynamicContentLabel.text = quotes.randomElement()
+            // Ensure background returns to a neutral color if it changed
+            if view.backgroundColor != .black {
+                UIView.animate(withDuration: 0.5) { self.view.backgroundColor = .black }
+            }
+        } else {
+            // Dynamic Message
+            dynamicContentLabel.text = messages.randomElement()
+            if view.backgroundColor != .black {
+                UIView.animate(withDuration: 0.5) { self.view.backgroundColor = .black }
+            }
+        }
+    }
+
+    // MARK: - Power Saver Logic
+    private func applyPowerSaverSettings(_ active: Bool) {
+        // Stop the current timer and restart with new interval
+        stopScreensaverAnimation()
+        startScreensaverAnimation()
+
+        // Visual dimming via overlay
+        UIView.animate(withDuration: 0.5) {
+            self.dimmingOverlay.alpha = active ? 0.7 : 0.0 // Dim to 70% opacity, or clear
+            self.dynamicContentLabel.alpha = active ? 0.7 : 1.0 // Dim content text too
+        }
+
+        // Adjust system brightness (use with caution - affects whole device)
+        // A better approach for in-app dimming is just the overlay.
+        // If you must use system brightness, save and restore properly.
+        if active {
+            // Only dim system brightness if it's not already very low, to avoid jarring changes
+            if UIScreen.main.brightness > 0.15 {
+                UIScreen.main.brightness = 0.15 // Dim to 15% system brightness
+            }
+        } else {
+            // Restore to original brightness only if we previously dimmed it specifically
+            // Or set to a reasonable default if you didn't explicitly track the pre-screensaver brightness
+            UIScreen.main.brightness = originalBrightness
+        }
+    }
+
+    private func restoreScreenBrightness() {
+        // Restore only if the app was responsible for dimming it
+        // A simple approach is to always restore to original on exit
+        UIScreen.main.brightness = originalBrightness
+    }
+
+    private func updateHintLabel() {
+        let powerSaverStatus = isPowerSaverModeActive ? "Power Saver ON" : "Power Saver OFF"
+        hintLabel.text = "Tap once to toggle \(powerSaverStatus)\nLong press for Developer Tools"
+    }
+
+    // MARK: - Gesture Handlers
+    @objc private func handleSingleTap() {
+        isPowerSaverModeActive.toggle()
+    }
+
+    @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+        if gesture.state == .began {
+            LogManager.shared.log("Long press detected, presenting Developer Tools.", level: .debug)
+            let developerToolsVC = DeveloperToolsViewController()
+            // Set modal presentation style for a full-screen or card-like appearance
+            developerToolsVC.modalPresentationStyle = .fullScreen // or .pageSheet, .formSheet
+            present(developerToolsVC, animated: true, completion: nil)
+        }
+    }
+}
+
+
+
+import UIKit
+import SystemConfiguration.CaptiveNetwork // For WiFi SSID (limited access in iOS 13+)
+import CoreTelephony // For carrier info
+import Foundation // For ProcessInfo
+
+class DeveloperToolsViewController: UIViewController {
+
+    // MARK: - UI Elements
+    private let scrollView: UIScrollView = {
+        let sv = UIScrollView()
+        sv.translatesAutoresizingMaskIntoConstraints = false
+        return sv
+    }()
+
+    private let stackView: UIStackView = {
+        let sv = UIStackView()
+        sv.axis = .vertical
+        sv.spacing = 10
+        sv.alignment = .leading
+        sv.translatesAutoresizingMaskIntoConstraints = false
+        return sv
+    }()
+
+    private let closeButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("Close", for: .normal)
+        button.titleLabel?.font = UIFont.systemFont(ofSize: 20, weight: .bold)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
+    }()
+
+    private let metricsLabel = UILabel()
+    private let logTextView: UITextView = {
+        let textView = UITextView()
+        textView.isEditable = false
+        textView.backgroundColor = .secondarySystemFill // Adapts to light/dark mode
+        textView.textColor = .label
+        textView.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        textView.layer.cornerRadius = 8
+        textView.textContainerInset = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        textView.translatesAutoresizingMaskIntoConstraints = false
+        return textView
+    }()
+
+    // MARK: - Properties
+    private var metricsTimer: Timer?
+
+    // MARK: - Lifecycle
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+        setupUI()
+        setupActions()
+        LogManager.shared.log("DeveloperToolsViewController loaded.", level: .debug)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        updateMetricsAndLogs() // Initial update
+        startMetricsTimer()
+        LogManager.shared.log("DeveloperToolsViewController appeared. Metrics timer started.", level: .debug)
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        stopMetricsTimer()
+        LogManager.shared.log("DeveloperToolsViewController disappeared. Metrics timer stopped.", level: .debug)
+    }
+
+    // MARK: - Setup
+    private func setupUI() {
+        view.addSubview(closeButton)
+        view.addSubview(scrollView)
+        scrollView.addSubview(stackView)
+
+        stackView.addArrangedSubview(createHeaderLabel("App & Device Information"))
+        stackView.addArrangedSubview(metricsLabel)
+        metricsLabel.numberOfLines = 0 // Allow multiple lines
+        metricsLabel.font = UIFont.systemFont(ofSize: 15)
+
+        stackView.addArrangedSubview(createHeaderLabel("App Logs"))
+        stackView.addArrangedSubview(logTextView)
+
+        NSLayoutConstraint.activate([
+            closeButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
+            closeButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+
+            scrollView.topAnchor.constraint(equalTo: closeButton.bottomAnchor, constant: 20),
+            scrollView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
+            scrollView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+            scrollView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
+
+            stackView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
+            stackView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor),
+            stackView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
+            stackView.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.width) // Ensure stack view matches scroll view width
+        ])
+
+        // Constraints for logTextView (fixed height)
+        NSLayoutConstraint.activate([
+            logTextView.heightAnchor.constraint(equalToConstant: 300) // Fixed height for logs
+        ])
+    }
+
+    private func createHeaderLabel(_ text: String) -> UILabel {
+        let label = UILabel()
+        label.text = text
+        label.font = UIFont.systemFont(ofSize: 18, weight: .semibold)
+        label.textColor = .systemBlue // Distinct color for headers
+        label.textAlignment = .left
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }
+
+    private func setupActions() {
+        closeButton.addTarget(self, action: #selector(closeButtonTapped), for: .touchUpInside)
+    }
+
+    // MARK: - Data Refresh
+    private func startMetricsTimer() {
+        metricsTimer?.invalidate()
+        metricsTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            self?.updateMetricsAndLogs()
+        }
+    }
+
+    private func stopMetricsTimer() {
+        metricsTimer?.invalidate()
+        metricsTimer = nil
+    }
+
+    private func updateMetricsAndLogs() {
+        DispatchQueue.main.async {
+            self.displaySystemMetrics()
+            self.displayAppLogs()
+        }
+    }
+
+    // MARK: - Metrics Display
+    private func displaySystemMetrics() {
+        let device = UIDevice.current
+        let processInfo = ProcessInfo.processInfo
+
+        // Battery Info
+        device.isBatteryMonitoringEnabled = true
+        let batteryLevel = Int(device.batteryLevel * 100)
+        let batteryState: String
+        switch device.batteryState {
+        case .unknown: batteryState = "Unknown"
+        case .unplugged: batteryState = "Unplugged"
+        case .charging: batteryState = "Charging"
+        case .full: batteryState = "Full"
+        @unknown default: batteryState = "Unknown"
+        }
+
+        // Memory Usage (App's Resident Set Size) - Requires C bridging
+        // This is a more accurate app memory usage than ProcessInfo.physicalMemory
+        var taskInfo = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size)/4
+        let kernReturn = task_info(mach_task_self_, mach_task_flavor_t(MACH_TASK_BASIC_INFO), &taskInfo.bmi, &count)
+        var residentMemoryMB: Double = 0.0
+        if kernReturn == KERN_SUCCESS {
+            residentMemoryMB = Double(taskInfo.resident_size) / (1024.0 * 1024.0)
+        }
+
+        // CPU Usage (Highly complex for per-app without private APIs)
+        // This is a placeholder; real CPU usage tracking is much harder and often leads to app rejection.
+        let cpuUsage = "N/A (Limited Access)"
+
+        // Network Info (basic type)
+        // For more advanced network info, you'd integrate Network framework or reachability
+        let networkType = "WiFi/Cellular (Basic)" // Can't get specific connection type easily here
+        // Note: Getting WiFi SSID requires special entitlements and location services in iOS 13+
+
+        // Carrier Info (if available)
+        let telephoyInfo = CTTelephonyNetworkInfo()
+        let carrierName = telephoyInfo.serviceSubscriberCellularProviders?.first?.value.carrierName ?? "N/A"
+
+        metricsLabel.text = """
+        Device Model: \(device.model)
+        OS Version: iOS \(device.systemVersion)
+        App Version: \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "N/A")
+        Build Number: \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "N/A")
+
+        --- Performance (Live) ---
+        CPU Usage (App): \(cpuUsage)
+        Memory (App RSS): \(String(format: "%.2f MB", residentMemoryMB))
+        Battery: \(batteryLevel)% (\(batteryState))
+        Network: \(networkType)
+        Carrier: \(carrierName)
+        """
+    }
+
+    // MARK: - Log Display
+    private func displayAppLogs() {
+        var logText = ""
+        for logEntry in LogManager.shared.getRecentLogs(count: 50) {
+            logText += "[\(logEntry.timestamp)] [\(logEntry.level.rawValue)] \(logEntry.message)\n"
+        }
+        logTextView.text = logText
+        // Scroll to bottom
+        let bottom = logTextView.contentSize.height - logTextView.bounds.size.height
+        if bottom > 0 {
+            logTextView.setContentOffset(CGPoint(x: 0, y: bottom), animated: true)
+        }
+    }
+
+    // MARK: - Actions
+    @objc private func closeButtonTapped() {
+        dismiss(animated: true, completion: nil)
+    }
+}
+
+// MARK: - LogManager (Simple In-App Logger)
+enum LogLevel: String {
+    case debug = "DEBUG"
+    case info = "INFO"
+    case warn = "WARN"
+    case error = "ERROR"
+}
+
+struct LogEntry {
+    let timestamp: String
+    let level: LogLevel
+    let message: String
+}
+
+class LogManager {
+    static let shared = LogManager() // Singleton
+    private var logs: [LogEntry] = []
+    private let maxLogs = 100 // Keep a maximum of 100 log entries
+
+    private init() {} // Private initializer to ensure singleton
+
+    func log(_ message: String, level: LogLevel) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        let timestamp = formatter.string(from: Date())
+        let newEntry = LogEntry(timestamp: timestamp, level: level, message: message)
+
+        // Add to array, ensuring maxLogs limit
+        logs.append(newEntry)
+        if logs.count > maxLogs {
+            logs.removeFirst()
+        }
+        // Also print to Xcode console for debugging
+        print("[\(level.rawValue)] \(timestamp): \(message)")
+    }
+
+    func getRecentLogs(count: Int) -> [LogEntry] {
+        let startIndex = max(0, logs.count - count)
+        return Array(logs[startIndex..<logs.count])
+    }
+}
+
+
+import UIKit
+
+class SceneDelegate: UIResponder, UIWindowSceneDelegate {
+
+    var window: UIWindow?
+
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
+        guard let windowScene = (scene as? UIWindowScene) else { return }
+
+        let window = UIWindow(windowScene: windowScene)
+        window.rootViewController = ScreensaverViewController() // Set your ScreensaverVC as the root
+        self.window = window
+        window.makeKeyAndVisible()
+
+        LogManager.shared.log("SceneDelegate: App started.", level: .info)
+    }
+
+    func sceneDidBecomeActive(_ scene: UIScene) {
+        // Called when the scene has moved from an inactive state to an active state.
+        // This is where you might restart content updates if paused.
+        LogManager.shared.log("SceneDelegate: Scene became active.", level: .info)
+    }
+
+    func sceneWillResignActive(_ scene: UIScene) {
+        // Called when the scene will move from an active state to an inactive state.
+        // This may occur due to temporary interruptions (ex. an incoming phone call).
+        LogManager.shared.log("SceneDelegate: Scene will resign active.", level: .warn)
+    }
+
+    func sceneDidEnterBackground(_ scene: UIScene) {
+        // Called as the scene transitions from the foreground to the background.
+        // This is where you would typically pause heavy animations or content updates.
+        LogManager.shared.log("SceneDelegate: Scene entered background.", level: .info)
+    }
+
+    // ... other SceneDelegate methods
+}
+
+
+
+override var prefersStatusBarHidden: Bool {
+    return true
+}
+override var preferredStatusBarUpdateAnimation: UIStatusBarAnimation {
+    return .slide // Or .fade
+}
+
+
+Generating C++ code for an "advanced iOS screensaver with power saver and developer tools" directly is not feasible in the way you might expect. Here's why and what the practical approaches are:
+Why Direct C++ for iOS UI/Screensaver is Not Standard:
+ * Native iOS UI Frameworks: iOS UIs are primarily built using Apple's proprietary frameworks (UIKit, SwiftUI) which are written in Objective-C and Swift, respectively. These frameworks are deeply integrated with the operating system and its rendering pipeline.
+ * No C++ UI Framework: There's no native C++ UI framework for iOS provided by Apple. While you can write C++ logic, you can't use it directly to draw buttons, labels, or handle touch events on an iPhone screen without bridging to Objective-C/Swift.
+ * Screensaver Limitations: As mentioned in previous responses, third-party apps cannot become system-wide screensavers on iOS. They run as regular foreground applications.
+ * System Access: Accessing low-level system features like power management (beyond preventing idle sleep) or granular per-app CPU/memory usage directly from C++ is highly restricted and would typically require private Apple APIs (leading to App Store rejection) or complex Objective-C/Swift bridging.
+Practical Approaches Using C++ with iOS:
+ * C++ as a Logic/Computation Layer (Most Common):
+   * You write complex algorithms, physics simulations, game engines, data processing, or networking logic in C++.
+   * You then create an Objective-C++ bridging layer (files with .mm extension) that exposes C++ classes and functions to your Swift/Objective-C UI.
+   * The actual UI is still built with Swift/Objective-C (UIKit/SwiftUI). The C++ code provides the "brains" behind the screensaver's dynamic content, but not its visual representation.
+ * Cross-Platform Frameworks (Less Native UI):
+   * Frameworks like Qt, SDL, Cocos2d-x (mostly C++ for games) allow you to write C++ code that renders its own UI to a canvas provided by a thin native wrapper.
+   * While this is "C++ code," the UI often doesn't feel entirely native and direct iOS system integration is still challenging or requires custom bridging. This is more common for games than utility apps.
+Given your request, the most "advanced" and practical C++ integration would involve providing the core logic for the dynamic screensaver content and possibly some internal developer metrics calculations in C++, while the UI and actual device interaction remain in Swift/Objective-C.
+Conceptual C++ Code for a Core Screensaver Logic Library
+This C++ library could provide dynamic content data, handle some internal "power saving" logic (e.g., how often to update internal state), and simulate developer metrics.
+Folder Structure (Conceptual):
+AdvancedScreensaver/
+├── AdvancedScreensaver/
+│   ├── AppDelegate.swift
+│   ├── SceneDelegate.swift
+│   ├── ScreensaverViewController.swift (Swift/Objective-C++ UI)
+│   ├── DeveloperToolsViewController.swift (Swift/Objective-C++ UI)
+│   ├── BridgingHeader.h (if using Objective-C++)
+│   └── main.m (if using Objective-C)
+│
+└── ScreensaverCore/  <-- Your C++ library
+    ├── ScreensaverLogic.hpp
+    ├── ScreensaverLogic.cpp
+    ├── MetricsGenerator.hpp
+    ├── MetricsGenerator.cpp
+    └── LogHandler.hpp
+    └── LogHandler.cpp
+
+1. ScreensaverCore/ScreensaverLogic.hpp
+#pragma once
+
+#include <string>
+#include <vector>
+#include <map>
+#include <chrono>
+
+namespace ScreensaverCore {
+
+// Data structures for screensaver content
+struct ContentItem {
+    std::string type; // e.g., "quote", "image_url", "animation_params"
+    std::map<std::string, std::string> data;
+    std::map<std::string, double> animationParams; // For numeric animation parameters
+};
+
+// Represents current application settings
+struct AppSettings {
+    bool powerSaverEnabled;
+    std::string selectedTheme; // "dynamic", "quotes", "colors" etc.
+    int updateIntervalMs;      // How often the content should refresh
+};
+
+// Main logic class for the screensaver
+class ScreensaverLogic {
+public:
+    ScreensaverLogic();
+
+    // Gets a new piece of content based on current settings
+    ContentItem getNextContent();
+
+    // Updates settings
+    void updateSettings(bool powerSaver, const std::string& theme, int intervalMs);
+
+    // Gets current settings
+    AppSettings getCurrentSettings() const;
+
+private:
+    AppSettings settings;
+    std::vector<std::string> quotePool;
+    std::vector<std::string> colorNames; // For dynamic color background ideas
+
+    void initializeContentPools();
+};
+
+} // namespace ScreensaverCore
+
+2. ScreensaverCore/ScreensaverLogic.cpp
+#include "ScreensaverLogic.hpp"
+#include <random>
+#include <iostream> // For logging to console (for debug)
+
+namespace ScreensaverCore {
+
+ScreensaverLogic::ScreensaverLogic() {
+    initializeContentPools();
+    settings = {
+        .powerSaverEnabled = false,
+        .selectedTheme = "dynamic",
+        .updateIntervalMs = 3000 // Default 3 seconds
+    };
+    std::cout << "C++: ScreensaverLogic initialized." << std::endl;
+}
+
+void ScreensaverLogic::initializeContentPools() {
+    quotePool = {
+        "The only true wisdom is in knowing you know nothing. - Socrates",
+        "The future belongs to those who believe in the beauty of their dreams. - Eleanor Roosevelt",
+        "The only way to do great work is to love what you do. - Steve Jobs",
+        "Be yourself; everyone else is already taken. - Oscar Wilde",
+        "Life is what happens when you're busy making other plans. - John Lennon"
+    };
+    colorNames = {
+        "Red", "Green", "Blue", "Yellow", "Purple", "Orange", "Cyan", "Magenta"
+    };
+}
+
+ContentItem ScreensaverLogic::getNextContent() {
+    ContentItem item;
+    std::random_device rd;
+    std::mt19937 gen(rd());
+
+    std::string actualTheme = settings.selectedTheme;
+    if (actualTheme == "dynamic") {
+        std::vector<std::string> themes = {"quotes", "colors"};
+        actualTheme = themes[std::uniform_int_distribution<>(0, themes.size() - 1)(gen)];
+    }
+
+    if (actualTheme == "quotes") {
+        item.type = "quote";
+        item.data["text"] = quotePool[std::uniform_int_distribution<>(0, quotePool.size() - 1)(gen)];
+    } else if (actualTheme == "colors") {
+        item.type = "color";
+        item.data["name"] = colorNames[std::uniform_int_distribution<>(0, colorNames.size() - 1)(gen)];
+        // Simulate a hex color for the Swift side to interpret
+        std::stringstream ss;
+        ss << "#" << std::hex << std::setw(6) << std::setfill('0') << (gen() & 0xFFFFFF);
+        item.data["hex"] = ss.str();
+
+        item.animationParams["duration"] = settings.powerSaverEnabled ? 3.0 : 1.5; // Slower animation in power saver
+    }
+    // Add more content types (e.g., image_urls)
+    std::cout << "C++: Generated content of type: " << item.type << std::endl;
+    return item;
+}
+
+void ScreensaverLogic::updateSettings(bool powerSaver, const std::string& theme, int intervalMs) {
+    settings.powerSaverEnabled = powerSaver;
+    settings.selectedTheme = theme;
+    if (intervalMs > 0) {
+        settings.updateIntervalMs = intervalMs;
+    }
+    std::cout << "C++: Settings updated - PowerSaver: " << settings.powerSaverEnabled
+              << ", Theme: " << settings.selectedTheme
+              << ", Interval: " << settings.updateIntervalMs << "ms" << std::endl;
+}
+
+AppSettings ScreensaverLogic::getCurrentSettings() const {
+    return settings;
+}
+
+} // namespace ScreensaverCore
+
+3. ScreensaverCore/MetricsGenerator.hpp
+#pragma once
+
+#include <string>
+#include <map>
+#include <chrono>
+
+namespace ScreensaverCore {
+
+// Represents simulated developer metrics
+struct SimulatedDevMetrics {
+    std::string timestamp;
+    double cpuUsagePercent;
+    double memoryUsageMB; // Simulated app memory
+    int batteryLevelPercent;
+    int networkLatencyMs;
+    std::string appVersion;
+    std::string buildNumber;
+    std::string deviceModel;
+    std::string osVersion;
+};
+
+class MetricsGenerator {
+public:
+    MetricsGenerator();
+
+    // Generates simulated developer metrics
+    SimulatedDevMetrics generateMetrics();
+
+private:
+    // Helper for random numbers
+    double getRandomDouble(double min, double max);
+    int getRandomInt(int min, int max);
+};
+
+} // namespace ScreensaverCore
+
+4. ScreensaverCore/MetricsGenerator.cpp
+#include "MetricsGenerator.hpp"
+#include <random>
+#include <iomanip> // For std::put_time
+#include <sstream> // For std::stringstream
+
+namespace ScreensaverCore {
+
+MetricsGenerator::MetricsGenerator() {
+    std::cout << "C++: MetricsGenerator initialized." << std::endl;
+}
+
+SimulatedDevMetrics MetricsGenerator::generateMetrics() {
+    auto now = std::chrono::system_clock::now();
+    std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+    std::tm* ptm = std::localtime(&now_c);
+    
+    std::stringstream ss;
+    ss << std::put_time(ptm, "%Y-%m-%d %H:%M:%S");
+
+    SimulatedDevMetrics metrics = {
+        .timestamp = ss.str(),
+        .cpuUsagePercent = getRandomDouble(10.0, 60.0),
+        .memoryUsageMB = getRandomDouble(50.0, 250.0),
+        .batteryLevelPercent = getRandomInt(0, 100),
+        .networkLatencyMs = getRandomInt(10, 150),
+        .appVersion = "1.0.3-c++",
+        .buildNumber = "1016",
+        .deviceModel = "iPhone 17 Pro (Simulated C++)",
+        .osVersion = "iOS 19.0 (Simulated C++)"
+    };
+    std::cout << "C++: Generated simulated metrics." << std::endl;
+    return metrics;
+}
+
+double MetricsGenerator::getRandomDouble(double min, double max) {
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    std::uniform_real_distribution<> dis(min, max);
+    return dis(gen);
+}
+
+int MetricsGenerator::getRandomInt(int min, int max) {
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dis(min, max);
+    return dis(gen);
+}
+
+} // namespace ScreensaverCore
+
+5. ScreensaverCore/LogHandler.hpp
+#pragma once
+
+#include <string>
+#include <vector>
+#include <mutex>
+#include <chrono>
+#include <map>
+
+namespace ScreensaverCore {
+
+enum class LogLevel {
+    DEBUG,
+    INFO,
+    WARN,
+    ERROR
+};
+
+struct LogEntry {
+    std::string timestamp;
+    LogLevel level;
+    std::string message;
+    std::map<std::string, std::string> context;
+};
+
+class LogHandler {
+public:
+    static LogHandler& getInstance(); // Singleton access
+
+    void log(LogLevel level, const std::string& message, const std::map<std::string, std::string>& context = {});
+    std::vector<LogEntry> getRecentLogs(int count = 50) const;
+
+private:
+    LogHandler() = default; // Private constructor for singleton
+    LogHandler(const LogHandler&) = delete;
+    LogHandler& operator=(const LogHandler&) = delete;
+
+    std::vector<LogEntry> logs;
+    mutable std::mutex logsMutex; // Protect logs vector
+    const size_t maxLogs = 100;
+};
+
+} // namespace ScreensaverCore
+
+6. ScreensaverCore/LogHandler.cpp
+#include "LogHandler.hpp"
+#include <iostream>
+#include <iomanip>
+#include <sstream>
+
+namespace ScreensaverCore {
+
+LogHandler& LogHandler::getInstance() {
+    static LogHandler instance;
+    return instance;
+}
+
+void LogHandler::log(LogLevel level, const std::string& message, const std::map<std::string, std::string>& context) {
+    auto now = std::chrono::system_clock::now();
+    std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+    std::tm* ptm = std::localtime(&now_c);
+
+    std::stringstream ss_ts;
+    ss_ts << std::put_time(ptm, "%H:%M:%S.%L"); // High-resolution timestamp
+
+    std::string levelStr;
+    switch (level) {
+        case LogLevel::DEBUG: levelStr = "DEBUG"; break;
+        case LogLevel::INFO:  levelStr = "INFO";  break;
+        case LogLevel::WARN:  levelStr = "WARN";  break;
+        case LogLevel::ERROR: levelStr = "ERROR"; break;
+    }
+
+    LogEntry newEntry = {
+        .timestamp = ss_ts.str(),
+        .level = level,
+        .message = message,
+        .context = context
+    };
+
+    std::lock_guard<std::mutex> lock(logsMutex); // Protect concurrent access
+    logs.push_back(newEntry);
+    if (logs.size() > maxLogs) {
+        logs.erase(logs.begin());
+    }
+
+    // Also print to console for debugging C++ side
+    std::cout << "[" << levelStr << "] " << newEntry.timestamp << ": " << message;
+    if (!context.empty()) {
+        std::cout << " {";
+        bool first = true;
+        for (const auto& pair : context) {
+            if (!first) std::cout << ", ";
+            std::cout << pair.first << ": " << pair.second;
+            first = false;
+        }
+        std::cout << "}";
+    }
+    std::cout << std::endl;
+}
+
+std::vector<LogEntry> LogHandler::getRecentLogs(int count) const {
+    std::lock_guard<std::mutex> lock(logsMutex); // Protect concurrent access
+    if (count <= 0 || count >= logs.size()) {
+        return logs;
+    }
+    return std::vector<LogEntry>(logs.end() - count, logs.end());
+}
+
+} // namespace ScreensaverCore
+
+7. Objective-C++ Bridging File (.mm) - Example for ScreensaverViewController
+To integrate C++ into Swift, you usually go through Objective-C++.
+Create a new file in Xcode (File -> New -> File -> Objective-C File). Name it something like ScreensaverBridge.mm. Xcode will ask if you want to create a Bridging Header. Say YES.
+ScreensaverBridge.mm
+#import <Foundation/Foundation.h> // Required for Objective-C++
+// Import your C++ headers
+#import "ScreensaverLogic.hpp"
+#import "MetricsGenerator.hpp"
+#import "LogHandler.hpp"
+
+// Define Objective-C classes/methods that wrap your C++ logic
+// These will be visible to Swift
+
+@interface ScreensaverContentBridge : NSObject
+@property (nonatomic, copy) NSString* type;
+@property (nonatomic, copy) NSDictionary<NSString*, NSString*>* data;
+@property (nonatomic, copy) NSDictionary<NSString*, NSNumber*>* animationParams;
+- (instancetype)initWithCppContent:(const ScreensaverCore::ContentItem&)cppContent;
+@end
+
+@interface AppSettingsBridge : NSObject
+@property (nonatomic, assign) BOOL powerSaverEnabled;
+@property (nonatomic, copy) NSString* selectedTheme;
+@property (nonatomic, assign) int updateIntervalMs;
+- (instancetype)initWithCppSettings:(const ScreensaverCore::AppSettings&)cppSettings;
+@end
+
+@interface SimulatedDevMetricsBridge : NSObject
+@property (nonatomic, copy) NSString* timestamp;
+@property (nonatomic, assign) double cpuUsagePercent;
+@property (nonatomic, assign) double memoryUsageMB;
+@property (nonatomic, assign) int batteryLevelPercent;
+@property (nonatomic, assign) int networkLatencyMs;
+@property (nonatomic, copy) NSString* appVersion;
+@property (nonatomic, copy) NSString* buildNumber;
+@property (nonatomic, copy) NSString* deviceModel;
+@property (nonatomic, copy) NSString* osVersion;
+- (instancetype)initWithCppMetrics:(const ScreensaverCore::SimulatedDevMetrics&)cppMetrics;
+@end
+
+@interface LogEntryBridge : NSObject
+@property (nonatomic, copy) NSString* timestamp;
+@property (nonatomic, copy) NSString* level; // Convert enum to string
+@property (nonatomic, copy) NSString* message;
+@property (nonatomic, copy) NSDictionary<NSString*, NSString*>* context;
+- (instancetype)initWithCppLogEntry:(const ScreensaverCore::LogEntry&)cppEntry;
+@end
+
+@interface ScreensaverCoreBridge : NSObject
++ (ScreensaverCoreBridge*)sharedInstance; // Singleton for the bridge
+
+- (ScreensaverContentBridge*)getNextContent;
+- (void)updateSettingsWithPowerSaverEnabled:(BOOL)powerSaverEnabled
+                               selectedTheme:(NSString*)selectedTheme
+                            updateIntervalMs:(int)updateIntervalMs;
+- (AppSettingsBridge*)getCurrentSettings;
+- (SimulatedDevMetricsBridge*)generateDevMetrics;
+- (void)logMessage:(NSString*)message level:(NSString*)level context:(NSDictionary<NSString*, NSString*>*)context;
+- (NSArray<LogEntryBridge*>*)getRecentLogs:(int)count;
+
+@end
+
+
+@implementation ScreensaverContentBridge
+- (instancetype)initWithCppContent:(const ScreensaverCore::ContentItem&)cppContent {
+    self = [super init];
+    if (self) {
+        _type = [NSString stringWithUTF8String:cppContent.type.c_str()];
+        
+        NSMutableDictionary<NSString*, NSString*>* dataDict = [NSMutableDictionary dictionary];
+        for (const auto& pair : cppContent.data) {
+            dataDict[[NSString stringWithUTF8String:pair.first.c_str()]] = [NSString stringWithUTF8String:pair.second.c_str()];
+        }
+        _data = [dataDict copy];
+
+        NSMutableDictionary<NSString*, NSNumber*>* animDict = [NSMutableDictionary dictionary];
+        for (const auto& pair : cppContent.animationParams) {
+            animDict[[NSString stringWithUTF8String:pair.first.c_str()]] = @(pair.second);
+        }
+        _animationParams = [animDict copy];
+    }
+    return self;
+}
+@end
+
+@implementation AppSettingsBridge
+- (instancetype)initWithCppSettings:(const ScreensaverCore::AppSettings&)cppSettings {
+    self = [super init];
+    if (self) {
+        _powerSaverEnabled = cppSettings.powerSaverEnabled;
+        _selectedTheme = [NSString stringWithUTF8String:cppSettings.selectedTheme.c_str()];
+        _updateIntervalMs = cppSettings.updateIntervalMs;
+    }
+    return self;
+}
+@end
+
+@implementation SimulatedDevMetricsBridge
+- (instancetype)initWithCppMetrics:(const ScreensaverCore::SimulatedDevMetrics&)cppMetrics {
+    self = [super init];
+    if (self) {
+        _timestamp = [NSString stringWithUTF8String:cppMetrics.timestamp.c_str()];
+        _cpuUsagePercent = cppMetrics.cpuUsagePercent;
+        _memoryUsageMB = cppMetrics.memoryUsageMB;
+        _batteryLevelPercent = cppMetrics.batteryLevelPercent;
+        _networkLatencyMs = cppMetrics.networkLatencyMs;
+        _appVersion = [NSString stringWithUTF8String:cppMetrics.appVersion.c_str()];
+        _buildNumber = [NSString stringWithUTF8String:cppMetrics.buildNumber.c_str()];
+        _deviceModel = [NSString stringWithUTF8String:cppMetrics.deviceModel.c_str()];
+        _osVersion = [NSString stringWithUTF8String:cppMetrics.osVersion.c_str()];
+    }
+    return self;
+}
+@end
+
+@implementation LogEntryBridge
+- (instancetype)initWithCppLogEntry:(const ScreensaverCore::LogEntry&)cppEntry {
+    self = [super init];
+    if (self) {
+        _timestamp = [NSString stringWithUTF8String:cppEntry.timestamp.c_str()];
+        
+        std::string levelStr;
+        switch (cppEntry.level) {
+            case ScreensaverCore::LogLevel::DEBUG: levelStr = "DEBUG"; break;
+            case ScreensaverCore::LogLevel::INFO:  levelStr = "INFO"; break;
+            case ScreensaverCore::LogLevel::WARN:  levelStr = "WARN"; break;
+            case ScreensaverCore::LogLevel::ERROR: levelStr = "ERROR"; break;
+        }
+        _level = [NSString stringWithUTF8String:levelStr.c_str()];
+        _message = [NSString stringWithUTF8String:cppEntry.message.c_str()];
+        
+        NSMutableDictionary<NSString*, NSString*>* contextDict = [NSMutableDictionary dictionary];
+        for (const auto& pair : cppEntry.context) {
+            contextDict[[NSString stringWithUTF8String:pair.first.c_str()]] = [NSString stringWithUTF8String:pair.second.c_str()];
+        }
+        _context = [contextDict copy];
+    }
+    return self;
+}
+@end
+
+
+@implementation ScreensaverCoreBridge {
+    ScreensaverCore::ScreensaverLogic _screensaverLogic; // C++ instance
+    ScreensaverCore::MetricsGenerator _metricsGenerator; // C++ instance
+}
+
++ (ScreensaverCoreBridge*)sharedInstance {
+    static ScreensaverCoreBridge* shared = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        shared = [[self alloc] init];
+    });
+    return shared;
+}
+
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        // C++ objects are automatically constructed here
+    }
+    return self;
+}
+
+- (ScreensaverContentBridge*)getNextContent {
+    ScreensaverCore::ContentItem cppContent = _screensaverLogic.getNextContent();
+    return [[ScreensaverContentBridge alloc] initWithCppContent:cppContent];
+}
+
+- (void)updateSettingsWithPowerSaverEnabled:(BOOL)powerSaverEnabled
+                               selectedTheme:(NSString*)selectedTheme
+                            updateIntervalMs:(int)updateIntervalMs {
+    _screensaverLogic.updateSettings(powerSaverEnabled,
+                                     [selectedTheme UTF8String],
+                                     updateIntervalMs);
+}
+
+- (AppSettingsBridge*)getCurrentSettings {
+    ScreensaverCore::AppSettings cppSettings = _screensaverLogic.getCurrentSettings();
+    return [[AppSettingsBridge alloc] initWithCppSettings:cppSettings];
+}
+
+- (SimulatedDevMetricsBridge*)generateDevMetrics {
+    ScreensaverCore::SimulatedDevMetrics cppMetrics = _metricsGenerator.generateMetrics();
+    return [[SimulatedDevMetricsBridge alloc] initWithCppMetrics:cppMetrics];
+}
+
+- (void)logMessage:(NSString*)message level:(NSString*)level context:(NSDictionary<NSString*, NSString*>*)context {
+    ScreensaverCore::LogLevel cppLevel;
+    if ([level isEqualToString:@"DEBUG"]) {
+        cppLevel = ScreensaverCore::LogLevel::DEBUG;
+    } else if ([level isEqualToString:@"INFO"]) {
+        cppLevel = ScreensaverCore::LogLevel::INFO;
+    } else if ([level isEqualToString:@"WARN"]) {
+        cppLevel = ScreensaverCore::LogLevel::WARN;
+    } else if ([level isEqualToString:@"ERROR"]) {
+        cppLevel = ScreensaverCore::LogLevel::ERROR;
+    } else {
+        cppLevel = ScreensaverCore::LogLevel::INFO; // Default
+    }
+
+    std::map<std::string, std::string> cppContext;
+    if (context) {
+        for (NSString* key in context) {
+            NSString* value = context[key];
+            cppContext[[key UTF8String]] = [value UTF8String];
+        }
+    }
+    ScreensaverCore::LogHandler::getInstance().log(cppLevel, [message UTF8String], cppContext);
+}
+
+- (NSArray<LogEntryBridge*>*)getRecentLogs:(int)count {
+    std::vector<ScreensaverCore::LogEntry> cppLogs = ScreensaverCore::LogHandler::getInstance().getRecentLogs(count);
+    NSMutableArray<LogEntryBridge*>* bridgedLogs = [NSMutableArray arrayWithCapacity:cppLogs.size()];
+    for (const auto& cppEntry : cppLogs) {
+        [bridgedLogs addObject:[[LogEntryBridge alloc] initWithCppLogEntry:cppEntry]];
+    }
+    return [bridgedLogs copy];
+}
+
+@end
+
+8. Swift Integration
+AdvancedScreensaver-Bridging-Header.h
+This file is automatically created by Xcode when you add your first .mm file. You just need to import your Objective-C++ bridge header here.
+#import "ScreensaverBridge.mm" // Or just "ScreensaverBridge.h" if you separate .h and .mm
+
+Swift code in ScreensaverViewController.swift and DeveloperToolsViewController.swift:
+Now, you can call your C++ logic through the Objective-C++ bridge.
+// In ScreensaverViewController.swift
+
+// ... (existing code)
+
+// MARK: - Screensaver Logic (using C++ bridge)
+private func startScreensaverAnimation() {
+    stopScreensaverAnimation() // Invalidate any existing timer
+
+    // Get update interval from C++ settings
+    let settings = ScreensaverCoreBridge.sharedInstance().getCurrentSettings()
+    contentUpdateInterval = TimeInterval(settings.updateIntervalMs) / 1000.0 // Convert ms to seconds
+
+    screensaverTimer = Timer.scheduledTimer(withTimeInterval: contentUpdateInterval, repeats: true) { [weak self] _ in
+        self?.updateScreensaverContent()
+    }
+    updateScreensaverContent() // Immediate update
+}
+
+private func updateScreensaverContent() {
+    let content = ScreensaverCoreBridge.sharedInstance().getNextContent()
+    DispatchQueue.main.async {
+        if let type = content.type {
+            switch type {
+            case "quote":
+                self.dynamicContentLabel.text = content.data?["text"] ?? "C++ Quote Error"
+                // Ensure background returns to neutral
+                if self.view.backgroundColor != .black {
+                    UIView.animate(withDuration: 0.5) { self.view.backgroundColor = .black }
+                }
+            case "color":
+                if let hexColor = content.data?["hex"], let uiColor = UIColor(hex: hexColor) {
+                    let duration = content.animationParams?["duration"]?.doubleValue ?? 1.5
+                    UIView.animate(withDuration: duration) {
+                        self.view.backgroundColor = uiColor
+                    }
+                    self.currentBackgroundColor = uiColor
+                    self.dynamicContentLabel.text = "Color: \(content.data?["name"] ?? "Unknown")"
+                }
+            default:
+                self.dynamicContentLabel.text = "Unknown C++ Content Type: \(type)"
+            }
+        }
+    }
+}
+
+// MARK: - Power Saver Logic (using C++ bridge)
+private func applyPowerSaverSettings(_ active: Bool) {
+    // Update C++ settings
+    let currentSettings = ScreensaverCoreBridge.sharedInstance().getCurrentSettings()
+    ScreensaverCoreBridge.sharedInstance().updateSettingsWithPowerSaverEnabled(
+        active,
+        selectedTheme: currentSettings.selectedTheme,
+        updateIntervalMs: currentSettings.updateIntervalMs
+    )
+    
+    // ... (rest of the Swift UI updates as before) ...
+    // Stop the current timer and restart with new interval based on updated C++ settings
+    stopScreensaverAnimation()
+    startScreensaverAnimation() // This will now pick up the new interval from C++
+    
+    UIView.animate(withDuration: 0.5) {
+        self.dimmingOverlay.alpha = active ? 0.7 : 0.0
+        self.dynamicContentLabel.alpha = active ? 0.7 : 1.0
+    }
+    // ... (rest of native Swift screen brightness handling) ...
+}
+
+
+// MARK: - Gesture Handlers (using C++ bridge for logging)
+@objc private func handleSingleTap() {
+    let currentSettings = ScreensaverCoreBridge.sharedInstance().getCurrentSettings()
+    let newPowerSaverState = !currentSettings.powerSaverEnabled
+    ScreensaverCoreBridge.sharedInstance().updateSettingsWithPowerSaverEnabled(
+        newPowerSaverState,
+        selectedTheme: currentSettings.selectedTheme,
+        updateIntervalMs: currentSettings.updateIntervalMs
+    )
+    self.isPowerSaverModeActive = newPowerSaverState // Update local Swift state
+    ScreensaverCoreBridge.sharedInstance().logMessage("Power Saver Toggled", level: newPowerSaverState ? "INFO" : "INFO", context: ["new_state": newPowerSaverState ? "ON" : "OFF"])
+}
+
+@objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+    if gesture.state == .began {
+        ScreensaverCoreBridge.sharedInstance().logMessage("Long press detected, presenting Developer Tools.", level: "DEBUG", context: nil)
+        let developerToolsVC = DeveloperToolsViewController()
+        developerToolsVC.modalPresentationStyle = .fullScreen
+        present(developerToolsVC, animated: true, completion: nil)
+    }
+}
+
+// Extension to help convert hex strings to UIColor (optional, but useful for 'color' type content)
+extension UIColor {
+    convenience init?(hex: String) {
+        let r, g, b, a: CGFloat
+
+        if hex.hasPrefix("#") {
+            let start = hex.index(hex.startIndex, offsetBy: 1)
+            let hexColor = String(hex[start...])
+
+            if hexColor.count == 6 {
+                let scanner = Scanner(string: hexColor)
+                var hexNumber: UInt64 = 0
+
+                if scanner.scanHexInt64(&hexNumber) {
+                    r = CGFloat((hexNumber & 0xff0000) >> 16) / 255
+                    g = CGFloat((hexNumber & 0x00ff00) >> 8) / 255
+                    b = CGFloat((hexNumber & 0x0000ff) >> 0) / 255
+                    a = 1.0
+
+                    self.init(red: r, green: g, blue: b, alpha: a)
+                    return
+                }
+            }
+        }
+        return nil
+    }
+}
+
+// In DeveloperToolsViewController.swift
+
+// ... (existing code)
+
+// MARK: - Metrics Display (using C++ bridge)
+private func displaySystemMetrics() {
+    let metrics = ScreensaverCoreBridge.sharedInstance().generateDevMetrics()
+    
+    // ... (rest of native Swift device info) ...
+    let device = UIDevice.current
+    let processInfo = ProcessInfo.processInfo
+    // ... (battery, memory, etc. - as in previous Swift example) ...
+
+    metricsLabel.text = """
+    Device Model: \(device.model)
+    OS Version: iOS \(device.systemVersion)
+    App Version: \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "N/A")
+    Build Number: \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "N/A")
+
+    --- Performance (Simulated C++ / Live) ---
+    Timestamp: \(metrics.timestamp ?? "N/A")
+    CPU Usage (Simulated): \(String(format: "%.2f%%", metrics.cpuUsagePercent))
+    Memory (Simulated App): \(String(format: "%.2f MB", metrics.memoryUsageMB))
+    Battery: \(metrics.batteryLevelPercent)% (Live)
+    Network Latency (Simulated): \(metrics.networkLatencyMs) ms
+    Simulated Device: \(metrics.deviceModel ?? "N/A")
+    Simulated OS: \(metrics.osVersion ?? "N/A")
+    """
+}
+
+// MARK: - Log Display (using C++ bridge)
+private func displayAppLogs() {
+    let logs = ScreensaverCoreBridge.sharedInstance().getRecentLogs(50) // Get last 50 logs from C++
+    var logText = ""
+    for logEntry in logs {
+        logText += "[\(logEntry.timestamp ?? "N/A")] [\(logEntry.level ?? "INFO")] \(logEntry.message ?? "No message")\n"
+    }
+    logTextView.text = logText
+    // Scroll to bottom
+    let bottom = logTextView.contentSize.height - logTextView.bounds.size.height
+    if bottom > 0 {
+        logTextView.setContentOffset(CGPoint(x: 0, y: bottom), animated: true)
+    }
+}
+
+Xcode Project Settings for C++
+ * Add C++ Files: Drag your ScreensaverCore folder into your Xcode project navigator. Choose "Create folder references" and ensure your target is checked.
+ * Build Settings:
+   * Select your project in the navigator, then your target.
+   * Go to "Build Settings."
+   * Search for "C++ Language Dialect." Set it to C++17 or C++20 (or GNU++17/GNU++20).
+   * Search for "C++ Standard Library." Set it to libstdc++ (or libc++ if you prefer the LLVM library, which is generally more modern).
+   * Search for "Header Search Paths." Add $(SRCROOT)/ScreensaverCore (or wherever your C++ headers are located) and set it to recursive.
+   * Ensure any .m files that use C++ objects are renamed to .mm (Objective-C++). Xcode should prompt you for this.
+This setup provides a robust way to leverage C++ for heavy lifting while maintaining a native Swift UI on iOS.
+
+
+
+#pragma once
+
+#include <string>
+#include <vector>
+#include <map>
+#include <chrono>
+
+namespace ScreensaverCore {
+
+// Data structures for screensaver content
+struct ContentItem {
+    std::string type; // e.g., "quote", "image_url", "animation_params"
+    std::map<std::string, std::string> data;
+    std::map<std::string, double> animationParams; // For numeric animation parameters
+};
+
+// Represents current application settings
+struct AppSettings {
+    bool powerSaverEnabled;
+    std::string selectedTheme; // "dynamic", "quotes", "colors" etc.
+    int updateIntervalMs;      // How often the content should refresh
+};
+
+// Main logic class for the screensaver
+class ScreensaverLogic {
+public:
+    ScreensaverLogic();
+
+    // Gets a new piece of content based on current settings
+    ContentItem getNextContent();
+
+    // Updates settings
+    void updateSettings(bool powerSaver, const std::string& theme, int intervalMs);
+
+    // Gets current settings
+    AppSettings getCurrentSettings() const;
+
+private:
+    AppSettings settings;
+    std::vector<std::string> quotePool;
+    std::vector<std::string> colorNames; // For dynamic color background ideas
+
+    void initializeContentPools();
+};
+
+} // namespace ScreensaverCore
+
+
+
+#include "ScreensaverLogic.hpp"
+#include <random>
+#include <iostream> // For logging to console (for debug)
+
+namespace ScreensaverCore {
+
+ScreensaverLogic::ScreensaverLogic() {
+    initializeContentPools();
+    settings = {
+        .powerSaverEnabled = false,
+        .selectedTheme = "dynamic",
+        .updateIntervalMs = 3000 // Default 3 seconds
+    };
+    std::cout << "C++: ScreensaverLogic initialized." << std::endl;
+}
+
+void ScreensaverLogic::initializeContentPools() {
+    quotePool = {
+        "The only true wisdom is in knowing you know nothing. - Socrates",
+        "The future belongs to those who believe in the beauty of their dreams. - Eleanor Roosevelt",
+        "The only way to do great work is to love what you do. - Steve Jobs",
+        "Be yourself; everyone else is already taken. - Oscar Wilde",
+        "Life is what happens when you're busy making other plans. - John Lennon"
+    };
+    colorNames = {
+        "Red", "Green", "Blue", "Yellow", "Purple", "Orange", "Cyan", "Magenta"
+    };
+}
+
+ContentItem ScreensaverLogic::getNextContent() {
+    ContentItem item;
+    std::random_device rd;
+    std::mt19937 gen(rd());
+
+    std::string actualTheme = settings.selectedTheme;
+    if (actualTheme == "dynamic") {
+        std::vector<std::string> themes = {"quotes", "colors"};
+        actualTheme = themes[std::uniform_int_distribution<>(0, themes.size() - 1)(gen)];
+    }
+
+    if (actualTheme == "quotes") {
+        item.type = "quote";
+        item.data["text"] = quotePool[std::uniform_int_distribution<>(0, quotePool.size() - 1)(gen)];
+    } else if (actualTheme == "colors") {
+        item.type = "color";
+        item.data["name"] = colorNames[std::uniform_int_distribution<>(0, colorNames.size() - 1)(gen)];
+        // Simulate a hex color for the Swift side to interpret
+        std::stringstream ss;
+        ss << "#" << std::hex << std::setw(6) << std::setfill('0') << (gen() & 0xFFFFFF);
+        item.data["hex"] = ss.str();
+
+        item.animationParams["duration"] = settings.powerSaverEnabled ? 3.0 : 1.5; // Slower animation in power saver
+    }
+    // Add more content types (e.g., image_urls)
+    std::cout << "C++: Generated content of type: " << item.type << std::endl;
+    return item;
+}
+
+void ScreensaverLogic::updateSettings(bool powerSaver, const std::string& theme, int intervalMs) {
+    settings.powerSaverEnabled = powerSaver;
+    settings.selectedTheme = theme;
+    if (intervalMs > 0) {
+        settings.updateIntervalMs = intervalMs;
+    }
+    std::cout << "C++: Settings updated - PowerSaver: " << settings.powerSaverEnabled
+              << ", Theme: " << settings.selectedTheme
+              << ", Interval: " << settings.updateIntervalMs << "ms" << std::endl;
+}
+
+AppSettings ScreensaverLogic::getCurrentSettings() const {
+    return settings;
+}
+
+} // namespace ScreensaverCore
+
+
+
+#pragma once
+
+#include <string>
+#include <map>
+#include <chrono>
+
+namespace ScreensaverCore {
+
+// Represents simulated developer metrics
+struct SimulatedDevMetrics {
+    std::string timestamp;
+    double cpuUsagePercent;
+    double memoryUsageMB; // Simulated app memory
+    int batteryLevelPercent;
+    int networkLatencyMs;
+    std::string appVersion;
+    std::string buildNumber;
+    std::string deviceModel;
+    std::string osVersion;
+};
+
+class MetricsGenerator {
+public:
+    MetricsGenerator();
+
+    // Generates simulated developer metrics
+    SimulatedDevMetrics generateMetrics();
+
+private:
+    // Helper for random numbers
+    double getRandomDouble(double min, double max);
+    int getRandomInt(int min, int max);
+};
+
+} // namespace ScreensaverCore
+
+
+
+#include "MetricsGenerator.hpp"
+#include <random>
+#include <iomanip> // For std::put_time
+#include <sstream> // For std::stringstream
+
+namespace ScreensaverCore {
+
+MetricsGenerator::MetricsGenerator() {
+    std::cout << "C++: MetricsGenerator initialized." << std::endl;
+}
+
+SimulatedDevMetrics MetricsGenerator::generateMetrics() {
+    auto now = std::chrono::system_clock::now();
+    std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+    std::tm* ptm = std::localtime(&now_c);
+    
+    std::stringstream ss;
+    ss << std::put_time(ptm, "%Y-%m-%d %H:%M:%S");
+
+    SimulatedDevMetrics metrics = {
+        .timestamp = ss.str(),
+        .cpuUsagePercent = getRandomDouble(10.0, 60.0),
+        .memoryUsageMB = getRandomDouble(50.0, 250.0),
+        .batteryLevelPercent = getRandomInt(0, 100),
+        .networkLatencyMs = getRandomInt(10, 150),
+        .appVersion = "1.0.3-c++",
+        .buildNumber = "1016",
+        .deviceModel = "iPhone 17 Pro (Simulated C++)",
+        .osVersion = "iOS 19.0 (Simulated C++)"
+    };
+    std::cout << "C++: Generated simulated metrics." << std::endl;
+    return metrics;
+}
+
+double MetricsGenerator::getRandomDouble(double min, double max) {
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    std::uniform_real_distribution<> dis(min, max);
+    return dis(gen);
+}
+
+int MetricsGenerator::getRandomInt(int min, int max) {
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dis(min, max);
+    return dis(gen);
+}
+
+} // namespace ScreensaverCore
+
+
+
+#pragma once
+
+#include <string>
+#include <vector>
+#include <mutex>
+#include <chrono>
+#include <map>
+
+namespace ScreensaverCore {
+
+enum class LogLevel {
+    DEBUG,
+    INFO,
+    WARN,
+    ERROR
+};
+
+struct LogEntry {
+    std::string timestamp;
+    LogLevel level;
+    std::string message;
+    std::map<std::string, std::string> context;
+};
+
+class LogHandler {
+public:
+    static LogHandler& getInstance(); // Singleton access
+
+    void log(LogLevel level, const std::string& message, const std::map<std::string, std::string>& context = {});
+    std::vector<LogEntry> getRecentLogs(int count = 50) const;
+
+private:
+    LogHandler() = default; // Private constructor for singleton
+    LogHandler(const LogHandler&) = delete;
+    LogHandler& operator=(const LogHandler&) = delete;
+
+    std::vector<LogEntry> logs;
+    mutable std::mutex logsMutex; // Protect logs vector
+    const size_t maxLogs = 100;
+};
+
+} // namespace ScreensaverCore
+
+
+
+
+#include "LogHandler.hpp"
+#include <iostream>
+#include <iomanip>
+#include <sstream>
+
+namespace ScreensaverCore {
+
+LogHandler& LogHandler::getInstance() {
+    static LogHandler instance;
+    return instance;
+}
+
+void LogHandler::log(LogLevel level, const std::string& message, const std::map<std::string, std::string>& context) {
+    auto now = std::chrono::system_clock::now();
+    std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+    std::tm* ptm = std::localtime(&now_c);
+
+    std::stringstream ss_ts;
+    ss_ts << std::put_time(ptm, "%H:%M:%S.%L"); // High-resolution timestamp
+
+    std::string levelStr;
+    switch (level) {
+        case LogLevel::DEBUG: levelStr = "DEBUG"; break;
+        case LogLevel::INFO:  levelStr = "INFO";  break;
+        case LogLevel::WARN:  levelStr = "WARN";  break;
+        case LogLevel::ERROR: levelStr = "ERROR"; break;
+    }
+
+    LogEntry newEntry = {
+        .timestamp = ss_ts.str(),
+        .level = level,
+        .message = message,
+        .context = context
+    };
+
+    std::lock_guard<std::mutex> lock(logsMutex); // Protect concurrent access
+    logs.push_back(newEntry);
+    if (logs.size() > maxLogs) {
+        logs.erase(logs.begin());
+    }
+
+    // Also print to console for debugging C++ side
+    std::cout << "[" << levelStr << "] " << newEntry.timestamp << ": " << message;
+    if (!context.empty()) {
+        std::cout << " {";
+        bool first = true;
+        for (const auto& pair : context) {
+            if (!first) std::cout << ", ";
+            std::cout << pair.first << ": " << pair.second;
+            first = false;
+        }
+        std::cout << "}";
+    }
+    std::cout << std::endl;
+}
+
+std::vector<LogEntry> LogHandler::getRecentLogs(int count) const {
+    std::lock_guard<std::mutex> lock(logsMutex); // Protect concurrent access
+    if (count <= 0 || count >= logs.size()) {
+        return logs;
+    }
+    return std::vector<LogEntry>(logs.end() - count, logs.end());
+}
+
+} // namespace ScreensaverCore
+
+
+
+#import <Foundation/Foundation.h> // Required for Objective-C++
+// Import your C++ headers
+#import "ScreensaverLogic.hpp"
+#import "MetricsGenerator.hpp"
+#import "LogHandler.hpp"
+
+// Define Objective-C classes/methods that wrap your C++ logic
+// These will be visible to Swift
+
+@interface ScreensaverContentBridge : NSObject
+@property (nonatomic, copy) NSString* type;
+@property (nonatomic, copy) NSDictionary<NSString*, NSString*>* data;
+@property (nonatomic, copy) NSDictionary<NSString*, NSNumber*>* animationParams;
+- (instancetype)initWithCppContent:(const ScreensaverCore::ContentItem&)cppContent;
+@end
+
+@interface AppSettingsBridge : NSObject
+@property (nonatomic, assign) BOOL powerSaverEnabled;
+@property (nonatomic, copy) NSString* selectedTheme;
+@property (nonatomic, assign) int updateIntervalMs;
+- (instancetype)initWithCppSettings:(const ScreensaverCore::AppSettings&)cppSettings;
+@end
+
+@interface SimulatedDevMetricsBridge : NSObject
+@property (nonatomic, copy) NSString* timestamp;
+@property (nonatomic, assign) double cpuUsagePercent;
+@property (nonatomic, assign) double memoryUsageMB;
+@property (nonatomic, assign) int batteryLevelPercent;
+@property (nonatomic, assign) int networkLatencyMs;
+@property (nonatomic, copy) NSString* appVersion;
+@property (nonatomic, copy) NSString* buildNumber;
+@property (nonatomic, copy) NSString* deviceModel;
+@property (nonatomic, copy) NSString* osVersion;
+- (instancetype)initWithCppMetrics:(const ScreensaverCore::SimulatedDevMetrics&)cppMetrics;
+@end
+
+@interface LogEntryBridge : NSObject
+@property (nonatomic, copy) NSString* timestamp;
+@property (nonatomic, copy) NSString* level; // Convert enum to string
+@property (nonatomic, copy) NSString* message;
+@property (nonatomic, copy) NSDictionary<NSString*, NSString*>* context;
+- (instancetype)initWithCppLogEntry:(const ScreensaverCore::LogEntry&)cppEntry;
+@end
+
+@interface ScreensaverCoreBridge : NSObject
++ (ScreensaverCoreBridge*)sharedInstance; // Singleton for the bridge
+
+- (ScreensaverContentBridge*)getNextContent;
+- (void)updateSettingsWithPowerSaverEnabled:(BOOL)powerSaverEnabled
+                               selectedTheme:(NSString*)selectedTheme
+                            updateIntervalMs:(int)updateIntervalMs;
+- (AppSettingsBridge*)getCurrentSettings;
+- (SimulatedDevMetricsBridge*)generateDevMetrics;
+- (void)logMessage:(NSString*)message level:(NSString*)level context:(NSDictionary<NSString*, NSString*>*)context;
+- (NSArray<LogEntryBridge*>*)getRecentLogs:(int)count;
+
+@end
+
+
+@implementation ScreensaverContentBridge
+- (instancetype)initWithCppContent:(const ScreensaverCore::ContentItem&)cppContent {
+    self = [super init];
+    if (self) {
+        _type = [NSString stringWithUTF8String:cppContent.type.c_str()];
+        
+        NSMutableDictionary<NSString*, NSString*>* dataDict = [NSMutableDictionary dictionary];
+        for (const auto& pair : cppContent.data) {
+            dataDict[[NSString stringWithUTF8String:pair.first.c_str()]] = [NSString stringWithUTF8String:pair.second.c_str()];
+        }
+        _data = [dataDict copy];
+
+        NSMutableDictionary<NSString*, NSNumber*>* animDict = [NSMutableDictionary dictionary];
+        for (const auto& pair : cppContent.animationParams) {
+            animDict[[NSString stringWithUTF8String:pair.first.c_str()]] = @(pair.second);
+        }
+        _animationParams = [animDict copy];
+    }
+    return self;
+}
+@end
+
+@implementation AppSettingsBridge
+- (instancetype)initWithCppSettings:(const ScreensaverCore::AppSettings&)cppSettings {
+    self = [super init];
+    if (self) {
+        _powerSaverEnabled = cppSettings.powerSaverEnabled;
+        _selectedTheme = [NSString stringWithUTF8String:cppSettings.selectedTheme.c_str()];
+        _updateIntervalMs = cppSettings.updateIntervalMs;
+    }
+    return self;
+}
+@end
+
+@implementation SimulatedDevMetricsBridge
+- (instancetype)initWithCppMetrics:(const ScreensaverCore::SimulatedDevMetrics&)cppMetrics {
+    self = [super init];
+    if (self) {
+        _timestamp = [NSString stringWithUTF8String:cppMetrics.timestamp.c_str()];
+        _cpuUsagePercent = cppMetrics.cpuUsagePercent;
+        _memoryUsageMB = cppMetrics.memoryUsageMB;
+        _batteryLevelPercent = cppMetrics.batteryLevelPercent;
+        _networkLatencyMs = cppMetrics.networkLatencyMs;
+        _appVersion = [NSString stringWithUTF8String:cppMetrics.appVersion.c_str()];
+        _buildNumber = [NSString stringWithUTF8String:cppMetrics.buildNumber.c_str()];
+        _deviceModel = [NSString stringWithUTF8String:cppMetrics.deviceModel.c_str()];
+        _osVersion = [NSString stringWithUTF8String:cppMetrics.osVersion.c_str()];
+    }
+    return self;
+}
+@end
+
+@implementation LogEntryBridge
+- (instancetype)initWithCppLogEntry:(const ScreensaverCore::LogEntry&)cppEntry {
+    self = [super init];
+    if (self) {
+        _timestamp = [NSString stringWithUTF8String:cppEntry.timestamp.c_str()];
+        
+        std::string levelStr;
+        switch (cppEntry.level) {
+            case ScreensaverCore::LogLevel::DEBUG: levelStr = "DEBUG"; break;
+            case ScreensaverCore::LogLevel::INFO:  levelStr = "INFO"; break;
+            case ScreensaverCore::LogLevel::WARN:  levelStr = "WARN"; break;
+            case ScreensaverCore::LogLevel::ERROR: levelStr = "ERROR"; break;
+        }
+        _level = [NSString stringWithUTF8String:levelStr.c_str()];
+        _message = [NSString stringWithUTF8String:cppEntry.message.c_str()];
+        
+        NSMutableDictionary<NSString*, NSString*>* contextDict = [NSMutableDictionary dictionary];
+        for (const auto& pair : cppEntry.context) {
+            contextDict[[NSString stringWithUTF8String:pair.first.c_str()]] = [NSString stringWithUTF8String:pair.second.c_str()];
+        }
+        _context = [contextDict copy];
+    }
+    return self;
+}
+@end
+
+
+@implementation ScreensaverCoreBridge {
+    ScreensaverCore::ScreensaverLogic _screensaverLogic; // C++ instance
+    ScreensaverCore::MetricsGenerator _metricsGenerator; // C++ instance
+}
+
++ (ScreensaverCoreBridge*)sharedInstance {
+    static ScreensaverCoreBridge* shared = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        shared = [[self alloc] init];
+    });
+    return shared;
+}
+
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        // C++ objects are automatically constructed here
+    }
+    return self;
+}
+
+- (ScreensaverContentBridge*)getNextContent {
+    ScreensaverCore::ContentItem cppContent = _screensaverLogic.getNextContent();
+    return [[ScreensaverContentBridge alloc] initWithCppContent:cppContent];
+}
+
+- (void)updateSettingsWithPowerSaverEnabled:(BOOL)powerSaverEnabled
+                               selectedTheme:(NSString*)selectedTheme
+                            updateIntervalMs:(int)updateIntervalMs {
+    _screensaverLogic.updateSettings(powerSaverEnabled,
+                                     [selectedTheme UTF8String],
+                                     updateIntervalMs);
+}
+
+- (AppSettingsBridge*)getCurrentSettings {
+    ScreensaverCore::AppSettings cppSettings = _screensaverLogic.getCurrentSettings();
+    return [[AppSettingsBridge alloc] initWithCppSettings:cppSettings];
+}
+
+- (SimulatedDevMetricsBridge*)generateDevMetrics {
+    ScreensaverCore::SimulatedDevMetrics cppMetrics = _metricsGenerator.generateMetrics();
+    return [[SimulatedDevMetricsBridge alloc] initWithCppMetrics:cppMetrics];
+}
+
+- (void)logMessage:(NSString*)message level:(NSString*)level context:(NSDictionary<NSString*, NSString*>*)context {
+    ScreensaverCore::LogLevel cppLevel;
+    if ([level isEqualToString:@"DEBUG"]) {
+        cppLevel = ScreensaverCore::LogLevel::DEBUG;
+    } else if ([level isEqualToString:@"INFO"]) {
+        cppLevel = ScreensaverCore::LogLevel::INFO;
+    } else if ([level isEqualToString:@"WARN"]) {
+        cppLevel = ScreensaverCore::LogLevel::WARN;
+    } else if ([level isEqualToString:@"ERROR"]) {
+        cppLevel = ScreensaverCore::LogLevel::ERROR;
+    } else {
+        cppLevel = ScreensaverCore::LogLevel::INFO; // Default
+    }
+
+    std::map<std::string, std::string> cppContext;
+    if (context) {
+        for (NSString* key in context) {
+            NSString* value = context[key];
+            cppContext[[key UTF8String]] = [value UTF8String];
+        }
+    }
+    ScreensaverCore::LogHandler::getInstance().log(cppLevel, [message UTF8String], cppContext);
+}
+
+- (NSArray<LogEntryBridge*>*)getRecentLogs:(int)count {
+    std::vector<ScreensaverCore::LogEntry> cppLogs = ScreensaverCore::LogHandler::getInstance().getRecentLogs(count);
+    NSMutableArray<LogEntryBridge*>* bridgedLogs = [NSMutableArray arrayWithCapacity:cppLogs.size()];
+    for (const auto& cppEntry : cppLogs) {
+        [bridgedLogs addObject:[[LogEntryBridge alloc] initWithCppLogEntry:cppEntry]];
+    }
+    return [bridgedLogs copy];
+}
+
+@end
+
+
+
+#import "ScreensaverBridge.mm" // Or just "ScreensaverBridge.h" if you separate .h and .mm
+
+
+
+// In ScreensaverViewController.swift
+
+// ... (existing code)
+
+// MARK: - Screensaver Logic (using C++ bridge)
+private func startScreensaverAnimation() {
+    stopScreensaverAnimation() // Invalidate any existing timer
+
+    // Get update interval from C++ settings
+    let settings = ScreensaverCoreBridge.sharedInstance().getCurrentSettings()
+    contentUpdateInterval = TimeInterval(settings.updateIntervalMs) / 1000.0 // Convert ms to seconds
+
+    screensaverTimer = Timer.scheduledTimer(withTimeInterval: contentUpdateInterval, repeats: true) { [weak self] _ in
+        self?.updateScreensaverContent()
+    }
+    updateScreensaverContent() // Immediate update
+}
+
+private func updateScreensaverContent() {
+    let content = ScreensaverCoreBridge.sharedInstance().getNextContent()
+    DispatchQueue.main.async {
+        if let type = content.type {
+            switch type {
+            case "quote":
+                self.dynamicContentLabel.text = content.data?["text"] ?? "C++ Quote Error"
+                // Ensure background returns to neutral
+                if self.view.backgroundColor != .black {
+                    UIView.animate(withDuration: 0.5) { self.view.backgroundColor = .black }
+                }
+            case "color":
+                if let hexColor = content.data?["hex"], let uiColor = UIColor(hex: hexColor) {
+                    let duration = content.animationParams?["duration"]?.doubleValue ?? 1.5
+                    UIView.animate(withDuration: duration) {
+                        self.view.backgroundColor = uiColor
+                    }
+                    self.currentBackgroundColor = uiColor
+                    self.dynamicContentLabel.text = "Color: \(content.data?["name"] ?? "Unknown")"
+                }
+            default:
+                self.dynamicContentLabel.text = "Unknown C++ Content Type: \(type)"
+            }
+        }
+    }
+}
+
+// MARK: - Power Saver Logic (using C++ bridge)
+private func applyPowerSaverSettings(_ active: Bool) {
+    // Update C++ settings
+    let currentSettings = ScreensaverCoreBridge.sharedInstance().getCurrentSettings()
+    ScreensaverCoreBridge.sharedInstance().updateSettingsWithPowerSaverEnabled(
+        active,
+        selectedTheme: currentSettings.selectedTheme,
+        updateIntervalMs: currentSettings.updateIntervalMs
+    )
+    
+    // ... (rest of the Swift UI updates as before) ...
+    // Stop the current timer and restart with new interval based on updated C++ settings
+    stopScreensaverAnimation()
+    startScreensaverAnimation() // This will now pick up the new interval from C++
+    
+    UIView.animate(withDuration: 0.5) {
+        self.dimmingOverlay.alpha = active ? 0.7 : 0.0
+        self.dynamicContentLabel.alpha = active ? 0.7 : 1.0
+    }
+    // ... (rest of native Swift screen brightness handling) ...
+}
+
+
+// MARK: - Gesture Handlers (using C++ bridge for logging)
+@objc private func handleSingleTap() {
+    let currentSettings = ScreensaverCoreBridge.sharedInstance().getCurrentSettings()
+    let newPowerSaverState = !currentSettings.powerSaverEnabled
+    ScreensaverCoreBridge.sharedInstance().updateSettingsWithPowerSaverEnabled(
+        newPowerSaverState,
+        selectedTheme: currentSettings.selectedTheme,
+        updateIntervalMs: currentSettings.updateIntervalMs
+    )
+    self.isPowerSaverModeActive = newPowerSaverState // Update local Swift state
+    ScreensaverCoreBridge.sharedInstance().logMessage("Power Saver Toggled", level: newPowerSaverState ? "INFO" : "INFO", context: ["new_state": newPowerSaverState ? "ON" : "OFF"])
+}
+
+@objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+    if gesture.state == .began {
+        ScreensaverCoreBridge.sharedInstance().logMessage("Long press detected, presenting Developer Tools.", level: "DEBUG", context: nil)
+        let developerToolsVC = DeveloperToolsViewController()
+        developerToolsVC.modalPresentationStyle = .fullScreen
+        present(developerToolsVC, animated: true, completion: nil)
+    }
+}
+
+// Extension to help convert hex strings to UIColor (optional, but useful for 'color' type content)
+extension UIColor {
+    convenience init?(hex: String) {
+        let r, g, b, a: CGFloat
+
+        if hex.hasPrefix("#") {
+            let start = hex.index(hex.startIndex, offsetBy: 1)
+            let hexColor = String(hex[start...])
+
+            if hexColor.count == 6 {
+                let scanner = Scanner(string: hexColor)
+                var hexNumber: UInt64 = 0
+
+                if scanner.scanHexInt64(&hexNumber) {
+                    r = CGFloat((hexNumber & 0xff0000) >> 16) / 255
+                    g = CGFloat((hexNumber & 0x00ff00) >> 8) / 255
+                    b = CGFloat((hexNumber & 0x0000ff) >> 0) / 255
+                    a = 1.0
+
+                    self.init(red: r, green: g, blue: b, alpha: a)
+                    return
+                }
+            }
+        }
+        return nil
+    }
+}
+
+
+// In DeveloperToolsViewController.swift
+
+// ... (existing code)
+
+// MARK: - Metrics Display (using C++ bridge)
+private func displaySystemMetrics() {
+    let metrics = ScreensaverCoreBridge.sharedInstance().generateDevMetrics()
+    
+    // ... (rest of native Swift device info) ...
+    let device = UIDevice.current
+    let processInfo = ProcessInfo.processInfo
+    // ... (battery, memory, etc. - as in previous Swift example) ...
+
+    metricsLabel.text = """
+    Device Model: \(device.model)
+    OS Version: iOS \(device.systemVersion)
+    App Version: \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "N/A")
+    Build Number: \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "N/A")
+
+    --- Performance (Simulated C++ / Live) ---
+    Timestamp: \(metrics.timestamp ?? "N/A")
+    CPU Usage (Simulated): \(String(format: "%.2f%%", metrics.cpuUsagePercent))
+    Memory (Simulated App): \(String(format: "%.2f MB", metrics.memoryUsageMB))
+    Battery: \(metrics.batteryLevelPercent)% (Live)
+    Network Latency (Simulated): \(metrics.networkLatencyMs) ms
+    Simulated Device: \(metrics.deviceModel ?? "N/A")
+    Simulated OS: \(metrics.osVersion ?? "N/A")
+    """
+}
+
+// MARK: - Log Display (using C++ bridge)
+private func displayAppLogs() {
+    let logs = ScreensaverCoreBridge.sharedInstance().getRecentLogs(50) // Get last 50 logs from C++
+    var logText = ""
+    for logEntry in logs {
+        logText += "[\(logEntry.timestamp ?? "N/A")] [\(logEntry.level ?? "INFO")] \(logEntry.message ?? "No message")\n"
+    }
+    logTextView.text = logText
+    // Scroll to bottom
+    let bottom = logTextView.contentSize.height - logTextView.bounds.size.height
+    if bottom > 0 {
+        logTextView.setContentOffset(CGPoint(x: 0, y: bottom), animated: true)
+    }
+}
+
+
+
+
+import UIKit
+
+class ScreensaverViewController: UIViewController {
+
+    // MARK: - UI Elements
+    private let dynamicContentLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Initializing Screensaver..."
+        label.font = UIFont.systemFont(ofSize: 38, weight: .bold)
+        label.textColor = .white
+        label.textAlignment = .center
+        label.numberOfLines = 0
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private let hintLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Tap once to toggle Power Saver\nLong press for Developer Tools"
+        label.font = UIFont.systemFont(ofSize: 16, weight: .regular)
+        label.textColor = .lightGray
+        label.textAlignment = .center
+        label.numberOfLines = 2
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private let dimmingOverlay: UIView = {
+        let view = UIView()
+        view.backgroundColor = .black
+        view.alpha = 0.0 // Initially transparent
+        view.isUserInteractionEnabled = false // Allow touches to pass through
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
+    }()
+
+    // MARK: - Properties
+    private var screensaverTimer: Timer?
+    private var contentUpdateInterval: TimeInterval = 3.0 // Default update interval
+    private var originalBrightness: CGFloat = UIScreen.main.brightness // Store original system brightness
+
+    var isPowerSaverModeActive: Bool = false {
+        didSet {
+            // Update UI and behavior when power saver mode changes
+            applyPowerSaverSettings(isPowerSaverModeActive)
+            updateHintLabel()
+            if isPowerSaverModeActive {
+                LogManager.shared.log("Power Saver Mode: ON", level: .info)
+            } else {
+                LogManager.shared.log("Power Saver Mode: OFF", level: .info)
+            }
+        }
+    }
+
+    private var currentBackgroundColor: UIColor = .black // For dynamic background
+
+    // MARK: - Lifecycle
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setupView()
+        setupUI()
+        setupGestures()
+        LogManager.shared.log("ScreensaverViewController loaded.", level: .debug)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // Ensure the screen stays awake while this app is in the foreground
+        UIApplication.shared.isIdleTimerDisabled = true
+        startScreensaverAnimation()
+        // Apply initial power saver settings based on default or loaded state
+        applyPowerSaverSettings(isPowerSaverModeActive)
+        LogManager.shared.log("ScreensaverViewController appeared. Idle timer disabled.", level: .debug)
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        // Allow the screen to dim/lock again when the app is no longer foreground
+        UIApplication.shared.isIdleTimerDisabled = false
+        stopScreensaverAnimation()
+        restoreScreenBrightness() // Always restore brightness on exit
+        LogManager.shared.log("ScreensaverViewController disappeared. Idle timer enabled.", level: .debug)
+    }
+    
+    // Optional: Hide status bar for full-screen effect
+    override var prefersStatusBarHidden: Bool {
+        return true
+    }
+    override var preferredStatusBarUpdateAnimation: UIStatusBarAnimation {
+        return .slide // Or .fade
+    }
+
+    // MARK: - Setup
+    private func setupView() {
+        self.view.backgroundColor = currentBackgroundColor // Initial background
+    }
+
+    private func setupUI() {
+        view.addSubview(dynamicContentLabel)
+        view.addSubview(hintLabel)
+        view.addSubview(dimmingOverlay) // Add dimming overlay
+
+        NSLayoutConstraint.activate([
+            dynamicContentLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            dynamicContentLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: -50),
+            dynamicContentLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 30),
+            dynamicContentLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -30),
+
+            hintLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            hintLabel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
+            hintLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            hintLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+
+            dimmingOverlay.topAnchor.constraint(equalTo: view.topAnchor),
+            dimmingOverlay.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            dimmingOverlay.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            dimmingOverlay.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+    }
+
+    private func setupGestures() {
+        let singleTap = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap))
+        view.addGestureRecognizer(singleTap)
+
+        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress))
+        longPress.minimumPressDuration = 1.0 // 1 second press
+        view.addGestureRecognizer(longPress)
+    }
+
+    // MARK: - Screensaver Animation / Content Update
+    private func startScreensaverAnimation() {
+        stopScreensaverAnimation() // Invalidate any existing timer
+
+        // Set initial interval based on power saver mode
+        contentUpdateInterval = isPowerSaverModeActive ? 6.0 : 3.0 // Slower updates in power saver
+
+        screensaverTimer = Timer.scheduledTimer(withTimeInterval: contentUpdateInterval, repeats: true) { [weak self] _ in
+            self?.updateScreensaverContent()
+        }
+        // Immediately update content on start
+        updateScreensaverContent()
+    }
+
+    private func stopScreensaverAnimation() {
+        screensaverTimer?.invalidate()
+        screensaverTimer = nil
+    }
+
+    private func updateScreensaverContent() {
+        let colors: [UIColor] = [.systemRed, .systemGreen, .systemBlue, .systemPurple, .systemOrange, .systemCyan, .systemMint]
+        let quotes = [
+            "The only way to do great work is to love what you do. - Steve Jobs",
+            "Innovation distinguishes between a leader and a follower. - Steve Jobs",
+            "Stay hungry, stay foolish. - Steve Jobs",
+            "Your time is limited, don't waste it living someone else's life. - Steve Jobs",
+            "Design is not just what it looks like and feels like. Design is how it works. - Steve Jobs"
+        ]
+        let messages = [
+            "Hello from iOS!",
+            "Welcome to the Future!",
+            "System Status: OK",
+            "Dream Big!",
+            "Coding in Swift!",
+            "Enjoy the tranquility."
+        ]
+
+        let currentOption = Int.random(in: 0...2)
+
+        if currentOption == 0 {
+            // Dynamic Background Color
+            let newColor = colors.randomElement()!
+            UIView.animate(withDuration: 1.5, animations: {
+                self.view.backgroundColor = newColor
+            })
+            currentBackgroundColor = newColor
+            dynamicContentLabel.text = messages.randomElement()
+        } else if currentOption == 1 {
+            // Dynamic Quote
+            dynamicContentLabel.text = quotes.randomElement()
+            // Ensure background returns to a neutral color if it changed
+            if view.backgroundColor != .black {
+                UIView.animate(withDuration: 0.5) { self.view.backgroundColor = .black }
+            }
+        } else {
+            // Dynamic Message
+            dynamicContentLabel.text = messages.randomElement()
+            if view.backgroundColor != .black {
+                UIView.animate(withDuration: 0.5) { self.view.backgroundColor = .black }
+            }
+        }
+    }
+
+    // MARK: - Power Saver Logic
+    private func applyPowerSaverSettings(_ active: Bool) {
+        // Stop the current timer and restart with new interval
+        stopScreensaverAnimation()
+        startScreensaverAnimation() // This will pick up the new interval based on `isPowerSaverModeActive`
+
+        // Visual dimming via overlay
+        UIView.animate(withDuration: 0.5) {
+            self.dimmingOverlay.alpha = active ? 0.7 : 0.0 // Dim to 70% opacity, or clear
+            self.dynamicContentLabel.alpha = active ? 0.7 : 1.0 // Dim content text too
+        }
+
+        // Adjust system brightness (use with caution - affects whole device)
+        // A better approach for in-app dimming is just the overlay.
+        // If you must use system brightness, save and restore properly.
+        if active {
+            // Only dim system brightness if it's not already very low, to avoid jarring changes
+            if UIScreen.main.brightness > 0.15 {
+                UIScreen.main.brightness = 0.15 // Dim to 15% system brightness
+            }
+        } else {
+            // Restore to original brightness only if we previously dimmed it specifically
+            // Or set to a reasonable default if you didn't explicitly track the pre-screensaver brightness
+            UIScreen.main.brightness = originalBrightness
+        }
+    }
+
+    private func restoreScreenBrightness() {
+        // Restore only if the app was responsible for dimming it
+        // A simple approach is to always restore to original on exit
+        UIScreen.main.brightness = originalBrightness
+    }
+
+    private func updateHintLabel() {
+        let powerSaverStatus = isPowerSaverModeActive ? "Power Saver ON" : "Power Saver OFF"
+        hintLabel.text = "Tap once to toggle \(powerSaverStatus)\nLong press for Developer Tools"
+    }
+
+    // MARK: - Gesture Handlers
+    @objc private func handleSingleTap() {
+        isPowerSaverModeActive.toggle()
+        LogManager.shared.log("Power Saver Toggled. New state: \(isPowerSaverModeActive ? "ON" : "OFF")", level: .info)
+    }
+
+    @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+        if gesture.state == .began {
+            LogManager.shared.log("Long press detected, presenting Developer Tools.", level: .debug)
+            let developerToolsVC = DeveloperToolsViewController()
+            // Set modal presentation style for a full-screen or card-like appearance
+            developerToolsVC.modalPresentationStyle = .fullScreen // or .pageSheet, .formSheet
+            present(developerToolsVC, animated: true, completion: nil)
+        }
+    }
+}
+
+
+
+
+import UIKit
+import SystemConfiguration.CaptiveNetwork // For WiFi SSID (limited access in iOS 13+)
+import CoreTelephony // For carrier info
+import Network // For more robust network monitoring (iOS 12+)
+
+class DeveloperToolsViewController: UIViewController {
+
+    // MARK: - UI Elements
+    private let scrollView: UIScrollView = {
+        let sv = UIScrollView()
+        sv.translatesAutoresizingMaskIntoConstraints = false
+        return sv
+    }()
+
+    private let stackView: UIStackView = {
+        let sv = UIStackView()
+        sv.axis = .vertical
+        sv.spacing = 10
+        sv.alignment = .leading
+        sv.translatesAutoresizingMaskIntoConstraints = false
+        return sv
+    }()
+
+    private let closeButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("Close", for: .normal)
+        button.titleLabel?.font = UIFont.systemFont(ofSize: 20, weight: .bold)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
+    }()
+
+    private let metricsLabel: UILabel = {
+        let label = UILabel()
+        label.numberOfLines = 0 // Allow multiple lines
+        label.font = UIFont.systemFont(ofSize: 15)
+        return label
+    }()
+
+    private let logTextView: UITextView = {
+        let textView = UITextView()
+        textView.isEditable = false
+        textView.backgroundColor = .secondarySystemFill // Adapts to light/dark mode
+        textView.textColor = .label
+        textView.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        textView.layer.cornerRadius = 8
+        textView.textContainerInset = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        textView.translatesAutoresizingMaskIntoConstraints = false
+        return textView
+    }()
+
+    // MARK: - Properties
+    private var metricsTimer: Timer?
+    private var networkMonitor: NWPathMonitor? // For robust network monitoring
+
+    // MARK: - Lifecycle
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+        setupUI()
+        setupActions()
+        startNetworkMonitoring()
+        LogManager.shared.log("DeveloperToolsViewController loaded.", level: .debug)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        updateMetricsAndLogs() // Initial update
+        startMetricsTimer()
+        LogManager.shared.log("DeveloperToolsViewController appeared. Metrics timer started.", level: .debug)
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        stopMetricsTimer()
+        stopNetworkMonitoring()
+        LogManager.shared.log("DeveloperToolsViewController disappeared. Metrics timer stopped.", level: .debug)
+    }
+
+    // MARK: - Setup
+    private func setupUI() {
+        view.addSubview(closeButton)
+        view.addSubview(scrollView)
+        scrollView.addSubview(stackView)
+
+        stackView.addArrangedSubview(createHeaderLabel("App & Device Information"))
+        stackView.addArrangedSubview(metricsLabel)
+
+        stackView.addArrangedSubview(createHeaderLabel("App Logs"))
+        stackView.addArrangedSubview(logTextView)
+
+        // Add some test log buttons
+        let testLogStack = UIStackView()
+        testLogStack.axis = .horizontal
+        testLogStack.spacing = 10
+        testLogStack.distribution = .fillEqually
+        stackView.addArrangedSubview(testLogStack)
+
+        let infoButton = UIButton(type: .system)
+        infoButton.setTitle("Send INFO Log", for: .normal)
+        infoButton.addTarget(self, action: #selector(sendTestInfoLog), for: .touchUpInside)
+        testLogStack.addArrangedSubview(infoButton)
+
+        let warnButton = UIButton(type: .system)
+        warnButton.setTitle("Send WARN Log", for: .normal)
+        warnButton.tintColor = .systemOrange
+        warnButton.addTarget(self, action: #selector(sendTestWarnLog), for: .touchUpInside)
+        testLogStack.addArrangedSubview(warnButton)
+        
+        let errorButton = UIButton(type: .system)
+        errorButton.setTitle("Send ERROR Log", for: .normal)
+        errorButton.tintColor = .systemRed
+        errorButton.addTarget(self, action: #selector(sendTestErrorLog), for: .touchUpInside)
+        testLogStack.addArrangedSubview(errorButton)
+
+
+        NSLayoutConstraint.activate([
+            closeButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
+            closeButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+
+            scrollView.topAnchor.constraint(equalTo: closeButton.bottomAnchor, constant: 20),
+            scrollView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20),
+            scrollView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+            scrollView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
+
+            stackView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
+            stackView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor),
+            stackView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
+            stackView.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.width) // Ensure stack view matches scroll view width
+        ])
+
+        // Constraints for logTextView (fixed height)
+        NSLayoutConstraint.activate([
+            logTextView.heightAnchor.constraint(equalToConstant: 300) // Fixed height for logs
+        ])
+    }
+
+    private func createHeaderLabel(_ text: String) -> UILabel {
+        let label = UILabel()
+        label.text = text
+        label.font = UIFont.systemFont(ofSize: 18, weight: .semibold)
+        label.textColor = .systemBlue // Distinct color for headers
+        label.textAlignment = .left
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }
+
+    private func setupActions() {
+        closeButton.addTarget(self, action: #selector(closeButtonTapped), for: .touchUpInside)
+    }
+    
+    // MARK: - Network Monitoring (NWPathMonitor)
+    private func startNetworkMonitoring() {
+        networkMonitor = NWPathMonitor()
+        let queue = DispatchQueue(label: "NetworkMonitor")
+        networkMonitor?.start(queue: queue)
+        networkMonitor?.pathUpdateHandler = { [weak self] path in
+            DispatchQueue.main.async {
+                self?.updateMetricsAndLogs() // Refresh UI on network change
+            }
+        }
+    }
+    
+    private func stopNetworkMonitoring() {
+        networkMonitor?.cancel()
+        networkMonitor = nil
+    }
+
+    // MARK: - Data Refresh
+    private func startMetricsTimer() {
+        metricsTimer?.invalidate()
+        metricsTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            self?.updateMetricsAndLogs()
+        }
+    }
+
+    private func stopMetricsTimer() {
+        metricsTimer?.invalidate()
+        metricsTimer = nil
+    }
+
+    private func updateMetricsAndLogs() {
+        DispatchQueue.main.async {
+            self.displaySystemMetrics()
+            self.displayAppLogs()
+        }
+    }
+
+    // MARK: - Metrics Display
+    private func displaySystemMetrics() {
+        let device = UIDevice.current
+        
+        // Battery Info
+        device.isBatteryMonitoringEnabled = true
+        let batteryLevel = Int(device.batteryLevel * 100)
+        let batteryState: String
+        switch device.batteryState {
+        case .unknown: batteryState = "Unknown"
+        case .unplugged: batteryState = "Unplugged"
+        case .charging: batteryState = "Charging"
+        case .full: batteryState = "Full"
+        @unknown default: batteryState = "Unknown"
+        }
+
+        // Memory Usage (App's Resident Set Size)
+        // This is the most reliable way to get *your app's* memory footprint
+        var taskInfo = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size)/4
+        let kernReturn = task_info(mach_task_self_, mach_task_flavor_t(MACH_TASK_BASIC_INFO), &taskInfo.bmi, &count)
+        var residentMemoryMB: Double = 0.0
+        if kernReturn == KERN_SUCCESS {
+            residentMemoryMB = Double(taskInfo.resident_size) / (1024.0 * 1024.0)
+        }
+        
+        // CPU Usage (Highly complex for per-app without private APIs)
+        // Real-time per-app CPU usage is very restricted. This is a placeholder.
+        // For actual profiling, use Xcode Instruments (Time Profiler).
+        let cpuUsage = "N/A (Limited App Access)"
+
+        // Network Info
+        var networkType = "Unknown"
+        var isConnected = false
+        if let currentPath = networkMonitor?.currentPath {
+            if currentPath.status == .satisfied {
+                isConnected = true
+                if currentPath.usesInterfaceType(.wifi) {
+                    networkType = "WiFi"
+                } else if currentPath.usesInterfaceType(.cellular) {
+                    networkType = "Cellular"
+                } else if currentPath.usesInterfaceType(.wiredEthernet) {
+                    networkType = "Ethernet"
+                } else if currentPath.usesInterfaceType(.loopback) {
+                    networkType = "Loopback"
+                }
+            } else {
+                networkType = "Disconnected"
+            }
+        }
+        
+        // Carrier Info (if available)
+        let telephoyInfo = CTTelephonyNetworkInfo()
+        let carrierName = telephoyInfo.serviceSubscriberCellularProviders?.first?.value.carrierName ?? "N/A"
+
+        metricsLabel.text = """
+        Device Model: \(device.model)
+        OS Version: iOS \(device.systemVersion)
+        App Version: \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "N/A")
+        Build Number: \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "N/A")
+
+        --- Performance (Live) ---
+        CPU Usage (App): \(cpuUsage)
+        Memory (App RSS): \(String(format: "%.2f MB", residentMemoryMB))
+        Battery: \(batteryLevel)% (\(batteryState))
+        Network: \(isConnected ? networkType : "Disconnected")
+        Carrier: \(carrierName)
+        """
+    }
+
+    // MARK: - Log Display
+    private func displayAppLogs() {
+        var logText = ""
+        for logEntry in LogManager.shared.getRecentLogs(count: 50) {
+            logText += "[\(logEntry.timestamp)] [\(logEntry.level.rawValue)] \(logEntry.message)\n"
+        }
+        logTextView.text = logText
+        // Scroll to bottom
+        let bottom = logTextView.contentSize.height - logTextView.bounds.size.height
+        if bottom > 0 {
+            logTextView.setContentOffset(CGPoint(x: 0, y: bottom), animated: true)
+        }
+    }
+
+    // MARK: - Actions
+    @objc private func closeButtonTapped() {
+        dismiss(animated: true, completion: nil)
+    }
+    
+    @objc private func sendTestInfoLog() {
+        LogManager.shared.log("This is a test INFO log from the dev tools.", level: .info)
+    }
+    
+    @objc private func sendTestWarnLog() {
+        LogManager.shared.log("This is a test WARNING log from the dev tools.", level: .warn)
+    }
+    
+    @objc private func sendTestErrorLog() {
+        LogManager.shared.log("This is a test ERROR log from the dev tools. Something went wrong!", level: .error)
+    }
+}
+
+
+
+import Foundation
+
+enum LogLevel: String {
+    case debug = "DEBUG"
+    case info = "INFO"
+    case warn = "WARN"
+    case error = "ERROR"
+}
+
+struct LogEntry {
+    let timestamp: String
+    let level: LogLevel
+    let message: String
+}
+
+class LogManager {
+    static let shared = LogManager() // Singleton
+
+    private var logs: [LogEntry] = []
+    private let maxLogs = 100 // Keep a maximum of 100 log entries
+    private let logQueue = DispatchQueue(label: "com.advancedscreensaver.logger", qos: .background) // Background queue for logging
+
+    private init() {} // Private initializer to ensure singleton
+
+    func log(_ message: String, level: LogLevel) {
+        logQueue.async {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "HH:mm:ss.SSS"
+            let timestamp = formatter.string(from: Date())
+            let newEntry = LogEntry(timestamp: timestamp, level: level, message: message)
+
+            self.logs.append(newEntry)
+            if self.logs.count > self.maxLogs {
+                self.logs.removeFirst()
+            }
+            // Also print to Xcode console for debugging
+            print("[\(level.rawValue)] \(timestamp): \(message)")
+        }
+    }
+
+    func getRecentLogs(count: Int) -> [LogEntry] {
+        return logQueue.sync {
+            let startIndex = max(0, logs.count - count)
+            return Array(logs[startIndex..<logs.count])
+        }
+    }
+}
+
+
+
+
+import UIKit
+
+extension UIColor {
+    convenience init?(hex: String) {
+        let r, g, b, a: CGFloat
+
+        if hex.hasPrefix("#") {
+            let start = hex.index(hex.startIndex, offsetBy: 1)
+            let hexColor = String(hex[start...])
+
+            // Handle both 6-digit (RGB) and 8-digit (RGBA) hex strings
+            if hexColor.count == 6 {
+                let scanner = Scanner(string: hexColor)
+                var hexNumber: UInt64 = 0
+
+                if scanner.scanHexInt64(&hexNumber) {
+                    r = CGFloat((hexNumber & 0xff0000) >> 16) / 255
+                    g = CGFloat((hexNumber & 0x00ff00) >> 8) / 255
+                    b = CGFloat((hexNumber & 0x0000ff) >> 0) / 255
+                    a = 1.0 // Opaque
+
+                    self.init(red: r, green: g, blue: b, alpha: a)
+                    return
+                }
+            } else if hexColor.count == 8 {
+                let scanner = Scanner(string: hexColor)
+                var hexNumber: UInt64 = 0
+
+                if scanner.scanHexInt64(&hexNumber) {
+                    r = CGFloat((hexNumber & 0xff000000) >> 24) / 255
+                    g = CGFloat((hexNumber & 0x00ff0000) >> 16) / 255
+                    b = CGFloat((hexNumber & 0x0000ff00) >> 8) / 255
+                    a = CGFloat(hexNumber & 0x000000ff) / 255
+
+                    self.init(red: r, green: g, blue: b, alpha: a)
+                    return
+                }
+            }
+        }
+        return nil
+    }
+}
+
+
+
+import UIKit
+
+class SceneDelegate: UIResponder, UIWindowSceneDelegate {
+
+    var window: UIWindow?
+
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
+        guard let windowScene = (scene as? UIWindowScene) else { return }
+
+        let window = UIWindow(windowScene: windowScene)
+        window.rootViewController = ScreensaverViewController() // Set your ScreensaverVC as the root
+        self.window = window
+        window.makeKeyAndVisible()
+
+        LogManager.shared.log("SceneDelegate: App started.", level: .info)
+    }
+
+    func sceneDidBecomeActive(_ scene: UIScene) {
+        // Called when the scene has moved from an inactive state to an active state.
+        // This is where you might restart content updates if paused.
+        LogManager.shared.log("SceneDelegate: Scene became active.", level: .info)
+    }
+
+    func sceneWillResignActive(_ scene: UISene) {
+        // Called when the scene will move from an active state to an inactive state.
+        // This may occur due to temporary interruptions (ex. an incoming phone call).
+        LogManager.shared.log("SceneDelegate: Scene will resign active.", level: .warn)
+    }
+
+    func sceneDidEnterBackground(_ scene: UIScene) {
+        // Called as the scene transitions from the foreground to the background.
+        // This is where you would typically pause heavy animations or content updates.
+        LogManager.shared.log("SceneDelegate: Scene entered background.", level: .info)
+    }
+
+    // ... other SceneDelegate methods
+}
+
+
+
+
+
+
