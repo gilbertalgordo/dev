@@ -1,0 +1,2104 @@
+import SwiftUI
+import LocalAuthentication // For Biometrics (Face ID/Touch ID)
+import Foundation
+import AppIntents // For Siri Shortcuts and App-level integration
+import CoreML // For on-device machine learning (if custom models are used)
+import PhotosUI // For photo-related intelligence features (e.g., Image Wand)
+
+// MARK: - Advanced Biometric Authentication Service
+
+class BiometricAuthenticationService: ObservableObject {
+    @Published var isAuthenticated: Bool = false
+    @Published var authenticationError: String?
+
+    private let context = LAContext()
+
+    func authenticateUser(reason: String, completion: @escaping (Bool, String?) -> Void) {
+        authenticationError = nil // Clear previous errors
+
+        // Check if biometric authentication is available
+        var error: NSError?
+        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
+            context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { success, authenticationError in
+                DispatchQueue.main.async {
+                    if success {
+                        self.isAuthenticated = true
+                        completion(true, nil)
+                    } else {
+                        // Handle different authentication errors
+                        if let laError = authenticationError as? LAError {
+                            switch laError.code {
+                            case .userCancel:
+                                self.authenticationError = "Authentication cancelled by user."
+                            case .userFallback:
+                                self.authenticationError = "User chose to enter passcode."
+                            case .biometryNotAvailable:
+                                self.authenticationError = "Biometric authentication not available on this device."
+                            case .biometryLockout:
+                                self.authenticationError = "Biometric authentication locked out. Please use passcode."
+                            case .biometryNotEnrolled:
+                                self.authenticationError = "No biometrics enrolled on this device."
+                            default:
+                                self.authenticationError = "Biometric authentication failed: \(laError.localizedDescription)"
+                            }
+                        } else {
+                            self.authenticationError = "Authentication failed: An unknown error occurred."
+                        }
+                        self.isAuthenticated = false
+                        completion(false, self.authenticationError)
+                    }
+                }
+            }
+        } else {
+            // Biometrics not available or configured
+            DispatchQueue.main.async {
+                self.authenticationError = "Biometric authentication not available or configured: \(error?.localizedDescription ?? "Unknown error")"
+                self.isAuthenticated = false
+                completion(false, self.authenticationError)
+            }
+        }
+    }
+}
+
+// MARK: - Siri Integration (App Intent Example)
+
+// Define an App Intent that Siri can recognize and execute
+struct OrderCoffeeIntent: AppIntent {
+    static var title: LocalizedStringResource = "Order Coffee"
+    static var description = IntentDescription("Orders your favorite coffee from the app.")
+
+    @Parameter(title: "Coffee Type", description: "The type of coffee to order (e.g., Latte, Cappuccino)")
+    var coffeeType: String
+
+    @Parameter(title: "Size", description: "The size of the coffee (e.g., Small, Medium, Large)")
+    var size: String
+
+    // Add more parameters for customization (e.g., sugar, milk type)
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Order a \(.value(\.$size)) \(.value(\.$coffeeType))")
+    }
+
+    func perform() async throws -> some IntentResult {
+        // Simulate ordering coffee with a delay
+        try await Task.sleep(for: .seconds(2))
+
+        // In a real app, this would interact with a backend or local database
+        print("Ordering \(size) \(coffeeType)...")
+
+        return .result(
+            dialog: "Your \(size) \(coffeeType) has been ordered!"
+        )
+    }
+}
+
+// MARK: - Apple Intelligence Features (Conceptual Usage)
+
+// This represents a hypothetical service that leverages Apple Intelligence
+// features like Writing Tools, Image Playground, or contextual understanding.
+class AppleIntelligenceService: ObservableObject {
+    @Published var summarizedText: String = ""
+    @Published var generatedImageDescription: String = ""
+    @Published var cleanedUpPhoto: UIImage?
+
+    // Conceptual function for summarizing text using Apple Intelligence Writing Tools
+    func summarizeText(_ text: String) async {
+        // In a real scenario, you'd use the Writing Tools API here.
+        // For example:
+        // let summary = await WritingTools.shared.summarize(text)
+        // self.summarizedText = summary
+
+        // Simulating a summary for demonstration
+        await Task.sleep(for: .seconds(1))
+        self.summarizedText = "This is a summarized version of: \"\(text)\""
+        print("Text summarized by Apple Intelligence: \(self.summarizedText)")
+    }
+
+    // Conceptual function for generating an image description based on user input
+    // This could leverage Image Playground capabilities.
+    func generateImage(prompt: String) async {
+        // In a real scenario, you'd use Image Playground APIs here.
+        // For example:
+        // let generatedImage = await ImagePlayground.shared.generateImage(prompt: prompt)
+        // self.generatedImage = generatedImage
+
+        // Simulating image generation for demonstration
+        await Task.sleep(for: .seconds(2))
+        self.generatedImageDescription = "Image generated for: \"\(prompt)\""
+        print("Image generated by Apple Intelligence: \(self.generatedImageDescription)")
+    }
+
+    // Conceptual function for "cleaning up" a photo using Apple Intelligence features
+    // like Clean Up in Photos.
+    func cleanUpPhoto(_ photo: UIImage) async {
+        // This would involve passing the photo to the Photos framework's
+        // Apple Intelligence capabilities.
+        await Task.sleep(for: .seconds(1.5))
+        self.cleanedUpPhoto = photo // In reality, this would be the modified photo
+        print("Photo conceptually cleaned up by Apple Intelligence.")
+    }
+}
+
+
+// MARK: - Auto-Updates (System Level)
+
+/*
+    Auto-updates for core Apple Intelligence, Biometrics, and Siri
+    are managed by the iOS/iPadOS/macOS system itself.
+    Developers don't implement these directly within their apps.
+    Users typically enable "Automatic Updates" in Settings -> General -> Software Update.
+
+    However, an app *can* be designed to check for its own updates or
+    be aware of system capabilities.
+*/
+
+// MARK: - Main Application View (Conceptual)
+
+struct ContentView: View {
+    @StateObject private var biometricService = BiometricAuthenticationService()
+    @StateObject private var appleIntelligenceService = AppleIntelligenceService()
+
+    @State private var textToSummarize: String = "This is a long piece of text that needs to be summarized by Apple Intelligence. It contains various details and information that could be condensed for easier reading."
+    @State private var imageGenerationPrompt: String = "A futuristic city at sunset with flying cars and neon lights."
+    @State private var selectedPhoto: UIImage?
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section("Biometric Authentication") {
+                    Button("Authenticate with Face ID/Touch ID") {
+                        biometricService.authenticateUser(reason: "To access secure content in this app.") { success, error in
+                            if success {
+                                print("Authentication successful!")
+                            } else if let error = error {
+                                print("Authentication failed: \(error)")
+                            }
+                        }
+                    }
+                    if biometricService.isAuthenticated {
+                        Text("User Authenticated Successfully!")
+                            .foregroundColor(.green)
+                    }
+                    if let error = biometricService.authenticationError {
+                        Text("Error: \(error)")
+                            .foregroundColor(.red)
+                    }
+                }
+
+                Section("Siri Integration (App Intents)") {
+                    Text("You can say: 'Hey Siri, order a Latte Medium from MyAppName'")
+                    Button("Simulate Siri Order (App Intent)") {
+                        // In a real scenario, Siri would trigger the OrderCoffeeIntent
+                        // This button just shows what the intent does.
+                        Task {
+                            let intent = OrderCoffeeIntent(coffeeType: "Espresso", size: "Small")
+                            _ = try? await intent.perform()
+                        }
+                    }
+                }
+
+                Section("Apple Intelligence - Writing Tools") {
+                    TextEditor(text: $textToSummarize)
+                        .frame(height: 100)
+                        .border(Color.gray, width: 0.5)
+                        .padding(.vertical, 5)
+
+                    Button("Summarize Text") {
+                        Task {
+                            await appleIntelligenceService.summarizeText(textToSummarize)
+                        }
+                    }
+                    if !appleIntelligenceService.summarizedText.isEmpty {
+                        Text("Summarized: \(appleIntelligenceService.summarizedText)")
+                            .font(.caption)
+                            .padding(.top, 5)
+                    }
+                }
+
+                Section("Apple Intelligence - Image Playground") {
+                    TextField("Enter image prompt", text: $imageGenerationPrompt)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .padding(.vertical, 5)
+
+                    Button("Generate Image") {
+                        Task {
+                            await appleIntelligenceService.generateImage(prompt: imageGenerationPrompt)
+                        }
+                    }
+                    if !appleIntelligenceService.generatedImageDescription.isEmpty {
+                        Text("Generated Image Description: \(appleIntelligenceService.generatedImageDescription)")
+                            .font(.caption)
+                            .padding(.top, 5)
+                    }
+                }
+
+                Section("Apple Intelligence - Photos (Clean Up)") {
+                    Button("Select Photo to Clean Up") {
+                        // In a real app, you'd use PhotoPicker for this
+                        // For demonstration, let's assume a photo is "selected"
+                        selectedPhoto = UIImage(systemName: "photo") // Placeholder
+                        if let photo = selectedPhoto {
+                            Task {
+                                await appleIntelligenceService.cleanUpPhoto(photo)
+                            }
+                        }
+                    }
+                    if appleIntelligenceService.cleanedUpPhoto != nil {
+                        Text("Photo cleanup initiated/completed conceptually.")
+                            .font(.caption)
+                            .padding(.top, 5)
+                    }
+                }
+            }
+            .navigationTitle("AI Biometrics & Siri Demo")
+        }
+    }
+}
+
+// Preview Provider for SwiftUI
+struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
+        ContentView()
+    }
+}
+
+
+
+# Initialize a new Node.js project
+mkdir apple-intelligence-backend
+cd apple-intelligence-backend
+npm init -y
+
+# Install necessary packages
+npm install express body-parser @apple/app-store-server-api # express for server, body-parser for parsing requests
+# For APNs: You'd typically use a library like 'apn' or a cloud service
+npm install apn
+
+
+
+// server.js
+const express = require('express');
+const bodyParser = require('body-parser');
+const apn = require('apn'); // For Apple Push Notifications
+const app = express();
+const port = 3000;
+
+app.use(bodyParser.json());
+
+// --- Database Simulation (in a real app, use a proper DB like MongoDB, PostgreSQL, etc.) ---
+const users = {}; // Stores user data including device tokens
+const summarizedDocuments = {}; // Stores summarized documents linked to users
+
+// --- API for Apple Intelligence Integration ---
+// Endpoint for native app to send summarized text
+app.post('/api/document/summarize', (req, res) => {
+    const { userId, documentId, summarizedContent } = req.body;
+
+    if (!userId || !documentId || !summarizedContent) {
+        return res.status(400).json({ message: 'Missing required fields.' });
+    }
+
+    // In a real application, validate userId and store securely
+    if (!summarizedDocuments[userId]) {
+        summarizedDocuments[userId] = {};
+    }
+    summarizedDocuments[userId][documentId] = {
+        content: summarizedContent,
+        timestamp: new Date().toISOString()
+    };
+
+    console.log(`[AI-API] Summarized document ${documentId} for user ${userId}.`);
+    console.log(`Content: ${summarizedContent.substring(0, 50)}...`);
+
+    res.status(200).json({ message: 'Document summarized and saved successfully.', documentId });
+});
+
+// Endpoint for native app to send image playground results (e.g., generated image URL/metadata)
+app.post('/api/image/generated', (req, res) => {
+    const { userId, imageId, imageUrl, promptUsed } = req.body;
+
+    if (!userId || !imageId || !imageUrl || !promptUsed) {
+        return res.status(400).json({ message: 'Missing required fields.' });
+    }
+
+    // Store image metadata. In a real scenario, imageUrl might point to cloud storage.
+    if (!users[userId]) {
+        users[userId] = {};
+    }
+    if (!users[userId].generatedImages) {
+        users[userId].generatedImages = {};
+    }
+    users[userId].generatedImages[imageId] = {
+        imageUrl,
+        promptUsed,
+        timestamp: new Date().toISOString()
+    };
+
+    console.log(`[AI-API] Generated image ${imageId} for user ${userId} with prompt: "${promptUsed.substring(0, 50)}..."`);
+    res.status(200).json({ message: 'Image generation data saved successfully.', imageId });
+});
+
+// --- API for Biometric Authentication (indirect) ---
+// Your Node.js server wouldn't perform the biometric check itself.
+// Instead, the native app would use Face ID/Touch ID and then authenticate with your server.
+// This is typically done with tokens (e.g., JWT) that are securely generated AFTER biometric success.
+
+app.post('/api/auth/login-with-biometrics', (req, res) => {
+    const { userId, biometricToken } = req.body; // biometricToken would be a securely generated token from the native app
+
+    if (!userId || !biometricToken) {
+        return res.status(400).json({ message: 'Missing userId or biometricToken.' });
+    }
+
+    // This is a placeholder for actual token validation.
+    // In a real app, 'biometricToken' would be a JWT or similar, signed by the native app (or a secure enclave service)
+    // and validated here. The server trusts the native app's successful biometric check.
+    if (biometricToken === 'SECURE_BIOMETRIC_TOKEN_FROM_NATIVE_APP') { // Placeholder
+        const sessionToken = `session_${userId}_${Date.now()}`; // Generate a session token
+        users[userId] = { ...users[userId], sessionToken };
+        console.log(`[Auth-API] User ${userId} authenticated successfully via biometrics.`);
+        return res.status(200).json({ message: 'Authentication successful', sessionToken });
+    } else {
+        return res.status(401).json({ message: 'Invalid biometric token or authentication failed.' });
+    }
+});
+
+// --- Siri Integration (Indirect via App Intents/Webhooks) ---
+// Your Node.js server can act as a webhook for Siri Shortcuts or App Intents
+// if your native app uses Network-based App Intents.
+
+app.post('/api/siri/order-coffee', (req, res) => {
+    const { userId, coffeeType, size } = req.body;
+
+    if (!userId || !coffeeType || !size) {
+        return res.status(400).json({ message: 'Missing coffee order details.' });
+    }
+
+    // Process the coffee order.
+    console.log(`[Siri-API] User ${userId} ordered a ${size} ${coffeeType}.`);
+
+    // In a real scenario, this would interact with an order system
+    const orderId = `COFFEE_${Date.now()}`;
+    res.status(200).json({
+        message: `Your ${size} ${coffeeType} has been ordered. Order ID: ${orderId}`,
+        orderId
+    });
+});
+
+// --- Auto-Updates (via Apple Push Notifications - APNs) ---
+// Node.js can send silent push notifications to trigger content updates or UI refreshes in the native app.
+// It cannot force OS-level updates or core Apple Intelligence/Siri model updates.
+
+// APN configuration (replace with your actual certificate/key paths or token-based authentication)
+// For production, it's recommended to use token-based authentication (.p8 key)
+const options = {
+    token: {
+        key: '/path/to/your/AuthKey_XXXXXXXXXX.p8', // Path to your .p8 authentication key
+        keyId: 'YOUR_KEY_ID', // Your 10-character Key ID from Apple Developer Portal
+        teamId: 'YOUR_TEAM_ID' // Your 10-character Team ID from Apple Developer Portal
+    },
+    production: false // Set to true for production environment
+};
+const apnProvider = new apn.Provider(options);
+
+// Endpoint to register device token from the native app
+app.post('/api/register-device', (req, res) => {
+    const { userId, deviceToken } = req.body;
+    if (!userId || !deviceToken) {
+        return res.status(400).json({ message: 'Missing userId or deviceToken.' });
+    }
+    // Store device token associated with the user for sending push notifications later
+    if (!users[userId]) {
+        users[userId] = {};
+    }
+    users[userId].deviceToken = deviceToken;
+    console.log(`[APNs] Device token registered for user ${userId}: ${deviceToken}`);
+    res.status(200).json({ message: 'Device registered successfully.' });
+});
+
+// Endpoint to trigger a silent update notification
+app.post('/api/trigger-app-update', async (req, res) => {
+    const { userId, updateType, payload } = req.body; // e.g., updateType: 'new_content', payload: { ... }
+
+    if (!userId || !updateType) {
+        return res.status(400).json({ message: 'Missing userId or updateType.' });
+    }
+
+    const deviceToken = users[userId]?.deviceToken;
+    if (!deviceToken) {
+        console.warn(`[APNs] No device token found for user ${userId}. Cannot send update notification.`);
+        return res.status(404).json({ message: 'Device token not found for user.' });
+    }
+
+    const notification = new apn.Notification();
+    notification.aps.contentAvailable = 1; // Silent notification
+    notification.topic = 'YOUR_APP_BUNDLE_ID'; // e.g., 'com.yourcompany.yourapp'
+    notification.payload = {
+        updateType: updateType,
+        ...payload
+    };
+
+    try {
+        const result = await apnProvider.send(notification, deviceToken);
+        console.log(`[APNs] Sent silent update notification to user ${userId}:`, result.sent);
+        if (result.failed.length > 0) {
+            console.error(`[APNs] Failed to send to some devices:`, result.failed);
+        }
+        res.status(200).json({ message: 'Silent update notification sent.', sent: result.sent, failed: result.failed });
+    } catch (error) {
+        console.error(`[APNs] Error sending silent update notification:`, error);
+        res.status(500).json({ message: 'Failed to send silent update notification.', error: error.message });
+    }
+});
+
+
+// Start the server
+app.listen(port, () => {
+    console.log(`Node.js backend listening at http://localhost:${port}`);
+    console.log('--- Remember to replace placeholders like paths, IDs, and dummy tokens ---');
+});
+
+// Error handling for APN provider
+apnProvider.on('error', (err) => {
+    console.error('APN Provider Error:', err);
+});
+
+
+
+
+# Example installation (refer to individual library documentation for exact steps)
+npm install react-native-apple-llm react-native-biometrics react-native-siri-shortcut @react-native-community/netinfo # For network check
+cd ios && pod install && cd .. # For iOS native module linking
+
+
+
+// App.js or a relevant component
+import React, { useState, useEffect } from 'react';
+import {
+    View,
+    Text,
+    Button,
+    StyleSheet,
+    TextInput,
+    Alert,
+    SafeAreaView,
+    ScrollView
+} from 'react-native';
+
+// Import libraries for native features
+import ReactNativeBiometrics, { BiometryTypes } from 'react-native-biometrics'; // For Face ID/Touch ID
+import AppleLLM from 'react-native-apple-llm'; // For Apple Intelligence Foundation Models
+import { addShortcut } from 'react-native-siri-shortcut'; // For Siri Shortcuts
+import NetInfo from '@react-native-community/netinfo'; // To check network for update checks (CodePush related)
+
+// Optional: CodePush for Over-the-Air updates (install separately)
+// import codePush from 'react-native-code-push';
+
+const rnBiometrics = new ReactNativeBiometrics();
+
+function App() {
+    const [biometryType, setBiometryType] = useState(null);
+    const [biometricStatus, setBiometricStatus] = useState('');
+    const [llmAvailability, setLlmAvailability] = useState('Checking...');
+    const [textToSummarize, setTextToSummarize] = useState('This is a long piece of text that I want Apple Intelligence to summarize for me. It contains various details and information. Apple Intelligence can rephrase, summarize, and even proofread text on-device.');
+    const [summarizedText, setSummarizedText] = useState('');
+    const [imagePrompt, setImagePrompt] = useState('A futuristic cityscape at sunset with flying cars.');
+    const [generatedImageDescription, setGeneratedImageDescription] = useState('');
+    const [siriShortcutStatus, setSiriShortcutStatus] = useState('');
+    const [appUpdateStatus, setAppUpdateStatus] = useState('Checking for updates...');
+
+    useEffect(() => {
+        checkBiometrics();
+        checkAppleLLMAvailability();
+        // checkCodePushUpdates(); // Uncomment if you integrate CodePush
+    }, []);
+
+    // MARK: - Biometrics (Face ID/Touch ID) Integration
+    const checkBiometrics = async () => {
+        try {
+            const { available, biometryType } = await rnBiometrics.isSensorAvailable();
+            if (available) {
+                setBiometryType(biometryType);
+                setBiometricStatus(`Biometrics available: ${biometryType}`);
+            } else {
+                setBiometryType(null);
+                setBiometricStatus('Biometrics not available on this device.');
+            }
+        } catch (error) {
+            console.error('Biometrics check error:', error);
+            setBiometricStatus(`Error checking biometrics: ${error.message}`);
+        }
+    };
+
+    const authenticateBiometrics = async () => {
+        if (!biometryType) {
+            Alert.alert('Error', 'Biometrics not available or configured.');
+            return;
+        }
+
+        try {
+            const result = await rnBiometrics.simplePrompt({
+                promptMessage: 'Authenticate to access secure content',
+                cancelButtonText: 'Use Passcode' // iOS only
+            });
+
+            if (result.success) {
+                setBiometricStatus('Authentication successful!');
+                Alert.alert('Success', 'Biometric authentication successful!');
+            } else {
+                setBiometricStatus('Authentication failed or cancelled.');
+                Alert.alert('Failed', 'Biometric authentication failed or cancelled.');
+            }
+        } catch (error) {
+            console.error('Biometric authentication error:', error);
+            setBiometricStatus(`Authentication error: ${error.message}`);
+            Alert.alert('Error', `Biometric authentication failed: ${error.message}`);
+        }
+    };
+
+    // MARK: - Apple Intelligence (Foundation Models) Integration
+    const checkAppleLLMAvailability = async () => {
+        try {
+            // This is a hypothetical API from react-native-apple-llm
+            // Refer to the actual library's documentation for precise API.
+            const availability = await AppleLLM.isFoundationModelsEnabled();
+            setLlmAvailability(availability);
+            if (availability !== 'available') {
+                Alert.alert('Apple Intelligence Status', `Foundation Models are not fully available: ${availability}. User might need to enable them in settings or models are downloading.`);
+            }
+        } catch (error) {
+            console.error('Error checking Apple LLM availability:', error);
+            setLlmAvailability(`Error: ${error.message}`);
+        }
+    };
+
+    const summarizeTextWithAppleIntelligence = async () => {
+        if (llmAvailability !== 'available') {
+            Alert.alert('Not Ready', 'Apple Intelligence Foundation Models are not available yet.');
+            return;
+        }
+        try {
+            setSummarizedText('Summarizing...');
+            // Hypothetical API: Call Apple LLM for summarization
+            const result = await AppleLLM.summarizeText(textToSummarize);
+            setSummarizedText(result); // Assuming result is the summarized text
+            Alert.alert('Summary Complete', 'Text summarized successfully!');
+        } catch (error) {
+            console.error('Error summarizing text:', error);
+            setSummarizedText(`Error: ${error.message}`);
+            Alert.alert('Error', `Failed to summarize text: ${error.message}`);
+        }
+    };
+
+    const generateImageWithAppleIntelligence = async () => {
+        if (llmAvailability !== 'available') {
+            Alert.alert('Not Ready', 'Apple Intelligence Foundation Models are not available yet.');
+            return;
+        }
+        try {
+            setGeneratedImageDescription('Generating image...');
+            // Hypothetical API: Call Apple LLM for image generation (or a wrapper for Image Playground)
+            const result = await AppleLLM.generateImage(imagePrompt);
+            setGeneratedImageDescription(`Image generated for: "${imagePrompt}" (Details: ${result})`); // Assuming result is a URL or description
+            Alert.alert('Image Generated', 'Image generation requested!');
+        } catch (error) {
+            console.error('Error generating image:', error);
+            setGeneratedImageDescription(`Error: ${error.message}`);
+            Alert.alert('Error', `Failed to generate image: ${error.message}`);
+        }
+    };
+
+    // MARK: - Siri Upgrades (Siri Shortcuts) Integration
+    const addOrderCoffeeShortcut = async () => {
+        try {
+            // This assumes you've defined an App Intent in native code (Swift/Objective-C)
+            // that corresponds to 'OrderCoffeeIntent'. The addShortcut function bridges to it.
+            // Parameters for the shortcut are typically passed as an object.
+            await addShortcut({
+                activityType: 'OrderCoffeeIntent', // This maps to your native App Intent identifier
+                title: 'Order My Favorite Coffee',
+                userInfo: {
+                    coffeeType: 'Latte',
+                    size: 'Medium'
+                },
+                keywords: ['coffee', 'order', 'latte'],
+                isPublic: true, // Allows Siri to suggest it
+                persistentIdentifier: 'order-favorite-coffee-shortcut'
+            });
+            setSiriShortcutStatus('Siri Shortcut "Order My Favorite Coffee" added!');
+            Alert.alert('Siri Shortcut Added', 'You can now say "Hey Siri, order my favorite coffee" or add it in Shortcuts app.');
+        } catch (error) {
+            console.error('Error adding Siri Shortcut:', error);
+            setSiriShortcutStatus(`Error adding Siri Shortcut: ${error.message}`);
+            Alert.alert('Error', `Failed to add Siri Shortcut: ${error.message}`);
+        }
+    };
+
+    // MARK: - Auto-Updates (Conceptual CodePush Integration)
+    // Uncomment and configure if you use CodePush
+    /*
+    const checkCodePushUpdates = async () => {
+        try {
+            const update = await codePush.checkForUpdate();
+            if (update) {
+                setAppUpdateStatus('Update available. Downloading...');
+                await update.download();
+                setAppUpdateStatus('Update downloaded. Installing on next restart.');
+                Alert.alert('App Update', 'A new update has been downloaded and will be applied the next time you open the app.');
+            } else {
+                setAppUpdateStatus('No over-the-air updates available.');
+            }
+        } catch (error) {
+            console.error('CodePush update error:', error);
+            setAppUpdateStatus(`CodePush error: ${error.message}`);
+        }
+    };
+    */
+
+    return (
+        <SafeAreaView style={styles.container}>
+            <ScrollView contentContainerStyle={styles.scrollViewContent}>
+                <Text style={styles.title}>Apple Intelligence React Native Demo</Text>
+
+                {/* Biometrics Section */}
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Advanced Biometrics (Face ID/Touch ID)</Text>
+                    <Text>Status: {biometricStatus}</Text>
+                    <Button title="Authenticate with Biometrics" onPress={authenticateBiometrics} />
+                </View>
+
+                {/* Apple Intelligence Section */}
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Apple Intelligence (Foundation Models)</Text>
+                    <Text>LLM Availability: {llmAvailability}</Text>
+                    <Text style={styles.subtitle}>Writing Tools (Summarization)</Text>
+                    <TextInput
+                        style={styles.textArea}
+                        multiline
+                        numberOfLines={4}
+                        value={textToSummarize}
+                        onChangeText={setTextToSummarize}
+                        placeholder="Enter text to summarize"
+                    />
+                    <Button
+                        title="Summarize Text with Apple Intelligence"
+                        onPress={summarizeTextWithAppleIntelligence}
+                        disabled={llmAvailability !== 'available'}
+                    />
+                    {summarizedText ? <Text style={styles.resultText}>Summary: {summarizedText}</Text> : null}
+
+                    <Text style={styles.subtitle}>Image Playground (Generation)</Text>
+                    <TextInput
+                        style={styles.input}
+                        value={imagePrompt}
+                        onChangeText={setImagePrompt}
+                        placeholder="Enter prompt for image generation"
+                    />
+                    <Button
+                        title="Generate Image with Apple Intelligence"
+                        onPress={generateImageWithAppleIntelligence}
+                        disabled={llmAvailability !== 'available'}
+                    />
+                    {generatedImageDescription ? <Text style={styles.resultText}>{generatedImageDescription}</Text> : null}
+                </View>
+
+                {/* Siri Integration Section */}
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Siri Upgrades (Siri Shortcuts)</Text>
+                    <Text>{siriShortcutStatus}</Text>
+                    <Button title="Add 'Order Coffee' Siri Shortcut" onPress={addOrderCoffeeShortcut} />
+                    <Text style={styles.infoText}>
+                        (After adding, try saying "Hey Siri, order my favorite coffee" or check in the Shortcuts app.)
+                    </Text>
+                </View>
+
+                {/* Auto-Updates Section (CodePush conceptual) */}
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>App Auto-Updates (via CodePush)</Text>
+                    <Text>{appUpdateStatus}</Text>
+                    {/* <Button title="Check for App Updates" onPress={checkCodePushUpdates} /> */}
+                    <Text style={styles.infoText}>
+                        (This section is conceptual for CodePush. Core OS/AI updates are handled by Apple.)
+                    </Text>
+                </View>
+            </ScrollView>
+        </SafeAreaView>
+    );
+}
+
+// Optional: Wrap your App with CodePush if you're using it
+// let CodePushApp = codePush({ updateDialog: true, installMode: codePush.InstallMode.IMMEDIATE })(App);
+// export default CodePushApp;
+
+export default App;
+
+const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+        backgroundColor: '#f8f8f8',
+    },
+    scrollViewContent: {
+        padding: 20,
+    },
+    title: {
+        fontSize: 28,
+        fontWeight: 'bold',
+        marginBottom: 30,
+        textAlign: 'center',
+        color: '#333',
+    },
+    section: {
+        backgroundColor: '#fff',
+        borderRadius: 10,
+        padding: 20,
+        marginBottom: 20,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
+    },
+    sectionTitle: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        marginBottom: 15,
+        color: '#555',
+    },
+    subtitle: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        marginTop: 15,
+        marginBottom: 10,
+        color: '#666',
+    },
+    textArea: {
+        height: 100,
+        borderColor: '#ddd',
+        borderWidth: 1,
+        borderRadius: 8,
+        padding: 10,
+        marginBottom: 10,
+        textAlignVertical: 'top',
+    },
+    input: {
+        height: 40,
+        borderColor: '#ddd',
+        borderWidth: 1,
+        borderRadius: 8,
+        paddingHorizontal: 10,
+        marginBottom: 10,
+    },
+    resultText: {
+        marginTop: 10,
+        padding: 10,
+        backgroundColor: '#e0f7fa',
+        borderRadius: 8,
+        color: '#00796b',
+        fontSize: 14,
+    },
+    infoText: {
+        fontSize: 12,
+        color: '#777',
+        marginTop: 5,
+        fontStyle: 'italic',
+    },
+});
+
+
+
+npx react-native init MyAppleAIApp --template react-native-template-typescript # Or just a plain JS template
+cd MyAppleAIApp
+
+
+
+npm install react-native-apple-llm react-native-biometrics react-native-siri-shortcut @react-native-community/netinfo
+
+
+
+cd ios && pod install && cd ..
+
+
+
+npm run ios
+
+
+
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/gorilla/mux" // A powerful HTTP router
+	"github.com/sideshow/apns2" // For sending Apple Push Notifications
+	"github.com/sideshow/apns2/token" // For token-based APNs authentication
+)
+
+// User represents a simplified user model with device token for push notifications
+type User struct {
+	ID          string `json:"id"`
+	DeviceToken string `json:"deviceToken,omitempty"` // APNs device token
+	SessionToken string `json:"sessionToken,omitempty"` // Server-generated session token
+	// Other user data
+}
+
+// SummarizedDocument represents data processed by Apple Intelligence Writing Tools
+type SummarizedDocument struct {
+	UserID    string `json:"userId"`
+	DocumentID string `json:"documentId"`
+	Content   string `json:"content"`
+	Timestamp string `json:"timestamp"`
+}
+
+// GeneratedImage represents metadata from Apple Intelligence Image Playground
+type GeneratedImage struct {
+	UserID    string `json:"userId"`
+	ImageID   string `json:"imageId"`
+	ImageURL  string `json:"imageUrl"`
+	Prompt    string `json:"prompt"`
+	Timestamp string `json:"timestamp"`
+}
+
+// CoffeeOrder represents a request from a Siri App Intent
+type CoffeeOrder struct {
+	UserID    string `json:"userId"`
+	CoffeeType string `json:"coffeeType"`
+	Size      string `json:"size"`
+	OrderID   string `json:"orderId,omitempty"`
+}
+
+// In a real application, replace these maps with a proper database (SQL, NoSQL)
+var (
+	users              = make(map[string]*User)
+	summarizedDocs     = make(map[string]map[string]SummarizedDocument) // userId -> documentId -> doc
+	generatedImages    = make(map[string]map[string]GeneratedImage)    // userId -> imageId -> img
+	usersMutex         sync.Mutex
+	summarizedDocsMutex sync.Mutex
+	generatedImagesMutex sync.Mutex
+)
+
+// APNs client for sending push notifications
+var apnsClient *apns2.Client
+
+// APNs configuration (replace with your actual values)
+const (
+	APN_KEY_PATH = "/path/to/your/AuthKey_XXXXXXXXXX.p8" // Path to your .p8 authentication key
+	APN_KEY_ID   = "YOUR_KEY_ID"                         // Your 10-character Key ID from Apple Developer Portal
+	APN_TEAM_ID  = "YOUR_TEAM_ID"                        // Your 10-character Team ID from Apple Developer Portal
+	APP_BUNDLE_ID = "com.yourcompany.yourapp"           // Your app's bundle ID
+)
+
+func init() {
+	// Initialize APNs client
+	authKey, err := token.AuthKeyFromFile(APN_KEY_PATH)
+	if err != nil {
+		log.Fatalf("Failed to read APNs AuthKey: %v", err)
+	}
+
+	token := &token.Token{
+		AuthKey: authKey,
+		KeyID:   APN_KEY_ID,
+		TeamID:  APN_TEAM_ID,
+	}
+
+	apnsClient = apns2.NewTokenClient(token)
+	// For development (sandbox) environment: apnsClient.Development()
+	apnsClient.Production() // Use Production() for production environment
+}
+
+func main() {
+	router := mux.NewRouter()
+
+	// API for Apple Intelligence Integration
+	router.HandleFunc("/api/document/summarize", handleSummarizeDocument).Methods("POST")
+	router.HandleFunc("/api/image/generated", handleGeneratedImage).Methods("POST")
+
+	// API for Biometric Authentication (indirect)
+	router.HandleFunc("/api/auth/login-with-biometrics", handleBiometricLogin).Methods("POST")
+
+	// API for Siri Integration (indirect via App Intents/Webhooks)
+	router.HandleFunc("/api/siri/order-coffee", handleOrderCoffee).Methods("POST")
+
+	// API for Auto-Updates (via APNs)
+	router.HandleFunc("/api/register-device", handleRegisterDevice).Methods("POST")
+	router.HandleFunc("/api/trigger-app-update", handleTriggerAppUpdate).Methods("POST")
+
+	fmt.Println("Go backend listening on :8080")
+	log.Fatal(http.ListenAndServe(":8080", router))
+}
+
+// handleSummarizeDocument receives summarized text from the native app
+func handleSummarizeDocument(w http.ResponseWriter, r *http.Request) {
+	var doc SummarizedDocument
+	if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	if doc.UserID == "" || doc.DocumentID == "" || doc.Content == "" {
+		http.Error(w, "Missing required fields", http.StatusBadRequest)
+		return
+	}
+
+	doc.Timestamp = time.Now().Format(time.RFC3339)
+
+	summarizedDocsMutex.Lock()
+	if _, ok := summarizedDocs[doc.UserID]; !ok {
+		summarizedDocs[doc.UserID] = make(map[string]SummarizedDocument)
+	}
+	summarizedDocs[doc.UserID][doc.DocumentID] = doc
+	summarizedDocsMutex.Unlock()
+
+	log.Printf("[AI-API] Summarized document %s for user %s. Content: %s...", doc.DocumentID, doc.UserID, doc.Content[:50])
+	json.NewEncoder(w).Encode(map[string]string{"message": "Document summarized and saved successfully.", "documentId": doc.DocumentID})
+}
+
+// handleGeneratedImage receives metadata for images generated by Apple Intelligence
+func handleGeneratedImage(w http.ResponseWriter, r *http.Request) {
+	var img GeneratedImage
+	if err := json.NewDecoder(r.Body).Decode(&img); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	if img.UserID == "" || img.ImageID == "" || img.ImageURL == "" || img.Prompt == "" {
+		http.Error(w, "Missing required fields", http.StatusBadRequest)
+		return
+	}
+
+	img.Timestamp = time.Now().Format(time.RFC3339)
+
+	generatedImagesMutex.Lock()
+	if _, ok := generatedImages[img.UserID]; !ok {
+		generatedImages[img.UserID] = make(map[string]GeneratedImage)
+	}
+	generatedImages[img.UserID][img.ImageID] = img
+	generatedImagesMutex.Unlock()
+
+	log.Printf("[AI-API] Generated image %s for user %s with prompt: %s...", img.ImageID, img.UserID, img.Prompt[:50])
+	json.NewEncoder(w).Encode(map[string]string{"message": "Image generation data saved successfully.", "imageId": img.ImageID})
+}
+
+// handleBiometricLogin processes authentication requests after native biometric check
+func handleBiometricLogin(w http.ResponseWriter, r *http.Request) {
+	var authReq struct {
+		UserID        string `json:"userId"`
+		BiometricProof string `json:"biometricProof"` // This would be a token/signature from the native app
+	}
+	if err := json.NewDecoder(r.Body).Decode(&authReq); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	// IMPORTANT: In a real system, 'biometricProof' would be a cryptographically
+	// signed token or a secure enclave-generated nonce that proves the native
+	// app successfully authenticated the user via biometrics.
+	// The server would then validate this proof securely.
+	// For this conceptual example, we'll use a dummy check.
+	if authReq.UserID == "" || authReq.BiometricProof == "" {
+		http.Error(w, "Missing userId or biometricProof", http.StatusBadRequest)
+		return
+	}
+
+	if authReq.BiometricProof == "SECURE_BIOMETRIC_PROOF_FROM_NATIVE_APP" { // Dummy check
+		usersMutex.Lock()
+		if _, ok := users[authReq.UserID]; !ok {
+			users[authReq.UserID] = &User{ID: authReq.UserID}
+		}
+		users[authReq.UserID].SessionToken = fmt.Sprintf("session_%s_%d", authReq.UserID, time.Now().UnixNano())
+		log.Printf("[Auth-API] User %s authenticated successfully via biometrics. Session: %s", authReq.UserID, users[authReq.UserID].SessionToken)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message":      "Authentication successful",
+			"sessionToken": users[authReq.UserID].SessionToken,
+		})
+		usersMutex.Unlock()
+	} else {
+		http.Error(w, "Invalid biometric proof or authentication failed", http.StatusUnauthorized)
+	}
+}
+
+// handleOrderCoffee receives coffee order requests from Siri via the native app
+func handleOrderCoffee(w http.ResponseWriter, r *http.Request) {
+	var order CoffeeOrder
+	if err := json.NewDecoder(r.Body).Decode(&order); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	if order.UserID == "" || order.CoffeeType == "" || order.Size == "" {
+		http.Error(w, "Missing coffee order details", http.StatusBadRequest)
+		return
+	}
+
+	order.OrderID = fmt.Sprintf("COFFEE_%d", time.Now().UnixNano())
+	// In a real scenario, integrate with an order processing system
+	log.Printf("[Siri-API] User %s ordered a %s %s. Order ID: %s", order.UserID, order.Size, order.CoffeeType, order.OrderID)
+
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": `Your ` + order.Size + ` ` + order.CoffeeType + ` has been ordered. Order ID: ` + order.OrderID,
+		"orderId": order.OrderID,
+	})
+}
+
+// handleRegisterDevice registers a device token for push notifications
+func handleRegisterDevice(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		UserID      string `json:"userId"`
+		DeviceToken string `json:"deviceToken"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	if req.UserID == "" || req.DeviceToken == "" {
+		http.Error(w, "Missing userId or deviceToken", http.StatusBadRequest)
+		return
+	}
+
+	usersMutex.Lock()
+	if _, ok := users[req.UserID]; !ok {
+		users[req.UserID] = &User{ID: req.UserID}
+	}
+	users[req.UserID].DeviceToken = req.DeviceToken
+	usersMutex.Unlock()
+
+	log.Printf("[APNs] Device token registered for user %s: %s", req.UserID, req.DeviceToken)
+	json.NewEncoder(w).Encode(map[string]string{"message": "Device registered successfully."})
+}
+
+// handleTriggerAppUpdate sends a silent push notification to a user's device
+func handleTriggerAppUpdate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		UserID    string                 `json:"userId"`
+		UpdateType string                 `json:"updateType"`
+		Payload   map[string]interface{} `json:"payload"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	if req.UserID == "" || req.UpdateType == "" {
+		http.Error(w, "Missing userId or updateType", http.StatusBadRequest)
+		return
+	}
+
+	usersMutex.Lock()
+	deviceToken := users[req.UserID].DeviceToken
+	usersMutex.Unlock()
+
+	if deviceToken == "" {
+		log.Printf("[APNs] No device token found for user %s. Cannot send update notification.", req.UserID)
+		http.Error(w, "Device token not found for user.", http.StatusNotFound)
+		return
+	}
+
+	notification := &apns2.Notification{
+		DeviceToken: deviceToken,
+		Topic:       APP_BUNDLE_ID,
+		Payload: map[string]interface{}{
+			"aps": map[string]int{"content-available": 1}, // Silent notification
+			"updateType": req.UpdateType,
+			"payload":    req.Payload,
+		},
+	}
+
+	res, err := apnsClient.Push(notification)
+	if err != nil {
+		log.Printf("[APNs] Error sending silent update notification to user %s: %v", req.UserID, err)
+		http.Error(w, fmt.Sprintf("Failed to send silent update notification: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("[APNs] Sent silent update notification to user %s. APNs ID: %s, Status: %d", req.UserID, res.ApnsID, res.StatusCode)
+	json.NewEncoder(w).Encode(map[string]string{"message": "Silent update notification sent.", "apnsId": res.ApnsID})
+}
+
+
+
+go mod init your_module_name
+go get github.com/gorilla/mux
+go get github.com/sideshow/apns2
+
+
+
+go run main.go
+
+
+
+// textprocessor/textprocessor.go
+package textprocessor
+
+import (
+	"strings"
+)
+
+// ProcessSummary takes a summarized text and applies additional custom logic.
+// This function would be called from Swift/Objective-C code in your iOS app.
+func ProcessSummary(summary string, keywords string) string {
+	if summary == "" {
+		return ""
+	}
+
+	// Example custom logic: Highlight keywords
+	highlightedSummary := summary
+	if keywords != "" {
+		kwList := strings.Split(keywords, ",")
+		for _, kw := range kwList {
+			highlightedSummary = strings.ReplaceAll(highlightedSummary, strings.TrimSpace(kw), "**"+strings.TrimSpace(kw)+"**")
+		}
+	}
+
+	return "Custom Processed: " + highlightedSummary
+}
+
+// Dummy function that might simulate an AI interaction from Go (not actually talking to Apple AI)
+func SimulateAITextGeneration(prompt string) string {
+	if prompt == "" {
+		return "Please provide a prompt."
+	}
+	return "Simulated AI: Generating text for '" + prompt + "'..." +
+		" The result is a creative and insightful response to your query."
+}
+
+
+
+
+go install golang.org/x/mobile/cmd/gomobile@latest
+gomobile init
+
+
+
+# From the directory containing textprocessor.go
+gomobile bind -target=ios -v ./textprocessor
+
+
+
+import Textprocessor // Assuming you built the framework correctly
+
+func useGoLogic() {
+    let originalSummary = "The quick brown fox jumps over the lazy dog."
+    let keywords = "fox, dog"
+    let processedSummary = Textprocessor.ProcessSummary(originalSummary, keywords)
+    print("Processed by Go:", processedSummary)
+
+    let aiPrompt = "Describe a futuristic city"
+    let simulatedAIResponse = Textprocessor.SimulateAITextGeneration(aiPrompt)
+    print("Simulated AI by Go:", simulatedAIResponse)
+}
+
+
+
+import SwiftUI
+import LocalAuthentication // For Biometrics (Face ID/Touch ID)
+import Foundation
+import AppIntents // For Siri Shortcuts and App-level integration
+import FoundationModels // New in iOS 18/Apple Intelligence, for on-device AI
+import PhotosUI // For Image Playground-like features (e.g., Clean Up, Image Wand)
+import UserNotifications // For local notifications (could be triggered by content updates)
+
+// MARK: - App Intent Definition (for Siri and Shortcuts)
+
+// 1. Define your App Intent
+// This makes your app's action available to Siri and Shortcuts.
+// You'll need to enable the Siri capability for your target in Xcode.
+struct OrderCoffeeIntent: AppIntent {
+    static var title: LocalizedStringResource = "Order Coffee"
+    static var description = IntentDescription("Orders your favorite coffee from the app.")
+    static var openAppWhenRun: Bool = false // Set to true if you want the app to open
+
+    @Parameter(title: "Coffee Type", description: "The type of coffee to order (e.g., Latte, Cappuccino)")
+    var coffeeType: String
+
+    @Parameter(title: "Size", description: "The size of the coffee (e.g., Small, Medium, Large)")
+    var size: String
+
+    // Parameter Summary for how Siri phrases the intent
+    static var parameterSummary: some ParameterSummary {
+        Summary("Order a \(.value(\.$size)) \(.value(\.$coffeeType))") {
+            // Provide examples for Siri to learn
+            \$coffeeType.suggestedValues = ["Latte", "Cappuccino", "Espresso"]
+            \$size.suggestedValues = ["Small", "Medium", "Large"]
+        }
+    }
+
+    // This is the core logic that Siri or Shortcuts will execute
+    func perform() async throws -> some IntentResult {
+        // In a real app, this would interact with a backend or local database
+        print("Siri: Ordering \(size) \(coffeeType)...")
+
+        // Simulate a network request or processing time
+        try await Task.sleep(for: .seconds(1.5))
+
+        // Return a dialog response for Siri
+        return .result(
+            dialog: "Your \(size) \(coffeeType) has been ordered!"
+        )
+    }
+}
+
+// 2. Define an App Shortcut for your intent (optional, but good practice)
+struct AppShortcuts: AppShortcutsProvider {
+    static var appShortcuts: [AppShortcut] {
+        AppShortcut(
+            intent: OrderCoffeeIntent(coffeeType: "Latte", size: "Medium"),
+            phrases: [
+                "Order my favorite coffee with \(.applicationName)",
+                "Get a \(\.$size) \(\.$coffeeType) from \(.applicationName)"
+            ]
+        )
+    }
+}
+
+
+// MARK: - Main SwiftUI Content View
+
+struct ContentView: View {
+    @State private var isAuthenticated: Bool = false
+    @State private var biometricError: String?
+    @State private var llmStatus: String = "Checking Apple Intelligence availability..."
+    @State private var textToSummarize: String = "This is a detailed paragraph that contains various facts and figures about a historical event. It includes dates, names, and consequences that can be condensed for easier consumption. Apple Intelligence's Writing Tools should be able to process this efficiently."
+    @State private var summarizedText: String = ""
+    @State private var imageGenerationPrompt: String = "A whimsical unicorn playing chess in a enchanted forest, digital art style."
+    @State private var generatedImageDescription: String = ""
+    @State private var siriShortcutAdded: Bool = false
+    @State private var appContentUpdateMessage: String = "No new content updates."
+
+    var body: some View {
+        NavigationView {
+            Form {
+                // MARK: - Advanced Biometrics (Face ID/Touch ID)
+                Section("Biometric Authentication") {
+                    Button("Authenticate with Face ID/Touch ID") {
+                        authenticateWithBiometrics()
+                    }
+                    if isAuthenticated {
+                        Text("User Authenticated Successfully!")
+                            .foregroundColor(.green)
+                    }
+                    if let error = biometricError {
+                        Text("Error: \(error)")
+                            .foregroundColor(.red)
+                    }
+                }
+
+                // MARK: - Apple Intelligence Integration
+                Section("Apple Intelligence Features") {
+                    Text("Foundation Models Status: \(llmStatus)")
+                        .font(.caption)
+
+                    // Writing Tools Example: Summarization
+                    Text("Writing Tools (Summarization)")
+                        .font(.headline)
+                    TextEditor(text: $textToSummarize)
+                        .frame(height: 100)
+                        .border(Color.gray.opacity(0.3), width: 1)
+                        .padding(.vertical, 5)
+
+                    Button("Summarize Text") {
+                        Task { await summarizeTextWithAppleIntelligence() }
+                    }
+                    if !summarizedText.isEmpty {
+                        Text("Summary: \(summarizedText)")
+                            .font(.caption)
+                            .padding(.top, 5)
+                    }
+
+                    // Image Playground Example: Image Generation
+                    Text("Image Playground (Generation)")
+                        .font(.headline)
+                        .padding(.top, 10)
+                    TextField("Image Prompt", text: $imageGenerationPrompt)
+                        .textFieldStyle(.roundedBorder)
+                        .padding(.vertical, 5)
+
+                    Button("Generate Image") {
+                        Task { await generateImageWithAppleIntelligence() }
+                    }
+                    if !generatedImageDescription.isEmpty {
+                        Text("Generated: \(generatedImageDescription)")
+                            .font(.caption)
+                            .padding(.top, 5)
+                    }
+                    
+                    // Note: Other AI features like Clean Up (Photos), Genmoji, etc.,
+                    // integrate directly into system apps or via Photos framework APIs.
+                    // This example focuses on Foundation Models API.
+                }
+
+                // MARK: - Siri Upgrades (App Intents)
+                Section("Siri Upgrades") {
+                    Text("Add App Intent for Siri/Shortcuts")
+                    Button("Add 'Order Coffee' Shortcut") {
+                        addSiriShortcut()
+                    }
+                    if siriShortcutAdded {
+                        Text("Siri Shortcut added! Try saying 'Hey Siri, order my favorite coffee'.")
+                            .font(.caption)
+                            .foregroundColor(.blue)
+                    }
+                    Text("Note: Advanced Siri features (on-screen context, personal context) are automatic system integrations once your App Intents are defined.")
+                        .font(.footnote)
+                        .foregroundColor(.gray)
+                }
+
+                // MARK: - Auto-Updates (App Content)
+                Section("App Content Auto-Updates") {
+                    Text(appContentUpdateMessage)
+                        .font(.callout)
+                    Button("Simulate Content Check") {
+                        simulateContentUpdateCheck()
+                    }
+                    Text("System OS/AI model auto-updates are handled by iOS Settings, not by individual apps.")
+                        .font(.footnote)
+                        .foregroundColor(.gray)
+                }
+            }
+            .navigationTitle("Advanced Apple AI Demo")
+            .onAppear {
+                checkAppleLLMAvailability()
+            }
+        }
+    }
+
+    // MARK: - Biometrics Function
+    func authenticateWithBiometrics() {
+        let context = LAContext()
+        var error: NSError?
+
+        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
+            let reason = "To access secure features in your app"
+            context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { success, authenticationError in
+                DispatchQueue.main.async {
+                    if success {
+                        isAuthenticated = true
+                        biometricError = nil
+                        print("Biometric authentication successful!")
+                    } else {
+                        isAuthenticated = false
+                        if let laError = authenticationError as? LAError {
+                            switch laError.code {
+                            case .userCancel:
+                                biometricError = "Authentication cancelled by user."
+                            case .userFallback:
+                                biometricError = "User chose to enter passcode."
+                            case .biometryNotAvailable:
+                                biometricError = "Biometric authentication not available."
+                            case .biometryLockout:
+                                biometricError = "Biometric authentication locked out. Please use passcode."
+                            case .biometryNotEnrolled:
+                                biometricError = "No biometrics enrolled."
+                            default:
+                                biometricError = "Authentication failed: \(laError.localizedDescription)"
+                            }
+                        } else {
+                            biometricError = "Authentication failed."
+                        }
+                        print("Biometric authentication failed: \(biometricError ?? "Unknown error")")
+                    }
+                }
+            }
+        } else {
+            isAuthenticated = false
+            biometricError = error?.localizedDescription ?? "Biometrics not available or configured."
+            print("Biometrics not available: \(biometricError ?? "Unknown error")")
+        }
+    }
+
+    // MARK: - Apple Intelligence Functions (using Foundation Models)
+    // Note: The `FoundationModels` framework is new in iOS 18/Apple Intelligence.
+    // Ensure your project targets iOS 18+ and you have necessary permissions/entitlements.
+    
+    func checkAppleLLMAvailability() {
+        Task {
+            // Check if Foundation Models are available on the device
+            // and if user has enabled Apple Intelligence.
+            let modelCapability = await LLM.isModelLoaded(LLMSchema.Universal.Text.General.modelIdentifier)
+            DispatchQueue.main.async {
+                switch modelCapability {
+                case .available:
+                    llmStatus = "Available and Ready"
+                case .downloading:
+                    llmStatus = "Downloading models..."
+                case .notAvailable:
+                    llmStatus = "Not available (check device compatibility or settings)"
+                @unknown default:
+                    llmStatus = "Unknown status"
+                }
+                print("LLM Status: \(llmStatus)")
+            }
+        }
+    }
+
+    func summarizeTextWithAppleIntelligence() async {
+        guard llmStatus == "Available and Ready" else {
+            print("LLM not ready for summarization.")
+            summarizedText = "Apple Intelligence not ready."
+            return
+        }
+
+        print("Attempting to summarize text...")
+        do {
+            summarizedText = "Summarizing..."
+            // Using the Foundation Models API for summarization
+            let llm = LLM.universal.text.general
+            let response = try await llm.summarize(textToSummarize) // Assuming a summarize method
+            DispatchQueue.main.async {
+                summarizedText = response.text // Assuming the summarized text is in 'text' property
+                print("Summarization successful: \(summarizedText)")
+            }
+        } catch {
+            DispatchQueue.main.async {
+                summarizedText = "Error summarizing: \(error.localizedDescription)"
+                print("Error summarizing text: \(error)")
+            }
+        }
+    }
+
+    func generateImageWithAppleIntelligence() async {
+        guard llmStatus == "Available and Ready" else {
+            print("LLM not ready for image generation.")
+            generatedImageDescription = "Apple Intelligence not ready."
+            return
+        }
+
+        print("Attempting to generate image...")
+        do {
+            generatedImageDescription = "Generating..."
+            // Using the Foundation Models API for image generation
+            let llm = LLM.universal.image.general // Assuming image generation model
+            let response = try await llm.generateImage(prompt: imageGenerationPrompt) // Hypothetical API
+            DispatchQueue.main.async {
+                // In a real app, 'response' would contain the image data or a reference.
+                // For demonstration, we'll just confirm the prompt.
+                generatedImageDescription = "Image generated for prompt: \"\(imageGenerationPrompt)\""
+                print("Image generation successful for prompt: \(imageGenerationPrompt)")
+            }
+        } catch {
+            DispatchQueue.main.async {
+                generatedImageDescription = "Error generating image: \(error.localizedDescription)"
+                print("Error generating image: \(error)")
+            }
+        }
+    }
+
+    // MARK: - Siri Integration Function
+    func addSiriShortcut() {
+        // Adding the App Shortcut defined earlier to the system.
+        // Users can also add it via the Shortcuts app.
+        // This will allow Siri to recognize phrases associated with OrderCoffeeIntent.
+        let shortcut = AppShortcut(intent: OrderCoffeeIntent(coffeeType: "Latte", size: "Medium"))
+        Task {
+            do {
+                try await shortcut.donate()
+                DispatchQueue.main.async {
+                    siriShortcutAdded = true
+                    print("Siri Shortcut for OrderCoffeeIntent donated successfully.")
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    siriShortcutAdded = false
+                    print("Error donating Siri Shortcut: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    // MARK: - App Content Auto-Updates (Conceptual)
+    // This simulates checking for new content on a server and updating UI.
+    // This does NOT update the app binary itself.
+    func simulateContentUpdateCheck() {
+        print("Checking for new content updates...")
+        // Simulate a network request to a backend server
+        Task {
+            try await Task.sleep(for: .seconds(2)) // Simulate network delay
+
+            let newContentAvailable = Bool.random() // Simulate if new content is available
+            DispatchQueue.main.async {
+                if newContentAvailable {
+                    appContentUpdateMessage = "New content available! Refreshing data..."
+                    // In a real app, you'd fetch new data, update Core Data, etc.
+                    // You might also trigger a local notification:
+                    showLocalNotification(title: "New Content!", body: "Fresh articles are available in the app.")
+                } else {
+                    appContentUpdateMessage = "App content is up to date."
+                }
+                print("Content update check complete. New content: \(newContentAvailable)")
+            }
+        }
+    }
+
+    func showLocalNotification(title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = UNNotificationSound.default
+
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false) // Fire immediately
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: trigger)
+
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error = error {
+                print("Error showing notification: \(error.localizedDescription)")
+            } else {
+                print("Local notification scheduled.")
+            }
+        }
+    }
+}
+
+
+// MARK: - App Delegate (for Notifications setup)
+
+// Add this class to your project, usually in a new file named AppDelegate.swift
+// And connect it to your App struct if using SwiftUI App Lifecycle.
+class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
+        // Request notification authorization
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+            print("Notification permission granted: \(granted)")
+            if let error = error {
+                print("Notification permission error: \(error.localizedDescription)")
+            }
+        }
+        UNUserNotificationCenter.current().delegate = self
+        return true
+    }
+
+    // Handle notifications when the app is in the foreground
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound]) // Show banner and play sound
+    }
+}
+
+// Connect AppDelegate to your SwiftUI App
+@main
+struct AdvancedAppleAIApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+        }
+    }
+}
+
+
+
+import AppIntents // Required for AppIntents and Siri integration
+import Foundation
+
+// MARK: - App Intent Definition
+
+// This App Intent defines an action that Siri or the Shortcuts app can perform.
+// You need to enable the Siri capability for your target in Xcode.
+struct OrderCoffeeIntent: AppIntent {
+    // A localized title for your intent, displayed in Shortcuts app and by Siri.
+    static var title: LocalizedStringResource = "Order Coffee"
+
+    // A description for your intent, providing more context.
+    static var description = IntentDescription("Orders your favorite coffee from the app.")
+
+    // If set to true, the app will open when this intent is run.
+    // For a backend-driven order, you might want to keep it false.
+    static var openAppWhenRun: Bool = false
+
+    // Parameters for your intent. These will be prompted by Siri if not provided.
+    @Parameter(title: "Coffee Type", description: "The type of coffee to order (e.g., Latte, Cappuccino)")
+    var coffeeType: String
+
+    @Parameter(title: "Size", description: "The size of the coffee (e.g., Small, Medium, Large)")
+    var size: String
+
+    // Parameter Summary for how Siri phrases the intent and presents input.
+    static var parameterSummary: some ParameterSummary {
+        Summary("Order a \(.value(\.$size)) \(.value(\.$coffeeType))") {
+            // Provide suggested values to help Siri understand and for user convenience.
+            \$coffeeType.suggestedValues = ["Latte", "Cappuccino", "Espresso", "Americano"]
+            \$size.suggestedValues = ["Small", "Medium", "Large"]
+        }
+    }
+
+    // The core logic that Siri or Shortcuts will execute when this intent is performed.
+    // This is where you'd typically interact with your backend server.
+    func perform() async throws -> some IntentResult {
+        print("Siri: Ordering \(size) \(coffeeType)...")
+
+        // --- Simulate Backend Interaction ---
+        // In a real app, you'd send this order to your Go backend (or any backend).
+        // For example:
+        // let orderData = ["coffeeType": coffeeType, "size": size]
+        // let url = URL(string: "http://your-backend.com/api/siri/order-coffee")!
+        // var request = URLRequest(url: url)
+        // request.httpMethod = "POST"
+        // request.httpBody = try? JSONEncoder().encode(orderData)
+        // let (data, response) = try await URLSession.shared.data(for: request)
+        // let backendMessage = String(data: data, encoding: .utf8) ?? "Order processed by backend."
+
+        try await Task.sleep(for: .seconds(1.5)) // Simulate network request/processing
+
+        let orderID = UUID().uuidString.prefix(8) // Simulate an order ID
+
+        // Return a dialog response for Siri to speak or display.
+        return .result(
+            dialog: "Your \(size) \(coffeeType) has been ordered! Your order ID is \(orderID)."
+        )
+    }
+}
+
+// MARK: - App Shortcuts Provider (Optional, but highly recommended)
+
+// This makes your intent discoverable by Siri and provides suggested phrases.
+struct MyCoffeeAppShortcuts: AppShortcutsProvider {
+    static var appShortcuts: [AppShortcut] {
+        AppShortcut(
+            intent: OrderCoffeeIntent(coffeeType: "Latte", size: "Medium"), // Provide a default instance
+            phrases: [
+                "Order my favorite coffee with \(.applicationName)",
+                "Get a \(\.$size) \(\.$coffeeType) from \(.applicationName)"
+            ],
+            shortTitle: "Quick Coffee Order", // Title for display in Shortcuts app
+            systemImageName: "cup.and.saucer.fill" // Icon for display
+        )
+    }
+}
+
+
+
+import UIKit
+import UserNotifications // For local and remote notifications
+
+class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
+        // Request notification authorization on app launch
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+            print("Notification permission granted: \(granted)")
+            if let error = error {
+                print("Notification permission error: \(error.localizedDescription)")
+            }
+        }
+        UNUserNotificationCenter.current().delegate = self
+
+        // Register for remote notifications (for silent push updates)
+        UIApplication.shared.registerForRemoteNotifications()
+
+        // Configure background fetch interval (optional, for periodic content checks)
+        UIApplication.shared.setMinimumBackgroundFetchInterval(UIApplication.backgroundFetchIntervalMinimum) // Or your desired interval
+
+        print("App finished launching.")
+        return true
+    }
+
+    // MARK: - Remote Notification Delegate Methods
+
+    // Called when the device token is successfully registered with APNs
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        let tokenParts = deviceToken.map { data in String(format: "%02.2hhx", data) }
+        let token = tokenParts.joined()
+        print("Device Token: \(token)")
+        // In a real app, send this 'token' to your Go backend for APNs targeting.
+        // For example:
+        // YourBackendAPI.shared.sendDeviceTokenToServer(token)
+    }
+
+    // Called if device token registration fails
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        print("Failed to register for remote notifications: \(error.localizedDescription)")
+    }
+
+    // Handle incoming remote notifications (including silent pushes)
+    func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable : Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        print("Received remote notification (silent or otherwise): \(userInfo)")
+
+        // Check if it's a silent notification (content-available: 1)
+        if application.applicationState == .background || application.applicationState == .inactive {
+            // This is where you would trigger your app's content update logic
+            print("App in background/inactive, performing background fetch for content update.")
+            // Call your content update manager here
+            // e.g., ContentUpdateManager.shared.checkForUpdates { result in
+            //     completionHandler(result) // Pass .newData, .noData, or .failed
+            // }
+            // For now, just simulate
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                print("Simulated background content update complete.")
+                completionHandler(.newData) // Indicate that new data was fetched
+            }
+        } else {
+            // App is active, handle as a regular notification or just ignore silent ones
+            print("App is active, ignoring silent push for background fetch.")
+            completionHandler(.noData) // No background fetch needed
+        }
+    }
+
+    // MARK: - UNUserNotificationCenterDelegate (for foreground notifications)
+
+    // Called when a notification is presented while the app is in the foreground
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        // Decide how to present the notification to the user in the foreground
+        completionHandler([.banner, .sound]) // Show banner and play sound
+    }
+
+    // Called when the user interacts with a notification
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        let userInfo = response.notification.request.content.userInfo
+        print("User interacted with notification: \(userInfo)")
+        // Handle deep linking or specific actions based on userInfo
+        completionHandler()
+    }
+}
+
+
+
+import SwiftUI
+import LocalAuthentication // For Biometrics (Face ID/Touch ID)
+import FoundationModels // New in iOS 18, for on-device Apple Intelligence
+import AppIntents // For Siri Shortcuts
+import UserNotifications // For local notifications
+
+struct ContentView: View {
+    // MARK: - State Variables
+    @State private var isAuthenticated: Bool = false
+    @State private var biometricError: String?
+
+    @State private var llmStatus: String = "Checking Apple Intelligence availability..."
+    @State private var textToSummarize: String = "This is a detailed paragraph that contains various facts and figures about a historical event. It includes dates, names, and consequences that can be condensed for easier consumption. Apple Intelligence's Writing Tools should be able to process this efficiently."
+    @State private var summarizedText: String = ""
+    @State private var imageGenerationPrompt: String = "A whimsical unicorn playing chess in an enchanted forest, digital art style."
+    @State private var generatedImageDescription: String = ""
+
+    @State private var siriShortcutDonated: Bool = false
+
+    @State private var appContentUpdateMessage: String = "No new content updates."
+
+    var body: some View {
+        NavigationView {
+            Form {
+                // MARK: - Advanced Biometrics (Face ID/Touch ID)
+                Section("Biometric Authentication") {
+                    Button("Authenticate with Face ID / Touch ID") {
+                        authenticateWithBiometrics()
+                    }
+                    if isAuthenticated {
+                        Text("User Authenticated Successfully!")
+                            .foregroundColor(.green)
+                    }
+                    if let error = biometricError {
+                        Text("Error: \(error)")
+                            .foregroundColor(.red)
+                    }
+                }
+
+                // MARK: - Apple Intelligence Integration (Foundation Models)
+                Section("Apple Intelligence Features") {
+                    Text("Foundation Models Status: \(llmStatus)")
+                        .font(.caption)
+                        .padding(.bottom, 5)
+
+                    // Writing Tools Example: Summarization
+                    Text("Writing Tools (Summarization)")
+                        .font(.headline)
+                        .padding(.top, 5)
+                    TextEditor(text: $textToSummarize)
+                        .frame(height: 100)
+                        .border(Color.gray.opacity(0.3), width: 1)
+                        .padding(.vertical, 5)
+
+                    Button("Summarize Text") {
+                        Task { await summarizeTextWithAppleIntelligence() }
+                    }
+                    if !summarizedText.isEmpty {
+                        Text("Summary: \(summarizedText)")
+                            .font(.caption)
+                            .padding(.top, 5)
+                    }
+
+                    // Image Playground Example: Image Generation
+                    Text("Image Playground (Generation)")
+                        .font(.headline)
+                        .padding(.top, 10)
+                    TextField("Image Prompt", text: $imageGenerationPrompt)
+                        .textFieldStyle(.roundedBorder)
+                        .padding(.vertical, 5)
+
+                    Button("Generate Image") {
+                        Task { await generateImageWithAppleIntelligence() }
+                    }
+                    if !generatedImageDescription.isEmpty {
+                        Text("Generated: \(generatedImageDescription)")
+                            .font(.caption)
+                            .padding(.top, 5)
+                    }
+
+                    Text("Note: Other Apple Intelligence features like Clean Up (Photos), Genmoji, Notification Summaries, etc., are integrated into system apps or via specific frameworks (e.g., Photos, Messages) rather than directly through FoundationModels for general app use.")
+                        .font(.footnote)
+                        .foregroundColor(.gray)
+                        .padding(.top, 5)
+                }
+
+                // MARK: - Siri Upgrades (App Intents)
+                Section("Siri Upgrades") {
+                    Text("Add App Intent for Siri/Shortcuts")
+                    Button("Add 'Order Coffee' Shortcut") {
+                        donateSiriShortcut()
+                    }
+                    if siriShortcutDonated {
+                        Text("Siri Shortcut 'Order Coffee' added! Try saying 'Hey Siri, order my favorite coffee'.")
+                            .font(.caption)
+                            .foregroundColor(.blue)
+                    }
+                    Text("Advanced Siri features (on-screen context, personal context) are automatic system integrations once your App Intents are well-defined.")
+                        .font(.footnote)
+                        .foregroundColor(.gray)
+                }
+
+                // MARK: - App Content Auto-Updates (via Background Fetch / Push Notifications)
+                Section("App Content Auto-Updates") {
+                    Text(appContentUpdateMessage)
+                        .font(.callout)
+                    Button("Simulate Content Update Check") {
+                        simulateContentUpdateCheck()
+                    }
+                    Text("System OS/AI model updates are handled by iOS Settings, not by individual apps.")
+                        .font(.footnote)
+                        .foregroundColor(.gray)
+                }
+            }
+            .navigationTitle("Advanced Apple AI Demo")
+            .onAppear {
+                checkAppleLLMAvailability()
+            }
+        }
+    }
+
+    // MARK: - Biometrics Function Implementation
+    func authenticateWithBiometrics() {
+        let context = LAContext()
+        var error: NSError?
+
+        // Check if biometrics is available and enrolled
+        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
+            let reason = "To access secure features in your app"
+            context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { success, authenticationError in
+                // UI updates must happen on the main thread
+                DispatchQueue.main.async {
+                    if success {
+                        isAuthenticated = true
+                        biometricError = nil
+                        print("Biometric authentication successful!")
+                    } else {
+                        isAuthenticated = false
+                        if let laError = authenticationError as? LAError {
+                            switch laError.code {
+                            case .userCancel:
+                                biometricError = "Authentication cancelled by user."
+                            case .userFallback:
+                                biometricError = "User chose to enter passcode."
+                            case .biometryNotAvailable:
+                                biometricError = "Biometric authentication not available."
+                            case .biometryLockout:
+                                biometricError = "Biometric authentication locked out. Please use passcode."
+                            case .biometryNotEnrolled:
+                                biometricError = "No biometrics enrolled. Please set up Face ID/Touch ID in Settings."
+                            case .authenticationFailed:
+                                biometricError = "Authentication failed. Try again."
+                            default:
+                                biometricError = "Authentication failed: \(laError.localizedDescription)"
+                            }
+                        } else {
+                            biometricError = "Authentication failed due to an unknown error."
+                        }
+                        print("Biometric authentication failed: \(biometricError ?? "Unknown error")")
+                    }
+                }
+            }
+        } else {
+            isAuthenticated = false
+            biometricError = error?.localizedDescription ?? "Biometrics not available or configured on this device."
+            print("Biometrics not available: \(biometricError ?? "Unknown error")")
+        }
+    }
+
+    // MARK: - Apple Intelligence Function Implementations (Foundation Models)
+
+    func checkAppleLLMAvailability() {
+        Task {
+            // This checks the current loading status of the general text model
+            let modelCapability = await LLM.isModelLoaded(LLMSchema.Universal.Text.General.modelIdentifier)
+            DispatchQueue.main.async {
+                switch modelCapability {
+                case .available:
+                    llmStatus = "Available and Ready"
+                case .downloading:
+                    llmStatus = "Downloading models... (may take some time)"
+                case .notAvailable:
+                    llmStatus = "Not available (check device compatibility, iOS version, or settings)"
+                @unknown default:
+                    llmStatus = "Unknown status (requires iOS 18+ and compatible hardware)"
+                }
+                print("LLM Status: \(llmStatus)")
+            }
+        }
+    }
+
+    func summarizeTextWithAppleIntelligence() async {
+        guard llmStatus == "Available and Ready" else {
+            DispatchQueue.main.async {
+                summarizedText = "Apple Intelligence not ready for summarization."
+            }
+            print("LLM not ready for summarization.")
+            return
+        }
+
+        print("Attempting to summarize text...")
+        DispatchQueue.main.async {
+            summarizedText = "Summarizing..."
+        }
+
+        do {
+            // Access the on-device general text model
+            let llm = LLM.universal.text.general
+            // Use the summarize capability of the LLM
+            // The exact API might evolve; this is based on WWDC24/iOS 18 previews.
+            let response = try await llm.summarize(textToSummarize) // Assuming a `summarize` method for text
+
+            DispatchQueue.main.async {
+                summarizedText = response.text // Assuming the response has a `text` property
+                print("Summarization successful: \(summarizedText.prefix(100))...")
+            }
+        } catch {
+            DispatchQueue.main.async {
+                summarizedText = "Error summarizing: \(error.localizedDescription)"
+                print("Error summarizing text: \(error)")
+            }
+        }
+    }
+
+    func generateImageWithAppleIntelligence() async {
+        guard llmStatus == "Available and Ready" else {
+            DispatchQueue.main.async {
+                generatedImageDescription = "Apple Intelligence not ready for image generation."
+            }
+            print("LLM not ready for image generation.")
+            return
+        }
+
+        print("Attempting to generate image...")
+        DispatchQueue.main.async {
+            generatedImageDescription = "Generating image..."
+        }
+
+        do {
+            // Access the on-device general image model
+            let llm = LLM.universal.image.general // Hypothetical access to image model
+            // Use the generateImage capability of the LLM
+            let response = try await llm.generateImage(prompt: imageGenerationPrompt) // Hypothetical API
+
+            DispatchQueue.main.async {
+                // In a real scenario, `response` would contain image data (e.g., `UIImage`)
+                // or a reference to it. For this example, we'll just confirm the prompt.
+                generatedImageDescription = "Image generated for prompt: \"\(imageGenerationPrompt)\""
+                print("Image generation successful for prompt: \(imageGenerationPrompt)")
+                // You would typically display the generated image here
+                // e.g., Image(uiImage: response.uiImage)
+            }
+        } catch {
+            DispatchQueue.main.async {
+                generatedImageDescription = "Error generating image: \(error.localizedDescription)"
+                print("Error generating image: \(error)")
+            }
+        }
+    }
+
+    // MARK: - Siri Integration Function Implementation
+
+    func donateSiriShortcut() {
+        // Donate the App Shortcut to the system. This makes it discoverable by Siri and Shortcuts app.
+        // Users can then add it or Siri might suggest it proactively.
+        let shortcut = MyCoffeeAppShortcuts.appShortcuts.first?.intent as? OrderCoffeeIntent // Get the intent instance
+        if let shortcut = shortcut {
+            Task {
+                do {
+                    try await shortcut.donate() // Donate the specific intent
+                    DispatchQueue.main.async {
+                        siriShortcutDonated = true
+                        print("Siri Shortcut for OrderCoffeeIntent donated successfully.")
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        siriShortcutDonated = false
+                        print("Error donating Siri Shortcut: \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - App Content Auto-Updates Implementation (Conceptual)
+
+    // This function simulates checking for and applying content updates from a backend.
+    // It doesn't update the app binary.
+    func simulateContentUpdateCheck() {
+        print("Checking for new content updates...")
+        // Simulate a network request to your Go backend (or any backend)
+        // You would use URLSession to make a real network request here.
+        Task {
+            // Simulate network delay
+            try await Task.sleep(for: .seconds(2))
+
+            let newContentAvailable = Bool.random() // Simulate if new content is available
+            DispatchQueue.main.async {
+                if newContentAvailable {
+                    appContentUpdateMessage = "New content available! Refreshing data..."
+                    // In a real app, you'd fetch new data (e.g., JSON, images),
+                    // update your data model (e.g., Core Data, SwiftData),
+                    // and then your SwiftUI views would automatically refresh.
+                    showLocalNotification(title: "New Articles Available!", body: "Discover the latest updates in our app.")
+                } else {
+                    appContentUpdateMessage = "App content is up to date."
+                }
+                print("Content update check complete. New content detected: \(newContentAvailable)")
+            }
+        }
+    }
+
+    // Helper to show a local notification (can be triggered by background fetch or silent push)
+    func showLocalNotification(title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = UNNotificationSound.default
+
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false) // Fire after 1 second
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: trigger)
+
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error = error {
+                print("Error adding local notification: \(error.localizedDescription)")
+            } else {
+                print("Local notification scheduled.")
+            }
+        }
+    }
+}
+
+
+
+import SwiftUI
+
+@main
+struct AdvancedAppleAIApp: App {
+    // Connects the AppDelegate to your SwiftUI App lifecycle
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+        }
+    }
+}
