@@ -1,0 +1,3934 @@
+import math
+
+# --- Constants and Configuration (simplified) ---
+GRAVITY = 9.81  # m/s^2
+AIR_DENSITY_SEA_LEVEL = 1.225  # kg/m^3
+CD_BASE_CARBON_FIBER = 0.25 # Typical low drag coefficient for a sleek car
+FRONTAL_AREA_M2 = 2.0 # Example frontal area
+ROLLING_RESISTANCE_COEFF = 0.01
+WHEEL_RADIUS_M = 0.35 # Approx. wheel radius
+GEAR_RATIOS_V12 = [2.97, 2.31, 1.95, 1.68, 1.45, 1.26, 1.09, 0.94, 0.81, 0.70] # Example 10-speed
+MAX_ENGINE_RPM = 12000
+FUEL_ENERGY_DENSITY = 44 * 10**6 # Joules/kg (gasoline)
+BATTERY_ENERGY_DENSITY = 250 * 3600 # Joules/kg (Li-ion, 250 Wh/kg)
+
+# --- Base Classes for Modularity ---
+
+class Engine:
+    def __init__(self, cylinders, displacement_L, max_power_hp, max_torque_nm, redline_rpm):
+        self.cylinders = cylinders
+        self.displacement_L = displacement_L
+        self.max_power_hp = max_power_hp
+        self.max_torque_nm = max_torque_nm
+        self.redline_rpm = redline_rpm
+        self.current_rpm = 0
+        self.fuel_consumption_rate = 0 # kg/s
+
+    def get_power_output(self, rpm, throttle_position):
+        # Simplified power curve: linear up to max, then drops
+        if rpm > self.redline_rpm:
+            return 0
+        normalized_rpm = min(1.0, rpm / self.redline_rpm)
+        power_at_rpm = self.max_power_hp * normalized_rpm * throttle_position
+        return power_at_rpm * 745.7 # Convert HP to Watts
+
+    def get_torque_output(self, rpm, throttle_position):
+        # Simplified torque curve
+        if rpm > self.redline_rpm:
+            return 0
+        normalized_rpm = min(1.0, rpm / self.redline_rpm)
+        torque_at_rpm = self.max_torque_nm * (1 - abs(0.5 - normalized_rpm)) * 2 * throttle_position
+        return torque_at_rpm
+
+    def update_fuel_consumption(self, power_output_watts):
+        # Very simplified: fuel consumption proportional to power output
+        self.fuel_consumption_rate = power_output_watts / (FUEL_ENERGY_DENSITY * 0.4) # Assuming 40% efficiency
+
+class ElectricMotor:
+    def __init__(self, max_power_kw, max_torque_nm, efficiency=0.95):
+        self.max_power_kw = max_power_kw
+        self.max_torque_nm = max_torque_nm
+        self.efficiency = efficiency
+        self.current_power_draw = 0 # Watts
+
+    def get_power_output(self, demand_watts):
+        # Simulate power delivery up to max, considering efficiency
+        actual_power = min(demand_watts, self.max_power_kw * 1000)
+        self.current_power_draw = actual_power / self.efficiency
+        return actual_power
+
+    def get_torque_output(self, demand_torque_nm):
+        return min(demand_torque_nm, self.max_torque_nm)
+
+    def regenerate_power(self, torque_input_nm, rpm):
+        # Simulate power regeneration during braking
+        regen_power_watts = (torque_input_nm * rpm * math.pi / 30) * self.efficiency # Torque * Angular velocity
+        return regen_power_watts
+
+class Battery:
+    def __init__(self, capacity_kwh, max_discharge_kw, max_charge_kw):
+        self.capacity_kwh = capacity_kwh
+        self.current_charge_kwh = capacity_kwh * 0.8 # Start at 80%
+        self.max_discharge_kw = max_discharge_kw
+        self.max_charge_kw = max_charge_kw
+
+    def discharge(self, power_kw, dt):
+        power_kw = min(power_kw, self.max_discharge_kw)
+        energy_draw = power_kw * (dt / 3600) # kWh
+        if self.current_charge_kwh >= energy_draw:
+            self.current_charge_kwh -= energy_draw
+            return power_kw
+        else:
+            actual_power = self.current_charge_kwh / (dt / 3600)
+            self.current_charge_kwh = 0
+            return actual_power
+
+    def charge(self, power_kw, dt):
+        power_kw = min(power_kw, self.max_charge_kw)
+        energy_charge = power_kw * (dt / 3600) # kWh
+        if self.current_charge_kwh + energy_charge <= self.capacity_kwh:
+            self.current_charge_kwh += energy_charge
+            return power_kw
+        else:
+            actual_power = (self.capacity_kwh - self.current_charge_kwh) / (dt / 3600)
+            self.current_charge_kwh = self.capacity_kwh
+            return actual_power
+
+class BrakingSystem:
+    def __init__(self, max_braking_torque_nm, regenerative_ratio=0.7):
+        self.max_braking_torque_nm = max_braking_torque_nm
+        self.regenerative_ratio = regenerative_ratio # Portion of braking that can be regenerative
+
+    def apply_brakes(self, pedal_pressure, current_speed_mps):
+        # Simplified: braking force proportional to pedal pressure and current speed (for regen)
+        braking_torque = self.max_braking_torque_nm * pedal_pressure
+        mechanical_braking_torque = braking_torque * (1 - self.regenerative_ratio)
+        regenerative_braking_torque = braking_torque * self.regenerative_ratio
+
+        return mechanical_braking_torque, regenerative_braking_torque
+
+class Aerodynamics:
+    def __init__(self, cd_base, frontal_area_m2, cooling_duct_efficiency=0.8):
+        self.cd_base = cd_base
+        self.frontal_area_m2 = frontal_area_m2
+        self.cooling_duct_efficiency = cooling_duct_efficiency
+        self.active_aero_state = "low_drag" # States: low_drag, high_downforce, braking
+
+    def get_drag_force(self, velocity_mps):
+        # Drag Force = 0.5 * AirDensity * Velocity^2 * Cd * FrontalArea
+        drag_coefficient = self.cd_base
+        if self.active_aero_state == "high_downforce":
+            drag_coefficient *= 1.5 # Increase drag for downforce
+        elif self.active_aero_state == "braking":
+            drag_coefficient *= 1.8 # Air brakes / more aggressive drag
+        
+        return 0.5 * AIR_DENSITY_SEA_LEVEL * (velocity_mps**2) * drag_coefficient * self.frontal_area_m2
+
+    def adjust_aero(self, vehicle_state):
+        # Logic to dynamically adjust aero elements (e.g., active spoilers, diffusers)
+        if vehicle_state == "high_speed_acceleration":
+            self.active_aero_state = "low_drag"
+        elif vehicle_state == "cornering":
+            self.active_aero_state = "high_downforce"
+        elif vehicle_state == "hard_braking":
+            self.active_aero_state = "braking"
+        else:
+            self.active_aero_state = "low_drag" # Default
+
+    def get_cooling_airflow(self, velocity_mps):
+        # Estimate airflow for cooling based on speed and duct efficiency
+        # This would be highly complex in reality, considering duct design, pressure differentials
+        airflow_m3_per_s = self.frontal_area_m2 * velocity_mps * self.cooling_duct_efficiency
+        return airflow_m3_per_s
+
+class Powertrain:
+    def __init__(self, engine, electric_motor, battery, transmission_ratios, final_drive_ratio, wheel_radius):
+        self.engine = engine
+        self.electric_motor = electric_motor
+        self.battery = battery
+        self.transmission_ratios = transmission_ratios
+        self.final_drive_ratio = final_drive_ratio
+        self.wheel_radius = wheel_radius
+        self.current_gear = 1
+        self.clutch_engaged = True
+
+    def calculate_wheel_rpm(self, vehicle_speed_mps):
+        wheel_circumference = 2 * math.pi * self.wheel_radius
+        wheel_rpm = (vehicle_speed_mps / wheel_circumference) * 60
+        return wheel_rpm
+
+    def calculate_engine_rpm(self, vehicle_speed_mps):
+        if not self.clutch_engaged:
+            return 0
+        wheel_rpm = self.calculate_wheel_rpm(vehicle_speed_mps)
+        gear_ratio = self.transmission_ratios[self.current_gear - 1]
+        engine_rpm = wheel_rpm * gear_ratio * self.final_drive_ratio
+        return engine_rpm
+
+    def get_total_wheel_torque(self, throttle_position, battery_assist_demand_kw):
+        engine_rpm = self.engine.current_rpm # Assume engine RPM is already updated
+        engine_torque = self.engine.get_torque_output(engine_rpm, throttle_position)
+
+        # Electric motor assist
+        motor_power_demand_watts = battery_assist_demand_kw * 1000
+        motor_power_output_watts = self.electric_motor.get_power_output(motor_power_demand_watts)
+        
+        # Convert motor power to torque at wheel, assuming direct drive or fixed ratio
+        # This is a simplification; actual hybrid integration is complex
+        motor_torque_at_wheel = 0
+        if motor_power_output_watts > 0 and self.engine.current_rpm > 0: # Avoid division by zero
+            # Simplified: assuming motor adds torque directly to the drivetrain
+            # In reality, it could be on crankshaft, transmission, or wheels
+            motor_torque_at_wheel = (motor_power_output_watts / (self.engine.current_rpm * math.pi / 30)) * \
+                                    self.final_drive_ratio * self.transmission_ratios[self.current_gear - 1]
+
+        # Total torque before losses
+        total_drivetrain_torque = engine_torque * self.transmission_ratios[self.current_gear - 1] * self.final_drive_ratio + motor_torque_at_wheel
+
+        # Apply drivetrain losses (simplified)
+        drivetrain_efficiency = 0.92
+        return total_drivetrain_torque * drivetrain_efficiency
+
+    def shift_gear_up(self):
+        if self.current_gear < len(self.transmission_ratios):
+            self.current_gear += 1
+            # Simulate brief clutch disengagement
+            self.clutch_engaged = False
+            # In a real system, there would be a precise shift timing and rev matching
+            self.clutch_engaged = True
+
+    def shift_gear_down(self):
+        if self.current_gear > 1:
+            self.current_gear -= 1
+            self.clutch_engaged = False
+            self.clutch_engaged = True
+
+# --- Main Ferrari Vehicle Class ---
+
+class FerrariVehicle:
+    def __init__(self, engine_type="V12", body_material="titanium_carbon_fiber"):
+        self.mass_kg = 1500 # Example mass for a supercar
+        self.velocity_mps = 0
+        self.acceleration_mps2 = 0
+        self.total_distance_m = 0
+        self.fuel_level_kg = 50 # 50 kg of fuel
+        self.oil_temperature_c = 90
+        self.coolant_temperature_c = 90
+        self.gear_shift_strategy = "automatic" # or "manual"
+
+        # Engine selection based on type
+        if engine_type == "V6":
+            self.engine = Engine(6, 2.9, 800, 800, 10000) # Example V6 specs
+        elif engine_type == "V8":
+            self.engine = Engine(8, 3.9, 950, 900, 9500) # Example V8 specs
+        elif engine_type == "V10":
+            self.engine = Engine(10, 5.0, 1100, 1000, 10500) # Example V10 specs
+        elif engine_type == "V12":
+            self.engine = Engine(12, 6.5, 1200, 1100, 11000) # Example V12 specs
+        else:
+            raise ValueError("Invalid engine type specified.")
+
+        self.electric_motor = ElectricMotor(max_power_kw=200, max_torque_nm=300) # Example motor
+        self.battery = Battery(capacity_kwh=10, max_discharge_kw=300, max_charge_kw=150) # Example battery
+
+        self.powertrain = Powertrain(
+            self.engine, self.electric_motor, self.battery,
+            GEAR_RATIOS_V12, final_drive_ratio=3.0, wheel_radius=WHEEL_RADIUS_M
+        )
+        self.braking_system = BrakingSystem(max_braking_torque_nm=5000) # Example braking torque
+        self.aerodynamics = Aerodynamics(CD_BASE_CARBON_FIBER, FRONTAL_AREA_M2)
+
+        # Body material (conceptual for now)
+        self.body_material = body_material
+        if body_material == "titanium_carbon_fiber":
+            self.mass_kg *= 0.85 # Reduce mass for advanced materials
+            print(f"Vehicle initialized with {engine_type} and {body_material} body. Mass: {self.mass_kg:.0f} kg")
+
+    def _calculate_forces(self, throttle_position, brake_pedal_pressure, battery_assist_demand_kw):
+        # 1. Tractive Force from Powertrain
+        wheel_torque = self.powertrain.get_total_wheel_torque(throttle_position, battery_assist_demand_kw)
+        tractive_force = wheel_torque / self.powertrain.wheel_radius
+
+        # 2. Braking Force
+        mechanical_brake_torque, regenerative_brake_torque = self.braking_system.apply_brakes(
+            brake_pedal_pressure, self.velocity_mps
+        )
+        total_braking_force = (mechanical_brake_torque + regenerative_brake_torque) / self.powertrain.wheel_radius
+        
+        # Regenerate battery power during braking
+        regen_power_watts = self.electric_motor.regenerate_power(
+            regenerative_brake_torque, self.powertrain.calculate_wheel_rpm(self.velocity_mps)
+        )
+        self.battery.charge(regen_power_watts / 1000, 0.01) # dt is small
+
+        # 3. Aerodynamic Drag
+        drag_force = self.aerodynamics.get_drag_force(self.velocity_mps)
+
+        # 4. Rolling Resistance
+        rolling_resistance_force = ROLLING_RESISTANCE_COEFF * self.mass_kg * GRAVITY
+
+        net_force = tractive_force - total_braking_force - drag_force - rolling_resistance_force
+        return net_force
+
+    def _manage_engine_and_hybrid(self, throttle_position, battery_assist_demand_kw, dt):
+        # Update engine RPM
+        self.engine.current_rpm = self.powertrain.calculate_engine_rpm(self.velocity_mps)
+
+        # Determine hybrid power split based on demand and battery state
+        engine_power_demand_watts = self.engine.get_power_output(self.engine.current_rpm, throttle_position)
+        motor_power_demand_watts = battery_assist_demand_kw * 1000
+
+        # Prioritize electric assist if requested and battery available
+        actual_motor_power_watts = self.battery.discharge(motor_power_demand_watts / 1000, dt) * 1000
+        # If motor can't meet demand, engine makes up the difference (simplified)
+        actual_engine_power_watts = engine_power_demand_watts
+        
+        # Update engine fuel consumption
+        self.engine.update_fuel_consumption(actual_engine_power_watts)
+        self.fuel_level_kg -= self.engine.fuel_consumption_rate * dt
+
+    def _manage_cooling(self, dt):
+        # Simulate cooling system based on engine load and airflow
+        engine_heat_generation = self.engine.get_power_output(self.engine.current_rpm, 1.0) * 0.6 # Assuming 60% waste heat
+        airflow = self.aerodynamics.get_cooling_airflow(self.velocity_mps)
+
+        # Very simplified temperature model
+        # Heat transfer rate = U * A * DeltaT
+        # DeltaT_oil = (HeatGen - (Airflow * SpecificHeat_Air * TemperatureDifference_OilAir)) / (Mass_Oil * SpecificHeat_Oil)
+        # This is highly complex in reality with multiple fluid circuits (oil, coolant, intercooler)
+
+        # For demonstration: just increase with load, decrease with airflow
+        self.oil_temperature_c += (engine_heat_generation / 1000000) * dt - (airflow / 50) * dt
+        self.coolant_temperature_c += (engine_heat_generation / 800000) * dt - (airflow / 40) * dt
+
+        # Simple overheat protection
+        if self.oil_temperature_c > 130 or self.coolant_temperature_c > 110:
+            print("WARNING: Engine overheating! Reducing power.")
+            # self.engine.max_power_hp *= 0.9 # Reduce power if overheating
+
+    def _manage_aerodynamics(self):
+        # Adjust aero based on current speed and assumed driving intent
+        if self.velocity_mps * 2.237 > 200: # Over 200 mph
+            self.aerodynamics.adjust_aero("high_speed_acceleration")
+        elif self.acceleration_mps2 < -5: # Hard braking
+            self.aerodynamics.adjust_aero("hard_braking")
+        else:
+            self.aerodynamics.adjust_aero("low_drag")
+
+    def update(self, throttle_position, brake_pedal_pressure, battery_assist_demand_kw, dt):
+        """
+        Updates the vehicle state over a small time step (dt).
+
+        Args:
+            throttle_position (float): 0.0 (no throttle) to 1.0 (full throttle).
+            brake_pedal_pressure (float): 0.0 (no brake) to 1.0 (full brake).
+            battery_assist_demand_kw (float): Power demand from battery in kW.
+            dt (float): Time step in seconds.
+        """
+        if self.fuel_level_kg <= 0:
+            print("Out of fuel!")
+            throttle_position = 0
+            battery_assist_demand_kw = 0
+
+        # Clamp inputs
+        throttle_position = max(0.0, min(1.0, throttle_position))
+        brake_pedal_pressure = max(0.0, min(1.0, brake_pedal_pressure))
+        battery_assist_demand_kw = max(0.0, min(self.battery.max_discharge_kw, battery_assist_demand_kw))
+
+        # Update sub-systems
+        self._manage_engine_and_hybrid(throttle_position, battery_assist_demand_kw, dt)
+        self._manage_aerodynamics()
+
+        # Calculate net force
+        net_force = self._calculate_forces(throttle_position, brake_pedal_pressure, battery_assist_demand_kw)
+
+        # Apply Newton's Second Law: F = ma
+        self.acceleration_mps2 = net_force / self.mass_kg
+
+        # Update velocity and position
+        self.velocity_mps += self.acceleration_mps2 * dt
+        self.velocity_mps = max(0, self.velocity_mps) # Cannot go backwards
+        self.total_distance_m += self.velocity_mps * dt
+
+        # Automatic Gear Shifting (simplified)
+        if self.gear_shift_strategy == "automatic":
+            target_engine_rpm_lower = self.engine.redline_rpm * 0.7
+            target_engine_rpm_upper = self.engine.redline_rpm * 0.9
+            
+            if self.engine.current_rpm > target_engine_rpm_upper and self.powertrain.current_gear < len(self.powertrain.transmission_ratios):
+                self.powertrain.shift_gear_up()
+            elif self.engine.current_rpm < target_engine_rpm_lower and self.powertrain.current_gear > 1 and throttle_position < 0.5:
+                # Downshift only if not trying to accelerate hard, to avoid lugging
+                self.powertrain.shift_gear_down()
+
+        self._manage_cooling(dt)
+
+    def get_speed_mph(self):
+        return self.velocity_mps * 2.23694
+
+    def get_fuel_level_liters(self):
+        # Approx density of gasoline 0.75 kg/L
+        return self.fuel_level_kg / 0.75
+
+# --- Simulation Example ---
+
+if __name__ == "__main__":
+    # Initialize a Ferrari with a V12 engine
+    ferrari = FerrariVehicle(engine_type="V12", body_material="titanium_carbon_fiber")
+
+    time_elapsed = 0
+    dt = 0.01 # seconds
+    target_speed_mph = 500
+    
+    # Data logging for plotting
+    speeds = []
+    times = []
+    rpms = []
+    gears = []
+    fuel_levels = []
+    battery_charges = []
+    oil_temps = []
+    coolant_temps = []
+
+    print("Starting 0-500 mph acceleration simulation...")
+
+    while ferrari.get_speed_mph() < target_speed_mph and time_elapsed < 60: # Max 60 seconds
+        # Apply full throttle and some battery assist
+        throttle = 1.0
+        battery_assist = ferrari.battery.max_discharge_kw # Use full battery assist
+
+        # If battery is low, reduce assist
+        if ferrari.battery.current_charge_kwh < ferrari.battery.capacity_kwh * 0.2:
+            battery_assist = 0
+            
+        ferrari.update(throttle, 0.0, battery_assist, dt)
+
+        time_elapsed += dt
+
+        speeds.append(ferrari.get_speed_mph())
+        times.append(time_elapsed)
+        rpms.append(ferrari.engine.current_rpm)
+        gears.append(ferrari.powertrain.current_gear)
+        fuel_levels.append(ferrari.get_fuel_level_liters())
+        battery_charges.append(ferrari.battery.current_charge_kwh)
+        oil_temps.append(ferrari.oil_temperature_c)
+        coolant_temps.append(ferrari.coolant_temperature_c)
+
+        if int(time_elapsed * 10) % 50 == 0: # Print every 0.5 seconds
+            print(f"Time: {time_elapsed:.2f}s, Speed: {ferrari.get_speed_mph():.2f} mph, "
+                  f"RPM: {ferrari.engine.current_rpm:.0f}, Gear: {ferrari.powertrain.current_gear}, "
+                  f"Fuel: {ferrari.get_fuel_level_liters():.1f} L, Battery: {ferrari.battery.current_charge_kwh:.1f} kWh, "
+                  f"Oil Temp: {ferrari.oil_temperature_c:.1f}°C, Coolant Temp: {ferrari.coolant_temperature_c:.1f}°C")
+
+    print(f"\nSimulation Finished.")
+    print(f"Time to reach {ferrari.get_speed_mph():.2f} mph: {time_elapsed:.2f} seconds.")
+    print(f"Total distance covered: {ferrari.total_distance_m / 1000:.2f} km.")
+    print(f"Remaining fuel: {ferrari.get_fuel_level_liters():.1f} L.")
+    print(f"Remaining battery: {ferrari.battery.current_charge_kwh:.1f} kWh.")
+
+    # You would typically use a plotting library like matplotlib to visualize these results.
+    try:
+        import matplotlib.pyplot as plt
+
+        fig, axs = plt.subplots(4, 1, figsize=(10, 16))
+
+        axs[0].plot(times, speeds)
+        axs[0].set_title('Speed vs. Time')
+        axs[0].set_xlabel('Time (s)')
+        axs[0].set_ylabel('Speed (mph)')
+        axs[0].grid(True)
+
+        axs[1].plot(times, rpms, label='Engine RPM')
+        ax2 = axs[1].twinx()
+        ax2.plot(times, gears, color='red', linestyle='--', label='Gear')
+        axs[1].set_title('Engine RPM and Gear vs. Time')
+        axs[1].set_xlabel('Time (s)')
+        axs[1].set_ylabel('RPM')
+        ax2.set_ylabel('Gear')
+        axs[1].legend(loc='upper left')
+        ax2.legend(loc='upper right')
+        axs[1].grid(True)
+
+        axs[2].plot(times, fuel_levels, label='Fuel (L)')
+        ax3 = axs[2].twinx()
+        ax3.plot(times, battery_charges, color='orange', label='Battery (kWh)')
+        axs[2].set_title('Fuel and Battery Charge vs. Time')
+        axs[2].set_xlabel('Time (s)')
+        axs[2].set_ylabel('Fuel (L)')
+        ax3.set_ylabel('Battery (kWh)')
+        axs[2].legend(loc='upper left')
+        ax3.legend(loc='upper right')
+        axs[2].grid(True)
+
+        axs[3].plot(times, oil_temps, label='Oil Temp (°C)')
+        axs[3].plot(times, coolant_temps, label='Coolant Temp (°C)', linestyle='--')
+        axs[3].set_title('Temperatures vs. Time')
+        axs[3].set_xlabel('Time (s)')
+        axs[3].set_ylabel('Temperature (°C)')
+        axs[3].legend()
+        axs[3].grid(True)
+
+        plt.tight_layout()
+        plt.show()
+
+    except ImportError:
+        print("\nMatplotlib not found. Install it with 'pip install matplotlib' to see plots.")
+
+
+
+
+// --- Constants and Configuration (simplified) ---
+const GRAVITY = 9.81; // m/s^2
+const AIR_DENSITY_SEA_LEVEL = 1.225; // kg/m^3
+const CD_BASE_CARBON_FIBER = 0.25; // Typical low drag coefficient for a sleek car
+const FRONTAL_AREA_M2 = 2.0; // Example frontal area
+const ROLLING_RESISTANCE_COEFF = 0.01;
+const WHEEL_RADIUS_M = 0.35; // Approx. wheel radius
+const GEAR_RATIOS_V12 = [2.97, 2.31, 1.95, 1.68, 1.45, 1.26, 1.09, 0.94, 0.81, 0.70]; // Example 10-speed
+const MAX_ENGINE_RPM = 12000;
+const FUEL_ENERGY_DENSITY = 44 * 10**6; // Joules/kg (gasoline)
+const BATTERY_ENERGY_DENSITY = 250 * 3600; // Joules/kg (Li-ion, 250 Wh/kg)
+
+// --- Base Classes for Modularity ---
+
+class Engine {
+    constructor(cylinders, displacementL, maxPowerHp, maxTorqueNm, redlineRpm) {
+        this.cylinders = cylinders;
+        this.displacementL = displacementL;
+        this.maxPowerHp = maxPowerHp;
+        this.maxTorqueNm = maxTorqueNm;
+        this.redlineRpm = redlineRpm;
+        this.currentRpm = 0;
+        this.fuelConsumptionRate = 0; // kg/s
+    }
+
+    getPowerOutput(rpm, throttlePosition) {
+        // Simplified power curve: linear up to max, then drops
+        if (rpm > this.redlineRpm) {
+            return 0;
+        }
+        const normalizedRpm = Math.min(1.0, rpm / this.redlineRpm);
+        const powerAtRpm = this.maxPowerHp * normalizedRpm * throttlePosition;
+        return powerAtRpm * 745.7; // Convert HP to Watts
+    }
+
+    getTorqueOutput(rpm, throttlePosition) {
+        // Simplified torque curve
+        if (rpm > this.redlineRpm) {
+            return 0;
+        }
+        const normalizedRpm = Math.min(1.0, rpm / this.redlineRpm);
+        const torqueAtRpm = this.maxTorqueNm * (1 - Math.abs(0.5 - normalizedRpm)) * 2 * throttlePosition;
+        return torqueAtRpm;
+    }
+
+    updateFuelConsumption(powerOutputWatts) {
+        // Very simplified: fuel consumption proportional to power output
+        this.fuelConsumptionRate = powerOutputWatts / (FUEL_ENERGY_DENSITY * 0.4); // Assuming 40% efficiency
+    }
+}
+
+class ElectricMotor {
+    constructor(maxPowerKw, maxTorqueNm, efficiency = 0.95) {
+        this.maxPowerKw = maxPowerKw;
+        this.maxTorqueNm = maxTorqueNm;
+        this.efficiency = efficiency;
+        this.currentPowerDraw = 0; // Watts
+    }
+
+    getPowerOutput(demandWatts) {
+        // Simulate power delivery up to max, considering efficiency
+        const actualPower = Math.min(demandWatts, this.maxPowerKw * 1000);
+        this.currentPowerDraw = actualPower / this.efficiency;
+        return actualPower;
+    }
+
+    getTorqueOutput(demandTorqueNm) {
+        return Math.min(demandTorqueNm, this.maxTorqueNm);
+    }
+
+    regeneratePower(torqueInputNm, rpm) {
+        // Simulate power regeneration during braking
+        const regenPowerWatts = (torqueInputNm * rpm * Math.PI / 30) * this.efficiency; // Torque * Angular velocity
+        return regenPowerWatts;
+    }
+}
+
+class Battery {
+    constructor(capacityKwh, maxDischargeKw, maxChargeKw) {
+        this.capacityKwh = capacityKwh;
+        this.currentChargeKwh = capacityKwh * 0.8; // Start at 80%
+        this.maxDischargeKw = maxDischargeKw;
+        this.maxChargeKw = maxChargeKw;
+    }
+
+    discharge(powerKw, dt) {
+        powerKw = Math.min(powerKw, this.maxDischargeKw);
+        const energyDraw = powerKw * (dt / 3600); // kWh
+        if (this.currentChargeKwh >= energyDraw) {
+            this.currentChargeKwh -= energyDraw;
+            return powerKw;
+        } else {
+            const actualPower = this.currentChargeKwh / (dt / 3600);
+            this.currentChargeKwh = 0;
+            return actualPower;
+        }
+    }
+
+    charge(powerKw, dt) {
+        powerKw = Math.min(powerKw, this.maxChargeKw);
+        const energyCharge = powerKw * (dt / 3600); // kWh
+        if (this.currentChargeKwh + energyCharge <= this.capacityKwh) {
+            this.currentChargeKwh += energyCharge;
+            return powerKw;
+        } else {
+            const actualPower = (this.capacityKwh - this.currentChargeKwh) / (dt / 3600);
+            this.currentChargeKwh = this.capacityKwh;
+            return actualPower;
+        }
+    }
+}
+
+class BrakingSystem {
+    constructor(maxBrakingTorqueNm, regenerativeRatio = 0.7) {
+        this.maxBrakingTorqueNm = maxBrakingTorqueNm;
+        this.regenerativeRatio = regenerativeRatio; // Portion of braking that can be regenerative
+    }
+
+    applyBrakes(pedalPressure, currentSpeedMps) {
+        // Simplified: braking force proportional to pedal pressure and current speed (for regen)
+        const brakingTorque = this.maxBrakingTorqueNm * pedalPressure;
+        const mechanicalBrakingTorque = brakingTorque * (1 - this.regenerativeRatio);
+        const regenerativeBrakingTorque = brakingTorque * this.regenerativeRatio;
+
+        return { mechanicalBrakingTorque, regenerativeBrakingTorque };
+    }
+}
+
+class Aerodynamics {
+    constructor(cdBase, frontalAreaM2, coolingDuctEfficiency = 0.8) {
+        this.cdBase = cdBase;
+        this.frontalAreaM2 = frontalAreaM2;
+        this.coolingDuctEfficiency = coolingDuctEfficiency;
+        this.activeAeroState = "low_drag"; // States: low_drag, high_downforce, braking
+    }
+
+    getDragForce(velocityMps) {
+        // Drag Force = 0.5 * AirDensity * Velocity^2 * Cd * FrontalArea
+        let dragCoefficient = this.cdBase;
+        if (this.activeAeroState === "high_downforce") {
+            dragCoefficient *= 1.5; // Increase drag for downforce
+        } else if (this.activeAeroState === "braking") {
+            dragCoefficient *= 1.8; // Air brakes / more aggressive drag
+        }
+        
+        return 0.5 * AIR_DENSITY_SEA_LEVEL * (velocityMps**2) * dragCoefficient * this.frontalAreaM2;
+    }
+
+    adjustAero(vehicleState) {
+        // Logic to dynamically adjust aero elements (e.g., active spoilers, diffusers)
+        if (vehicleState === "high_speed_acceleration") {
+            this.activeAeroState = "low_drag";
+        } else if (vehicleState === "cornering") {
+            this.activeAeroState = "high_downforce";
+        } else if (vehicleState === "hard_braking") {
+            this.activeAeroState = "braking";
+        } else {
+            this.activeAeroState = "low_drag"; // Default
+        }
+    }
+
+    getCoolingAirflow(velocityMps) {
+        // Estimate airflow for cooling based on speed and duct efficiency
+        const airflowM3PerS = this.frontalAreaM2 * velocityMps * this.coolingDuctEfficiency;
+        return airflowM3PerS;
+    }
+}
+
+class Powertrain {
+    constructor(engine, electricMotor, battery, transmissionRatios, finalDriveRatio, wheelRadius) {
+        this.engine = engine;
+        this.electricMotor = electricMotor;
+        this.battery = battery;
+        this.transmissionRatios = transmissionRatios;
+        this.finalDriveRatio = finalDriveRatio;
+        this.wheelRadius = wheelRadius;
+        this.currentGear = 1;
+        this.clutchEngaged = true;
+    }
+
+    calculateWheelRpm(vehicleSpeedMps) {
+        const wheelCircumference = 2 * Math.PI * this.wheelRadius;
+        const wheelRpm = (vehicleSpeedMps / wheelCircumference) * 60;
+        return wheelRpm;
+    }
+
+    calculateEngineRpm(vehicleSpeedMps) {
+        if (!this.clutchEngaged) {
+            return 0;
+        }
+        const wheelRpm = this.calculateWheelRpm(vehicleSpeedMps);
+        const gearRatio = this.transmissionRatios[this.currentGear - 1];
+        const engineRpm = wheelRpm * gearRatio * this.finalDriveRatio;
+        return engineRpm;
+    }
+
+    getTotalWheelTorque(throttlePosition, batteryAssistDemandKw) {
+        const engineRpm = this.engine.currentRpm; // Assume engine RPM is already updated
+        const engineTorque = this.engine.getTorqueOutput(engineRpm, throttlePosition);
+
+        // Electric motor assist
+        const motorPowerDemandWatts = batteryAssistDemandKw * 1000;
+        const motorPowerOutputWatts = this.electricMotor.getPowerOutput(motorPowerDemandWatts);
+        
+        let motorTorqueAtWheel = 0;
+        if (motorPowerOutputWatts > 0 && this.engine.currentRpm > 0) {
+            motorTorqueAtWheel = (motorPowerOutputWatts / (this.engine.currentRpm * Math.PI / 30)) * this.finalDriveRatio * this.transmissionRatios[this.currentGear - 1];
+        }
+
+        const totalDrivetrainTorque = engineTorque * this.transmissionRatios[this.currentGear - 1] * this.finalDriveRatio + motorTorqueAtWheel;
+
+        const drivetrainEfficiency = 0.92;
+        return totalDrivetrainTorque * drivetrainEfficiency;
+    }
+
+    shiftGearUp() {
+        if (this.currentGear < this.transmissionRatios.length) {
+            this.currentGear++;
+            this.clutchEngaged = false;
+            // In a real system, there would be a precise shift timing and rev matching
+            this.clutchEngaged = true;
+        }
+    }
+
+    shiftGearDown() {
+        if (this.currentGear > 1) {
+            this.currentGear--;
+            this.clutchEngaged = false;
+            this.clutchEngaged = true;
+        }
+    }
+}
+
+// --- Main Ferrari Vehicle Class ---
+
+class FerrariVehicle {
+    constructor(engineType = "V12", bodyMaterial = "titanium_carbon_fiber") {
+        this.massKg = 1500; // Example mass for a supercar
+        this.velocityMps = 0;
+        this.accelerationMps2 = 0;
+        this.totalDistanceM = 0;
+        this.fuelLevelKg = 50; // 50 kg of fuel
+        this.oilTemperatureC = 90;
+        this.coolantTemperatureC = 90;
+        this.gearShiftStrategy = "automatic"; // or "manual"
+
+        // Engine selection based on type
+        if (engineType === "V6") {
+            this.engine = new Engine(6, 2.9, 800, 800, 10000); // Example V6 specs
+        } else if (engineType === "V8") {
+            this.engine = new Engine(8, 3.9, 950, 900, 9500); // Example V8 specs
+        } else if (engineType === "V10") {
+            this.engine = new Engine(10, 5.0, 1100, 1000, 10500); // Example V10 specs
+        } else if (engineType === "V12") {
+            this.engine = new Engine(12, 6.5, 1200, 1100, 11000); // Example V12 specs
+        } else {
+            throw new Error("Invalid engine type specified.");
+        }
+
+        this.electricMotor = new ElectricMotor(200, 300); // Example motor
+        this.battery = new Battery(10, 300, 150); // Example battery
+
+        this.powertrain = new Powertrain(
+            this.engine, this.electricMotor, this.battery,
+            GEAR_RATIOS_V12, 3.0, WHEEL_RADIUS_M
+        );
+        this.brakingSystem = new BrakingSystem(5000); // Example braking torque
+        this.aerodynamics = new Aerodynamics(CD_BASE_CARBON_FIBER, FRONTAL_AREA_M2);
+
+        // Body material (conceptual for now)
+        this.bodyMaterial = bodyMaterial;
+        if (bodyMaterial === "titanium_carbon_fiber") {
+            this.massKg *= 0.85; // Reduce mass for advanced materials
+            console.log(`Vehicle initialized with ${engineType} and ${bodyMaterial} body. Mass: ${this.massKg.toFixed(0)} kg`);
+        }
+    }
+
+    _calculateForces(throttlePosition, brakePedalPressure, batteryAssistDemandKw) {
+        // 1. Tractive Force from Powertrain
+        const wheelTorque = this.powertrain.getTotalWheelTorque(throttlePosition, batteryAssistDemandKw);
+        const tractiveForce = wheelTorque / this.powertrain.wheelRadius;
+
+        // 2. Braking Force
+        const { mechanicalBrakingTorque, regenerativeBrakingTorque } = this.brakingSystem.applyBrakes(
+            brakePedalPressure, this.velocityMps
+        );
+        const totalBrakingForce = (mechanicalBrakingTorque + regenerativeBrakingTorque) / this.powertrain.wheelRadius;
+        
+        // Regenerate battery power during braking
+        const regenPowerWatts = this.electricMotor.regeneratePower(
+            regenerativeBrakingTorque, this.powertrain.calculateWheelRpm(this.velocityMps)
+        );
+        this.battery.charge(regenPowerWatts / 1000, 0.01); // dt is small
+
+        // 3. Aerodynamic Drag
+        const dragForce = this.aerodynamics.getDragForce(this.velocityMps);
+
+        // 4. Rolling Resistance
+        const rollingResistanceForce = ROLLING_RESISTANCE_COEFF * this.massKg * GRAVITY;
+
+        const netForce = tractiveForce - totalBrakingForce - dragForce - rollingResistanceForce;
+        return netForce;
+    }
+
+    _manageEngineAndHybrid(throttlePosition, batteryAssistDemandKw, dt) {
+        // Update engine RPM
+        this.engine.currentRpm = this.powertrain.calculateEngineRpm(this.velocityMps);
+
+        // Determine hybrid power split based on demand and battery state
+        const enginePowerDemandWatts = this.engine.getPowerOutput(this.engine.currentRpm, throttlePosition);
+        const motorPowerDemandWatts = batteryAssistDemandKw * 1000;
+
+        // Prioritize electric assist if requested and battery available
+        const actualMotorPowerWatts = this.battery.discharge(motorPowerDemandWatts / 1000, dt) * 1000;
+        // If motor can't meet demand, engine makes up the difference (simplified)
+        const actualEnginePowerWatts = enginePowerDemandWatts; // Simplification
+
+        // Update engine fuel consumption
+        this.engine.updateFuelConsumption(actualEnginePowerWatts);
+        this.fuelLevelKg -= this.engine.fuelConsumptionRate * dt;
+    }
+
+    _manageCooling(dt) {
+        // Simulate cooling system based on engine load and airflow
+        const engineHeatGeneration = this.engine.getPowerOutput(this.engine.currentRpm, 1.0) * 0.6; // Assuming 60% waste heat
+        const airflow = this.aerodynamics.getCoolingAirflow(this.velocityMps);
+
+        // Very simplified temperature model
+        this.oilTemperatureC += (engineHeatGeneration / 1000000) * dt - (airflow / 50) * dt;
+        this.coolantTemperatureC += (engineHeatGeneration / 800000) * dt - (airflow / 40) * dt;
+
+        // Simple overheat protection
+        if (this.oilTemperatureC > 130 || this.coolantTemperatureC > 110) {
+            // console.warn("WARNING: Engine overheating! Reducing power.");
+            // this.engine.maxPowerHp *= 0.9; // Reduce power if overheating (conceptual)
+        }
+    }
+
+    _manageAerodynamics() {
+        // Adjust aero based on current speed and assumed driving intent
+        if (this.velocityMps * 2.237 > 200) { // Over 200 mph
+            this.aerodynamics.adjustAero("high_speed_acceleration");
+        } else if (this.accelerationMps2 < -5) { // Hard braking
+            this.aerodynamics.adjustAero("hard_braking");
+        } else {
+            this.aerodynamics.adjustAero("low_drag");
+        }
+    }
+
+    update(throttlePosition, brakePedalPressure, batteryAssistDemandKw, dt) {
+        /**
+         * Updates the vehicle state over a small time step (dt).
+         *
+         * @param {number} throttlePosition - 0.0 (no throttle) to 1.0 (full throttle).
+         * @param {number} brakePedalPressure - 0.0 (no brake) to 1.0 (full brake).
+         * @param {number} batteryAssistDemandKw - Power demand from battery in kW.
+         * @param {number} dt - Time step in seconds.
+         */
+        if (this.fuelLevelKg <= 0) {
+            // console.log("Out of fuel!");
+            throttlePosition = 0;
+            batteryAssistDemandKw = 0;
+        }
+
+        // Clamp inputs
+        throttlePosition = Math.max(0.0, Math.min(1.0, throttlePosition));
+        brakePedalPressure = Math.max(0.0, Math.min(1.0, brakePedalPressure));
+        batteryAssistDemandKw = Math.max(0.0, Math.min(this.battery.maxDischargeKw, batteryAssistDemandKw));
+
+        // Update sub-systems
+        this._manageEngineAndHybrid(throttlePosition, batteryAssistDemandKw, dt);
+        this._manageAerodynamics();
+
+        // Calculate net force
+        const netForce = this._calculateForces(throttlePosition, brakePedalPressure, batteryAssistDemandKw);
+
+        // Apply Newton's Second Law: F = ma
+        this.accelerationMps2 = netForce / this.massKg;
+
+        // Update velocity and position
+        this.velocityMps += this.accelerationMps2 * dt;
+        this.velocityMps = Math.max(0, this.velocityMps); // Cannot go backwards
+        this.totalDistanceM += this.velocityMps * dt;
+
+        // Automatic Gear Shifting (simplified)
+        if (this.gearShiftStrategy === "automatic") {
+            const targetEngineRpmLower = this.engine.redlineRpm * 0.7;
+            const targetEngineRpmUpper = this.engine.redlineRpm * 0.9;
+            
+            if (this.engine.currentRpm > targetEngineRpmUpper && this.powertrain.currentGear < this.powertrain.transmissionRatios.length) {
+                this.powertrain.shiftGearUp();
+            } else if (this.engine.currentRpm < targetEngineRpmLower && this.powertrain.currentGear > 1 && throttlePosition < 0.5) {
+                // Downshift only if not trying to accelerate hard, to avoid lugging
+                this.powertrain.shiftGearDown();
+            }
+        }
+
+        this._manageCooling(dt);
+    }
+
+    getSpeedMph() {
+        return this.velocityMps * 2.23694;
+    }
+
+    getFuelLevelLiters() {
+        // Approx density of gasoline 0.75 kg/L
+        return this.fuelLevelKg / 0.75;
+    }
+}
+
+// --- Simulation Example ---
+
+async function runSimulation() {
+    // Initialize a Ferrari with a V12 engine
+    const ferrari = new FerrariVehicle("V12", "titanium_carbon_fiber");
+
+    let timeElapsed = 0;
+    const dt = 0.01; // seconds
+    const targetSpeedMph = 500;
+    
+    // Data logging for plotting (could be sent to a frontend for visualization)
+    const speeds = [];
+    const times = [];
+    const rpms = [];
+    const gears = [];
+    const fuelLevels = [];
+    const batteryCharges = [];
+    const oilTemps = [];
+    const coolantTemps = [];
+
+    console.log("Starting 0-500 mph acceleration simulation...");
+
+    // Using a simple loop. For real-time browser-based simulations, requestAnimationFrame is better.
+    // For Node.js, we just loop quickly.
+    while (ferrari.getSpeedMph() < targetSpeedMph && timeElapsed < 60) { // Max 60 seconds
+        // Apply full throttle and some battery assist
+        const throttle = 1.0;
+        let batteryAssist = ferrari.battery.maxDischargeKw; // Use full battery assist
+
+        // If battery is low, reduce assist
+        if (ferrari.battery.currentChargeKwh < ferrari.battery.capacityKwh * 0.2) {
+            batteryAssist = 0;
+        }
+            
+        ferrari.update(throttle, 0.0, batteryAssist, dt);
+
+        timeElapsed += dt;
+
+        speeds.push(ferrari.getSpeedMph());
+        times.push(timeElapsed);
+        rpms.push(ferrari.engine.currentRpm);
+        gears.push(ferrari.powertrain.currentGear);
+        fuelLevels.push(ferrari.getFuelLevelLiters());
+        batteryCharges.push(ferrari.battery.currentChargeKwh);
+        oilTemps.push(ferrari.oilTemperatureC);
+        coolantTemps.push(ferrari.coolantTemperatureC);
+
+        if (Math.floor(timeElapsed * 100) % 50 === 0) { // Print every 0.5 seconds
+            process.stdout.write(`\rTime: ${timeElapsed.toFixed(2)}s, Speed: ${ferrari.getSpeedMph().toFixed(2)} mph, ` +
+                  `RPM: ${ferrari.engine.currentRpm.toFixed(0)}, Gear: ${ferrari.powertrain.currentGear}, ` +
+                  `Fuel: ${ferrari.getFuelLevelLiters().toFixed(1)} L, Battery: ${ferrari.battery.currentChargeKwh.toFixed(1)} kWh, ` +
+                  `Oil Temp: ${ferrari.oilTemperatureC.toFixed(1)}°C, Coolant Temp: ${ferrari.coolantTemperatureC.toFixed(1)}°C`);
+        }
+    }
+    console.log("\n"); // Newline after progress
+    
+    console.log("Simulation Finished.");
+    console.log(`Time to reach ${ferrari.getSpeedMph().toFixed(2)} mph: ${timeElapsed.toFixed(2)} seconds.`);
+    console.log(`Total distance covered: ${(ferrari.totalDistanceM / 1000).toFixed(2)} km.`);
+    console.log(`Remaining fuel: ${ferrari.getFuelLevelLiters().toFixed(1)} L.`);
+    console.log(`Remaining battery: ${ferrari.battery.currentChargeKwh.toFixed(1)} kWh.`);
+
+    // In a real Node.js application, you might send this data to a client-side
+    // charting library (e.g., Chart.js, D3.js) via WebSockets or a REST API endpoint.
+    // For direct plotting in Node.js, you'd need a server-side charting library,
+    // which is outside the scope of this conceptual simulation.
+}
+
+runSimulation();
+
+
+
+
+npx create-react-app ferrari-sim-app
+cd ferrari-sim-app
+npm install --save react-three-fiber three @react-three/drei
+# You might also want a charting library, e.g., react-chartjs-2 and chart.js
+npm install --save react-chartjs-2 chart.js
+
+
+
+// src/VehicleSimulation.js
+
+// --- Constants and Configuration (simplified) ---
+export const GRAVITY = 9.81; // m/s^2
+export const AIR_DENSITY_SEA_LEVEL = 1.225; // kg/m^3
+export const CD_BASE_CARBON_FIBER = 0.25; // Typical low drag coefficient for a sleek car
+export const FRONTAL_AREA_M2 = 2.0; // Example frontal area
+export const ROLLING_RESISTANCE_COEFF = 0.01;
+export const WHEEL_RADIUS_M = 0.35; // Approx. wheel radius
+export const GEAR_RATIOS_V12 = [2.97, 2.31, 1.95, 1.68, 1.45, 1.26, 1.09, 0.94, 0.81, 0.70]; // Example 10-speed
+export const MAX_ENGINE_RPM = 12000;
+export const FUEL_ENERGY_DENSITY = 44 * 10**6; // Joules/kg (gasoline)
+export const BATTERY_ENERGY_DENSITY = 250 * 3600; // Joules/kg (Li-ion, 250 Wh/kg)
+
+// --- Base Classes for Modularity ---
+
+export class Engine {
+    constructor(cylinders, displacementL, maxPowerHp, maxTorqueNm, redlineRpm) {
+        this.cylinders = cylinders;
+        this.displacementL = displacementL;
+        this.maxPowerHp = maxPowerHp;
+        this.maxTorqueNm = maxTorqueNm;
+        this.redlineRpm = redlineRpm;
+        this.currentRpm = 0;
+        this.fuelConsumptionRate = 0; // kg/s
+    }
+
+    getPowerOutput(rpm, throttlePosition) {
+        if (rpm > this.redlineRpm) {
+            return 0;
+        }
+        const normalizedRpm = Math.min(1.0, rpm / this.redlineRpm);
+        const powerAtRpm = this.maxPowerHp * normalizedRpm * throttlePosition;
+        return powerAtRpm * 745.7; // Convert HP to Watts
+    }
+
+    getTorqueOutput(rpm, throttlePosition) {
+        if (rpm > this.redlineRpm) {
+            return 0;
+        }
+        const normalizedRpm = Math.min(1.0, rpm / this.redlineRpm);
+        const torqueAtRpm = this.maxTorqueNm * (1 - Math.abs(0.5 - normalizedRpm)) * 2 * throttlePosition;
+        return torqueAtRpm;
+    }
+
+    updateFuelConsumption(powerOutputWatts) {
+        this.fuelConsumptionRate = powerOutputWatts / (FUEL_ENERGY_DENSITY * 0.4);
+    }
+}
+
+export class ElectricMotor {
+    constructor(maxPowerKw, maxTorqueNm, efficiency = 0.95) {
+        this.maxPowerKw = maxPowerKw;
+        this.maxTorqueNm = maxTorqueNm;
+        this.efficiency = efficiency;
+        this.currentPowerDraw = 0; // Watts
+    }
+
+    getPowerOutput(demandWatts) {
+        const actualPower = Math.min(demandWatts, this.maxPowerKw * 1000);
+        this.currentPowerDraw = actualPower / this.efficiency;
+        return actualPower;
+    }
+
+    getTorqueOutput(demandTorqueNm) {
+        return Math.min(demandTorqueNm, this.maxTorqueNm);
+    }
+
+    regeneratePower(torqueInputNm, rpm) {
+        const regenPowerWatts = (torqueInputNm * rpm * Math.PI / 30) * this.efficiency;
+        return regenPowerWatts;
+    }
+}
+
+export class Battery {
+    constructor(capacityKwh, maxDischargeKw, maxChargeKw) {
+        this.capacityKwh = capacityKwh;
+        this.currentChargeKwh = capacityKwh * 0.8;
+        this.maxDischargeKw = maxDischargeKw;
+        this.maxChargeKw = maxChargeKw;
+    }
+
+    discharge(powerKw, dt) {
+        powerKw = Math.min(powerKw, this.maxDischargeKw);
+        const energyDraw = powerKw * (dt / 3600);
+        if (this.currentChargeKwh >= energyDraw) {
+            this.currentChargeKwh -= energyDraw;
+            return powerKw;
+        } else {
+            const actualPower = this.currentChargeKwh / (dt / 3600);
+            this.currentChargeKwh = 0;
+            return actualPower;
+        }
+    }
+
+    charge(powerKw, dt) {
+        powerKw = Math.min(powerKw, this.maxChargeKw);
+        const energyCharge = powerKw * (dt / 3600);
+        if (this.currentChargeKwh + energyCharge <= this.capacityKwh) {
+            this.currentChargeKwh += energyCharge;
+            return powerKw;
+        } else {
+            const actualPower = (this.capacityKwh - this.currentChargeKwh) / (dt / 3600);
+            this.currentChargeKwh = this.capacityKwh;
+            return actualPower;
+        }
+    }
+}
+
+export class BrakingSystem {
+    constructor(maxBrakingTorqueNm, regenerativeRatio = 0.7) {
+        this.maxBrakingTorqueNm = maxBrakingTorqueNm;
+        this.regenerativeRatio = regenerativeRatio;
+    }
+
+    applyBrakes(pedalPressure, currentSpeedMps) {
+        const brakingTorque = this.maxBrakingTorqueNm * pedalPressure;
+        const mechanicalBrakingTorque = brakingTorque * (1 - this.regenerativeRatio);
+        const regenerativeBrakingTorque = brakingTorque * this.regenerativeRatio;
+
+        return { mechanicalBrakingTorque, regenerativeBrakingTorque };
+    }
+}
+
+export class Aerodynamics {
+    constructor(cdBase, frontalAreaM2, coolingDuctEfficiency = 0.8) {
+        this.cdBase = cdBase;
+        this.frontalAreaM2 = frontalAreaM2;
+        this.coolingDuctEfficiency = coolingDuctEfficiency;
+        this.activeAeroState = "low_drag";
+    }
+
+    getDragForce(velocityMps) {
+        let dragCoefficient = this.cdBase;
+        if (this.activeAeroState === "high_downforce") {
+            dragCoefficient *= 1.5;
+        } else if (this.activeAeroState === "braking") {
+            dragCoefficient *= 1.8;
+        }
+        
+        return 0.5 * AIR_DENSITY_SEA_LEVEL * (velocityMps**2) * dragCoefficient * this.frontalAreaM2;
+    }
+
+    adjustAero(vehicleState) {
+        if (vehicleState === "high_speed_acceleration") {
+            this.activeAeroState = "low_drag";
+        } else if (vehicleState === "cornering") {
+            this.activeAeroState = "high_downforce";
+        } else if (vehicleState === "hard_braking") {
+            this.activeAeroState = "braking";
+        } else {
+            this.activeAeroState = "low_drag";
+        }
+    }
+
+    getCoolingAirflow(velocityMps) {
+        const airflowM3PerS = this.frontalAreaM2 * velocityMps * this.coolingDuctEfficiency;
+        return airflowM3PerS;
+    }
+}
+
+export class Powertrain {
+    constructor(engine, electricMotor, battery, transmissionRatios, finalDriveRatio, wheelRadius) {
+        this.engine = engine;
+        this.electricMotor = electricMotor;
+        this.battery = battery;
+        this.transmissionRatios = transmissionRatios;
+        this.finalDriveRatio = finalDriveRatio;
+        this.wheelRadius = wheelRadius;
+        this.currentGear = 1;
+        this.clutchEngaged = true;
+    }
+
+    calculateWheelRpm(vehicleSpeedMps) {
+        const wheelCircumference = 2 * Math.PI * this.wheelRadius;
+        const wheelRpm = (vehicleSpeedMps / wheelCircumference) * 60;
+        return wheelRpm;
+    }
+
+    calculateEngineRpm(vehicleSpeedMps) {
+        if (!this.clutchEngaged) {
+            return 0;
+        }
+        const wheelRpm = this.calculateWheelRpm(vehicleSpeedMps);
+        const gearRatio = this.transmissionRatios[this.currentGear - 1];
+        const engineRpm = wheelRpm * gearRatio * this.finalDriveRatio;
+        return engineRpm;
+    }
+
+    getTotalWheelTorque(throttlePosition, batteryAssistDemandKw) {
+        const engineRpm = this.engine.currentRpm;
+        const engineTorque = this.engine.getTorqueOutput(engineRpm, throttlePosition);
+
+        const motorPowerDemandWatts = batteryAssistDemandKw * 1000;
+        const motorPowerOutputWatts = this.electricMotor.getPowerOutput(motorPowerDemandWatts);
+        
+        let motorTorqueAtWheel = 0;
+        if (motorPowerOutputWatts > 0 && this.engine.currentRpm > 0) {
+            motorTorqueAtWheel = (motorPowerOutputWatts / (this.engine.currentRpm * Math.PI / 30)) * this.finalDriveRatio * this.transmissionRatios[this.currentGear - 1];
+        }
+
+        const totalDrivetrainTorque = engineTorque * this.transmissionRatios[this.currentGear - 1] * this.finalDriveRatio + motorTorqueAtWheel;
+
+        const drivetrainEfficiency = 0.92;
+        return totalDrivetrainTorque * drivetrainEfficiency;
+    }
+
+    shiftGearUp() {
+        if (this.currentGear < this.transmissionRatios.length) {
+            this.currentGear++;
+            this.clutchEngaged = false;
+            this.clutchEngaged = true;
+        }
+    }
+
+    shiftGearDown() {
+        if (this.currentGear > 1) {
+            this.currentGear--;
+            this.clutchEngaged = false;
+            this.clutchEngaged = true;
+        }
+    }
+}
+
+export class FerrariVehicle {
+    constructor(engineType = "V12", bodyMaterial = "titanium_carbon_fiber") {
+        this.massKg = 1500;
+        this.velocityMps = 0;
+        this.accelerationMps2 = 0;
+        this.totalDistanceM = 0;
+        this.fuelLevelKg = 50;
+        this.oilTemperatureC = 90;
+        this.coolantTemperatureC = 90;
+        this.gearShiftStrategy = "automatic";
+
+        if (engineType === "V6") {
+            this.engine = new Engine(6, 2.9, 800, 800, 10000);
+        } else if (engineType === "V8") {
+            this.engine = new Engine(8, 3.9, 950, 900, 9500);
+        } else if (engineType === "V10") {
+            this.engine = new Engine(10, 5.0, 1100, 1000, 10500);
+        } else if (engineType === "V12") {
+            this.engine = new Engine(12, 6.5, 1200, 1100, 11000);
+        } else {
+            throw new Error("Invalid engine type specified.");
+        }
+
+        this.electricMotor = new ElectricMotor(200, 300);
+        this.battery = new Battery(10, 300, 150);
+
+        this.powertrain = new Powertrain(
+            this.engine, this.electricMotor, this.battery,
+            GEAR_RATIOS_V12, 3.0, WHEEL_RADIUS_M
+        );
+        this.brakingSystem = new BrakingSystem(5000);
+        this.aerodynamics = new Aerodynamics(CD_BASE_CARBON_FIBER, FRONTAL_AREA_M2);
+
+        this.bodyMaterial = bodyMaterial;
+        if (bodyMaterial === "titanium_carbon_fiber") {
+            this.massKg *= 0.85;
+        }
+    }
+
+    _calculateForces(throttlePosition, brakePedalPressure, batteryAssistDemandKw) {
+        const wheelTorque = this.powertrain.getTotalWheelTorque(throttlePosition, batteryAssistDemandKw);
+        const tractiveForce = wheelTorque / this.powertrain.wheelRadius;
+
+        const { mechanicalBrakingTorque, regenerativeBrakingTorque } = this.brakingSystem.applyBrakes(
+            brakePedalPressure, this.velocityMps
+        );
+        const totalBrakingForce = (mechanicalBrakingTorque + regenerativeBrakingTorque) / this.powertrain.wheelRadius;
+        
+        const regenPowerWatts = this.electricMotor.regeneratePower(
+            regenerativeBrakingTorque, this.powertrain.calculateWheelRpm(this.velocityMps)
+        );
+        this.battery.charge(regenPowerWatts / 1000, 0.01);
+
+        const dragForce = this.aerodynamics.getDragForce(this.velocityMps);
+        const rollingResistanceForce = ROLLING_RESISTANCE_COEFF * this.massKg * GRAVITY;
+
+        const netForce = tractiveForce - totalBrakingForce - dragForce - rollingResistanceForce;
+        return netForce;
+    }
+
+    _manageEngineAndHybrid(throttlePosition, batteryAssistDemandKw, dt) {
+        this.engine.currentRpm = this.powertrain.calculateEngineRpm(this.velocityMps);
+
+        const enginePowerDemandWatts = this.engine.getPowerOutput(this.engine.currentRpm, throttlePosition);
+        const motorPowerDemandWatts = batteryAssistDemandKw * 1000;
+
+        const actualMotorPowerWatts = this.battery.discharge(motorPowerDemandWatts / 1000, dt) * 1000;
+        const actualEnginePowerWatts = enginePowerDemandWatts;
+        
+        this.engine.updateFuelConsumption(actualEnginePowerWatts);
+        this.fuelLevelKg -= this.engine.fuelConsumptionRate * dt;
+    }
+
+    _manageCooling(dt) {
+        const engineHeatGeneration = this.engine.getPowerOutput(this.engine.currentRpm, 1.0) * 0.6;
+        const airflow = this.aerodynamics.getCoolingAirflow(this.velocityMps);
+
+        this.oilTemperatureC += (engineHeatGeneration / 1000000) * dt - (airflow / 50) * dt;
+        this.coolantTemperatureC += (engineHeatGeneration / 800000) * dt - (airflow / 40) * dt;
+
+        if (this.oilTemperatureC > 130 || this.coolantTemperatureC > 110) {
+            // console.warn("WARNING: Engine overheating!");
+        }
+    }
+
+    _manageAerodynamics() {
+        if (this.velocityMps * 2.237 > 200) {
+            this.aerodynamics.adjustAero("high_speed_acceleration");
+        } else if (this.accelerationMps2 < -5) {
+            this.aerodynamics.adjustAero("hard_braking");
+        } else {
+            this.aerodynamics.adjustAero("low_drag");
+        }
+    }
+
+    update(throttlePosition, brakePedalPressure, batteryAssistDemandKw, dt) {
+        if (this.fuelLevelKg <= 0) {
+            throttlePosition = 0;
+            batteryAssistDemandKw = 0;
+        }
+
+        throttlePosition = Math.max(0.0, Math.min(1.0, throttlePosition));
+        brakePedalPressure = Math.max(0.0, Math.min(1.0, brakePedalPressure));
+        batteryAssistDemandKw = Math.max(0.0, Math.min(this.battery.maxDischargeKw, batteryAssistDemandKw));
+
+        this._manageEngineAndHybrid(throttlePosition, batteryAssistDemandKw, dt);
+        this._manageAerodynamics();
+
+        const netForce = this._calculateForces(throttlePosition, brakePedalPressure, batteryAssistDemandKw);
+
+        this.accelerationMps2 = netForce / this.massKg;
+
+        this.velocityMps += this.accelerationMps2 * dt;
+        this.velocityMps = Math.max(0, this.velocityMps);
+        this.totalDistanceM += this.velocityMps * dt;
+
+        if (this.gearShiftStrategy === "automatic") {
+            const targetEngineRpmLower = this.engine.redlineRpm * 0.7;
+            const targetEngineRpmUpper = this.engine.redlineRpm * 0.9;
+            
+            if (this.engine.currentRpm > targetEngineRpmUpper && this.powertrain.currentGear < this.powertrain.transmissionRatios.length) {
+                this.powertrain.shiftGearUp();
+            } else if (this.engine.currentRpm < targetEngineRpmLower && this.powertrain.currentGear > 1 && throttlePosition < 0.5) {
+                this.powertrain.shiftGearDown();
+            }
+        }
+
+        this._manageCooling(dt);
+    }
+
+    getSpeedMph() {
+        return this.velocityMps * 2.23694;
+    }
+
+    getFuelLevelLiters() {
+        return this.fuelLevelKg / 0.75;
+    }
+
+    getData() {
+        return {
+            speedMph: this.getSpeedMph(),
+            rpm: this.engine.currentRpm,
+            gear: this.powertrain.currentGear,
+            fuelLiters: this.getFuelLevelLiters(),
+            batteryKwh: this.battery.currentChargeKwh,
+            oilTempC: this.oilTemperatureC,
+            coolantTempC: this.coolantTemperatureC,
+            accelerationMps2: this.accelerationMps2,
+            distanceKm: this.totalDistanceM / 1000
+        };
+    }
+}
+
+
+
+// src/App.js
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { FerrariVehicle, GEAR_RATIOS_V12 } from './VehicleSimulation';
+import { Canvas } from '@react-three/fiber';
+import { OrbitControls, Environment, useGLTF } from '@react-three/drei';
+import { Line } from 'react-chartjs-2';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+} from 'chart.js';
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend
+);
+
+// Basic Ferrari 3D Model Component (Placeholder)
+function FerrariModel({ position = [0, 0, 0], scale = 0.01 }) {
+  // Replace 'path/to/your/ferrari.gltf' with an actual GLTF model path
+  // You'd need to find or create a 3D model of a Ferrari (e.g., from Sketchfab, TurboSquid)
+  // and place it in your public folder or import it correctly.
+  const { scene } = useGLTF('/models/ferrari_test_model.gltf'); // Example path
+  
+  if (!scene) {
+    console.warn("Ferrari 3D model not loaded. Please provide a valid GLTF path.");
+    return null;
+  }
+
+  // You might want to adjust rotation, position, etc., here
+  return <primitive object={scene} position={position} scale={scale} />;
+}
+
+// Component to display current vehicle data
+const VehicleDashboard = ({ data }) => (
+  <div className="dashboard-card">
+    <h2>Vehicle Status</h2>
+    <p>Speed: {data.speedMph.toFixed(2)} mph</p>
+    <p>RPM: {data.rpm.toFixed(0)}</p>
+    <p>Gear: {data.gear}</p>
+    <p>Fuel: {data.fuelLiters.toFixed(1)} L</p>
+    <p>Battery: {data.batteryKwh.toFixed(1)} kWh</p>
+    <p>Oil Temp: {data.oilTempC.toFixed(1)}°C</p>
+    <p>Coolant Temp: {data.coolantTempC.toFixed(1)}°C</p>
+    <p>Acceleration: {data.accelerationMps2.toFixed(2)} m/s²</p>
+    <p>Distance: {data.distanceKm.toFixed(2)} km</p>
+  </div>
+);
+
+// Component for simulation controls
+const SimulationControls = ({ onStart, onStop, onReset, isRunning, throttle, setThrottle, brake, setBrake, batteryAssist, setBatteryAssist }) => (
+  <div className="controls-card">
+    <h2>Simulation Controls</h2>
+    <div className="control-group">
+      <label>Throttle:</label>
+      <input
+        type="range"
+        min="0"
+        max="1"
+        step="0.01"
+        value={throttle}
+        onChange={(e) => setThrottle(parseFloat(e.target.value))}
+      />
+      <span>{(throttle * 100).toFixed(0)}%</span>
+    </div>
+    <div className="control-group">
+      <label>Brake:</label>
+      <input
+        type="range"
+        min="0"
+        max="1"
+        step="0.01"
+        value={brake}
+        onChange={(e) => setBrake(parseFloat(e.target.value))}
+      />
+      <span>{(brake * 100).toFixed(0)}%</span>
+    </div>
+    <div className="control-group">
+      <label>Battery Assist (kW):</label>
+      <input
+        type="range"
+        min="0"
+        max="300" // Max assist for example
+        step="1"
+        value={batteryAssist}
+        onChange={(e) => setBatteryAssist(parseFloat(e.target.value))}
+      />
+      <span>{batteryAssist.toFixed(0)} kW</span>
+    </div>
+    <div className="button-group">
+      <button onClick={onStart} disabled={isRunning}>Start Simulation</button>
+      <button onClick={onStop} disabled={!isRunning}>Stop Simulation</button>
+      <button onClick={onReset}>Reset</button>
+    </div>
+  </div>
+);
+
+// Component for charting simulation data
+const SimulationChart = ({ chartData, label, color }) => {
+  const data = {
+    labels: chartData.times.map(t => t.toFixed(1)),
+    datasets: [{
+      label: label,
+      data: chartData.values,
+      borderColor: color,
+      backgroundColor: 'rgba(255, 99, 132, 0.5)',
+      fill: false,
+      tension: 0.1
+    }],
+  };
+
+  const options = {
+    responsive: true,
+    animation: {
+      duration: 0 // Disable animation for faster updates
+    },
+    plugins: {
+      legend: {
+        position: 'top',
+      },
+      title: {
+        display: true,
+        text: label + ' vs. Time',
+      },
+    },
+    scales: {
+      x: {
+        title: {
+          display: true,
+          text: 'Time (s)'
+        }
+      },
+      y: {
+        title: {
+          display: true,
+          text: label
+        }
+      }
+    }
+  };
+
+  return (
+    <div className="chart-card">
+      <Line options={options} data={data} />
+    </div>
+  );
+};
+
+
+function App() {
+  const ferrariRef = useRef(new FerrariVehicle("V12", "titanium_carbon_fiber"));
+  const [vehicleData, setVehicleData] = useState(ferrariRef.current.getData());
+  const [isRunning, setIsRunning] = useState(false);
+  const animationFrameId = useRef(null);
+  const lastUpdateTime = useRef(performance.now());
+
+  // Input states
+  const [throttle, setThrottle] = useState(0.0);
+  const [brake, setBrake] = useState(0.0);
+  const [batteryAssist, setBatteryAssist] = useState(0);
+
+  // Chart data states
+  const [speedChartData, setSpeedChartData] = useState({ times: [], values: [] });
+  const [rpmChartData, setRpmChartData] = useState({ times: [], values: [] });
+  const [tempChartData, setTempChartData] = useState({ times: [], oil: [], coolant: [] });
+
+  const simulateFrame = useCallback(() => {
+    const currentTime = performance.now();
+    const dt = (currentTime - lastUpdateTime.current) / 1000; // time in seconds
+    lastUpdateTime.current = currentTime;
+
+    const currentFerrari = ferrariRef.current;
+
+    // Determine battery assist dynamically or based on user input
+    let currentBatteryAssist = batteryAssist;
+    if (currentFerrari.battery.currentChargeKwh < currentFerrari.battery.capacityKwh * 0.1) {
+      currentBatteryAssist = 0; // Reduce assist if battery is low
+    }
+    
+    currentFerrari.update(throttle, brake, currentBatteryAssist, dt);
+    const newData = currentFerrari.getData();
+    setVehicleData(newData);
+
+    // Update chart data (limit array size for performance if needed)
+    setSpeedChartData(prev => ({
+      times: [...prev.times, timeElapsedRef.current],
+      values: [...prev.values, newData.speedMph]
+    }));
+    setRpmChartData(prev => ({
+      times: [...prev.times, timeElapsedRef.current],
+      values: [...prev.values, newData.rpm]
+    }));
+    setTempChartData(prev => ({
+      times: [...prev.times, timeElapsedRef.current],
+      oil: [...prev.oil, newData.oilTempC],
+      coolant: [...prev.coolant, newData.coolantTempC]
+    }));
+
+    timeElapsedRef.current += dt;
+
+    if (isRunning) {
+      animationFrameId.current = requestAnimationFrame(simulateFrame);
+    }
+  }, [isRunning, throttle, brake, batteryAssist]); // Dependencies for useCallback
+
+  const timeElapsedRef = useRef(0);
+
+  const startSimulation = () => {
+    setIsRunning(true);
+    lastUpdateTime.current = performance.now(); // Reset time for accurate dt
+    animationFrameId.current = requestAnimationFrame(simulateFrame);
+  };
+
+  const stopSimulation = () => {
+    setIsRunning(false);
+    if (animationFrameId.current) {
+      cancelAnimationFrame(animationFrameId.current);
+    }
+  };
+
+  const resetSimulation = () => {
+    stopSimulation();
+    ferrariRef.current = new FerrariVehicle("V12", "titanium_carbon_fiber");
+    setVehicleData(ferrariRef.current.getData());
+    timeElapsedRef.current = 0;
+    setThrottle(0.0);
+    setBrake(0.0);
+    setBatteryAssist(0);
+    setSpeedChartData({ times: [], values: [] });
+    setRpmChartData({ times: [], values: [] });
+    setTempChartData({ times: [], oil: [], coolant: [] });
+  };
+
+  // Cleanup on component unmount
+  useEffect(() => {
+    return () => {
+      if (animationFrameId.current) {
+        cancelAnimationFrame(animationFrameId.current);
+      }
+    };
+  }, []);
+
+  return (
+    <div className="App">
+      <header className="App-header">
+        <h1>Advanced Ferrari Simulation</h1>
+      </header>
+      <div className="simulation-container">
+        <div className="left-panel">
+          <SimulationControls
+            onStart={startSimulation}
+            onStop={stopSimulation}
+            onReset={resetSimulation}
+            isRunning={isRunning}
+            throttle={throttle}
+            setThrottle={setThrottle}
+            brake={brake}
+            setBrake={setBrake}
+            batteryAssist={batteryAssist}
+            setBatteryAssist={setBatteryAssist}
+          />
+          <VehicleDashboard data={vehicleData} />
+        </div>
+        <div className="center-panel">
+          <div className="three-d-viewer">
+            <Canvas camera={{ position: [0, 2, 5], fov: 75 }}>
+              <ambientLight intensity={0.5} />
+              <pointLight position={[10, 10, 10]} />
+              <Environment preset="city" /> {/* or 'studio', 'sunset', etc. */}
+              <FerrariModel /> {/* This is where your 3D model would be rendered */}
+              <OrbitControls /> {/* Allows user to rotate/zoom the camera */}
+            </Canvas>
+            <p className="viewer-note">
+                (3D model requires a .gltf file and `useGLTF` from @react-three/drei.
+                Default model path is `/models/ferrari_test_model.gltf`. This is a placeholder.)
+            </p>
+          </div>
+          <div className="chart-grid">
+            <SimulationChart chartData={speedChartData} label="Speed (mph)" color="blue" />
+            <SimulationChart chartData={rpmChartData} label="Engine RPM" color="green" />
+            {/* You could add more charts for fuel, battery, acceleration etc. */}
+            <div className="chart-card">
+              <Line
+                options={{
+                  responsive: true,
+                  animation: { duration: 0 },
+                  plugins: {
+                    legend: { position: 'top' },
+                    title: { display: true, text: 'Temperatures vs. Time' },
+                  },
+                  scales: {
+                    x: { title: { display: true, text: 'Time (s)' } },
+                    y: { title: { display: true, text: 'Temperature (°C)' } }
+                  }
+                }}
+                data={{
+                  labels: tempChartData.times.map(t => t.toFixed(1)),
+                  datasets: [
+                    {
+                      label: 'Oil Temp (°C)',
+                      data: tempChartData.oil,
+                      borderColor: 'red',
+                      backgroundColor: 'rgba(255, 0, 0, 0.5)',
+                      fill: false,
+                      tension: 0.1
+                    },
+                    {
+                      label: 'Coolant Temp (°C)',
+                      data: tempChartData.coolant,
+                      borderColor: 'purple',
+                      backgroundColor: 'rgba(128, 0, 128, 0.5)',
+                      fill: false,
+                      tension: 0.1
+                    }
+                  ],
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default App;
+
+
+
+/* src/index.css */
+body {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+  background-color: #f4f4f4;
+  color: #333;
+}
+
+.App {
+  text-align: center;
+  padding: 20px;
+}
+
+.App-header {
+  background-color: #282c34;
+  padding: 20px;
+  color: white;
+  margin-bottom: 20px;
+  border-radius: 8px;
+}
+
+.simulation-container {
+  display: flex;
+  gap: 20px;
+  max-width: 1400px;
+  margin: 0 auto;
+  align-items: flex-start;
+}
+
+.left-panel {
+  flex: 0 0 300px; /* Fixed width */
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.center-panel {
+  flex: 1; /* Takes remaining space */
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.dashboard-card, .controls-card, .chart-card {
+  background-color: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  text-align: left;
+}
+
+.dashboard-card p {
+  margin: 8px 0;
+  font-size: 1rem;
+}
+
+.controls-card .control-group {
+  margin-bottom: 15px;
+}
+
+.controls-card label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: bold;
+}
+
+.controls-card input[type="range"] {
+  width: calc(100% - 60px); /* Adjust width to make space for span */
+  vertical-align: middle;
+}
+
+.controls-card span {
+  display: inline-block;
+  width: 50px; /* Fixed width for value display */
+  text-align: right;
+  margin-left: 10px;
+  font-weight: bold;
+}
+
+.controls-card .button-group button {
+  padding: 10px 15px;
+  margin-right: 10px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  background-color: #007bff;
+  color: white;
+  font-size: 1rem;
+}
+
+.controls-card .button-group button:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
+}
+
+.three-d-viewer {
+  background-color: #e0e0e0;
+  height: 400px; /* Fixed height for the 3D canvas */
+  border-radius: 8px;
+  overflow: hidden; /* Ensure 3D content stays within bounds */
+  position: relative;
+}
+
+.viewer-note {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    background-color: rgba(0,0,0,0.5);
+    color: white;
+    padding: 5px 10px;
+    border-radius: 5px;
+    font-size: 0.8em;
+    z-index: 10;
+}
+
+.chart-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr; /* Two columns */
+    gap: 20px;
+    margin-top: 20px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 900px) {
+  .simulation-container {
+    flex-direction: column;
+    align-items: center;
+  }
+  .left-panel, .center-panel {
+    width: 100%;
+    flex: none;
+  }
+  .chart-grid {
+      grid-template-columns: 1fr; /* Stack charts on smaller screens */
+  }
+}
+
+
+
+package main
+
+import (
+	"fmt"
+	"math"
+	"time"
+)
+
+// --- Constants and Configuration (simplified) ---
+const (
+	GRAVITY                  = 9.81  // m/s^2
+	AIR_DENSITY_SEA_LEVEL    = 1.225 // kg/m^3
+	CD_BASE_CARBON_FIBER     = 0.25  // Typical low drag coefficient for a sleek car
+	FRONTAL_AREA_M2          = 2.0   // Example frontal area
+	ROLLING_RESISTANCE_COEFF = 0.01
+	WHEEL_RADIUS_M           = 0.35 // Approx. wheel radius
+	MAX_ENGINE_RPM           = 12000
+	FUEL_ENERGY_DENSITY      = 44 * 10e6 // Joules/kg (gasoline)
+	BATTERY_ENERGY_DENSITY   = 250 * 3600 // Joules/kg (Li-ion, 250 Wh/kg)
+)
+
+var GEAR_RATIOS_V12 = []float64{2.97, 2.31, 1.95, 1.68, 1.45, 1.26, 1.09, 0.94, 0.81, 0.70} // Example 10-speed
+
+// --- Base Structs (Go's equivalent of classes) ---
+
+// Engine represents an internal combustion engine
+type Engine struct {
+	Cylinders          int
+	DisplacementL      float64
+	MaxPowerHP         float64 // Horsepower
+	MaxTorqueNM        float64 // Newton-meters
+	RedlineRPM         float64
+	CurrentRPM         float64
+	FuelConsumptionRate float64 // kg/s
+}
+
+// GetPowerOutput calculates the engine's power output in Watts
+func (e *Engine) GetPowerOutput(rpm, throttlePosition float64) float64 {
+	if rpm > e.RedlineRPM {
+		return 0
+	}
+	normalizedRPM := math.Min(1.0, rpm/e.RedlineRPM)
+	powerAtRPM := e.MaxPowerHP * normalizedRPM * throttlePosition
+	return powerAtRPM * 745.7 // Convert HP to Watts
+}
+
+// GetTorqueOutput calculates the engine's torque output in Newton-meters
+func (e *Engine) GetTorqueOutput(rpm, throttlePosition float64) float64 {
+	if rpm > e.RedlineRPM {
+		return 0
+	}
+	normalizedRPM := math.Min(1.0, rpm/e.RedlineRPM)
+	// Simplified torque curve
+	torqueAtRPM := e.MaxTorqueNM * (1 - math.Abs(0.5-normalizedRPM)) * 2 * throttlePosition
+	return torqueAtRPM
+}
+
+// UpdateFuelConsumption updates the estimated fuel consumption rate
+func (e *Engine) UpdateFuelConsumption(powerOutputWatts float64) {
+	e.FuelConsumptionRate = powerOutputWatts / (FUEL_ENERGY_DENSITY * 0.4) // Assuming 40% efficiency
+}
+
+// ElectricMotor represents an electric motor
+type ElectricMotor struct {
+	MaxPowerKW     float64 // Kilowatts
+	MaxTorqueNM    float64 // Newton-meters
+	Efficiency     float64
+	CurrentPowerDraw float64 // Watts
+}
+
+// GetPowerOutput calculates the motor's power output in Watts
+func (em *ElectricMotor) GetPowerOutput(demandWatts float64) float64 {
+	actualPower := math.Min(demandWatts, em.MaxPowerKW*1000)
+	em.CurrentPowerDraw = actualPower / em.Efficiency
+	return actualPower
+}
+
+// GetTorqueOutput calculates the motor's torque output in Newton-meters
+func (em *ElectricMotor) GetTorqueOutput(demandTorqueNM float64) float64 {
+	return math.Min(demandTorqueNM, em.MaxTorqueNM)
+}
+
+// RegeneratePower calculates power regenerated during braking in Watts
+func (em *ElectricMotor) RegeneratePower(torqueInputNM, rpm float64) float64 {
+	regenPowerWatts := (torqueInputNM * rpm * math.Pi / 30) * em.Efficiency // Torque * Angular velocity
+	return regenPowerWatts
+}
+
+// Battery represents the vehicle's battery pack
+type Battery struct {
+	CapacityKWH      float64 // Kilowatt-hours
+	CurrentChargeKWH float64
+	MaxDischargeKW   float64
+	MaxChargeKW      float64
+}
+
+// Discharge draws power from the battery in KW, returns actual power drawn
+func (b *Battery) Discharge(powerKW, dt float64) float64 {
+	powerKW = math.Min(powerKW, b.MaxDischargeKW)
+	energyDraw := powerKW * (dt / 3600) // kWh
+	if b.CurrentChargeKWH >= energyDraw {
+		b.CurrentChargeKWH -= energyDraw
+		return powerKW
+	} else {
+		actualPower := b.CurrentChargeKWH / (dt / 3600)
+		b.CurrentChargeKWH = 0
+		return actualPower
+	}
+}
+
+// Charge adds power to the battery in KW, returns actual power charged
+func (b *Battery) Charge(powerKW, dt float64) float64 {
+	powerKW = math.Min(powerKW, b.MaxChargeKW)
+	energyCharge := powerKW * (dt / 3600) // kWh
+	if b.CurrentChargeKWH+energyCharge <= b.CapacityKWH {
+		b.CurrentChargeKWH += energyCharge
+		return powerKW
+	} else {
+		actualPower := (b.CapacityKWH - b.CurrentChargeKWH) / (dt / 3600)
+		b.CurrentChargeKWH = b.CapacityKWH
+		return actualPower
+	}
+}
+
+// BrakingSystem handles braking forces
+type BrakingSystem struct {
+	MaxBrakingTorqueNM float64
+	RegenerativeRatio  float64 // Portion of braking that can be regenerative
+}
+
+// ApplyBrakes calculates mechanical and regenerative braking torques
+func (bs *BrakingSystem) ApplyBrakes(pedalPressure, currentSpeedMps float64) (mechanicalBrakingTorque, regenerativeBrakingTorque float64) {
+	brakingTorque := bs.MaxBrakingTorqueNM * pedalPressure
+	mechanicalBrakingTorque = brakingTorque * (1 - bs.RegenerativeRatio)
+	regenerativeBrakingTorque = brakingTorque * bs.RegenerativeRatio
+	return
+}
+
+// Aerodynamics handles air resistance and active aero elements
+type Aerodynamics struct {
+	CDBase               float64
+	FrontalAreaM2        float64
+	CoolingDuctEfficiency float64
+	ActiveAeroState      string // States: low_drag, high_downforce, braking
+}
+
+// GetDragForce calculates the aerodynamic drag force in Newtons
+func (a *Aerodynamics) GetDragForce(velocityMps float64) float64 {
+	dragCoefficient := a.CDBase
+	if a.ActiveAeroState == "high_downforce" {
+		dragCoefficient *= 1.5 // Increase drag for downforce
+	} else if a.ActiveAeroState == "braking" {
+		dragCoefficient *= 1.8 // Air brakes / more aggressive drag
+	}
+	return 0.5 * AIR_DENSITY_SEA_LEVEL * (velocityMps * velocityMps) * dragCoefficient * a.FrontalAreaM2
+}
+
+// AdjustAero changes the active aerodynamic state
+func (a *Aerodynamics) AdjustAero(vehicleState string) {
+	switch vehicleState {
+	case "high_speed_acceleration":
+		a.ActiveAeroState = "low_drag"
+	case "cornering":
+		a.ActiveAeroState = "high_downforce"
+	case "hard_braking":
+		a.ActiveAeroState = "braking"
+	default:
+		a.ActiveAeroState = "low_drag" // Default
+	}
+}
+
+// GetCoolingAirflow estimates airflow for cooling in m^3/s
+func (a *Aerodynamics) GetCoolingAirflow(velocityMps float64) float64 {
+	airflowM3PerS := a.FrontalAreaM2 * velocityMps * a.CoolingDuctEfficiency
+	return airflowM3PerS
+}
+
+// Powertrain integrates the engine, motor, and transmission
+type Powertrain struct {
+	Engine            *Engine
+	ElectricMotor     *ElectricMotor
+	Battery           *Battery
+	TransmissionRatios []float64
+	FinalDriveRatio   float64
+	WheelRadius       float64
+	CurrentGear       int
+	ClutchEngaged     bool
+}
+
+// CalculateWheelRPM calculates wheel RPM from vehicle speed
+func (pt *Powertrain) CalculateWheelRPM(vehicleSpeedMps float64) float64 {
+	wheelCircumference := 2 * math.Pi * pt.WheelRadius
+	wheelRPM := (vehicleSpeedMps / wheelCircumference) * 60
+	return wheelRPM
+}
+
+// CalculateEngineRPM calculates engine RPM from vehicle speed and gear
+func (pt *Powertrain) CalculateEngineRPM(vehicleSpeedMps float64) float64 {
+	if !pt.ClutchEngaged {
+		return 0
+	}
+	wheelRPM := pt.CalculateWheelRPM(vehicleSpeedMps)
+	gearRatio := pt.TransmissionRatios[pt.CurrentGear-1]
+	engineRPM := wheelRPM * gearRatio * pt.FinalDriveRatio
+	return engineRPM
+}
+
+// GetTotalWheelTorque calculates the combined torque at the wheels
+func (pt *Powertrain) GetTotalWheelTorque(throttlePosition, batteryAssistDemandKW float64) float64 {
+	engineRPM := pt.Engine.CurrentRPM
+	engineTorque := pt.Engine.GetTorqueOutput(engineRPM, throttlePosition)
+
+	motorPowerDemandWatts := batteryAssistDemandKW * 1000
+	motorPowerOutputWatts := pt.ElectricMotor.GetPowerOutput(motorPowerDemandWatts)
+
+	motorTorqueAtWheel := 0.0
+	if motorPowerOutputWatts > 0 && pt.Engine.CurrentRPM > 0 { // Avoid division by zero
+		// Simplified: assuming motor adds torque directly to the drivetrain
+		motorTorqueAtWheel = (motorPowerOutputWatts / (pt.Engine.CurrentRPM * math.Pi / 30)) *
+			pt.FinalDriveRatio * pt.TransmissionRatios[pt.CurrentGear-1]
+	}
+
+	totalDrivetrainTorque := engineTorque*pt.TransmissionRatios[pt.CurrentGear-1]*pt.FinalDriveRatio + motorTorqueAtWheel
+
+	drivetrainEfficiency := 0.92
+	return totalDrivetrainTorque * drivetrainEfficiency
+}
+
+// ShiftGearUp shifts to a higher gear
+func (pt *Powertrain) ShiftGearUp() {
+	if pt.CurrentGear < len(pt.TransmissionRatios) {
+		pt.CurrentGear++
+		pt.ClutchEngaged = false // Simulate brief clutch disengagement
+		pt.ClutchEngaged = true
+	}
+}
+
+// ShiftGearDown shifts to a lower gear
+func (pt *Powertrain) ShiftGearDown() {
+	if pt.CurrentGear > 1 {
+		pt.CurrentGear--
+		pt.ClutchEngaged = false
+		pt.ClutchEngaged = true
+	}
+}
+
+// FerrariVehicle represents the entire vehicle
+type FerrariVehicle struct {
+	MassKG             float64
+	VelocityMPS        float64 // Meters per second
+	AccelerationMPS2   float64
+	TotalDistanceM     float64 // Meters
+	FuelLevelKG        float64
+	OilTemperatureC    float64
+	CoolantTemperatureC float64
+	GearShiftStrategy  string // automatic or manual
+
+	Engine        *Engine
+	ElectricMotor *ElectricMotor
+	Battery       *Battery
+	Powertrain    *Powertrain
+	BrakingSystem *BrakingSystem
+	Aerodynamics  *Aerodynamics
+	BodyMaterial  string
+}
+
+// NewFerrariVehicle creates and initializes a FerrariVehicle
+func NewFerrariVehicle(engineType, bodyMaterial string) (*FerrariVehicle, error) {
+	fv := &FerrariVehicle{
+		MassKG:             1500, // Example mass for a supercar
+		VelocityMPS:        0,
+		AccelerationMPS2:   0,
+		TotalDistanceM:     0,
+		FuelLevelKG:        50, // 50 kg of fuel
+		OilTemperatureC:    90,
+		CoolantTemperatureC: 90,
+		GearShiftStrategy:  "automatic",
+	}
+
+	// Engine selection
+	switch engineType {
+	case "V6":
+		fv.Engine = &Engine{Cylinders: 6, DisplacementL: 2.9, MaxPowerHP: 800, MaxTorqueNM: 800, RedlineRPM: 10000}
+	case "V8":
+		fv.Engine = &Engine{Cylinders: 8, DisplacementL: 3.9, MaxPowerHP: 950, MaxTorqueNM: 900, RedlineRPM: 9500}
+	case "V10":
+		fv.Engine = &Engine{Cylinders: 10, DisplacementL: 5.0, MaxPowerHP: 1100, MaxTorqueNM: 1000, RedlineRPM: 10500}
+	case "V12":
+		fv.Engine = &Engine{Cylinders: 12, DisplacementL: 6.5, MaxPowerHP: 1200, MaxTorqueNM: 1100, RedlineRPM: 11000}
+	default:
+		return nil, fmt.Errorf("invalid engine type specified: %s", engineType)
+	}
+
+	fv.ElectricMotor = &ElectricMotor{MaxPowerKW: 200, MaxTorqueNM: 300, Efficiency: 0.95}
+	fv.Battery = &Battery{CapacityKWH: 10, MaxDischargeKW: 300, MaxChargeKW: 150}
+
+	fv.Powertrain = &Powertrain{
+		Engine:            fv.Engine,
+		ElectricMotor:     fv.ElectricMotor,
+		Battery:           fv.Battery,
+		TransmissionRatios: GEAR_RATIOS_V12,
+		FinalDriveRatio:   3.0,
+		WheelRadius:       WHEEL_RADIUS_M,
+		CurrentGear:       1,
+		ClutchEngaged:     true,
+	}
+	fv.BrakingSystem = &BrakingSystem{MaxBrakingTorqueNM: 5000}
+	fv.Aerodynamics = &Aerodynamics{CDBase: CD_BASE_CARBON_FIBER, FrontalAreaM2: FRONTAL_AREA_M2}
+
+	fv.BodyMaterial = bodyMaterial
+	if bodyMaterial == "titanium_carbon_fiber" {
+		fv.MassKG *= 0.85 // Reduce mass for advanced materials
+		fmt.Printf("Vehicle initialized with %s and %s body. Mass: %.0f kg\n", engineType, bodyMaterial, fv.MassKG)
+	}
+
+	return fv, nil
+}
+
+// calculateForces computes the net force acting on the vehicle
+func (fv *FerrariVehicle) calculateForces(throttlePosition, brakePedalPressure, batteryAssistDemandKW float64) float64 {
+	// 1. Tractive Force from Powertrain
+	wheelTorque := fv.Powertrain.GetTotalWheelTorque(throttlePosition, batteryAssistDemandKW)
+	tractiveForce := wheelTorque / fv.Powertrain.WheelRadius
+
+	// 2. Braking Force
+	mechanicalBrakingTorque, regenerativeBrakingTorque := fv.BrakingSystem.ApplyBrakes(
+		brakePedalPressure, fv.VelocityMPS,
+	)
+	totalBrakingForce := (mechanicalBrakingTorque + regenerativeBrakingTorque) / fv.Powertrain.WheelRadius
+
+	// Regenerate battery power during braking
+	regenPowerWatts := fv.ElectricMotor.RegeneratePower(
+		regenerativeBrakingTorque, fv.Powertrain.CalculateWheelRPM(fv.VelocityMPS),
+	)
+	fv.Battery.Charge(regenPowerWatts/1000, 0.01) // dt is small
+
+	// 3. Aerodynamic Drag
+	dragForce := fv.Aerodynamics.GetDragForce(fv.VelocityMPS)
+
+	// 4. Rolling Resistance
+	rollingResistanceForce := ROLLING_RESISTANCE_COEFF * fv.MassKG * GRAVITY
+
+	netForce := tractiveForce - totalBrakingForce - dragForce - rollingResistanceForce
+	return netForce
+}
+
+// manageEngineAndHybrid updates engine and hybrid system state
+func (fv *FerrariVehicle) manageEngineAndHybrid(throttlePosition, batteryAssistDemandKW, dt float64) {
+	fv.Engine.CurrentRPM = fv.Powertrain.CalculateEngineRPM(fv.VelocityMPS)
+
+	enginePowerDemandWatts := fv.Engine.GetPowerOutput(fv.Engine.CurrentRPM, throttlePosition)
+	motorPowerDemandWatts := batteryAssistDemandKW * 1000
+
+	actualMotorPowerWatts := fv.Battery.Discharge(motorPowerDemandWatts/1000, dt) * 1000
+	_ = actualMotorPowerWatts // In a more complex model, this would influence engine power.
+	actualEnginePowerWatts := enginePowerDemandWatts // Simplification for now
+
+	fv.Engine.UpdateFuelConsumption(actualEnginePowerWatts)
+	fv.FuelLevelKG -= fv.Engine.FuelConsumptionRate * dt
+}
+
+// manageCooling updates vehicle temperatures
+func (fv *FerrariVehicle) manageCooling(dt float64) {
+	engineHeatGeneration := fv.Engine.GetPowerOutput(fv.Engine.CurrentRPM, 1.0) * 0.6 // Assuming 60% waste heat
+	airflow := fv.Aerodynamics.GetCoolingAirflow(fv.VelocityMPS)
+
+	fv.OilTemperatureC += (engineHeatGeneration / 1000000) * dt - (airflow / 50) * dt
+	fv.CoolantTemperatureC += (engineHeatGeneration / 800000) * dt - (airflow / 40) * dt
+
+	if fv.OilTemperatureC > 130 || fv.CoolantTemperatureC > 110 {
+		// fmt.Println("WARNING: Engine overheating! Reducing power.")
+	}
+}
+
+// manageAerodynamics adjusts active aero elements
+func (fv *FerrariVehicle) manageAerodynamics() {
+	if fv.GetSpeedMPH() > 200 { // Over 200 mph
+		fv.Aerodynamics.AdjustAero("high_speed_acceleration")
+	} else if fv.AccelerationMPS2 < -5 { // Hard braking
+		fv.Aerodynamics.AdjustAero("hard_braking")
+	} else {
+		fv.Aerodynamics.AdjustAero("low_drag")
+	}
+}
+
+// Update advances the vehicle state by a time step dt
+func (fv *FerrariVehicle) Update(throttlePosition, brakePedalPressure, batteryAssistDemandKW, dt float64) {
+	if fv.FuelLevelKG <= 0 {
+		throttlePosition = 0
+		batteryAssistDemandKW = 0
+	}
+
+	// Clamp inputs
+	throttlePosition = math.Max(0.0, math.Min(1.0, throttlePosition))
+	brakePedalPressure = math.Max(0.0, math.Min(1.0, brakePedalPressure))
+	batteryAssistDemandKW = math.Max(0.0, math.Min(fv.Battery.MaxDischargeKW, batteryAssistDemandKW))
+
+	fv.manageEngineAndHybrid(throttlePosition, batteryAssistDemandKW, dt)
+	fv.manageAerodynamics()
+
+	netForce := fv.calculateForces(throttlePosition, brakePedalPressure, batteryAssistDemandKW)
+
+	fv.AccelerationMPS2 = netForce / fv.MassKG
+
+	fv.VelocityMPS += fv.AccelerationMPS2 * dt
+	fv.VelocityMPS = math.Max(0, fv.VelocityMPS) // Cannot go backwards
+	fv.TotalDistanceM += fv.VelocityMPS * dt
+
+	if fv.GearShiftStrategy == "automatic" {
+		targetEngineRPMLower := fv.Engine.RedlineRPM * 0.7
+		targetEngineRPMUpper := fv.Engine.RedlineRPM * 0.9
+
+		if fv.Engine.CurrentRPM > targetEngineRPMUpper && fv.Powertrain.CurrentGear < len(fv.Powertrain.TransmissionRatios) {
+			fv.Powertrain.ShiftGearUp()
+		} else if fv.Engine.CurrentRPM < targetEngineRPMLower && fv.Powertrain.CurrentGear > 1 && throttlePosition < 0.5 {
+			fv.Powertrain.ShiftGearDown()
+		}
+	}
+
+	fv.manageCooling(dt)
+}
+
+// GetSpeedMPH returns the current speed in miles per hour
+func (fv *FerrariVehicle) GetSpeedMPH() float64 {
+	return fv.VelocityMPS * 2.23694
+}
+
+// GetFuelLevelLiters returns the current fuel level in liters
+func (fv *FerrariVehicle) GetFuelLevelLiters() float64 {
+	return fv.FuelLevelKG / 0.75 // Approx density of gasoline 0.75 kg/L
+}
+
+// --- Simulation Example ---
+
+func main() {
+	ferrari, err := NewFerrariVehicle("V12", "titanium_carbon_fiber")
+	if err != nil {
+		fmt.Println("Error initializing vehicle:", err)
+		return
+	}
+
+	timeElapsed := 0.0
+	dt := 0.01 // seconds
+	targetSpeedMPH := 500.0
+
+	fmt.Println("Starting 0-500 mph acceleration simulation...")
+
+	for ferrari.GetSpeedMPH() < targetSpeedMPH && timeElapsed < 60.0 { // Max 60 seconds
+		throttle := 1.0
+		batteryAssist := ferrari.Battery.MaxDischargeKW // Use full battery assist
+
+		if ferrari.Battery.CurrentChargeKWH < ferrari.Battery.CapacityKWH*0.2 {
+			batteryAssist = 0
+		}
+
+		ferrari.Update(throttle, 0.0, batteryAssist, dt)
+
+		timeElapsed += dt
+
+		// Print updates periodically
+		if int(timeElapsed*100)%50 == 0 { // Print every 0.5 seconds
+			fmt.Printf("Time: %.2fs, Speed: %.2f mph, RPM: %.0f, Gear: %d, Fuel: %.1f L, Battery: %.1f kWh, Oil Temp: %.1f°C, Coolant Temp: %.1f°C\n",
+				timeElapsed, ferrari.GetSpeedMPH(), ferrari.Engine.CurrentRPM, ferrari.Powertrain.CurrentGear,
+				ferrari.GetFuelLevelLiters(), ferrari.Battery.CurrentChargeKWH, ferrari.OilTemperatureC, ferrari.CoolantTemperatureC)
+		}
+	}
+
+	fmt.Println("\nSimulation Finished.")
+	fmt.Printf("Time to reach %.2f mph: %.2f seconds.\n", ferrari.GetSpeedMPH(), timeElapsed)
+	fmt.Printf("Total distance covered: %.2f km.\n", ferrari.TotalDistanceM/1000)
+	fmt.Printf("Remaining fuel: %.1f L.\n", ferrari.GetFuelLevelLiters())
+	fmt.Printf("Remaining battery: %.1f kWh.\n", ferrari.Battery.CurrentChargeKWH)
+}
+
+
+
+import math
+import time
+
+# --- Constants and Configuration (simplified) ---
+GRAVITY = 9.81  # m/s^2
+AIR_DENSITY_SEA_LEVEL = 1.225  # kg/m^3
+CD_BASE_CARBON_FIBER = 0.25 # Typical low drag coefficient for a sleek car
+FRONTAL_AREA_M2 = 2.0 # Example frontal area
+ROLLING_RESISTANCE_COEFF = 0.01
+WHEEL_RADIUS_M = 0.35 # Approx. wheel radius
+GEAR_RATIOS_V12 = [2.97, 2.31, 1.95, 1.68, 1.45, 1.26, 1.09, 0.94, 0.81, 0.70] # Example 10-speed
+MAX_ENGINE_RPM = 12000
+FUEL_ENERGY_DENSITY = 44 * 10**6 # Joules/kg (gasoline)
+BATTERY_ENERGY_DENSITY = 250 * 3600 # Joules/kg (Li-ion, 250 Wh/kg)
+
+# --- Base Classes for Modularity ---
+
+class Engine:
+    """Represents an internal combustion engine (V6, V8, V10, V12)."""
+    def __init__(self, cylinders: int, displacement_L: float, max_power_hp: float, max_torque_nm: float, redline_rpm: float):
+        self.cylinders = cylinders
+        self.displacement_L = displacement_L
+        self.max_power_hp = max_power_hp
+        self.max_torque_nm = max_torque_nm
+        self.redline_rpm = redline_rpm
+        self.current_rpm = 0.0
+        self.fuel_consumption_rate = 0.0 # kg/s
+
+    def get_power_output(self, rpm: float, throttle_position: float) -> float:
+        """
+        Calculates the engine's power output in Watts.
+        Simplified power curve: linear up to max, then drops.
+        """
+        if rpm > self.redline_rpm:
+            return 0.0
+        normalized_rpm = min(1.0, rpm / self.redline_rpm)
+        # Power scales with normalized RPM and throttle.
+        power_at_rpm = self.max_power_hp * normalized_rpm * throttle_position
+        return power_at_rpm * 745.7 # Convert HP to Watts
+
+    def get_torque_output(self, rpm: float, throttle_position: float) -> float:
+        """
+        Calculates the engine's torque output in Newton-meters.
+        Simplified torque curve (peak around mid-RPM, drops off).
+        """
+        if rpm > self.redline_rpm:
+            return 0.0
+        normalized_rpm = min(1.0, rpm / self.redline_rpm)
+        # Torque curve often peaks then drops. This is a very rough approximation.
+        torque_at_rpm = self.max_torque_nm * (1 - abs(0.5 - normalized_rpm)) * 2 * throttle_position
+        return torque_at_rpm
+
+    def update_fuel_consumption(self, power_output_watts: float):
+        """
+        Updates the estimated fuel consumption rate based on power output.
+        Very simplified: fuel consumption proportional to power output.
+        Assumes a fixed thermal efficiency (e.g., 40%).
+        """
+        # Power = Efficiency * Fuel_Energy_Density * Mass_Flow_Rate
+        # Mass_Flow_Rate = Power / (Efficiency * Fuel_Energy_Density)
+        self.fuel_consumption_rate = power_output_watts / (FUEL_ENERGY_DENSITY * 0.4)
+
+class ElectricMotor:
+    """Represents an electric motor for hybrid power."""
+    def __init__(self, max_power_kw: float, max_torque_nm: float, efficiency: float = 0.95):
+        self.max_power_kw = max_power_kw
+        self.max_torque_nm = max_torque_nm
+        self.efficiency = efficiency
+        self.current_power_draw = 0.0 # Watts
+
+    def get_power_output(self, demand_watts: float) -> float:
+        """Simulates power delivery up to max, considering efficiency."""
+        actual_power = min(demand_watts, self.max_power_kw * 1000)
+        self.current_power_draw = actual_power / self.efficiency # Actual electrical power drawn
+        return actual_power
+
+    def get_torque_output(self, demand_torque_nm: float) -> float:
+        """Returns the motor's torque output, capped by its max."""
+        return min(demand_torque_nm, self.max_torque_nm)
+
+    def regenerate_power(self, torque_input_nm: float, rpm: float) -> float:
+        """
+        Simulates power regeneration during braking.
+        Converts mechanical power (torque * angular velocity) to electrical power.
+        """
+        # Angular velocity (rad/s) = RPM * pi / 30
+        regen_power_watts = (torque_input_nm * rpm * math.pi / 30) * self.efficiency
+        return regen_power_watts
+
+class Battery:
+    """Manages the energy storage for the hybrid system."""
+    def __init__(self, capacity_kwh: float, max_discharge_kw: float, max_charge_kw: float):
+        self.capacity_kwh = capacity_kwh
+        self.current_charge_kwh = capacity_kwh * 0.8 # Start at 80% charge
+        self.max_discharge_kw = max_discharge_kw
+        self.max_charge_kw = max_charge_kw
+
+    def discharge(self, power_kw: float, dt: float) -> float:
+        """
+        Discharges power from the battery over a time step.
+        Returns the actual power successfully discharged.
+        """
+        power_kw = min(power_kw, self.max_discharge_kw)
+        energy_draw_kwh = power_kw * (dt / 3600) # Energy = Power * Time (kWh)
+        if self.current_charge_kwh >= energy_draw_kwh:
+            self.current_charge_kwh -= energy_draw_kwh
+            return power_kw
+        else:
+            # If not enough charge, draw only what's available
+            actual_power_kw = self.current_charge_kwh / (dt / 3600) if dt > 0 else 0.0
+            self.current_charge_kwh = 0.0
+            return actual_power_kw
+
+    def charge(self, power_kw: float, dt: float) -> float:
+        """
+        Charges power to the battery over a time step.
+        Returns the actual power successfully charged.
+        """
+        power_kw = min(power_kw, self.max_charge_kw)
+        energy_charge_kwh = power_kw * (dt / 3600)
+        if self.current_charge_kwh + energy_charge_kwh <= self.capacity_kwh:
+            self.current_charge_kwh += energy_charge_kwh
+            return power_kw
+        else:
+            # If battery is full, charge only up to capacity
+            actual_power_kw = (self.capacity_kwh - self.current_charge_kwh) / (dt / 3600) if dt > 0 else 0.0
+            self.current_charge_kwh = self.capacity_kwh
+            return actual_power_kw
+
+class BrakingSystem:
+    """Handles both mechanical and regenerative braking."""
+    def __init__(self, max_braking_torque_nm: float, regenerative_ratio: float = 0.7):
+        self.max_braking_torque_nm = max_braking_torque_nm
+        self.regenerative_ratio = regenerative_ratio # Portion of braking that can be regenerative
+
+    def apply_brakes(self, pedal_pressure: float, current_speed_mps: float) -> tuple[float, float]:
+        """
+        Calculates mechanical and regenerative braking torques based on pedal pressure.
+        Returns (mechanical_braking_torque, regenerative_braking_torque).
+        """
+        braking_torque = self.max_braking_torque_nm * pedal_pressure
+        mechanical_braking_torque = braking_torque * (1 - self.regenerative_ratio)
+        regenerative_braking_torque = braking_torque * self.regenerative_ratio
+        return mechanical_braking_torque, regenerative_braking_torque
+
+class Aerodynamics:
+    """Models air resistance and active aero elements."""
+    def __init__(self, cd_base: float, frontal_area_m2: float, cooling_duct_efficiency: float = 0.8):
+        self.cd_base = cd_base
+        self.frontal_area_m2 = frontal_area_m2
+        self.cooling_duct_efficiency = cooling_duct_efficiency
+        self.active_aero_state = "low_drag" # States: low_drag, high_downforce, braking
+
+    def get_drag_force(self, velocity_mps: float) -> float:
+        """
+        Calculates the aerodynamic drag force in Newtons.
+        Drag Force = 0.5 * AirDensity * Velocity^2 * Cd * FrontalArea
+        Cd (Drag Coefficient) can change with active aero.
+        """
+        drag_coefficient = self.cd_base
+        if self.active_aero_state == "high_downforce":
+            drag_coefficient *= 1.5 # Example: increase drag for more downforce
+        elif self.active_aero_state == "braking":
+            drag_coefficient *= 1.8 # Example: deploy air brakes for aggressive drag
+        
+        return 0.5 * AIR_DENSITY_SEA_LEVEL * (velocity_mps**2) * drag_coefficient * self.frontal_area_m2
+
+    def adjust_aero(self, vehicle_state: str):
+        """
+        Logic to dynamically adjust aero elements (e.g., active spoilers, diffusers).
+        In a real system, this would be based on speed, steering angle, braking force, etc.
+        """
+        if vehicle_state == "high_speed_acceleration":
+            self.active_aero_state = "low_drag"
+        elif vehicle_state == "cornering":
+            self.active_aero_state = "high_downforce"
+        elif vehicle_state == "hard_braking":
+            self.active_aero_state = "braking"
+        else:
+            self.active_aero_state = "low_drag" # Default
+            
+    def get_cooling_airflow(self, velocity_mps: float) -> float:
+        """
+        Estimates airflow for cooling based on speed and duct efficiency.
+        This is highly simplified; real systems involve complex fluid dynamics.
+        """
+        airflow_m3_per_s = self.frontal_area_m2 * velocity_mps * self.cooling_duct_efficiency
+        return airflow_m3_per_s
+
+class Powertrain:
+    """
+    Integrates the engine, electric motor, transmission, and final drive,
+    transferring power to the wheels.
+    """
+    def __init__(self, engine: Engine, electric_motor: ElectricMotor, battery: Battery, 
+                 transmission_ratios: list[float], final_drive_ratio: float, wheel_radius: float):
+        self.engine = engine
+        self.electric_motor = electric_motor
+        self.battery = battery
+        self.transmission_ratios = transmission_ratios
+        self.final_drive_ratio = final_drive_ratio
+        self.wheel_radius = wheel_radius
+        self.current_gear = 1
+        self.clutch_engaged = True
+
+    def calculate_wheel_rpm(self, vehicle_speed_mps: float) -> float:
+        """Calculates wheel RPM from vehicle speed."""
+        wheel_circumference = 2 * math.pi * self.wheel_radius
+        wheel_rpm = (vehicle_speed_mps / wheel_circumference) * 60
+        return wheel_rpm
+
+    def calculate_engine_rpm(self, vehicle_speed_mps: float) -> float:
+        """Calculates engine RPM based on vehicle speed and current gear."""
+        if not self.clutch_engaged:
+            return 0.0
+        wheel_rpm = self.calculate_wheel_rpm(vehicle_speed_mps)
+        gear_ratio = self.transmission_ratios[self.current_gear - 1]
+        engine_rpm = wheel_rpm * gear_ratio * self.final_drive_ratio
+        return engine_rpm
+
+    def get_total_wheel_torque(self, throttle_position: float, battery_assist_demand_kw: float) -> float:
+        """
+        Calculates the combined torque delivered to the wheels.
+        Combines engine torque and electric motor assist, applying gear ratios and losses.
+        """
+        engine_rpm = self.engine.current_rpm # Assume engine RPM is already updated
+        engine_torque = self.engine.get_torque_output(engine_rpm, throttle_position)
+
+        # Electric motor assist
+        motor_power_demand_watts = battery_assist_demand_kw * 1000
+        motor_power_output_watts = self.electric_motor.get_power_output(motor_power_demand_watts)
+        
+        motor_torque_at_wheel = 0.0
+        if motor_power_output_watts > 0 and engine_rpm > 0: # Avoid division by zero
+            # Simplified: assuming motor adds torque directly to the drivetrain.
+            # In reality, the motor could be on the crankshaft, transmission, or wheels.
+            motor_torque_at_wheel = (motor_power_output_watts / (engine_rpm * math.pi / 30)) * \
+                                    self.final_drive_ratio * self.transmission_ratios[self.current_gear - 1]
+
+        # Total torque before losses
+        total_drivetrain_torque = engine_torque * self.transmission_ratios[self.current_gear - 1] * self.final_drive_ratio + motor_torque_at_wheel
+
+        # Apply drivetrain losses (simplified efficiency factor)
+        drivetrain_efficiency = 0.92
+        return total_drivetrain_torque * drivetrain_efficiency
+
+    def shift_gear_up(self):
+        """Shifts to the next higher gear, if available."""
+        if self.current_gear < len(self.transmission_ratios):
+            self.current_gear += 1
+            # Simulate brief clutch disengagement for a realistic shift feel (conceptual)
+            self.clutch_engaged = False
+            # In a real system, there would be a precise shift timing and rev matching
+            self.clutch_engaged = True
+
+    def shift_gear_down(self):
+        """Shifts to the next lower gear, if available."""
+        if self.current_gear > 1:
+            self.current_gear -= 1
+            self.clutch_engaged = False
+            self.clutch_engaged = True
+
+# --- Main Ferrari Vehicle Class ---
+
+class FerrariVehicle:
+    """Represents the entire Ferrari vehicle, integrating all its systems."""
+    def __init__(self, engine_type: str = "V12", body_material: str = "titanium_carbon_fiber"):
+        self.mass_kg = 1500.0 # Example mass for a supercar
+        self.velocity_mps = 0.0
+        self.acceleration_mps2 = 0.0
+        self.total_distance_m = 0.0
+        self.fuel_level_kg = 50.0 # 50 kg of fuel
+        self.oil_temperature_c = 90.0
+        self.coolant_temperature_c = 90.0
+        self.gear_shift_strategy = "automatic" # or "manual"
+
+        # Engine selection based on type
+        if engine_type == "V6":
+            self.engine = Engine(6, 2.9, 800, 800, 10000) # Example V6 specs
+        elif engine_type == "V8":
+            self.engine = Engine(8, 3.9, 950, 900, 9500) # Example V8 specs
+        elif engine_type == "V10":
+            self.engine = Engine(10, 5.0, 1100, 1000, 10500) # Example V10 specs
+        elif engine_type == "V12":
+            self.engine = Engine(12, 6.5, 1200, 1100, 11000) # Example V12 specs
+        else:
+            raise ValueError(f"Invalid engine type specified: {engine_type}")
+
+        self.electric_motor = ElectricMotor(max_power_kw=200, max_torque_nm=300) # Example motor
+        self.battery = Battery(capacity_kwh=10, max_discharge_kw=300, max_charge_kw=150) # Example battery
+
+        self.powertrain = Powertrain(
+            self.engine, self.electric_motor, self.battery,
+            GEAR_RATIOS_V12, final_drive_ratio=3.0, wheel_radius=WHEEL_RADIUS_M
+        )
+        self.braking_system = BrakingSystem(max_braking_torque_nm=5000) # Example braking torque
+        self.aerodynamics = Aerodynamics(CD_BASE_CARBON_FIBER, FRONTAL_AREA_M2)
+
+        # Body material (conceptual effect on mass)
+        self.body_material = body_material
+        if body_material == "titanium_carbon_fiber":
+            self.mass_kg *= 0.85 # Reduce mass for advanced materials
+            print(f"Vehicle initialized with {engine_type} and {body_material} body. Mass: {self.mass_kg:.0f} kg")
+
+    def _calculate_forces(self, throttle_position: float, brake_pedal_pressure: float, battery_assist_demand_kw: float) -> float:
+        """Calculates all forces acting on the vehicle and returns the net force."""
+        # 1. Tractive Force from Powertrain
+        wheel_torque = self.powertrain.get_total_wheel_torque(throttle_position, battery_assist_demand_kw)
+        tractive_force = wheel_torque / self.powertrain.wheel_radius
+
+        # 2. Braking Force
+        mechanical_brake_torque, regenerative_brake_torque = self.braking_system.apply_brakes(
+            brake_pedal_pressure, self.velocity_mps
+        )
+        total_braking_force = (mechanical_brake_torque + regenerative_brake_torque) / self.powertrain.wheel_radius
+        
+        # Regenerate battery power during braking
+        regen_power_watts = self.electric_motor.regenerate_power(
+            regenerative_brake_torque, self.powertrain.calculate_wheel_rpm(self.velocity_mps)
+        )
+        self.battery.charge(regen_power_watts / 1000, 0.01) # Use a small dt for regeneration step
+
+        # 3. Aerodynamic Drag
+        drag_force = self.aerodynamics.get_drag_force(self.velocity_mps)
+
+        # 4. Rolling Resistance
+        rolling_resistance_force = ROLLING_RESISTANCE_COEFF * self.mass_kg * GRAVITY
+
+        net_force = tractive_force - total_braking_force - drag_force - rolling_resistance_force
+        return net_force
+
+    def _manage_engine_and_hybrid(self, throttle_position: float, battery_assist_demand_kw: float, dt: float):
+        """Manages the power split and consumption between engine and electric motor."""
+        # Update engine RPM based on current vehicle speed and gear
+        self.engine.current_rpm = self.powertrain.calculate_engine_rpm(self.velocity_mps)
+
+        # Determine hybrid power split based on demand and battery state
+        engine_power_demand_watts = self.engine.get_power_output(self.engine.current_rpm, throttle_position)
+        motor_power_demand_watts = battery_assist_demand_kw * 1000
+
+        # Prioritize electric assist if requested and battery available
+        actual_motor_power_watts = self.battery.discharge(motor_power_demand_watts / 1000, dt) * 1000
+        # For simplicity, if motor can't meet demand, engine makes up the difference (conceptual)
+        actual_engine_power_watts = engine_power_demand_watts # More complex logic needed here for real-world
+        
+        # Update engine fuel consumption
+        self.engine.update_fuel_consumption(actual_engine_power_watts)
+        self.fuel_level_kg -= self.engine.fuel_consumption_rate * dt
+
+    def _manage_cooling(self, dt: float):
+        """Simulates the cooling system based on engine load and airflow."""
+        # Estimate heat generation from engine (simplified: proportional to engine power)
+        engine_heat_generation = self.engine.get_power_output(self.engine.current_rpm, 1.0) * 0.6 # Assuming 60% waste heat
+        airflow = self.aerodynamics.get_cooling_airflow(self.velocity_mps)
+
+        # Very simplified temperature model: increase with heat, decrease with airflow
+        # Real-world cooling is a complex multi-fluid (oil, coolant, intercooler) heat transfer problem.
+        self.oil_temperature_c += (engine_heat_generation / 1000000) * dt - (airflow / 50) * dt
+        self.coolant_temperature_c += (engine_heat_generation / 800000) * dt - (airflow / 40) * dt
+
+        # Simple overheat protection warning
+        if self.oil_temperature_c > 130 or self.coolant_temperature_c > 110:
+            pass # print("WARNING: Engine overheating! Consider reducing power.")
+
+    def _manage_aerodynamics(self):
+        """Adjusts active aero elements based on current vehicle state."""
+        # Adjust aero based on current speed and assumed driving intent
+        if self.get_speed_mph() > 200: # Over 200 mph, optimize for low drag
+            self.aerodynamics.adjust_aero("high_speed_acceleration")
+        elif self.acceleration_mps2 < -5: # Hard braking, deploy air brakes
+            self.aerodynamics.adjust_aero("hard_braking")
+        else: # Default for normal driving or lower speeds
+            self.aerodynamics.adjust_aero("low_drag")
+
+    def update(self, throttle_position: float, brake_pedal_pressure: float, battery_assist_demand_kw: float, dt: float):
+        """
+        Updates the vehicle state over a small time step (dt).
+        This is the main simulation step function.
+        """
+        if self.fuel_level_kg <= 0:
+            print("Out of fuel!")
+            throttle_position = 0.0
+            battery_assist_demand_kw = 0.0
+
+        # Clamp inputs to valid ranges
+        throttle_position = max(0.0, min(1.0, throttle_position))
+        brake_pedal_pressure = max(0.0, min(1.0, brake_pedal_pressure))
+        battery_assist_demand_kw = max(0.0, min(self.battery.max_discharge_kw, battery_assist_demand_kw))
+
+        # Update sub-systems
+        self._manage_engine_and_hybrid(throttle_position, battery_assist_demand_kw, dt)
+        self._manage_aerodynamics()
+
+        # Calculate net force acting on the vehicle
+        net_force = self._calculate_forces(throttle_position, brake_pedal_pressure, battery_assist_demand_kw)
+
+        # Apply Newton's Second Law: F = ma => a = F/m
+        self.acceleration_mps2 = net_force / self.mass_kg
+
+        # Update velocity and position using simple Euler integration
+        self.velocity_mps += self.acceleration_mps2 * dt
+        self.velocity_mps = max(0.0, self.velocity_mps) # Speed cannot go negative
+        self.total_distance_m += self.velocity_mps * dt
+
+        # Automatic Gear Shifting (simplified logic)
+        if self.gear_shift_strategy == "automatic":
+            target_engine_rpm_lower = self.engine.redline_rpm * 0.7
+            target_engine_rpm_upper = self.engine.redline_rpm * 0.9
+            
+            # Shift up if RPM is high and there's a higher gear
+            if self.engine.current_rpm > target_engine_rpm_upper and self.powertrain.current_gear < len(self.powertrain.transmission_ratios):
+                self.powertrain.shift_gear_up()
+            # Shift down if RPM is too low (lugging) and not accelerating hard
+            elif self.engine.current_rpm < target_engine_rpm_lower and self.powertrain.current_gear > 1 and throttle_position < 0.5:
+                self.powertrain.shift_gear_down()
+
+        self._manage_cooling(dt)
+
+    def get_speed_mph(self) -> float:
+        """Returns the current vehicle speed in miles per hour."""
+        return self.velocity_mps * 2.23694
+
+    def get_fuel_level_liters(self) -> float:
+        """Returns the current fuel level in liters."""
+        # Approximate density of gasoline 0.75 kg/L
+        return self.fuel_level_kg / 0.75
+
+# --- Simulation Example ---
+
+if __name__ == "__main__":
+    # Initialize a Ferrari with a V12 engine and titanium carbon fiber body
+    ferrari = FerrariVehicle(engine_type="V12", body_material="titanium_carbon_fiber")
+
+    time_elapsed = 0.0
+    dt = 0.01 # seconds (time step for simulation)
+    target_speed_mph = 500.0
+    
+    # Data logging for potential plotting or detailed analysis
+    speeds = []
+    times = []
+    rpms = []
+    gears = []
+    fuel_levels = []
+    battery_charges = []
+    oil_temps = []
+    coolant_temps = []
+
+    print("Starting 0-500 mph acceleration simulation...")
+
+    # Simulation loop
+    while ferrari.get_speed_mph() < target_speed_mph and time_elapsed < 60.0: # Max 60 seconds simulation
+        # Inputs for the simulation:
+        throttle = 1.0 # Full throttle
+        brake = 0.0    # No braking
+        battery_assist = ferrari.battery.max_discharge_kw # Request maximum battery assist
+
+        # Dynamic adjustment of battery assist (e.g., reduce if battery is low)
+        if ferrari.battery.current_charge_kwh < ferrari.battery.capacity_kwh * 0.2:
+            battery_assist = 0.0 # Stop using battery if too low
+
+        # Update the vehicle state for this time step
+        ferrari.update(throttle, brake, battery_assist, dt)
+
+        time_elapsed += dt
+
+        # Store data for analysis
+        speeds.append(ferrari.get_speed_mph())
+        times.append(time_elapsed)
+        rpms.append(ferrari.engine.current_rpm)
+        gears.append(ferrari.powertrain.current_gear)
+        fuel_levels.append(ferrari.get_fuel_level_liters())
+        battery_charges.append(ferrari.battery.current_charge_kwh)
+        oil_temps.append(ferrari.oil_temperature_c)
+        coolant_temps.append(ferrari.coolant_temperature_c)
+
+        # Print progress periodically
+        if int(time_elapsed * 100) % 50 == 0: # Print every 0.5 seconds
+            print(f"Time: {time_elapsed:.2f}s, Speed: {ferrari.get_speed_mph():.2f} mph, "
+                  f"RPM: {ferrari.engine.current_rpm:.0f}, Gear: {ferrari.powertrain.current_gear}, "
+                  f"Fuel: {ferrari.get_fuel_level_liters():.1f} L, Battery: {ferrari.battery.current_charge_kwh:.1f} kWh, "
+                  f"Oil Temp: {ferrari.oil_temperature_c:.1f}°C, Coolant Temp: {ferrari.coolant_temperature_c:.1f}°C")
+
+    print(f"\nSimulation Finished.")
+    print(f"Time to reach {ferrari.get_speed_mph():.2f} mph: {time_elapsed:.2f} seconds.")
+    print(f"Total distance covered: {ferrari.total_distance_m / 1000:.2f} km.")
+    print(f"Remaining fuel: {ferrari.get_fuel_level_liters():.1f} L.")
+    print(f"Remaining battery: {ferrari.battery.current_charge_kwh:.1f} kWh.")
+
+    # You would typically use a plotting library like matplotlib to visualize these results.
+    try:
+        import matplotlib.pyplot as plt
+
+        fig, axs = plt.subplots(4, 1, figsize=(10, 16))
+
+        axs[0].plot(times, speeds)
+        axs[0].set_title('Speed vs. Time')
+        axs[0].set_xlabel('Time (s)')
+        axs[0].set_ylabel('Speed (mph)')
+        axs[0].grid(True)
+
+        axs[1].plot(times, rpms, label='Engine RPM')
+        ax2 = axs[1].twinx()
+        ax2.plot(times, gears, color='red', linestyle='--', label='Gear')
+        axs[1].set_title('Engine RPM and Gear vs. Time')
+        axs[1].set_xlabel('Time (s)')
+        axs[1].set_ylabel('RPM')
+        ax2.set_ylabel('Gear')
+        axs[1].legend(loc='upper left')
+        ax2.legend(loc='upper right')
+        axs[1].grid(True)
+
+        axs[2].plot(times, fuel_levels, label='Fuel (L)')
+        ax3 = axs[2].twinx()
+        ax3.plot(times, battery_charges, color='orange', label='Battery (kWh)')
+        axs[2].set_title('Fuel and Battery Charge vs. Time')
+        axs[2].set_xlabel('Time (s)')
+        axs[2].set_ylabel('Fuel (L)')
+        ax3.set_ylabel('Battery (kWh)')
+        axs[2].legend(loc='upper left')
+        ax3.legend(loc='upper right')
+        axs[2].grid(True)
+
+        axs[3].plot(times, oil_temps, label='Oil Temp (°C)')
+        axs[3].plot(times, coolant_temps, label='Coolant Temp (°C)', linestyle='--')
+        axs[3].set_title('Temperatures vs. Time')
+        axs[3].set_xlabel('Time (s)')
+        axs[3].set_ylabel('Temperature (°C)')
+        axs[3].legend()
+        axs[3].grid(True)
+
+        plt.tight_layout()
+        plt.show()
+
+    except ImportError:
+        print("\nMatplotlib not found. Install it with 'pip install matplotlib' to see plots.")
+
+
+
+
+#include <iostream>
+#include <vector>
+#include <string>
+#include <cmath>
+#include <algorithm> // For std::min, std::max
+
+// --- Constants and Configuration (simplified) ---
+const double GRAVITY                  = 9.81;  // m/s^2
+const double AIR_DENSITY_SEA_LEVEL    = 1.225; // kg/m^3
+const double CD_BASE_CARBON_FIBER     = 0.25;  // Typical low drag coefficient for a sleek car
+const double FRONTAL_AREA_M2          = 2.0;   // Example frontal area
+const double ROLLING_RESISTANCE_COEFF = 0.01;
+const double WHEEL_RADIUS_M           = 0.35;  // Approx. wheel radius
+const double MAX_ENGINE_RPM           = 12000.0;
+const double FUEL_ENERGY_DENSITY      = 44e6;  // Joules/kg (gasoline)
+const double BATTERY_ENERGY_DENSITY   = 250 * 3600.0; // Joules/kg (Li-ion, 250 Wh/kg)
+
+// Example 10-speed gear ratios for a V12
+const std::vector<double> GEAR_RATIOS_V12 = {2.97, 2.31, 1.95, 1.68, 1.45, 1.26, 1.09, 0.94, 0.81, 0.70};
+
+// --- Base Classes ---
+
+class Engine {
+private:
+    int cylinders;
+    double displacementL;
+    double maxPowerHP;      // Horsepower
+    double maxTorqueNM;     // Newton-meters
+    double redlineRPM;
+    
+public:
+    double currentRPM;
+    double fuelConsumptionRate; // kg/s
+
+    Engine(int cyl, double disp, double maxHp, double maxNm, double redline)
+        : cylinders(cyl), displacementL(disp), maxPowerHP(maxHp), maxTorqueNM(maxNm), redlineRPM(redline),
+          currentRPM(0.0), fuelConsumptionRate(0.0) {}
+
+    double getPowerOutput(double rpm, double throttlePosition) const {
+        if (rpm > redlineRPM) {
+            return 0.0;
+        }
+        double normalizedRPM = std::min(1.0, rpm / redlineRPM);
+        double powerAtRPM = maxPowerHP * normalizedRPM * throttlePosition;
+        return powerAtRPM * 745.7; // Convert HP to Watts
+    }
+
+    double getTorqueOutput(double rpm, double throttlePosition) const {
+        if (rpm > redlineRPM) {
+            return 0.0;
+        }
+        double normalizedRPM = std::min(1.0, rpm / redlineRPM);
+        // Simplified torque curve: peak around mid-RPM, drops off
+        double torqueAtRPM = maxTorqueNM * (1 - std::abs(0.5 - normalizedRPM)) * 2 * throttlePosition;
+        return torqueAtRPM;
+    }
+
+    void updateFuelConsumption(double powerOutputWatts) {
+        // Power = Efficiency * Fuel_Energy_Density * Mass_Flow_Rate
+        // Mass_Flow_Rate = Power / (Efficiency * Fuel_Energy_Density)
+        fuelConsumptionRate = powerOutputWatts / (FUEL_ENERGY_DENSITY * 0.4); // Assuming 40% efficiency
+    }
+};
+
+class ElectricMotor {
+private:
+    double maxPowerKW;     // Kilowatts
+    double maxTorqueNM;    // Newton-meters
+    double efficiency;
+
+public:
+    double currentPowerDraw; // Watts
+
+    ElectricMotor(double maxKw, double maxNm, double eff = 0.95)
+        : maxPowerKW(maxKw), maxTorqueNM(maxNm), efficiency(eff), currentPowerDraw(0.0) {}
+
+    double getPowerOutput(double demandWatts) {
+        double actualPower = std::min(demandWatts, maxPowerKW * 1000.0);
+        currentPowerDraw = actualPower / efficiency;
+        return actualPower;
+    }
+
+    double getTorqueOutput(double demandTorqueNM) const {
+        return std::min(demandTorqueNM, maxTorqueNM);
+    }
+
+    double regeneratePower(double torqueInputNM, double rpm) const {
+        // Angular velocity (rad/s) = RPM * pi / 30
+        double regenPowerWatts = (torqueInputNM * rpm * M_PI / 30.0) * efficiency;
+        return regenPowerWatts;
+    }
+};
+
+class Battery {
+private:
+    double capacityKWH;      // Kilowatt-hours
+    double maxDischargeKW;
+    double maxChargeKW;
+
+public:
+    double currentChargeKWH;
+
+    Battery(double capacity, double maxDischarge, double maxCharge)
+        : capacityKWH(capacity), maxDischargeKW(maxDischarge), maxChargeKW(maxCharge),
+          currentChargeKWH(capacity * 0.8) {} // Start at 80% charge
+
+    double discharge(double powerKW, double dt) {
+        powerKW = std::min(powerKW, maxDischargeKW);
+        double energyDrawKWH = powerKW * (dt / 3600.0); // Energy = Power * Time (kWh)
+        if (currentChargeKWH >= energyDrawKWH) {
+            currentChargeKWH -= energyDrawKWH;
+            return powerKW;
+        } else {
+            double actualPowerKW = (dt > 0) ? currentChargeKWH / (dt / 3600.0) : 0.0;
+            currentChargeKWH = 0.0;
+            return actualPowerKW;
+        }
+    }
+
+    double charge(double powerKW, double dt) {
+        powerKW = std::min(powerKW, maxChargeKW);
+        double energyChargeKWH = powerKW * (dt / 3600.0);
+        if (currentChargeKWH + energyChargeKWH <= capacityKWH) {
+            currentChargeKWH += energyChargeKWH;
+            return powerKW;
+        } else {
+            double actualPowerKW = (dt > 0) ? (capacityKWH - currentChargeKWH) / (dt / 3600.0) : 0.0;
+            currentChargeKWH = capacityKWH;
+            return actualPowerKW;
+        }
+    }
+};
+
+class BrakingSystem {
+private:
+    double maxBrakingTorqueNM;
+    double regenerativeRatio; // Portion of braking that can be regenerative
+
+public:
+    BrakingSystem(double maxNm, double regenRatio = 0.7)
+        : maxBrakingTorqueNM(maxNm), regenerativeRatio(regenRatio) {}
+
+    // Returns a pair: {mechanical_braking_torque, regenerative_braking_torque}
+    std::pair<double, double> applyBrakes(double pedalPressure, double currentSpeedMps) const {
+        double brakingTorque = maxBrakingTorqueNM * pedalPressure;
+        double mechanicalBrakingTorque = brakingTorque * (1 - regenerativeRatio);
+        double regenerativeBrakingTorque = brakingTorque * regenerativeRatio;
+        return {mechanicalBrakingTorque, regenerativeBrakingTorque};
+    }
+};
+
+class Aerodynamics {
+private:
+    double cdBase;
+    double frontalAreaM2;
+    double coolingDuctEfficiency;
+
+public:
+    std::string activeAeroState; // States: low_drag, high_downforce, braking
+
+    Aerodynamics(double cd, double area, double eff = 0.8)
+        : cdBase(cd), frontalAreaM2(area), coolingDuctEfficiency(eff), activeAeroState("low_drag") {}
+
+    double getDragForce(double velocityMps) const {
+        double dragCoefficient = cdBase;
+        if (activeAeroState == "high_downforce") {
+            dragCoefficient *= 1.5; // Example: increase drag for more downforce
+        } else if (activeAeroState == "braking") {
+            dragCoefficient *= 1.8; // Example: deploy air brakes for aggressive drag
+        }
+        return 0.5 * AIR_DENSITY_SEA_LEVEL * (velocityMps * velocityMps) * dragCoefficient * frontalAreaM2;
+    }
+
+    void adjustAero(const std::string& vehicleState) {
+        if (vehicleState == "high_speed_acceleration") {
+            activeAeroState = "low_drag";
+        } else if (vehicleState == "cornering") {
+            activeAeroState = "high_downforce";
+        } else if (vehicleState == "hard_braking") {
+            activeAeroState = "braking";
+        } else {
+            activeAeroState = "low_drag"; // Default
+        }
+    }
+            
+    double getCoolingAirflow(double velocityMps) const {
+        double airflowM3PerS = frontalAreaM2 * velocityMps * coolingDuctEfficiency;
+        return airflowM3PerS;
+    }
+};
+
+class Powertrain {
+private:
+    Engine* engine; // Pointer to Engine instance
+    ElectricMotor* electricMotor; // Pointer to ElectricMotor instance
+    Battery* battery; // Pointer to Battery instance
+    std::vector<double> transmissionRatios;
+    double finalDriveRatio;
+    double wheelRadius;
+
+public:
+    int currentGear;
+    bool clutchEngaged;
+
+    Powertrain(Engine* eng, ElectricMotor* em, Battery* batt, 
+               const std::vector<double>& ratios, double finalDrive, double wheelRad)
+        : engine(eng), electricMotor(em), battery(batt), 
+          transmissionRatios(ratios), finalDriveRatio(finalDrive), wheelRadius(wheelRad),
+          currentGear(1), clutchEngaged(true) {}
+
+    double calculateWheelRPM(double vehicleSpeedMps) const {
+        double wheelCircumference = 2 * M_PI * wheelRadius;
+        double wheelRPM = (vehicleSpeedMps / wheelCircumference) * 60.0;
+        return wheelRPM;
+    }
+
+    double calculateEngineRPM(double vehicleSpeedMps) const {
+        if (!clutchEngaged) {
+            return 0.0;
+        }
+        double wheelRPM = calculateWheelRPM(vehicleSpeedMps);
+        double gearRatio = transmissionRatios[currentGear - 1];
+        double engineRPM = wheelRPM * gearRatio * finalDriveRatio;
+        return engineRPM;
+    }
+
+    double getTotalWheelTorque(double throttlePosition, double batteryAssistDemandKW) {
+        double engineRPM = engine->currentRPM; // Assumes Engine::currentRPM is updated externally
+        double engineTorque = engine->getTorqueOutput(engineRPM, throttlePosition);
+
+        // Electric motor assist
+        double motorPowerDemandWatts = batteryAssistDemandKW * 1000.0;
+        double motorPowerOutputWatts = electricMotor->getPowerOutput(motorPowerDemandWatts);
+        
+        double motorTorqueAtWheel = 0.0;
+        if (motorPowerOutputWatts > 0 && engineRPM > 0) { // Avoid division by zero
+            // Simplified: motor adds torque directly to the drivetrain.
+            motorTorqueAtWheel = (motorPowerOutputWatts / (engineRPM * M_PI / 30.0)) * finalDriveRatio * transmissionRatios[currentGear - 1];
+        }
+
+        double totalDrivetrainTorque = engineTorque * transmissionRatios[currentGear - 1] * finalDriveRatio + motorTorqueAtWheel;
+
+        double drivetrainEfficiency = 0.92;
+        return totalDrivetrainTorque * drivetrainEfficiency;
+    }
+
+    void shiftGearUp() {
+        if (currentGear < transmissionRatios.size()) {
+            currentGear++;
+            clutchEngaged = false; // Simulate brief clutch disengagement
+            clutchEngaged = true;
+        }
+    }
+
+    void shiftGearDown() {
+        if (currentGear > 1) {
+            currentGear--;
+            clutchEngaged = false;
+            clutchEngaged = true;
+        }
+    }
+};
+
+// --- Main Ferrari Vehicle Class ---
+
+class FerrariVehicle {
+private:
+    double massKG;
+    double oilTemperatureC;
+    double coolantTemperatureC;
+    std::string gearShiftStrategy; // "automatic" or "manual"
+
+    // Component pointers
+    Engine* engine;
+    ElectricMotor* electricMotor;
+    Battery* battery;
+    Powertrain* powertrain;
+    BrakingSystem* brakingSystem;
+    Aerodynamics* aerodynamics;
+
+    // Helper methods (private as they are internal logic)
+    double calculateForces(double throttlePosition, double brakePedalPressure, double batteryAssistDemandKW);
+    void manageEngineAndHybrid(double throttlePosition, double batteryAssistDemandKW, double dt);
+    void manageCooling(double dt);
+    void manageAerodynamics();
+
+public:
+    double velocityMPS;        // Meters per second
+    double accelerationMPS2;
+    double totalDistanceM;     // Meters
+    double fuelLevelKG;
+    std::string bodyMaterial;
+
+    FerrariVehicle(const std::string& engineType = "V12", const std::string& bodyMat = "titanium_carbon_fiber")
+        : massKG(1500.0), velocityMPS(0.0), accelerationMPS2(0.0), totalDistanceM(0.0),
+          fuelLevelKG(50.0), oilTemperatureC(90.0), coolantTemperatureC(90.0),
+          gearShiftStrategy("automatic"), bodyMaterial(bodyMat) 
+    {
+        // Engine initialization
+        if (engineType == "V6") {
+            engine = new Engine(6, 2.9, 800, 800, 10000.0);
+        } else if (engineType == "V8") {
+            engine = new Engine(8, 3.9, 950, 900, 9500.0);
+        } else if (engineType == "V10") {
+            engine = new Engine(10, 5.0, 1100, 1000, 10500.0);
+        } else if (engineType == "V12") {
+            engine = new Engine(12, 6.5, 1200, 1100, 11000.0);
+        } else {
+            // Handle error or default to V12
+            std::cerr << "Invalid engine type specified: " << engineType << ". Defaulting to V12." << std::endl;
+            engine = new Engine(12, 6.5, 1200, 1100, 11000.0);
+        }
+
+        electricMotor = new ElectricMotor(200, 300);
+        battery = new Battery(10, 300, 150);
+
+        powertrain = new Powertrain(
+            engine, electricMotor, battery,
+            GEAR_RATIOS_V12, 3.0, WHEEL_RADIUS_M
+        );
+        brakingSystem = new BrakingSystem(5000);
+        aerodynamics = new Aerodynamics(CD_BASE_CARBON_FIBER, FRONTAL_AREA_M2);
+
+        if (bodyMaterial == "titanium_carbon_fiber") {
+            massKG *= 0.85; // Reduce mass for advanced materials
+            std::cout << "Vehicle initialized with " << engineType << " and " << bodyMaterial 
+                      << " body. Mass: " << static_cast<int>(massKG) << " kg" << std::endl;
+        }
+    }
+
+    // Destructor to free dynamically allocated memory
+    ~FerrariVehicle() {
+        delete engine;
+        delete electricMotor;
+        delete battery;
+        delete powertrain;
+        delete brakingSystem;
+        delete aerodynamics;
+    }
+
+    void update(double throttlePosition, double brakePedalPressure, double batteryAssistDemandKW, double dt) {
+        if (fuelLevelKG <= 0) {
+            std::cout << "Out of fuel! Stopping engine." << std::endl;
+            throttlePosition = 0.0;
+            batteryAssistDemandKW = 0.0;
+        }
+
+        // Clamp inputs
+        throttlePosition = std::max(0.0, std::min(1.0, throttlePosition));
+        brakePedalPressure = std::max(0.0, std::min(1.0, brakePedalPressure));
+        batteryAssistDemandKW = std::max(0.0, std::min(battery->maxDischargeKW, batteryAssistDemandKW));
+
+        manageEngineAndHybrid(throttlePosition, batteryAssistDemandKW, dt);
+        manageAerodynamics();
+
+        double netForce = calculateForces(throttlePosition, brakePedalPressure, batteryAssistDemandKW);
+
+        accelerationMPS2 = netForce / massKG;
+
+        velocityMPS += accelerationMPS2 * dt;
+        velocityMPS = std::max(0.0, velocityMPS); // Cannot go backwards
+        totalDistanceM += velocityMPS * dt;
+
+        if (gearShiftStrategy == "automatic") {
+            double targetEngineRPMLower = engine->redlineRPM * 0.7;
+            double targetEngineRPMUpper = engine->redlineRPM * 0.9;
+            
+            if (engine->currentRPM > targetEngineRPMLower && powertrain->currentGear < GEAR_RATIOS_V12.size()) {
+                powertrain->shiftGearUp();
+            } else if (engine->currentRPM < targetEngineRPMLower && powertrain->currentGear > 1 && throttlePosition < 0.5) {
+                powertrain->shiftGearDown();
+            }
+        }
+
+        manageCooling(dt);
+    }
+
+    double getSpeedMPH() const {
+        return velocityMPS * 2.23694;
+    }
+
+    double getFuelLevelLiters() const {
+        return fuelLevelKG / 0.75; // Approx density of gasoline 0.75 kg/L
+    }
+
+    // Accessors for public display/logging
+    double getCurrentEngineRPM() const { return engine->currentRPM; }
+    int getCurrentGear() const { return powertrain->currentGear; }
+    double getCurrentBatteryChargeKWH() const { return battery->currentChargeKWH; }
+    double getOilTemperatureC() const { return oilTemperatureC; }
+    double getCoolantTemperatureC() const { return coolantTemperatureC; }
+};
+
+// --- Implement FerrariVehicle's private helper methods ---
+
+double FerrariVehicle::calculateForces(double throttlePosition, double brakePedalPressure, double batteryAssistDemandKW) {
+    // 1. Tractive Force from Powertrain
+    double wheelTorque = powertrain->getTotalWheelTorque(throttlePosition, batteryAssistDemandKW);
+    double tractiveForce = wheelTorque / powertrain->wheelRadius;
+
+    // 2. Braking Force
+    std::pair<double, double> brakeTorques = brakingSystem->applyBrakes(brakePedalPressure, velocityMPS);
+    double mechanicalBrakingTorque = brakeTorques.first;
+    double regenerativeBrakingTorque = brakeTorques.second;
+    double totalBrakingForce = (mechanicalBrakingTorque + regenerativeBrakingTorque) / powertrain->wheelRadius;
+    
+    // Regenerate battery power during braking
+    double regenPowerWatts = electricMotor->regeneratePower(
+        regenerativeBrakingTorque, powertrain->calculateWheelRPM(velocityMPS)
+    );
+    battery->charge(regenPowerWatts / 1000.0, 0.01); // dt is small
+
+    // 3. Aerodynamic Drag
+    double dragForce = aerodynamics->getDragForce(velocityMPS);
+
+    // 4. Rolling Resistance
+    double rollingResistanceForce = ROLLING_RESISTANCE_COEFF * massKG * GRAVITY;
+
+    double netForce = tractiveForce - totalBrakingForce - dragForce - rollingResistanceForce;
+    return netForce;
+}
+
+void FerrariVehicle::manageEngineAndHybrid(double throttlePosition, double batteryAssistDemandKW, double dt) {
+    engine->currentRPM = powertrain->calculateEngineRPM(velocityMPS);
+
+    double enginePowerDemandWatts = engine->getPowerOutput(engine->currentRPM, throttlePosition);
+    double motorPowerDemandWatts = batteryAssistDemandKW * 1000.0;
+
+    double actualMotorPowerWatts = battery->discharge(motorPowerDemandWatts / 1000.0, dt) * 1000.0;
+    // In a more complex model, this would influence engine power.
+    double actualEnginePowerWatts = enginePowerDemandWatts; // Simplification
+
+    engine->updateFuelConsumption(actualEnginePowerWatts);
+    fuelLevelKG -= engine->fuelConsumptionRate * dt;
+}
+
+void FerrariVehicle::manageCooling(double dt) {
+    double engineHeatGeneration = engine->getPowerOutput(engine->currentRPM, 1.0) * 0.6; // Assuming 60% waste heat
+    double airflow = aerodynamics->getCoolingAirflow(velocityMPS);
+
+    oilTemperatureC += (engineHeatGeneration / 1000000.0) * dt - (airflow / 50.0) * dt;
+    coolantTemperatureC += (engineHeatGeneration / 800000.0) * dt - (airflow / 40.0) * dt;
+
+    if (oilTemperatureC > 130.0 || coolantTemperatureC > 110.0) {
+        // std::cerr << "WARNING: Engine overheating! Consider reducing power." << std::endl;
+    }
+}
+
+void FerrariVehicle::manageAerodynamics() {
+    if (getSpeedMPH() > 200.0) { // Over 200 mph
+        aerodynamics->adjustAero("high_speed_acceleration");
+    } else if (accelerationMPS2 < -5.0) { // Hard braking
+        aerodynamics->adjustAero("hard_braking");
+    } else {
+        aerodynamics->adjustAero("low_drag");
+    }
+}
+
+// --- Simulation Example ---
+
+int main() {
+    FerrariVehicle ferrari("V12", "titanium_carbon_fiber");
+
+    double timeElapsed = 0.0;
+    double dt = 0.01; // seconds (time step for simulation)
+    double targetSpeedMPH = 500.0;
+
+    std::cout << "Starting 0-500 mph acceleration simulation..." << std::endl;
+
+    // Simulation loop
+    while (ferrari.getSpeedMPH() < targetSpeedMPH && timeElapsed < 60.0) { // Max 60 seconds simulation
+        double throttle = 1.0; // Full throttle
+        double brake = 0.0;    // No braking
+        double batteryAssist = ferrari.battery->maxDischargeKW; // Request maximum battery assist
+
+        // Dynamic adjustment of battery assist (e.g., reduce if battery is low)
+        if (ferrari.getCurrentBatteryChargeKWH() < ferrari.battery->capacityKWH * 0.2) {
+            batteryAssist = 0.0; // Stop using battery if too low
+        }
+
+        // Update the vehicle state for this time step
+        ferrari.update(throttle, brake, batteryAssist, dt);
+
+        timeElapsed += dt;
+
+        // Print progress periodically
+        if (static_cast<int>(timeElapsed * 100) % 50 == 0) { // Print every 0.5 seconds
+            printf("Time: %.2fs, Speed: %.2f mph, RPM: %.0f, Gear: %d, Fuel: %.1f L, Battery: %.1f kWh, Oil Temp: %.1f°C, Coolant Temp: %.1f°C\n",
+                   timeElapsed, ferrari.getSpeedMPH(), ferrari.getCurrentEngineRPM(), ferrari.getCurrentGear(),
+                   ferrari.getFuelLevelLiters(), ferrari.getCurrentBatteryChargeKWH(), ferrari.getOilTemperatureC(), ferrari.getCoolantTemperatureC());
+        }
+    }
+
+    std::cout << "\nSimulation Finished." << std::endl;
+    printf("Time to reach %.2f mph: %.2f seconds.\n", ferrari.getSpeedMPH(), timeElapsed);
+    printf("Total distance covered: %.2f km.\n", ferrari.totalDistanceM / 1000.0);
+    printf("Remaining fuel: %.1f L.\n", ferrari.getFuelLevelLiters());
+    printf("Remaining battery: %.1f kWh.\n", ferrari.getCurrentBatteryChargeKWH());
+
+    return 0;
+}
+
+
+
+import Foundation
+
+// --- Constants and Configuration (simplified) ---
+struct Constants {
+    static let gravity: Double = 9.81  // m/s^2
+    static let airDensitySeaLevel: Double = 1.225 // kg/m^3
+    static let cdBaseCarbonFiber: Double = 0.25  // Typical low drag coefficient for a sleek car
+    static let frontalAreaM2: Double = 2.0   // Example frontal area
+    static let rollingResistanceCoeff: Double = 0.01
+    static let wheelRadiusM: Double = 0.35 // Approx. wheel radius
+    static let maxEngineRPM: Double = 12000.0
+    static let fuelEnergyDensity: Double = 44 * pow(10, 6) // Joules/kg (gasoline)
+    static let batteryEnergyDensity: Double = 250 * 3600.0 // Joules/kg (Li-ion, 250 Wh/kg)
+
+    // Example 10-speed gear ratios for a V12
+    static let gearRatiosV12: [Double] = [2.97, 2.31, 1.95, 1.68, 1.45, 1.26, 1.09, 0.94, 0.81, 0.70]
+}
+
+
+
+import Foundation
+
+class Engine {
+    let cylinders: Int
+    let displacementL: Double
+    let maxPowerHP: Double      // Horsepower
+    let maxTorqueNM: Double     // Newton-meters
+    let redlineRPM: Double
+    
+    var currentRPM: Double = 0.0
+    var fuelConsumptionRate: Double = 0.0 // kg/s
+
+    init(cylinders: Int, displacementL: Double, maxPowerHP: Double, maxTorqueNM: Double, redlineRPM: Double) {
+        self.cylinders = cylinders
+        self.displacementL = displacementL
+        self.maxPowerHP = maxPowerHP
+        self.maxTorqueNM = maxTorqueNM
+        self.redlineRPM = redlineRPM
+    }
+
+    func getPowerOutput(rpm: Double, throttlePosition: Double) -> Double {
+        guard rpm <= redlineRPM else { return 0.0 }
+        let normalizedRPM = min(1.0, rpm / redlineRPM)
+        let powerAtRPM = maxPowerHP * normalizedRPM * throttlePosition
+        return powerAtRPM * 745.7 // Convert HP to Watts
+    }
+
+    func getTorqueOutput(rpm: Double, throttlePosition: Double) -> Double {
+        guard rpm <= redlineRPM else { return 0.0 }
+        let normalizedRPM = min(1.0, rpm / redlineRPM)
+        // Simplified torque curve: peak around mid-RPM, drops off
+        let torqueAtRPM = maxTorqueNM * (1 - abs(0.5 - normalizedRPM)) * 2 * throttlePosition
+        return torqueAtRPM
+    }
+
+    func updateFuelConsumption(powerOutputWatts: Double) {
+        // Power = Efficiency * Fuel_Energy_Density * Mass_Flow_Rate
+        // Mass_Flow_Rate = Power / (Efficiency * Fuel_Energy_Density)
+        fuelConsumptionRate = powerOutputWatts / (Constants.fuelEnergyDensity * 0.4) // Assuming 40% efficiency
+    }
+}
+
+
+
+import Foundation
+
+class ElectricMotor {
+    let maxPowerKW: Double     // Kilowatts
+    let maxTorqueNM: Double    // Newton-meters
+    let efficiency: Double
+
+    var currentPowerDraw: Double = 0.0 // Watts
+
+    init(maxPowerKW: Double, maxTorqueNM: Double, efficiency: Double = 0.95) {
+        self.maxPowerKW = maxPowerKW
+        self.maxTorqueNM = maxTorqueNM
+        self.efficiency = efficiency
+    }
+
+    func getPowerOutput(demandWatts: Double) -> Double {
+        let actualPower = min(demandWatts, maxPowerKW * 1000.0)
+        currentPowerDraw = actualPower / efficiency
+        return actualPower
+    }
+
+    func getTorqueOutput(demandTorqueNM: Double) -> Double {
+        return min(demandTorqueNM, maxTorqueNM)
+    }
+
+    func regeneratePower(torqueInputNM: Double, rpm: Double) -> Double {
+        // Angular velocity (rad/s) = RPM * pi / 30
+        let regenPowerWatts = (torqueInputNM * rpm * Double.pi / 30.0) * efficiency
+        return regenPowerWatts
+    }
+}
+
+
+
+import Foundation
+
+class Battery {
+    let capacityKWH: Double      // Kilowatt-hours
+    let maxDischargeKW: Double
+    let maxChargeKW: Double
+
+    var currentChargeKWH: Double
+
+    init(capacityKWH: Double, maxDischargeKW: Double, maxChargeKW: Double) {
+        self.capacityKWH = capacityKWH
+        self.maxDischargeKW = maxDischargeKW
+        self.maxChargeKW = maxChargeKW
+        self.currentChargeKWH = capacityKWH * 0.8 // Start at 80% charge
+    }
+
+    func discharge(powerKW: Double, dt: Double) -> Double {
+        var powerKW = min(powerKW, maxDischargeKW)
+        let energyDrawKWH = powerKW * (dt / 3600.0) // Energy = Power * Time (kWh)
+        if currentChargeKWH >= energyDrawKWH {
+            currentChargeKWH -= energyDrawKWH
+            return powerKW
+        } else {
+            let actualPowerKW = (dt > 0) ? currentChargeKWH / (dt / 3600.0) : 0.0
+            currentChargeKWH = 0.0
+            return actualPowerKW
+        }
+    }
+
+    func charge(powerKW: Double, dt: Double) -> Double {
+        var powerKW = min(powerKW, maxChargeKW)
+        let energyChargeKWH = powerKW * (dt / 3600.0)
+        if currentChargeKWH + energyChargeKWH <= capacityKWH {
+            currentChargeKWH += energyChargeKWH
+            return powerKW
+        } else {
+            let actualPowerKW = (dt > 0) ? (capacityKWH - currentChargeKWH) / (dt / 3600.0) : 0.0
+            currentChargeKWH = capacityKWH
+            return actualPowerKW
+        }
+    }
+}
+
+
+
+import Foundation
+
+class BrakingSystem {
+    let maxBrakingTorqueNM: Double
+    let regenerativeRatio: Double // Portion of braking that can be regenerative
+
+    init(maxBrakingTorqueNM: Double, regenerativeRatio: Double = 0.7) {
+        self.maxBrakingTorqueNM = maxBrakingTorqueNM
+        self.regenerativeRatio = regenerativeRatio
+    }
+
+    // Returns a tuple: (mechanicalBrakingTorque, regenerativeBrakingTorque)
+    func applyBrakes(pedalPressure: Double, currentSpeedMps: Double) -> (mechanical: Double, regenerative: Double) {
+        let brakingTorque = maxBrakingTorqueNM * pedalPressure
+        let mechanicalBrakingTorque = brakingTorque * (1 - regenerativeRatio)
+        let regenerativeBrakingTorque = brakingTorque * regenerativeRatio
+        return (mechanicalBrakingTorque, regenerativeBrakingTorque)
+    }
+}
+
+
+
+import Foundation
+
+class Aerodynamics {
+    let cdBase: Double
+    let frontalAreaM2: Double
+    let coolingDuctEfficiency: Double
+
+    var activeAeroState: String = "low_drag" // States: low_drag, high_downforce, braking
+
+    init(cdBase: Double, frontalAreaM2: Double, coolingDuctEfficiency: Double = 0.8) {
+        self.cdBase = cdBase
+        self.frontalAreaM2 = frontalAreaM2
+        self.coolingDuctEfficiency = coolingDuctEfficiency
+    }
+
+    func getDragForce(velocityMps: Double) -> Double {
+        var dragCoefficient = cdBase
+        if activeAeroState == "high_downforce" {
+            dragCoefficient *= 1.5 // Example: increase drag for more downforce
+        } else if activeAeroState == "braking" {
+            dragCoefficient *= 1.8 // Example: deploy air brakes for aggressive drag
+        }
+        return 0.5 * Constants.airDensitySeaLevel * (velocityMps * velocityMps) * dragCoefficient * frontalAreaM2
+    }
+
+    func adjustAero(vehicleState: String) {
+        if vehicleState == "high_speed_acceleration" {
+            activeAeroState = "low_drag"
+        } else if vehicleState == "cornering" {
+            activeAeroState = "high_downforce"
+        } else if vehicleState == "hard_braking" {
+            activeAeroState = "braking"
+        } else {
+            activeAeroState = "low_drag" // Default
+        }
+    }
+            
+    func getCoolingAirflow(velocityMps: Double) -> Double {
+        let airflowM3PerS = frontalAreaM2 * velocityMps * coolingDuctEfficiency
+        return airflowM3PerS
+    }
+}
+
+
+
+import Foundation
+
+class Powertrain {
+    unowned let engine: Engine // unowned for non-owning reference
+    unowned let electricMotor: ElectricMotor
+    unowned let battery: Battery
+    let transmissionRatios: [Double]
+    let finalDriveRatio: Double
+    let wheelRadius: Double
+
+    var currentGear: Int = 1
+    var clutchEngaged: Bool = true
+
+    init(engine: Engine, electricMotor: ElectricMotor, battery: Battery, 
+         transmissionRatios: [Double], finalDriveRatio: Double, wheelRadius: Double) {
+        self.engine = engine
+        self.electricMotor = electricMotor
+        self.battery = battery
+        self.transmissionRatios = transmissionRatios
+        self.finalDriveRatio = finalDriveRatio
+        self.wheelRadius = wheelRadius
+    }
+
+    func calculateWheelRPM(vehicleSpeedMps: Double) -> Double {
+        let wheelCircumference = 2 * Double.pi * wheelRadius
+        let wheelRPM = (vehicleSpeedMps / wheelCircumference) * 60.0
+        return wheelRPM
+    }
+
+    func calculateEngineRPM(vehicleSpeedMps: Double) -> Double {
+        guard clutchEngaged else { return 0.0 }
+        let wheelRPM = calculateWheelRPM(vehicleSpeedMps)
+        let gearRatio = transmissionRatios[currentGear - 1]
+        let engineRPM = wheelRPM * gearRatio * finalDriveRatio
+        return engineRPM
+    }
+
+    func getTotalWheelTorque(throttlePosition: Double, batteryAssistDemandKW: Double) -> Double {
+        let engineRPM = engine.currentRPM // Assumes Engine::currentRPM is updated externally
+        let engineTorque = engine.getTorqueOutput(rpm: engineRPM, throttlePosition: throttlePosition)
+
+        // Electric motor assist
+        let motorPowerDemandWatts = batteryAssistDemandKW * 1000.0
+        let motorPowerOutputWatts = electricMotor.getPowerOutput(demandWatts: motorPowerDemandWatts)
+        
+        var motorTorqueAtWheel: Double = 0.0
+        if motorPowerOutputWatts > 0 && engineRPM > 0 { // Avoid division by zero
+            // Simplified: motor adds torque directly to the drivetrain.
+            motorTorqueAtWheel = (motorPowerOutputWatts / (engineRPM * Double.pi / 30.0)) * finalDriveRatio * transmissionRatios[currentGear - 1]
+        }
+
+        let totalDrivetrainTorque = engineTorque * transmissionRatios[currentGear - 1] * finalDriveRatio + motorTorqueAtWheel
+
+        let drivetrainEfficiency = 0.92
+        return totalDrivetrainTorque * drivetrainEfficiency
+    }
+
+    func shiftGearUp() {
+        if currentGear < transmissionRatios.count {
+            currentGear += 1
+            clutchEngaged = false // Simulate brief clutch disengagement
+            clutchEngaged = true
+        }
+    }
+
+    func shiftGearDown() {
+        if currentGear > 1 {
+            currentGear -= 1
+            clutchEngaged = false
+            clutchEngaged = true
+        }
+    }
+}
+
+
+import Foundation
+
+class FerrariVehicle {
+    var massKG: Double
+    var velocityMPS: Double = 0.0 // Meters per second
+    var accelerationMPS2: Double = 0.0
+    var totalDistanceM: Double = 0.0 // Meters
+    var fuelLevelKG: Double = 50.0 // 50 kg of fuel
+    var oilTemperatureC: Double = 90.0
+    var coolantTemperatureC: Double = 90.0
+    var gearShiftStrategy: String = "automatic" // "automatic" or "manual"
+    var bodyMaterial: String
+    
+    // Component instances
+    let engine: Engine
+    let electricMotor: ElectricMotor
+    let battery: Battery
+    let powertrain: Powertrain
+    let brakingSystem: BrakingSystem
+    let aerodynamics: Aerodynamics
+
+    init(engineType: String = "V12", bodyMaterial: String = "titanium_carbon_fiber") {
+        self.bodyMaterial = bodyMaterial
+
+        // Engine initialization
+        switch engineType {
+        case "V6":
+            engine = Engine(cylinders: 6, displacementL: 2.9, maxPowerHP: 800, maxTorqueNM: 800, redlineRPM: 10000.0)
+        case "V8":
+            engine = Engine(cylinders: 8, displacementL: 3.9, maxPowerHP: 950, maxTorqueNM: 900, redlineRPM: 9500.0)
+        case "V10":
+            engine = Engine(cylinders: 10, displacementL: 5.0, maxPowerHP: 1100, maxTorqueNM: 1000, redlineRPM: 10500.0)
+        case "V12":
+            engine = Engine(cylinders: 12, displacementL: 6.5, maxPowerHP: 1200, maxTorqueNM: 1100, redlineRPM: 11000.0)
+        default:
+            print("Invalid engine type specified: \(engineType). Defaulting to V12.")
+            engine = Engine(cylinders: 12, displacementL: 6.5, maxPowerHP: 1200, maxTorqueNM: 1100, redlineRPM: 11000.0)
+        }
+
+        electricMotor = ElectricMotor(maxPowerKW: 200, maxTorqueNM: 300)
+        battery = Battery(capacityKWH: 10, maxDischargeKW: 300, maxChargeKW: 150)
+        
+        // Pass references to powertrain
+        powertrain = Powertrain(
+            engine: engine, electricMotor: electricMotor, battery: battery,
+            transmissionRatios: Constants.gearRatiosV12, finalDriveRatio: 3.0, wheelRadius: Constants.wheelRadiusM
+        )
+        brakingSystem = BrakingSystem(maxBrakingTorqueNM: 5000)
+        aerodynamics = Aerodynamics(cdBase: Constants.cdBaseCarbonFiber, frontalAreaM2: Constants.frontalAreaM2)
+
+        self.massKG = 1500.0 // Base mass
+        if bodyMaterial == "titanium_carbon_fiber" {
+            self.massKG *= 0.85 // Reduce mass for advanced materials
+            print("Vehicle initialized with \(engineType) and \(bodyMaterial) body. Mass: \(Int(massKG)) kg")
+        }
+    }
+
+    private func calculateForces(throttlePosition: Double, brakePedalPressure: Double, batteryAssistDemandKW: Double) -> Double {
+        // 1. Tractive Force from Powertrain
+        let wheelTorque = powertrain.getTotalWheelTorque(throttlePosition: throttlePosition, batteryAssistDemandKW: batteryAssistDemandKW)
+        let tractiveForce = wheelTorque / powertrain.wheelRadius
+
+        // 2. Braking Force
+        let brakeTorques = brakingSystem.applyBrakes(pedalPressure: brakePedalPressure, currentSpeedMps: velocityMPS)
+        let mechanicalBrakingTorque = brakeTorques.mechanical
+        let regenerativeBrakingTorque = brakeTorques.regenerative
+        let totalBrakingForce = (mechanicalBrakingTorque + regenerativeBrakingTorque) / powertrain.wheelRadius
+        
+        // Regenerate battery power during braking
+        let regenPowerWatts = electricMotor.regeneratePower(
+            torqueInputNM: regenerativeBrakingTorque, rpm: powertrain.calculateWheelRPM(vehicleSpeedMps: velocityMPS)
+        )
+        battery.charge(powerKW: regenPowerWatts / 1000.0, dt: 0.01) // dt is small
+
+        // 3. Aerodynamic Drag
+        let dragForce = aerodynamics.getDragForce(velocityMps: velocityMPS)
+
+        // 4. Rolling Resistance
+        let rollingResistanceForce = Constants.rollingResistanceCoeff * massKG * Constants.gravity
+
+        let netForce = tractiveForce - totalBrakingForce - dragForce - rollingResistanceForce
+        return netForce
+    }
+
+    private func manageEngineAndHybrid(throttlePosition: Double, batteryAssistDemandKW: Double, dt: Double) {
+        engine.currentRPM = powertrain.calculateEngineRPM(vehicleSpeedMps: velocityMPS)
+
+        let enginePowerDemandWatts = engine.getPowerOutput(rpm: engine.currentRPM, throttlePosition: throttlePosition)
+        let motorPowerDemandWatts = batteryAssistDemandKW * 1000.0
+
+        _ = battery.discharge(powerKW: motorPowerDemandWatts / 1000.0, dt: dt) * 1000.0
+        // In a more complex model, this would influence engine power.
+        let actualEnginePowerWatts = enginePowerDemandWatts // Simplification
+
+        engine.updateFuelConsumption(powerOutputWatts: actualEnginePowerWatts)
+        fuelLevelKG -= engine.fuelConsumptionRate * dt
+    }
+
+    private func manageCooling(dt: Double) {
+        let engineHeatGeneration = engine.getPowerOutput(rpm: engine.currentRPM, throttlePosition: 1.0) * 0.6 // Assuming 60% waste heat
+        let airflow = aerodynamics.getCoolingAirflow(velocityMps: velocityMPS)
+
+        oilTemperatureC += (engineHeatGeneration / 1000000.0) * dt - (airflow / 50.0) * dt
+        coolantTemperatureC += (engineHeatGeneration / 800000.0) * dt - (airflow / 40.0) * dt
+
+        if oilTemperatureC > 130.0 || coolantTemperatureC > 110.0 {
+            // print("WARNING: Engine overheating! Consider reducing power.")
+        }
+    }
+
+    private func manageAerodynamics() {
+        if getSpeedMPH() > 200.0 { // Over 200 mph
+            aerodynamics.adjustAero(vehicleState: "high_speed_acceleration")
+        } else if accelerationMPS2 < -5.0 { // Hard braking
+            aerodynamics.adjustAero(vehicleState: "hard_braking")
+        } else {
+            aerodynamics.adjustAero(vehicleState: "low_drag")
+        }
+    }
+
+    func update(throttlePosition: Double, brakePedalPressure: Double, batteryAssistDemandKW: Double, dt: Double) {
+        if fuelLevelKG <= 0 {
+            print("Out of fuel! Stopping engine.")
+            // Ensure inputs are zero if out of fuel
+            let zeroThrottle = 0.0
+            let zeroBatteryAssist = 0.0
+            // Call internal managers with zeroed inputs
+            manageEngineAndHybrid(throttlePosition: zeroThrottle, batteryAssistDemandKW: zeroBatteryAssist, dt: dt)
+            // No forces will be generated from powertrain, but still brake/aero
+            let netForce = calculateForces(throttlePosition: zeroThrottle, brakePedalPressure: brakePedalPressure, batteryAssistDemandKW: zeroBatteryAssist)
+            accelerationMPS2 = netForce / massKG
+        } else {
+            // Clamp inputs
+            let clampedThrottle = max(0.0, min(1.0, throttlePosition))
+            let clampedBrake = max(0.0, min(1.0, brakePedalPressure))
+            let clampedBatteryAssist = max(0.0, min(battery.maxDischargeKW, batteryAssistDemandKW))
+
+            manageEngineAndHybrid(throttlePosition: clampedThrottle, batteryAssistDemandKW: clampedBatteryAssist, dt: dt)
+            let netForce = calculateForces(throttlePosition: clampedThrottle, brakePedalPressure: clampedBrake, batteryAssistDemandKW: clampedBatteryAssist)
+            accelerationMPS2 = netForce / massKG
+        }
+
+
+        velocityMPS += accelerationMPS2 * dt
+        velocityMPS = max(0.0, velocityMPS) // Cannot go backwards
+        totalDistanceM += velocityMPS * dt
+
+        if gearShiftStrategy == "automatic" {
+            let targetEngineRPMLower = engine.redlineRPM * 0.7
+            let targetEngineRPMUpper = engine.redlineRPM * 0.9
+            
+            if engine.currentRPM > targetEngineRPMLower && powertrain.currentGear < Constants.gearRatiosV12.count {
+                powertrain.shiftGearUp()
+            } else if engine.currentRPM < targetEngineRPMLower && powertrain.currentGear > 1 && throttlePosition < 0.5 {
+                powertrain.shiftGearDown()
+            }
+        }
+
+        manageCooling(dt)
+        manageAerodynamics() // Update aerodynamics based on new speed/acceleration
+    }
+
+    func getSpeedMPH() -> Double {
+        return velocityMPS * 2.23694
+    }
+
+    func getFuelLevelLiters() -> Double {
+        return fuelLevelKG / 0.75 // Approx density of gasoline 0.75 kg/L
+    }
+}
+
+
+
+import UIKit
+
+class ViewController: UIViewController {
+
+    var ferrari: FerrariVehicle!
+    var timer: Timer?
+    let simulationTimeStep: Double = 0.01 // seconds
+
+    // MARK: UI Outlets (Connect these in your Main.storyboard)
+    @IBOutlet weak var speedLabel: UILabel!
+    @IBOutlet weak var rpmLabel: UILabel!
+    @IBOutlet weak var gearLabel: UILabel!
+    @IBOutlet weak var fuelLabel: UILabel!
+    @IBOutlet weak var batteryLabel: UILabel!
+    @IBOutlet weak var oilTempLabel: UILabel!
+    @IBOutlet weak var coolantTempLabel: UILabel!
+    @IBOutlet weak var timeElapsedLabel: UILabel!
+    @IBOutlet weak var distanceLabel: UILabel!
+    
+    @IBOutlet weak var throttleSlider: UISlider!
+    @IBOutlet weak var brakeSlider: UISlider!
+    @IBOutlet weak var batteryAssistSlider: UISlider!
+
+    var timeElapsed: Double = 0.0
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        
+        // Initialize the Ferrari vehicle
+        ferrari = FerrariVehicle(engineType: "V12", bodyMaterial: "titanium_carbon_fiber")
+        
+        setupUI()
+        startSimulation()
+    }
+
+    func setupUI() {
+        speedLabel.text = "Speed: 0.00 mph"
+        rpmLabel.text = "RPM: 0"
+        gearLabel.text = "Gear: 1"
+        fuelLabel.text = "Fuel: 0.0 L"
+        batteryLabel.text = "Battery: 0.0 kWh"
+        oilTempLabel.text = "Oil Temp: 0.0°C"
+        coolantTempLabel.text = "Coolant Temp: 0.0°C"
+        timeElapsedLabel.text = "Time: 0.00s"
+        distanceLabel.text = "Distance: 0.00 km"
+
+        throttleSlider.minimumValue = 0.0
+        throttleSlider.maximumValue = 1.0
+        throttleSlider.value = 1.0 // Start with full throttle
+
+        brakeSlider.minimumValue = 0.0
+        brakeSlider.maximumValue = 1.0
+        brakeSlider.value = 0.0 // Start with no brake
+
+        batteryAssistSlider.minimumValue = 0.0
+        batteryAssistSlider.maximumValue = Float(ferrari.battery.maxDischargeKW)
+        batteryAssistSlider.value = Float(ferrari.battery.maxDischargeKW) // Start with full assist
+    }
+
+    func startSimulation() {
+        timer = Timer.scheduledTimer(withTimeInterval: simulationTimeStep, repeats: true) { [weak self] _ in
+            self?.updateSimulation()
+        }
+    }
+
+    func stopSimulation() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    func updateSimulation() {
+        guard let ferrari = self.ferrari else { return }
+
+        let throttle = Double(throttleSlider.value)
+        let brake = Double(brakeSlider.value)
+        var batteryAssist = Double(batteryAssistSlider.value)
+
+        // Dynamic adjustment for battery assist
+        if ferrari.battery.currentChargeKWH < ferrari.battery.capacityKWH * 0.2 {
+            batteryAssist = 0.0 // Stop using battery if too low
+            batteryAssistSlider.value = 0.0 // Update slider as well
+        }
+
+        ferrari.update(throttlePosition: throttle, brakePedalPressure: brake, batteryAssistDemandKW: batteryAssist, dt: simulationTimeStep)
+        
+        timeElapsed += simulationTimeStep
+
+        // Update UI
+        speedLabel.text = String(format: "Speed: %.2f mph", ferrari.getSpeedMPH())
+        rpmLabel.text = String(format: "RPM: %.0f", ferrari.getCurrentEngineRPM())
+        gearLabel.text = "Gear: \(ferrari.getCurrentGear())"
+        fuelLabel.text = String(format: "Fuel: %.1f L", ferrari.getFuelLevelLiters())
+        batteryLabel.text = String(format: "Battery: %.1f kWh", ferrari.getCurrentBatteryChargeKWH())
+        oilTempLabel.text = String(format: "Oil Temp: %.1f°C", ferrari.getOilTemperatureC())
+        coolantTempLabel.text = String(format: "Coolant Temp: %.1f°C", ferrari.getCoolantTemperatureC())
+        timeElapsedLabel.text = String(format: "Time: %.2fs", timeElapsed)
+        distanceLabel.text = String(format: "Distance: %.2f km", ferrari.totalDistanceM / 1000.0)
+
+        // Check for simulation end condition
+        if ferrari.getSpeedMPH() >= 500.0 || timeElapsed >= 60.0 {
+            stopSimulation()
+            print("\nSimulation Finished.")
+            print(String(format: "Time to reach %.2f mph: %.2f seconds.", ferrari.getSpeedMPH(), timeElapsed))
+            print(String(format: "Total distance covered: %.2f km.", ferrari.totalDistanceM / 1000.0))
+            print(String(format: "Remaining fuel: %.1f L.", ferrari.getFuelLevelLiters()))
+            print(String(format: "Remaining battery: %.1f kWh.", ferrari.getCurrentBatteryChargeKWH()))
+        }
+    }
+
+    // MARK: - Slider Actions (Connect these in Main.storyboard)
+    @IBAction func throttleSliderChanged(_ sender: UISlider) {
+        // No explicit action needed here if updateSimulation reads directly from slider values
+    }
+
+    @IBAction func brakeSliderChanged(_ sender: UISlider) {
+        // No explicit action needed
+    }
+
+    @IBAction func batteryAssistSliderChanged(_ sender: UISlider) {
+        // No explicit action needed
+    }
+
+    // MARK: - App Lifecycle
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        stopSimulation() // Stop timer when view disappears
+    }
+}
+
