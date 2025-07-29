@@ -1,0 +1,1755 @@
+import UIKit
+import LocalAuthentication // Import the LocalAuthentication framework
+
+class SecuredViewController: UIViewController {
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        // You might call authenticateUser() here if this view controller
+        // is the entry point for secured content.
+    }
+
+    // Call this method when you want to trigger the biometric authentication
+    @IBAction func authenticateButtonTapped(_ sender: UIButton) {
+        authenticateUser()
+    }
+
+    func authenticateUser() {
+        let context = LAContext()
+        var error: NSError?
+
+        // Check if the device supports biometric authentication (Touch ID or Face ID)
+        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
+
+            let reason = "Authenticate to access your secure data."
+
+            context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { success, authenticationError in
+
+                DispatchQueue.main.async {
+                    if success {
+                        // Biometric authentication successful
+                        print("Authentication successful!")
+                        // Perform actions after successful authentication,
+                        // e.g., dismiss the lock screen, show secured content.
+                        self.showSecuredContent()
+                    } else {
+                        // Biometric authentication failed or was canceled
+                        if let error = authenticationError as? LAError {
+                            switch error.code {
+                            case .userCancel:
+                                print("User canceled authentication.")
+                            case .userFallback:
+                                print("User chose fallback (e.g., entered passcode manually).")
+                                // You might present your custom passcode entry screen here
+                                self.presentCustomPasscodeScreen()
+                            case .biometryNotAvailable:
+                                print("Biometry not available on this device.")
+                                self.presentCustomPasscodeScreen() // Fallback to passcode
+                            case .biometryNotEnrolled:
+                                print("No biometrics enrolled.")
+                                self.presentCustomPasscodeScreen() // Fallback to passcode
+                            case .biometryLockout:
+                                print("Biometry is locked out. Too many failed attempts.")
+                                // User must enter device passcode to unlock biometrics
+                                self.presentCustomPasscodeScreen() // Fallback to passcode
+                            default:
+                                print("Authentication failed with error: \(error.localizedDescription)")
+                                self.presentCustomPasscodeScreen() // Fallback to passcode
+                            }
+                        } else {
+                            print("Authentication failed with unknown error.")
+                            self.presentCustomPasscodeScreen() // Fallback to passcode
+                        }
+                    }
+                }
+            }
+        } else {
+            // Device does not support biometrics or an error occurred during check
+            print("Biometric authentication not available or an error occurred: \(error?.localizedDescription ?? "Unknown error")")
+            // Fallback to a traditional passcode/password entry
+            self.presentCustomPasscodeScreen()
+        }
+    }
+
+    func showSecuredContent() {
+        // This is where you would transition to your app's protected content
+        // For example, you might dismiss a presented lock screen view controller,
+        // or unhide previously hidden elements.
+        let alert = UIAlertController(title: "Access Granted", message: "You can now view the secure content.", preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
+        present(alert, animated: true, completion: nil)
+        // Example: If this view controller *is* the secure content,
+        // you might just make previously hidden content visible.
+    }
+
+    func presentCustomPasscodeScreen() {
+        // Implement your custom passcode screen logic here.
+        // This would be a UIViewController that takes a passcode input
+        // and verifies it against a stored, encrypted passcode (not the device's passcode).
+        print("Presenting custom passcode screen...")
+        let alert = UIAlertController(title: "Enter Passcode", message: "Biometrics failed or not available. Please enter your app passcode.", preferredStyle: .alert)
+        alert.addTextField { (textField) in
+            textField.placeholder = "Passcode"
+            textField.isSecureTextEntry = true
+            textField.keyboardType = .numberPad // Or .default for alphanumeric
+        }
+        alert.addAction(UIAlertAction(title: "Verify", style: .default, handler: { _ in
+            if let passcode = alert.textFields?.first?.text, self.verifyCustomPasscode(passcode) {
+                self.showSecuredContent()
+            } else {
+                let errorAlert = UIAlertController(title: "Incorrect Passcode", message: "Please try again.", preferredStyle: .alert)
+                errorAlert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
+                self.present(errorAlert, animated: true, completion: nil)
+            }
+        }))
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: nil))
+        present(alert, animated: true, completion: nil)
+    }
+
+    // MARK: - Custom Passcode Logic (Example)
+
+    // In a real app, this passcode should be securely stored (e.g., in Keychain)
+    // and ideally hashed/salted, not stored in plain text.
+    let storedAppPasscode = "1234" // For demonstration only!
+
+    func verifyCustomPasscode(_ passcode: String) -> Bool {
+        return passcode == storedAppPasscode
+    }
+
+    // You would also need a way to set/change this custom passcode within your app.
+    // func setCustomPasscode(_ newPasscode: String) { ... }
+}
+
+
+
+mkdir secure-app-backend
+cd secure-app-backend
+npm init -y
+npm install express jsonwebtoken dotenv
+
+
+
+It's crucial to understand a fundamental concept first: Node.js runs on a server or as a desktop application (with frameworks like Electron), not directly on an iOS device.
+You cannot use Node.js to directly control or implement an "Apple screen lock" or access iOS biometric features like Touch ID at the system level. Apple's iOS is a highly secure, sandboxed operating system. This means:
+ * System-level control is restricted: Third-party applications (whether native iOS apps or those built with web technologies) cannot directly interact with or modify the core iOS lock screen or access raw biometric data. This is a fundamental security design choice by Apple to protect user privacy and device integrity.
+ * Biometrics are exposed via iOS frameworks: Biometric authentication (Touch ID, Face ID) is exposed to native iOS applications through Apple's LocalAuthentication framework (Swift/Objective-C). This framework allows your app to ask the user for biometric verification to unlock features within your app, but it does not give your app access to the biometric data itself or the ability to control the device's main lock screen.
+So, what can Node.js do in this context?
+Node.js could be part of a backend server that works in conjunction with a native iOS application. Here's a common scenario:
+ * Native iOS App: This app would handle the actual biometric authentication using LocalAuthentication (as shown in the Swift example in the previous response).
+ * Node.js Backend: After successful biometric authentication on the iOS device, the native app could send a request to a Node.js backend server.
+ * Backend Verification/Authorization: The Node.js server would then verify the app's request (e.g., check for a valid session token, user ID) and grant access to sensitive data or features that are stored or managed on the server.
+Example Scenario: Secure Note-Taking App
+ * iOS App: User opens the app. When they try to access their "secure notes," the app triggers a LocalAuthentication prompt (Touch ID/Face ID).
+ * Successful Biometric Auth: If successful, the iOS app sends a request (e.g., an HTTP POST request) to the Node.js backend, perhaps including a user ID and a temporary token.
+ * Node.js Backend:
+   * Receives the request.
+   * Validates the user ID and token.
+   * If valid, retrieves the encrypted secure notes from a database.
+   * Sends the encrypted notes back to the iOS app.
+ * iOS App: Receives the encrypted notes, decrypts them (using a key derived from user input or securely stored in the Keychain), and displays them to the user.
+Node.js Code Example (Backend for API authentication):
+This example shows a very basic Node.js Express server that might serve as a backend for a secure iOS application. It does not interact with Touch ID directly. It merely provides a protected endpoint that the iOS app would access after local biometric verification.
+1. Initialize a Node.js project:
+mkdir secure-app-backend
+cd secure-app-backend
+npm init -y
+npm install express jsonwebtoken dotenv
+
+2. Create a .env file for your secret key (for JWT):
+JWT_SECRET=your_super_secret_key_here_please_change_this_for_production
+
+3. server.js (Node.js Express Backend):
+require('dotenv').config(); // Load environment variables from .env
+const express = require('express');
+const jwt = require('jsonwebtoken');
+const app = express();
+const port = 3000;
+
+// Middleware to parse JSON request bodies
+app.use(express.json());
+
+// Dummy user data (in a real app, this would come from a database)
+const users = [
+    { id: 1, username: 'user1', password: 'password123', sensitiveData: 'This is user1\'s highly confidential data.' },
+    { id: 2, username: 'user2', password: 'password456', sensitiveData: 'Another set of private information for user2.' }
+];
+
+// In a real app, this key should be very strong and loaded from environment variables
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+    console.error('JWT_SECRET not set in .env file!');
+    process.exit(1);
+}
+
+// Middleware to verify JWT token
+function verifyToken(req, res, next) {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1]; // Expected format: "Bearer TOKEN"
+
+    if (!token) {
+        return res.status(401).json({ message: 'Access Denied: No token provided.' });
+    }
+
+    jwt.verify(token, JWT_SECRET, (err, user) => {
+        if (err) {
+            console.error('JWT Verification Error:', err);
+            return res.status(403).json({ message: 'Access Denied: Invalid token.' });
+        }
+        req.user = user; // Attach user payload to the request
+        next();
+    });
+}
+
+// ----------------------------------------------------------------------
+// Public API: User Login (not related to biometrics, but for initial session)
+// This is where an iOS app might initially log in a user with username/password
+// to get a JWT, which is then used for subsequent authenticated requests.
+// Biometric authentication would happen on the client-side *before* calling
+// secure endpoints that require this JWT.
+// ----------------------------------------------------------------------
+app.post('/api/login', (req, res) => {
+    const { username, password } = req.body;
+
+    const user = users.find(u => u.username === username && u.password === password);
+
+    if (user) {
+        // In a real app, you wouldn't include sensitive data in the JWT directly.
+        // The JWT payload should only contain enough info to identify the user
+        // and check their roles/permissions.
+        const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '1h' });
+        res.json({ message: 'Login successful', token: token });
+    } else {
+        res.status(401).json({ message: 'Invalid credentials' });
+    }
+});
+
+// ----------------------------------------------------------------------
+// Protected API: Accessing sensitive data
+// This endpoint requires a valid JWT. The iOS app would call this *after*
+// successful biometric authentication locally on the device.
+// ----------------------------------------------------------------------
+app.get('/api/secure-data', verifyToken, (req, res) => {
+    // req.user contains the decoded JWT payload (id, username)
+    const userId = req.user.id;
+    const user = users.find(u => u.id === userId);
+
+    if (user) {
+        res.json({
+            message: 'Access granted to secure data!',
+            data: user.sensitiveData,
+            accessedBy: req.user.username
+        });
+    } else {
+        res.status(404).json({ message: 'User not found.' });
+    }
+});
+
+// Start the server
+app.listen(port, () => {
+    console.log(`Node.js backend listening at http://localhost:${port}`);
+    console.log(`Please ensure JWT_SECRET is set for production.`);
+});
+
+How it works conceptually with an iOS app:
+ * Initial Login (iOS App -> Node.js /api/login): The user might log into the iOS app with a username/password once. The iOS app sends these credentials to the Node.js /api/login endpoint. The Node.js server authenticates and sends back a JWT (JSON Web Token). The iOS app securely stores this JWT (e.g., in the Keychain).
+ * Accessing Secure Feature (iOS App -> Local Biometric -> Node.js /api/secure-data):
+   * When the user wants to access a protected feature (e.g., "My Secret Notes"), the iOS app first triggers the LocalAuthentication (Touch ID/Face ID) prompt.
+   * If biometric authentication is successful on the device, the iOS app then uses the previously obtained JWT to make a request to the Node.js /api/secure-data endpoint. It includes the JWT in the Authorization: Bearer <token> header.
+   * The Node.js server receives the request, verifyToken middleware checks the JWT. If valid, the secure data is returned to the iOS app.
+   * If biometric authentication fails on the device, the iOS app does not send the request to the Node.js backend. Instead, it would prompt for an app-specific passcode or deny access.
+Key takeaway for Node.js and iOS biometrics:
+Node.js cannot directly control or access hardware features like Touch ID on an iOS device. Its role is typically as a backend server that provides authenticated API endpoints, which are then consumed by native iOS applications that handle the direct interaction with device-specific features like biometrics.
+
+
+
+require('dotenv').config(); // Load environment variables from .env
+const express = require('express');
+const jwt = require('jsonwebtoken');
+const app = express();
+const port = 3000;
+
+// Middleware to parse JSON request bodies
+app.use(express.json());
+
+// Dummy user data (in a real app, this would come from a database)
+const users = [
+    { id: 1, username: 'user1', password: 'password123', sensitiveData: 'This is user1\'s highly confidential data.' },
+    { id: 2, username: 'user2', password: 'password456', sensitiveData: 'Another set of private information for user2.' }
+];
+
+// In a real app, this key should be very strong and loaded from environment variables
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+    console.error('JWT_SECRET not set in .env file!');
+    process.exit(1);
+}
+
+// Middleware to verify JWT token
+function verifyToken(req, res, next) {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1]; // Expected format: "Bearer TOKEN"
+
+    if (!token) {
+        return res.status(401).json({ message: 'Access Denied: No token provided.' });
+    }
+
+    jwt.verify(token, JWT_SECRET, (err, user) => {
+        if (err) {
+            console.error('JWT Verification Error:', err);
+            return res.status(403).json({ message: 'Access Denied: Invalid token.' });
+        }
+        req.user = user; // Attach user payload to the request
+        next();
+    });
+}
+
+// ----------------------------------------------------------------------
+// Public API: User Login (not related to biometrics, but for initial session)
+// This is where an iOS app might initially log in a user with username/password
+// to get a JWT, which is then used for subsequent authenticated requests.
+// Biometric authentication would happen on the client-side *before* calling
+// secure endpoints that require this JWT.
+// ----------------------------------------------------------------------
+app.post('/api/login', (req, res) => {
+    const { username, password } = req.body;
+
+    const user = users.find(u => u.username === username && u.password === password);
+
+    if (user) {
+        // In a real app, you wouldn't include sensitive data in the JWT directly.
+        // The JWT payload should only contain enough info to identify the user
+        // and check their roles/permissions.
+        const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '1h' });
+        res.json({ message: 'Login successful', token: token });
+    } else {
+        res.status(401).json({ message: 'Invalid credentials' });
+    }
+});
+
+// ----------------------------------------------------------------------
+// Protected API: Accessing sensitive data
+// This endpoint requires a valid JWT. The iOS app would call this *after*
+// successful biometric authentication locally on the device.
+// ----------------------------------------------------------------------
+app.get('/api/secure-data', verifyToken, (req, res) => {
+    // req.user contains the decoded JWT payload (id, username)
+    const userId = req.user.id;
+    const user = users.find(u => u.id === userId);
+
+    if (user) {
+        res.json({
+            message: 'Access granted to secure data!',
+            data: user.sensitiveData,
+            accessedBy: req.user.username
+        });
+    } else {
+        res.status(404).json({ message: 'User not found.' });
+    }
+});
+
+// Start the server
+app.listen(port, () => {
+    console.log(`Node.js backend listening at http://localhost:${port}`);
+    console.log(`Please ensure JWT_SECRET is set for production.`);
+});
+
+
+
+npx create-expo-app MySecureApp
+cd MySecureApp
+
+
+
+npx expo install expo-local-authentication expo-secure-store
+
+
+
+{
+  "expo": {
+    // ... other configurations
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "This app uses Face ID to secure your sensitive data and provide quick access."
+      }
+    }
+  }
+}
+
+
+
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  View,
+  Text,
+  Button,
+  StyleSheet,
+  Alert,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  AppState,
+} from 'react-native';
+import * as LocalAuthentication from 'expo-local-authentication';
+import * as SecureStore from 'expo-secure-store'; // For secure storage of app passcode
+import { StatusBar } from 'expo-status-bar';
+
+const APP_PASSCODE_KEY = 'myAppPasscode'; // Key for secure storage
+
+export default function App() {
+  const [isAppLocked, setIsAppLocked] = useState(true); // State for app-level lock
+  const [biometryType, setBiometryType] = useState(null);
+  const [customPasscode, setCustomPasscode] = useState('');
+  const [storedPasscode, setStoredPasscode] = useState(null); // The securely stored app passcode
+  const appState = useRef(AppState.currentState);
+
+  // --- Initial Checks on App Load ---
+  useEffect(() => {
+    checkBiometricSupport();
+    loadStoredPasscode();
+
+    // Listen for app state changes (e.g., coming from background)
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  const handleAppStateChange = useCallback(
+    (nextAppState) => {
+      if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
+        console.log('App has come to the foreground!');
+        // Trigger lock screen if not already locked or authenticated
+        if (!isAppLocked && storedPasscode) { // Only lock if a passcode is set and app was unlocked
+          setIsAppLocked(true);
+        }
+      }
+      appState.current = nextAppState;
+    },
+    [isAppLocked, storedPasscode]
+  );
+
+  const checkBiometricSupport = async () => {
+    try {
+      const compatible = await LocalAuthentication.hasHardwareAsync();
+      if (!compatible) {
+        setBiometryType('None');
+        console.warn('Biometric hardware not available on this device.');
+        return;
+      }
+
+      const enrolled = await LocalAuthentication.isEnrolledAsync();
+      if (!enrolled) {
+        setBiometryType('None');
+        console.warn('No biometrics enrolled on this device.');
+        return;
+      }
+
+      const types = await LocalAuthentication.supportedAuthenticationTypesAsync();
+      if (types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION)) {
+        setBiometryType('FaceID');
+      } else if (types.includes(LocalAuthentication.AuthenticationType.FINGERPRINT)) {
+        setBiometryType('TouchID');
+      } else {
+        setBiometryType('Other Biometric');
+      }
+    } catch (error) {
+      console.error('Error checking biometric support:', error);
+      setBiometryType('Error');
+    }
+  };
+
+  const loadStoredPasscode = async () => {
+    try {
+      const passcode = await SecureStore.getItemAsync(APP_PASSCODE_KEY);
+      if (passcode) {
+        setStoredPasscode(passcode);
+        console.log('App passcode loaded.');
+      } else {
+        console.log('No app passcode set yet.');
+        setIsAppLocked(false); // If no passcode, don't lock the app initially
+      }
+    } catch (error) {
+      console.error('Error loading app passcode:', error);
+      Alert.alert('Error', 'Could not load app passcode securely.');
+      setIsAppLocked(false); // Fallback to unlocked if error
+    }
+  };
+
+  const authenticateWithBiometrics = async () => {
+    try {
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: 'Unlock your app with ' + (biometryType === 'FaceID' ? 'Face ID' : 'Touch ID'),
+        fallbackLabel: 'Enter Passcode', // Option for fallback to device passcode
+        disableDeviceFallback: false, // Allows falling back to device passcode
+      });
+
+      if (result.success) {
+        console.log('Biometric authentication successful!');
+        setIsAppLocked(false); // Unlock the app
+        Alert.alert('Success', 'App Unlocked!');
+      } else {
+        console.log('Biometric authentication failed or canceled:', result.error);
+        if (result.error === 'user_cancel') {
+          // User explicitly canceled
+          Alert.alert('Authentication Canceled', 'You canceled the biometric authentication.');
+        } else if (result.error === 'app_cancel') {
+          // App canceled (e.g., due to app going to background)
+          console.log('App canceled biometric authentication.');
+        } else if (result.error === 'system_cancel') {
+          // System canceled (e.g., another app came to foreground)
+          console.log('System canceled biometric authentication.');
+        } else if (result.error === 'passcode_not_set' || result.error === 'not_enrolled') {
+          Alert.alert('Biometrics Not Setup', 'Please enable ' + (biometryType === 'FaceID' ? 'Face ID' : 'Touch ID') + ' in your device settings.');
+          // In this case, prompt for custom app passcode immediately
+          // Or guide user to device settings.
+        } else if (result.error === 'lockout') {
+          Alert.alert('Biometrics Locked Out', 'Too many failed attempts. Please use your device passcode or try again later.');
+          // You might still offer the custom app passcode option here
+        } else {
+          Alert.alert('Authentication Failed', 'Could not authenticate. Please try again or use passcode.');
+        }
+      }
+    } catch (error) {
+      console.error('Error during biometric authentication:', error);
+      Alert.alert('Error', 'An unexpected error occurred during biometric authentication.');
+    }
+  };
+
+  const verifyCustomPasscode = () => {
+    if (customPasscode === storedPasscode) {
+      setIsAppLocked(false);
+      Alert.alert('Success', 'App Unlocked with Passcode!');
+      setCustomPasscode(''); // Clear input
+    } else {
+      Alert.alert('Incorrect Passcode', 'Please try again.');
+      setCustomPasscode(''); // Clear input
+    }
+  };
+
+  const setAppPasscode = async () => {
+    if (customPasscode.length < 4) { // Simple validation
+      Alert.alert('Passcode too short', 'Please enter at least 4 digits for your passcode.');
+      return;
+    }
+    try {
+      await SecureStore.setItemAsync(APP_PASSCODE_KEY, customPasscode);
+      setStoredPasscode(customPasscode);
+      setIsAppLocked(false); // Unlock after setting passcode
+      Alert.alert('Success', 'App Passcode set successfully!');
+      setCustomPasscode(''); // Clear input
+    } catch (error) {
+      console.error('Error setting app passcode:', error);
+      Alert.alert('Error', 'Could not set app passcode securely.');
+    }
+  };
+
+  const renderLockScreen = () => {
+    // If no passcode is set, prompt the user to set one first
+    if (!storedPasscode) {
+      return (
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.lockContainer}
+        >
+          <Text style={styles.lockTitle}>Set Your App Passcode</Text>
+          <Text style={styles.lockSubtitle}>This will be used if biometrics are unavailable or fail.</Text>
+          <TextInput
+            style={styles.passcode_input}
+            placeholder="Enter new passcode"
+            keyboardType="numeric"
+            secureTextEntry
+            maxLength={6} // Example
+            value={customPasscode}
+            onChangeText={setCustomPasscode}
+          />
+          <Button title="Set Passcode" onPress={setAppPasscode} />
+        </KeyboardAvoidingView>
+      );
+    }
+
+    // If a passcode is set, show unlock options
+    return (
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.lockContainer}
+      >
+        <Text style={styles.lockTitle}>App Locked</Text>
+        <Text style={styles.lockSubtitle}>
+          {biometryType === 'FaceID' ? 'Authenticate with Face ID' : (biometryType === 'TouchID' ? 'Authenticate with Touch ID' : 'Authenticate')}
+          {' or enter your passcode.'}
+        </Text>
+
+        {biometryType && biometryType !== 'None' && biometryType !== 'Error' && (
+          <View style={styles.buttonContainer}>
+            <Button
+              title={`Unlock with ${biometryType}`}
+              onPress={authenticateWithBiometrics}
+            />
+          </View>
+        )}
+
+        <TextInput
+          style={styles.passcode_input}
+          placeholder="Enter app passcode"
+          keyboardType="numeric"
+          secureTextEntry
+          maxLength={6}
+          value={customPasscode}
+          onChangeText={setCustomPasscode}
+        />
+        <View style={styles.buttonContainer}>
+          <Button title="Unlock with Passcode" onPress={verifyCustomPasscode} />
+        </View>
+      </KeyboardAvoidingView>
+    );
+  };
+
+  if (isAppLocked) {
+    return renderLockScreen();
+  }
+
+  // --- Main App Content (visible when unlocked) ---
+  return (
+    <View style={styles.container}>
+      <StatusBar style="auto" />
+      <Text style={styles.title}>Welcome to your Secure App!</Text>
+      <Text style={styles.description}>
+        This content is only visible after successful authentication.
+      </Text>
+      <Button title="Lock App" onPress={() => setIsAppLocked(true)} />
+      <Button title="Change App Passcode" onPress={() => {
+        setStoredPasscode(null); // Force user to set a new passcode
+        setIsAppLocked(true);
+      }} />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 20,
+  },
+  description: {
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 40,
+  },
+  lockContainer: {
+    flex: 1,
+    backgroundColor: '#f0f0f0',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  lockTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    color: '#333',
+  },
+  lockSubtitle: {
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 30,
+    color: '#555',
+  },
+  passcode_input: {
+    width: '80%',
+    height: 50,
+    borderColor: '#ccc',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 15,
+    fontSize: 20,
+    textAlign: 'center',
+    marginBottom: 20,
+    backgroundColor: '#fff',
+  },
+  buttonContainer: {
+    marginVertical: 10,
+    width: '80%',
+  },
+});
+
+
+
+from flask import Flask, request, jsonify
+import jwt
+import datetime
+from functools import wraps
+
+app = Flask(__name__)
+
+# --- Configuration (replace with strong, environment-variable loaded values in production) ---
+SECRET_KEY = "your_super_secret_python_key_please_change_this" # Used for JWT signing
+app.config['JWT_SECRET_KEY'] = SECRET_KEY
+
+# --- Dummy User Data (replace with a proper database) ---
+users_db = {
+    "user_id_123": {"username": "mobile_user", "email": "user@example.com", "secure_notes": "My secret note for user 123."},
+    "user_id_456": {"username": "another_user", "email": "another@example.com", "secure_notes": "Confidential data for user 456."}
+}
+
+# --- JWT Token Verification Decorator ---
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = None
+        # JWTs are typically sent in the Authorization header as "Bearer <token>"
+        if 'Authorization' in request.headers:
+            auth_header = request.headers['Authorization']
+            if auth_header.startswith('Bearer '):
+                token = auth_header.split(' ')[1]
+
+        if not token:
+            return jsonify({"message": "Token is missing!"}), 401
+
+        try:
+            # Decode the token using the secret key
+            data = jwt.decode(token, app.config['JWT_SECRET_KEY'], algorithms=["HS256"])
+            # In a real app, you might fetch the user from a database based on `data['user_id']`
+            # For this example, we'll just pass the decoded data
+            request.current_user = data
+        except jwt.ExpiredSignatureError:
+            return jsonify({"message": "Token has expired!"}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({"message": "Invalid token!"}), 401
+        except Exception as e:
+            print(f"Token decoding error: {e}")
+            return jsonify({"message": "Token processing error!"}), 500
+
+        return f(*args, **kwargs)
+    return decorated
+
+# --- API Endpoints ---
+
+@app.route('/')
+def home():
+    return "Python Backend for Secure Mobile App. Access /api/get_secure_data (protected) or /api/authenticate (to get token)."
+
+@app.route('/api/authenticate', methods=['POST'])
+def authenticate_user():
+    """
+    This endpoint simulates a successful *app-level* authentication
+    (e.g., after the iOS app has verified Touch ID locally or a custom app passcode).
+    It returns a JWT to the iOS app.
+    """
+    data = request.get_json()
+    user_id = data.get('user_id')
+    # In a real app, you'd verify some form of credentials here,
+    # or a challenge-response from the mobile app initiated after biometrics.
+    # For simplicity, we assume the iOS app sends a valid user_id after local verification.
+
+    if user_id in users_db:
+        # Create a JWT payload
+        payload = {
+            'user_id': user_id,
+            'username': users_db[user_id]['username'],
+            'exp': datetime.datetime.utcnow() + datetime.timedelta(minutes=30) # Token expires in 30 minutes
+        }
+        token = jwt.encode(payload, app.config['JWT_SECRET_KEY'], algorithm="HS256")
+        return jsonify({"message": "Authentication successful", "token": token}), 200
+    else:
+        return jsonify({"message": "Invalid user ID or authentication failed"}), 401
+
+@app.route('/api/get_secure_data', methods=['GET'])
+@token_required
+def get_secure_data():
+    """
+    This endpoint serves secure data. It requires a valid JWT.
+    The iOS app would call this *after* successfully performing
+    local biometric verification and obtaining a token.
+    """
+    user_id = request.current_user['user_id']
+    if user_id in users_db:
+        secure_data = users_db[user_id]['secure_notes']
+        return jsonify({"message": "Here is your secure data!", "data": secure_data}), 200
+    else:
+        return jsonify({"message": "User data not found for authenticated user"}), 404
+
+if __name__ == '__main__':
+    # For development only. Use a production WSGI server (e.g., Gunicorn) for deployment.
+    app.run(debug=True, host='0.0.0.0', port=5000)
+
+
+
+// my_security_lib.h (C++ header)
+
+#ifndef MY_SECURITY_LIB_H
+#define MY_SECURITY_LIB_H
+
+#include <string>
+#include <vector>
+
+// Define an interface for Objective-C/Swift to call C++ functions
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Function to securely hash a passcode (example using a dummy hash, use real crypto!)
+// Objective-C/Swift would pass a C string.
+const char* hashPasscode(const char* passcode);
+
+// Function to verify a passcode against a stored hash
+bool verifyPasscode(const char* enteredPasscode, const char* storedHash);
+
+// Other potential security functions (e.g., encryption/decryption)
+// const char* encryptData(const char* data, const char* key);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // MY_SECURITY_LIB_H
+
+
+
+// my_security_lib.cpp (C++ implementation)
+
+#include "my_security_lib.h"
+#include <iostream>
+#include <vector> // For potential use with bytes
+#include <string> // For string manipulation
+// You would link against a real cryptographic library here (e.g., OpenSSL, CryptoPP)
+// This is a dummy implementation for illustration.
+
+// Dummy hash function (DO NOT USE IN PRODUCTION!)
+std::string dummy_sha256(const std::string& input) {
+    // In a real scenario, this would be a proper cryptographic hash function
+    // For demonstration, let's just reverse the string and add a prefix.
+    std::string reversed_input = input;
+    std::reverse(reversed_input.begin(), reversed_input.end());
+    return "DUMMY_HASH_" + reversed_input + "_END";
+}
+
+// Global char* buffer for returning strings to Objective-C/Swift
+// This is a very simple and error-prone way to return C strings.
+// In real production code, use `std::string` and convert to `NSString`
+// or `String` in Swift, or manage memory carefully.
+static char g_return_buffer[256]; // Sufficient for small hashes
+
+const char* hashPasscode(const char* passcode_cstr) {
+    if (!passcode_cstr) return nullptr;
+    std::string passcode_str(passcode_cstr);
+    std::string hashed_str = dummy_sha256(passcode_str);
+
+    // Copy to global buffer, handling overflow
+    if (hashed_str.length() < sizeof(g_return_buffer)) {
+        strcpy(g_return_buffer, hashed_str.c_str());
+        return g_return_buffer;
+    } else {
+        // Handle error: hash too long for buffer
+        std::cerr << "Error: Hashed string too long for buffer." << std::endl;
+        return nullptr;
+    }
+}
+
+bool verifyPasscode(const char* enteredPasscode_cstr, const char* storedHash_cstr) {
+    if (!enteredPasscode_cstr || !storedHash_cstr) return false;
+
+    std::string entered_passcode_str(enteredPasscode_cstr);
+    std::string stored_hash_str(storedHash_cstr);
+
+    std::string hashed_entered_passcode = dummy_sha256(entered_passcode_str);
+
+    return hashed_entered_passcode == stored_hash_str;
+}
+
+
+
+// MySecurityManager.mm (Objective-C++ bridging file in your Xcode project)
+// This file allows Objective-C to call C++ functions
+
+#import <Foundation/Foundation.h>
+#import "my_security_lib.h" // Import your C++ header
+
+@interface MySecurityManager : NSObject
+
++ (NSString *)hashPasscode:(NSString *)passcode;
++ (BOOL)verifyPasscode:(NSString *)enteredPasscode againstHash:(NSString *)storedHash;
+
+@end
+
+@implementation MySecurityManager
+
++ (NSString *)hashPasscode:(NSString *)passcode {
+    if (!passcode) {
+        return nil;
+    }
+    // Convert NSString to C string (UTF-8)
+    const char* passcodeCstr = [passcode UTF8String];
+    const char* hashedCstr = hashPasscode(passcodeCstr); // Call C++ function
+
+    if (hashedCstr) {
+        return [NSString stringWithUTF8String:hashedCstr];
+    }
+    return nil;
+}
+
++ (BOOL)verifyPasscode:(NSString *)enteredPasscode againstHash:(NSString *)storedHash {
+    if (!enteredPasscode || !storedHash) {
+        return NO;
+    }
+    const char* enteredCstr = [enteredPasscode UTF8String];
+    const char* storedCstr = [storedHash UTF8String];
+
+    return verifyPasscode(enteredCstr, storedCstr); // Call C++ function
+}
+
+@end
+
+
+
+// Your Swift ViewController (example)
+import UIKit
+import LocalAuthentication
+
+class SecureContentViewController: UIViewController {
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        // Example: When the view loads, you might try to authenticate
+        // authenticateWithBiometricsAndAppPasscode()
+    }
+
+    func authenticateWithBiometricsAndAppPasscode() {
+        let laContext = LAContext()
+        var error: NSError?
+
+        if laContext.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
+            let reason = "Unlock app with Touch ID or Face ID"
+            laContext.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { success, authenticationError in
+                DispatchQueue.main.async {
+                    if success {
+                        print("Biometric authentication successful!")
+                        self.accessSecureContent()
+                    } else {
+                        // Handle biometric failure, e.g., prompt for app-specific passcode
+                        print("Biometric authentication failed: \(authenticationError?.localizedDescription ?? "Unknown error")")
+                        self.promptForAppPasscode()
+                    }
+                }
+            }
+        } else {
+            // Biometrics not available, immediately prompt for app-specific passcode
+            print("Biometrics not available: \(error?.localizedDescription ?? "Unknown error")")
+            self.promptForAppPasscode()
+        }
+    }
+
+    func promptForAppPasscode() {
+        // This is where you'd show a UI for the user to enter their app-specific passcode
+        // You would then use your C++-backed `MySecurityManager` to verify it.
+
+        // --- Example of using the C++-backed Objective-C++ class ---
+        let storedAppPasscodeHash = MySecurityManager.hashPasscode("1234") // Pretend this is loaded securely from Keychain
+        print("Stored passcode hash (from C++): \(storedAppPasscodeHash ?? "nil")")
+
+        let enteredPasscode = "1234" // User input
+        let isCorrect = MySecurityManager.verifyPasscode(enteredPasscode, againstHash: storedAppPasscodeHash)
+
+        if isCorrect {
+            print("App passcode verification successful!")
+            self.accessSecureContent()
+        } else {
+            print("App passcode incorrect!")
+            // Show error to user, retry, or lock out
+        }
+    }
+
+    func accessSecureContent() {
+        // Your main app content becomes visible
+        let alert = UIAlertController(title: "Access Granted", message: "You can now see the secure data.", preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
+        present(alert, animated: true, completion: nil)
+    }
+
+    // Function to set the app passcode (would involve UI)
+    func setAppPasscode(newPasscode: String) {
+        let hashedPasscode = MySecurityManager.hashPasscode(newPasscode)
+        // Store 'hashedPasscode' securely in Keychain using Swift's Keychain APIs
+        print("New passcode hashed and ready to store: \(hashedPasscode ?? "nil")")
+    }
+}
+
+
+
+//
+//  AppLockViewController.swift
+//  SecureAppLock
+//
+//  Created by [Your Name] on 2023/10/27. // Adjust date and name
+//
+
+import UIKit
+import LocalAuthentication
+
+protocol AppLockDelegate: AnyObject {
+    func appUnlockedSuccessfully()
+}
+
+class AppLockViewController: UIViewController {
+
+    weak var delegate: AppLockDelegate?
+
+    private let titleLabel: UILabel = {
+        let label = UILabel()
+        label.text = "App Locked"
+        label.font = UIFont.systemFont(ofSize: 32, weight: .bold)
+        label.textColor = .label
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private let subtitleLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Authenticate to continue"
+        label.font = UIFont.systemFont(ofSize: 18)
+        label.textColor = .secondaryLabel
+        label.numberOfLines = 0
+        label.textAlignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private let authenticateButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("Unlock with Biometrics", for: .normal)
+        button.titleLabel?.font = UIFont.systemFont(ofSize: 20, weight: .medium)
+        button.tintColor = .systemBlue
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
+    }()
+
+    private let passcodeTextField: UITextField = {
+        let textField = UITextField()
+        textField.placeholder = "Enter Passcode"
+        textField.isSecureTextEntry = true
+        textField.keyboardType = .numberPad
+        textField.textAlignment = .center
+        textField.borderStyle = .roundedRect
+        textField.font = UIFont.systemFont(ofSize: 20)
+        textField.translatesAutoresizingMaskIntoConstraints = false
+        return textField
+    }()
+
+    private let passcodeUnlockButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("Unlock with Passcode", for: .normal)
+        button.titleLabel?.font = UIFont.systemFont(ofSize: 20, weight: .medium)
+        button.tintColor = .systemGreen
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
+    }()
+
+    private var biometryType: LABiometryType = .none // Stores the detected biometry type
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+        setupUI()
+        setupActions()
+        checkBiometricSupport()
+
+        // Hide keyboard when tapping outside text field
+        let tap = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
+        view.addGestureRecognizer(tap)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // Automatically attempt biometric authentication when the lock screen appears
+        attemptBiometricAuthentication()
+    }
+
+    private func setupUI() {
+        view.addSubview(titleLabel)
+        view.addSubview(subtitleLabel)
+        view.addSubview(authenticateButton)
+        view.addSubview(passcodeTextField)
+        view.addSubview(passcodeUnlockButton)
+
+        NSLayoutConstraint.activate([
+            titleLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            titleLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: -100),
+
+            subtitleLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 10),
+            subtitleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 40),
+            subtitleLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -40),
+
+            authenticateButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            authenticateButton.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 40),
+            authenticateButton.heightAnchor.constraint(equalToConstant: 50),
+
+            passcodeTextField.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            passcodeTextField.topAnchor.constraint(equalTo: authenticateButton.bottomAnchor, constant: 30),
+            passcodeTextField.widthAnchor.constraint(equalToConstant: 250),
+            passcodeTextField.heightAnchor.constraint(equalToConstant: 50),
+
+            passcodeUnlockButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            passcodeUnlockButton.topAnchor.constraint(equalTo: passcodeTextField.bottomAnchor, constant: 15),
+            passcodeUnlockButton.heightAnchor.constraint(equalToConstant: 50)
+        ])
+    }
+
+    private func setupActions() {
+        authenticateButton.addTarget(self, action: #selector(authenticateButtonTapped), for: .touchUpInside)
+        passcodeUnlockButton.addTarget(self, action: #selector(passcodeUnlockButtonTapped), for: .touchUpInside)
+    }
+
+    @objc private func dismissKeyboard() {
+        view.endEditing(true)
+    }
+
+    private func checkBiometricSupport() {
+        let context = LAContext()
+        var error: NSError?
+
+        // Check if device supports biometrics and if biometrics are enrolled
+        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
+            biometryType = context.biometryType
+            switch biometryType {
+            case .faceID:
+                authenticateButton.setTitle("Unlock with Face ID", for: .normal)
+                subtitleLabel.text = "Authenticate with Face ID or enter your passcode."
+            case .touchID:
+                authenticateButton.setTitle("Unlock with Touch ID", for: .normal)
+                subtitleLabel.text = "Authenticate with Touch ID or enter your passcode."
+            case .none: // Should not be reached if canEvaluatePolicy returned true, but good for safety
+                authenticateButton.isHidden = true
+                subtitleLabel.text = "Biometrics not available. Please enter your passcode."
+            @unknown default:
+                authenticateButton.setTitle("Unlock with Biometrics", for: .normal)
+                subtitleLabel.text = "Authenticate with Biometrics or enter your passcode."
+            }
+        } else {
+            // Biometrics not available or not enrolled
+            authenticateButton.isHidden = true // Hide biometric button
+            subtitleLabel.text = "Biometrics not available or not enrolled. Please enter your passcode."
+            print("Biometric check error: \(error?.localizedDescription ?? "Unknown error")")
+        }
+    }
+
+    private func attemptBiometricAuthentication() {
+        guard biometryType != .none else { return } // Only attempt if biometrics are supported
+
+        let context = LAContext()
+        let reason = "Access your secure application content."
+
+        context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { [weak self] success, authenticationError in
+            DispatchQueue.main.async {
+                if success {
+                    print("Biometric authentication successful!")
+                    self?.delegate?.appUnlockedSuccessfully()
+                    self?.dismiss(animated: true, completion: nil)
+                } else {
+                    if let error = authenticationError as? LAError {
+                        switch error.code {
+                        case .userCancel:
+                            print("User canceled authentication.")
+                            // Optionally, keep the biometrics button active for retry
+                        case .userFallback:
+                            print("User chose fallback (device passcode).")
+                            // This means they chose to enter their DEVICE passcode.
+                            // The system handles this; if successful, control might return
+                            // to app, but if not, user needs to retry.
+                            // For app-specific passcode, they need to use our text field.
+                        case .biometryNotAvailable:
+                            print("Biometry not available on this device.")
+                            self?.authenticateButton.isHidden = true
+                        case .biometryNotEnrolled:
+                            print("No biometrics enrolled.")
+                            self?.authenticateButton.isHidden = true
+                        case .biometryLockout:
+                            print("Biometry is locked out. Too many failed attempts.")
+                            // Advise user to use device passcode or our app passcode.
+                            self?.showAuthAlert(title: "Biometrics Locked", message: "Too many failed attempts. Try later or use passcode.")
+                            self?.authenticateButton.isHidden = true // Disable biometrics until unlocked
+                        case .appCancel:
+                            print("Authentication canceled by app.")
+                        case .systemCancel:
+                            print("Authentication canceled by system.")
+                        default:
+                            print("Authentication failed with error: \(error.localizedDescription)")
+                            self?.showAuthAlert(title: "Authentication Failed", message: "Please try again or use your app passcode.")
+                        }
+                    } else {
+                        print("Authentication failed with unknown error.")
+                        self?.showAuthAlert(title: "Authentication Failed", message: "Please try again or use your app passcode.")
+                    }
+                }
+            }
+        }
+    }
+
+    @objc private func authenticateButtonTapped() {
+        attemptBiometricAuthentication()
+    }
+
+    @objc private func passcodeUnlockButtonTapped() {
+        guard let enteredPasscode = passcodeTextField.text, !enteredPasscode.isEmpty else {
+            showAuthAlert(title: "Input Required", message: "Please enter your app passcode.")
+            return
+        }
+
+        // --- IMPORTANT: Replace with secure passcode verification ---
+        // In a real app, you would securely store a HASH of the user's passcode
+        // (e.g., in Keychain) and compare the hash of the entered passcode.
+        // DO NOT store or compare plain text passcodes like this!
+        let storedAppPasscode = "1234" // <<< FOR DEMONSTRATION ONLY!
+        // -----------------------------------------------------------
+
+        if enteredPasscode == storedAppPasscode {
+            print("App passcode successful!")
+            delegate?.appUnlockedSuccessfully()
+            dismiss(animated: true, completion: nil)
+        } else {
+            showAuthAlert(title: "Incorrect Passcode", message: "The passcode you entered is incorrect. Please try again.")
+            passcodeTextField.text = "" // Clear field on failure
+        }
+    }
+
+    private func showAuthAlert(title: String, message: String) {
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
+        present(alert, animated: true, completion: nil)
+    }
+}
+
+
+
+//
+//  ViewController.swift
+//  SecureAppLock
+//
+//  Created by [Your Name] on 2023/10/27. // Adjust date and name
+//
+
+import UIKit
+
+class ViewController: UIViewController, AppLockDelegate {
+
+    private let secureContentLabel: UILabel = {
+        let label = UILabel()
+        label.text = "This is your secure content!"
+        label.font = UIFont.systemFont(ofSize: 24, weight: .semibold)
+        label.textColor = .label
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private let lockAppButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("Lock App", for: .normal)
+        button.titleLabel?.font = UIFont.systemFont(ofSize: 20, weight: .medium)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
+    }()
+
+    // MARK: - App Lifecycle & Lock Management
+
+    // Flag to control whether the app should present the lock screen
+    // You might want to persist this across launches (e.g., using UserDefaults)
+    // and based on user settings (e.g., "Require Face ID on App Launch")
+    var shouldPresentLockScreenOnAppear: Bool = true // Set to true to always start locked
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemTeal // A distinct background for secure content
+        setupUI()
+        setupActions()
+
+        // Observe when the app enters the foreground from the background
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(appDidBecomeActive),
+                                               name: UIApplication.didBecomeActiveNotification,
+                                               object: nil)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // Present lock screen if needed, every time this view appears
+        if shouldPresentLockScreenOnAppear {
+            presentAppLock()
+            shouldPresentLockScreenOnAppear = false // Present only once per appearance cycle unless explicitly re-locked
+        }
+    }
+
+    @objc private func appDidBecomeActive() {
+        // This is called when the app comes to foreground (from background/inactive)
+        // If your app was previously authenticated and goes to background,
+        // you might want to re-lock it here based on a timer or setting.
+        print("App did become active. Re-evaluating lock status.")
+        // For simplicity, we just set the flag to re-present the lock if it was dismissed.
+        // In a real app, you might check a timestamp of last activity.
+        if !self.presentedViewController(AppLockViewController.self) {
+             shouldPresentLockScreenOnAppear = true // Ensure lock is presented next time viewDidAppear
+             presentAppLock() // Optionally, present immediately if not already presented
+        }
+    }
+
+    private func presentAppLock() {
+        // Prevent presenting multiple lock screens
+        guard !(self.presentedViewController is AppLockViewController) else {
+            return // Lock screen is already presented
+        }
+        let appLockVC = AppLockViewController()
+        appLockVC.modalPresentationStyle = .fullScreen // Cover the whole screen
+        appLockVC.delegate = self
+        self.present(appLockVC, animated: false, completion: nil) // No animation for immediate lock
+    }
+
+    // MARK: - AppLockDelegate
+    func appUnlockedSuccessfully() {
+        print("App unlocked via delegate!")
+        // Now you can hide any "locked" state UI or show your secure content.
+        // (In this example, the secure content is always visible, it's the lock screen that's dismissed)
+    }
+
+    // MARK: - UI Setup & Actions
+
+    private func setupUI() {
+        view.addSubview(secureContentLabel)
+        view.addSubview(lockAppButton)
+
+        NSLayoutConstraint.activate([
+            secureContentLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            secureContentLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+
+            lockAppButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            lockAppButton.topAnchor.constraint(equalTo: secureContentLabel.bottomAnchor, constant: 50)
+        ])
+    }
+
+    private func setupActions() {
+        lockAppButton.addTarget(self, action: #selector(lockAppButtonTapped), for: .touchUpInside)
+    }
+
+    @objc private func lockAppButtonTapped() {
+        shouldPresentLockScreenOnAppear = true // Set flag to re-present
+        presentAppLock()
+    }
+}
+
+// Helper to check if a specific view controller type is currently presented
+extension UIViewController {
+    func presentedViewController<T: UIViewController>(_: T.Type) -> Bool {
+        return self.presentedViewController is T
+    }
+}
+
+
+
+//
+//  AppLockViewController.swift
+//  AppSecureLockSwift
+//
+//  Created by YourName on 2025/07/29.
+//
+
+import UIKit
+import LocalAuthentication
+
+// MARK: - AppLockDelegate Protocol
+
+// Protocol to notify the presenting view controller when authentication is successful
+protocol AppLockDelegate: AnyObject {
+    func appUnlockedSuccessfully()
+}
+
+// MARK: - AppLockViewController
+
+class AppLockViewController: UIViewController {
+
+    weak var delegate: AppLockDelegate?
+
+    // MARK: - UI Elements
+
+    private let titleLabel: UILabel = {
+        let label = UILabel()
+        label.text = "App Locked"
+        label.font = UIFont.systemFont(ofSize: 32, weight: .bold)
+        label.textColor = .label // Adapts to dark/light mode
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private let subtitleLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Authenticate to continue"
+        label.font = UIFont.systemFont(ofSize: 18)
+        label.textColor = .secondaryLabel // Adapts to dark/light mode
+        label.numberOfLines = 0
+        label.textAlignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private let authenticateButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("Unlock with Biometrics", for: .normal)
+        button.titleLabel?.font = UIFont.systemFont(ofSize: 20, weight: .medium)
+        button.tintColor = .systemBlue
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
+    }()
+
+    private let passcodeTextField: UITextField = {
+        let textField = UITextField()
+        textField.placeholder = "Enter Passcode"
+        textField.isSecureTextEntry = true
+        textField.keyboardType = .numberPad // Only numeric input
+        textField.textAlignment = .center
+        textField.borderStyle = .roundedRect
+        textField.font = UIFont.systemFont(ofSize: 20)
+        textField.translatesAutoresizingMaskIntoConstraints = false
+        return textField
+    }()
+
+    private let passcodeUnlockButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("Unlock with Passcode", for: .normal)
+        button.titleLabel?.font = UIFont.systemFont(ofSize: 20, weight: .medium)
+        button.tintColor = .systemGreen
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
+    }()
+
+    // MARK: - Properties
+
+    private var biometryType: LABiometryType = .none // Stores the detected biometry type (e.g., .faceID, .touchID)
+    // IMPORTANT: For demonstration only. In a real app, store this securely (e.g., in Keychain)
+    // and ideally as a HASH of the passcode.
+    private let storedAppPasscode: String = "1234" // <<<<<<< DEMO PASSCODE! DO NOT USE IN PRODUCTION!
+
+    // MARK: - Lifecycle
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground // Adapts to dark/light mode
+        setupUI()
+        setupActions()
+        checkBiometricSupport()
+
+        // Dismiss keyboard when tapping outside text field
+        let tap = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
+        view.addGestureRecognizer(tap)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // Automatically attempt biometric authentication when the lock screen appears
+        attemptBiometricAuthentication()
+    }
+
+    // MARK: - UI Setup
+
+    private func setupUI() {
+        view.addSubview(titleLabel)
+        view.addSubview(subtitleLabel)
+        view.addSubview(authenticateButton)
+        view.addSubview(passcodeTextField)
+        view.addSubview(passcodeUnlockButton)
+
+        NSLayoutConstraint.activate([
+            titleLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            titleLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: -100),
+
+            subtitleLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 10),
+            subtitleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 40),
+            subtitleLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -40),
+
+            authenticateButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            authenticateButton.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 40),
+            authenticateButton.heightAnchor.constraint(equalToConstant: 50),
+
+            passcodeTextField.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            passcodeTextField.topAnchor.constraint(equalTo: authenticateButton.bottomAnchor, constant: 30),
+            passcodeTextField.widthAnchor.constraint(equalToConstant: 250),
+            passcodeTextField.heightAnchor.constraint(equalToConstant: 50),
+
+            passcodeUnlockButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            passcodeUnlockButton.topAnchor.constraint(equalTo: passcodeTextField.bottomAnchor, constant: 15),
+            passcodeUnlockButton.heightAnchor.constraint(equalToConstant: 50)
+        ])
+    }
+
+    private func setupActions() {
+        authenticateButton.addTarget(self, action: #selector(authenticateButtonTapped), for: .touchUpInside)
+        passcodeUnlockButton.addTarget(self, action: #selector(passcodeUnlockButtonTapped), for: .touchUpInside)
+    }
+
+    @objc private func dismissKeyboard() {
+        view.endEditing(true)
+    }
+
+    // MARK: - Biometric Authentication
+
+    private func checkBiometricSupport() {
+        let context = LAContext()
+        var error: NSError?
+
+        // Check if the device has biometric hardware and if biometrics are enrolled
+        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
+            biometryType = context.biometryType // Get the specific biometry type (Face ID or Touch ID)
+            switch biometryType {
+            case .faceID:
+                authenticateButton.setTitle("Unlock with Face ID", for: .normal)
+                subtitleLabel.text = "Authenticate with Face ID or enter your passcode."
+            case .touchID:
+                authenticateButton.setTitle("Unlock with Touch ID", for: .normal)
+                subtitleLabel.text = "Authenticate with Touch ID or enter your passcode."
+            case .none: // Should ideally not be reached if canEvaluatePolicy was true, but as a fallback
+                authenticateButton.isHidden = true
+                subtitleLabel.text = "Biometrics not available. Please enter your passcode."
+            @unknown default: // For future biometric types
+                authenticateButton.setTitle("Unlock with Biometrics", for: .normal)
+                subtitleLabel.text = "Authenticate with Biometrics or enter your passcode."
+            }
+        } else {
+            // Biometrics are not available (e.g., no hardware, or not enrolled)
+            authenticateButton.isHidden = true // Hide the biometric button
+            subtitleLabel.text = "Biometrics not available or not enrolled. Please enter your passcode."
+            print("Biometric check error: \(error?.localizedDescription ?? "Unknown error")")
+        }
+    }
+
+    private func attemptBiometricAuthentication() {
+        guard biometryType != .none else { return } // Only attempt if biometrics are supported
+
+        let context = LAContext()
+        let reason = "Access your secure application content." // Message displayed in the biometric prompt
+
+        context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { [weak self] success, authenticationError in
+            DispatchQueue.main.async { // Ensure UI updates are on the main thread
+                if success {
+                    print("Biometric authentication successful!")
+                    self?.delegate?.appUnlockedSuccessfully() // Notify delegate
+                    self?.dismiss(animated: true, completion: nil) // Dismiss the lock screen
+                } else {
+                    // Handle various authentication failures
+                    if let error = authenticationError as? LAError {
+                        switch error.code {
+                        case .userCancel:
+                            print("User canceled authentication.")
+                            // User chose to cancel, they can retry or use passcode
+                        case .userFallback:
+                            print("User chose fallback (device passcode option).")
+                            // User decided to enter the DEVICE passcode. If they succeed,
+                            // the system handles it and app resumes. If they fail repeatedly,
+                            // device biometrics may lock out. This path is handled by OS.
+                            // For app-specific passcode, they need to use our text field.
+                        case .biometryNotAvailable:
+                            print("Biometry not available on this device.")
+                            self?.authenticateButton.isHidden = true
+                        case .biometryNotEnrolled:
+                            print("No biometrics enrolled.")
+                            self?.authenticateButton.isHidden = true
+                        case .biometryLockout:
+                            print("Biometry is locked out. Too many failed attempts.")
+                            self?.showAuthAlert(title: "Biometrics Locked", message: "Too many failed attempts. Please use your device passcode or try again later.")
+                            self?.authenticateButton.isHidden = true // Disable biometric button until system lockout is cleared
+                        case .appCancel:
+                            print("Authentication canceled by app.")
+                        case .systemCancel:
+                            print("Authentication canceled by system.")
+                        default:
+                            print("Authentication failed with error: \(error.localizedDescription)")
+                            self?.showAuthAlert(title: "Authentication Failed", message: "Please try again or use your app passcode.")
+                        }
+                    } else {
+                        print("Authentication failed with unknown error.")
+                        self?.showAuthAlert(title: "Authentication Failed", message: "Please try again or use your app passcode.")
+                    }
+                }
+            }
+        }
+    }
+
+    @objc private func authenticateButtonTapped() {
+        attemptBiometricAuthentication()
+    }
+
+    // MARK: - App Passcode Verification
+
+    @objc private func passcodeUnlockButtonTapped() {
+        guard let enteredPasscode = passcodeTextField.text, !enteredPasscode.isEmpty else {
+            showAuthAlert(title: "Input Required", message: "Please enter your app passcode.")
+            return
+        }
+
+        // --- IMPORTANT: Replace with secure passcode verification for a real app ---
+        // In a production app, you would:
+        // 1. When the user sets the passcode, HASH and SALT it. Store the hash and salt securely (e.g., in Keychain).
+        // 2. When the user enters a passcode for verification, hash it using the same salt.
+        // 3. Compare the newly generated hash with the stored hash.
+        // DO NOT store or compare passcodes in plain text like this!
+        if enteredPasscode == storedAppPasscode { // <<<<< INSECURE FOR DEMO ONLY!
+            print("App passcode successful!")
+            delegate?.appUnlockedSuccessfully()
+            dismiss(animated: true, completion: nil)
+        } else {
+            showAuthAlert(title: "Incorrect Passcode", message: "The passcode you entered is incorrect. Please try again.")
+            passcodeTextField.text = "" // Clear the text field on failure
+        }
+    }
+
+    // MARK: - Helper Methods
+
+    private func showAuthAlert(title: String, message: String) {
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
+        present(alert, animated: true, completion: nil)
+    }
+}
+
+
+
+//
+//  ViewController.swift
+//  AppSecureLockSwift
+//
+//  Created by YourName on 2025/07/29.
+//
+
+import UIKit
+
+// MARK: - ViewController
+
+class ViewController: UIViewController, AppLockDelegate {
+
+    // MARK: - UI Elements
+
+    private let secureContentLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Welcome to your Secure App!"
+        label.font = UIFont.systemFont(ofSize: 24, weight: .semibold)
+        label.textColor = .label
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private let lockAppButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("Lock App Now", for: .normal)
+        button.titleLabel?.font = UIFont.systemFont(ofSize: 20, weight: .medium)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
+    }()
+
+    // MARK: - Properties for Lock Management
+
+    // This flag controls whether the lock screen should be presented on 'viewDidAppear'.
+    // In a real app, this might be based on a user setting or a timeout since last activity.
+    var shouldPresentLockScreenOnAppear: Bool = true // Set to true to always start locked
+
+    // MARK: - Lifecycle
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemTeal // A distinct background for demonstration
+        setupUI()
+        setupActions()
+
+        // Observe when the app enters the foreground from the background/inactive state.
+        // This is crucial for re-locking the app after being in the background.
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(appDidBecomeActive),
+                                               name: UIApplication.didBecomeActiveNotification,
+                                               object: nil)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // Present the lock screen if needed, every time this view becomes visible.
+        if shouldPresentLockScreenOnAppear {
+            presentAppLock()
+            shouldPresentLockScreenOnAppear = false // Reset the flag so it doesn't try to present multiple times
+        }
+    }
+
+    // MARK: - App State Handling
+
+    @objc private func appDidBecomeActive() {
+        // This method is called when the app transitions to the active state (comes to foreground).
+        print("App did become active. Re-evaluating lock status.")
+
+        // If the app's secure content is currently visible and a lock screen isn't already presented,
+        // we'll set the flag to re-present it. In a real app, you might also check:
+        // 1. A timestamp of the last user interaction.
+        // 2. A user preference (e.g., "Require Face ID after X minutes").
+        if !self.isLockScreenPresented() {
+             shouldPresentLockScreenOnAppear = true
+             presentAppLock() // Optionally, present immediately if not already shown
+        }
+    }
+
+    // MARK: - App Lock Presentation
+
+    private func presentAppLock() {
+        // Prevent presenting multiple lock screens if one is already active
+        guard !self.isLockScreenPresented() else {
+            return
+        }
+
+        let appLockVC = AppLockViewController()
+        appLockVC.modalPresentationStyle = .fullScreen // Ensures it covers the entire screen
+        appLockVC.delegate = self // Set this view controller as the delegate to receive unlock notifications
+        self.present(appLockVC, animated: false, completion: nil) // Present without animation for an immediate lock feel
+    }
+
+    // MARK: - AppLockDelegate
+
+    // This method is called by AppLockViewController when authentication is successful
+    func appUnlockedSuccessfully() {
+        print("App unlocked via delegate!")
+        // At this point, the AppLockViewController has dismissed itself, revealing this ViewController.
+        // You can update any UI or state if needed.
+    }
+
+    // MARK: - UI Setup & Actions
+
+    private func setupUI() {
+        view.addSubview(secureContentLabel)
+        view.addSubview(lockAppButton)
+
+        NSLayoutConstraint.activate([
+            secureContentLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            secureContentLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+
+            lockAppButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            lockAppButton.topAnchor.constraint(equalTo: secureContentLabel.bottomAnchor, constant: 50)
+        ])
+    }
+
+    private func setupActions() {
+        lockAppButton.addTarget(self, action: #selector(lockAppButtonTapped), for: .touchUpInside)
+    }
+
+    @objc private func lockAppButtonTapped() {
+        shouldPresentLockScreenOnAppear = true // Set flag to ensure lock screen is presented
+        presentAppLock()
+    }
+}
+
+// MARK: - UIViewController Extension
+
+// Helper extension to easily check if a specific view controller type is currently presented
+extension UIViewController {
+    func isLockScreenPresented() -> Bool {
+        return self.presentedViewController is AppLockViewController
+    }
+}
+
