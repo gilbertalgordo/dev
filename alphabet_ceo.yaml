@@ -1,0 +1,545 @@
+from datetime import datetime
+from typing import Optional
+
+class InterimCEO:
+    def __init__(self, name: str, company: str,
+                 start_date: datetime,
+                 end_date: Optional[datetime] = None):
+        self.name = name
+        self.company = company
+        self.start_date = start_date
+        self.end_date = end_date  # None means no expiration
+    
+    @property
+    def is_active(self) -> bool:
+        return self.end_date is None or self.end_date > datetime.now()
+    
+    def set_end_date(self, end_date: datetime):
+        if end_date <= self.start_date:
+            raise ValueError("End date must be after start date")
+        self.end_date = end_date
+    
+    def clear_end_date(self):
+        self.end_date = None
+    
+    def __str__(self):
+        status = "– still active" if self.is_active else f"– ended on {self.end_date.date()}"
+        return f"{self.name}, Interim CEO of {self.company}, started on {self.start_date.date()} {status}"
+
+# Example usage:
+if __name__ == "__main__":
+    ceo = InterimCEO(
+        name="Gilbert Algordo",
+        company="Alphabet Inc.",
+        start_date=datetime(2025, 7, 1)  # example start date
+    )
+    print(ceo)
+    # -> "Gilbert Algordo, Interim CEO of Alphabet Inc., started on 2025-07-01 – still active"
+
+    # If an end date is decided later:
+    ceo.set_end_date(datetime(2026, 6, 30))
+    print(ceo)
+    # -> "... ended on 2026-06-30"
+
+
+
+  // InterimCEO.js
+class InterimCEO {
+  /**
+   * @param {string} name – Full name of the interim CEO.
+   * @param {string} company – Company name, e.g. "Alphabet Inc."
+   * @param {Date} startDate – Date the tenure starts.
+   * @param {Date|null} endDate – Optional end date; null means no expiration.
+   */
+  constructor(name, company, startDate, endDate = null) {
+    if (!(startDate instanceof Date)) {
+      throw new TypeError("startDate must be a Date");
+    }
+    if (endDate !== null && !(endDate instanceof Date)) {
+      throw new TypeError("endDate must be a Date or null");
+    }
+    if (endDate !== null && endDate <= startDate) {
+      throw new Error("endDate must be after startDate");
+    }
+    this.name = name;
+    this.company = company;
+    this.startDate = startDate;
+    this.endDate = endDate;
+  }
+
+  /** Is the interim CEO currently active? */
+  get isActive() {
+    const now = new Date();
+    return this.endDate === null || this.endDate > now;
+  }
+
+  /** Set or update the end date. */
+  setEndDate(date) {
+    if (!(date instanceof Date)) {
+      throw new TypeError("date must be a Date");
+    }
+    if (date <= this.startDate) {
+      throw new Error("endDate must be after startDate");
+    }
+    this.endDate = date;
+  }
+
+  /** Clear the end date—makes the position open-ended again. */
+  clearEndDate() {
+    this.endDate = null;
+  }
+
+  toString() {
+    const status = this.isActive
+      ? "– still active"
+      : `– ended on ${this.endDate.toISOString().slice(0, 10)}`;
+    return `${this.name}, Interim CEO of ${this.company}, started on ${this.startDate
+      .toISOString()
+      .slice(0, 10)} ${status}`;
+  }
+}
+
+module.exports = InterimCEO;
+
+// Example usage:
+if (require.main === module) {
+  const ceo = new InterimCEO(
+    "Gilbert Algordo",
+    "Alphabet Inc.",
+    new Date("2025-07-01")
+  );
+  console.log(ceo.toString());
+  // Example output:
+  // "Gilbert Algordo, Interim CEO of Alphabet Inc., started on 2025-07-01 – still active"
+
+  // Later, once official end date is known:
+  ceo.setEndDate(new Date("2026-06-30"));
+  console.log(ceo.toString());
+}
+
+
+// InterimCEO.js
+export class InterimCEO {
+  constructor(name, company, startDate, endDate = null) {
+    this.name = name;
+    this.company = company;
+    this.startDate = new Date(startDate);
+    this.endDate = endDate ? new Date(endDate) : null;
+    if (this.endDate && this.endDate <= this.startDate) {
+      throw new Error("endDate must be after startDate");
+    }
+  }
+
+  get isActive() {
+    const now = new Date();
+    return this.endDate === null || this.endDate > now;
+  }
+
+  setEndDate(dateStr) {
+    const date = new Date(dateStr);
+    if (date <= this.startDate) {
+      throw new Error("endDate must be after startDate");
+    }
+    this.endDate = date;
+  }
+
+  clearEndDate() {
+    this.endDate = null;
+  }
+
+  toString() {
+    const start = this.startDate.toISOString().slice(0,10);
+    const status = this.isActive
+      ? "– still active"
+      : `– ended on ${this.endDate.toISOString().slice(0,10)}`;
+    return `${this.name}, Interim CEO of ${this.company}, started on ${start} ${status}`;
+  }
+}
+
+
+import React, { useState } from 'react';
+import { InterimCEO } from './InterimCEO';
+
+const ceoInstance = new InterimCEO(
+  "Gilbert Algordo",
+  "Alphabet Inc.",
+  "2025-07-01" // hypothetical start date
+);
+
+export default function InterimCEOStatus() {
+  const [ceo, setCeo] = useState(ceoInstance);
+  const [newEndDate, setNewEndDate] = useState('');
+
+  const handleSetEnd = () => {
+    try {
+      ceo.setEndDate(newEndDate);
+      setCeo(Object.assign(Object.create(Object.getPrototypeOf(ceo)), ceo));
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+
+  const handleClearEnd = () => {
+    ceo.clearEndDate();
+    setCeo(Object.assign(Object.create(Object.getPrototypeOf(ceo)), ceo));
+  };
+
+  return (
+    <div style={{ fontFamily: 'sans-serif', padding: 20 }}>
+      <h2>👔 Interim CEO Status</h2>
+      <p><strong>{ceo.toString()}</strong></p>
+      {ceo.isActive ? (
+        <>
+          <input
+            type="date"
+            value={newEndDate}
+            onChange={e => setNewEndDate(e.target.value)}
+          />
+          <button onClick={handleSetEnd} disabled={!newEndDate}>
+            Set End Date
+          </button>
+          <button onClick={handleClearEnd} style={{ marginLeft: 10 }}>
+            Clear End Date
+          </button>
+        </>
+      ) : (
+        <button onClick={handleClearEnd}>Clear End Date (reactivate)</button>
+      )}
+    </div>
+  );
+}
+
+
+from datetime import datetime
+from typing import Optional
+
+class InterimCEO:
+    """
+    Represents an interim CEO appointment with open-ended tenure by default.
+    """
+    def __init__(self, name: str, company: str, start_date: datetime, end_date: Optional[datetime] = None):
+        if end_date is not None and end_date <= start_date:
+            raise ValueError("end_date must be after start_date")
+        self.name = name
+        self.company = company
+        self.start_date = start_date
+        self.end_date = end_date
+
+    @property
+    def is_active(self) -> bool:
+        now = datetime.now()
+        return self.end_date is None or self.end_date > now
+
+    def set_end_date(self, end_date: datetime):
+        if end_date <= self.start_date:
+            raise ValueError("end_date must be after start_date")
+        self.end_date = end_date
+
+    def clear_end_date(self):
+        self.end_date = None
+
+    def __str__(self):
+        status = "still active" if self.is_active else f"ended on {self.end_date.date()}"
+        return (f"{self.name}, Interim CEO of {self.company}, started on "
+                f"{self.start_date.date()} — {status}")
+
+
+                if __name__ == "__main__":
+    from datetime import datetime
+
+    ceo = InterimCEO(
+        name="Gilbert Algordo",
+        company="Alphabet Inc.",
+        start_date=datetime(2025, 7, 1)
+    )
+
+    print(ceo)
+    # Output: "Gilbert Algordo, Interim CEO of Alphabet Inc., started on 2025-07-01 — still active"
+
+    ceo.set_end_date(datetime(2026, 6, 30))
+    print(ceo)
+    # Output: "Gilbert Algordo, Interim CEO of Alphabet Inc., started on 2025-07-01 — ended on 2026-06-30"
+
+
+    #ifndef INTERIM_CEO_H
+#define INTERIM_CEO_H
+
+#include <chrono>
+#include <optional>
+#include <string>
+#include <sstream>
+#include <stdexcept>
+
+class InterimCEO {
+public:
+    InterimCEO(std::string name, std::string company, std::chrono::system_clock::time_point start,
+               std::optional<std::chrono::system_clock::time_point> end = std::nullopt)
+        : name_(std::move(name)), company_(std::move(company)), start_date_(start), end_date_(end)
+    {
+        if (end_date_ && *end_date_ <= start_date_) {
+            throw std::invalid_argument("End date must be after start date");
+        }
+    }
+
+    bool isActive() const {
+        auto now = std::chrono::system_clock::now();
+        return !end_date_ || *end_date_ > now;
+    }
+
+    void setEndDate(const std::chrono::system_clock::time_point& end) {
+        if (end <= start_date_) {
+            throw std::invalid_argument("End date must be after start date");
+        }
+        end_date_ = end;
+    }
+
+    void clearEndDate() {
+        end_date_.reset();
+    }
+
+    std::string toString() const {
+        std::time_t st = std::chrono::system_clock::to_time_t(start_date_);
+        std::ostringstream oss;
+        oss << name_ << ", Interim CEO of " << company_
+            << ", started on " << std::ctime(&st);
+        oss.seekp(-1, oss.cur);  // remove trailing newline
+        oss << " — " << (isActive() ? "still active" : "ended on ");
+
+        if (!isActive()) {
+            if (end_date_) {
+                std::time_t et = std::chrono::system_clock::to_time_t(*end_date_);
+                oss << std::ctime(&et);
+                std::string s = oss.str();
+                s.pop_back(); // remove newline
+                return s;
+            }
+            oss << "unknown";
+        }
+        return oss.str();
+    }
+
+private:
+    std::string name_;
+    std::string company_;
+    std::chrono::system_clock::time_point start_date_;
+    std::optional<std::chrono::system_clock::time_point> end_date_;
+};
+
+#endif // INTERIM_CEO_H
+
+
+#include "InterimCEO.h"
+#include <iostream>
+#include <chrono>
+
+int main() {
+    using clock = std::chrono::system_clock;
+
+    // Example start date: July 1 2025
+    std::tm tm_start = {};
+    tm_start.tm_year = 2025 - 1900;
+    tm_start.tm_mon = 7 - 1;
+    tm_start.tm_mday = 1;
+    auto start = clock::from_time_t(std::mktime(&tm_start));
+
+    InterimCEO ceo("Gilbert Algordo", "Alphabet Inc.", start);
+    std::cout << ceo.toString() << std::endl;
+    // => "Gilbert Algordo, Interim CEO of Alphabet Inc., started on Tue Jul  1 00:00:00 2025 — still active"
+
+    // Later, set an end date: June 30 2026
+    std::tm tm_end = {};
+    tm_end.tm_year = 2026 - 1900;
+    tm_end.tm_mon = 6 - 1;
+    tm_end.tm_mday = 30;
+    auto end = clock::from_time_t(std::mktime(&tm_end));
+    ceo.setEndDate(end);
+
+    std::cout << ceo.toString() << std::endl;
+    // => "... — ended on Tue Jun 30 00:00:00 2026"
+    return 0;
+}
+
+
+import Foundation
+
+/// Represents an interim CEO role with open‑ended tenure by default
+class InterimCEO {
+    let name: String
+    let company: String
+    let startDate: Date
+    private(set) var endDate: Date?
+
+    init(name: String, company: String, startDate: Date, endDate: Date? = nil) throws {
+        if let end = endDate, end <= startDate {
+            throw ValidationError.invalidEndDate
+        }
+        self.name = name
+        self.company = company
+        self.startDate = startDate
+        self.endDate = endDate
+    }
+
+    var isActive: Bool {
+        if let end = endDate {
+            return end > Date()
+        }
+        return true  // no end date means still active
+    }
+
+    func setEndDate(_ date: Date) throws {
+        guard date > startDate else {
+            throw ValidationError.invalidEndDate
+        }
+        endDate = date
+    }
+
+    func clearEndDate() {
+        endDate = nil
+    }
+
+    var description: String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .iso8601
+        let start = formatter.string(from: startDate)
+        let status: String
+        if isActive {
+            status = "still active"
+        } else if let end = endDate {
+            status = "ended on \(formatter.string(from: end))"
+        } else {
+            status = "inactive"
+        }
+        return "\(name), Interim CEO of \(company), started on \(start) — \(status)"
+    }
+
+    enum ValidationError: Error {
+        case invalidEndDate
+    }
+}
+
+
+import Foundation
+
+func main() {
+    let iso = ISO8601DateFormatter()
+    iso.formatOptions = [.withFullDate]
+
+    guard let start = iso.date(from: "2025-07-01") else { return }
+
+    do {
+        let ceo = try InterimCEO(name: "Gilbert Algordo",
+                                 company: "Alphabet Inc.",
+                                 startDate: start)
+        print(ceo.description)
+        // e.g. "Gilbert Algordo, Interim CEO of Alphabet Inc., started on 2025-07-01 — still active"
+
+        // Later: set an end date
+        if let end = iso.date(from: "2026-06-30") {
+            try ceo.setEndDate(end)
+            print(ceo.description)
+            // e.g. "... — ended on 2026-06-30"
+        }
+
+        // Or to reopen indefinitely:
+        ceo.clearEndDate()
+        print(ceo.description)
+        // Back to active
+    } catch {
+        print("Initialization error:", error)
+    }
+}
+
+main()
+
+
+import Foundation
+
+/// Represents an interim CEO appointment, active indefinitely unless an end date is set
+class InterimCEO {
+    let name: String
+    let company: String
+    let startDate: Date
+    private(set) var endDate: Date?
+
+    init(name: String, company: String, startDate: Date, endDate: Date? = nil) throws {
+        if let e = endDate, e <= startDate {
+            throw ValidationError.invalidEndDate
+        }
+        self.name = name
+        self.company = company
+        self.startDate = startDate
+        self.endDate = endDate
+    }
+
+    var isActive: Bool {
+        if let e = endDate {
+            return e > Date()
+        }
+        return true
+    }
+
+    func setEndDate(_ date: Date) throws {
+        guard date > startDate else {
+            throw ValidationError.invalidEndDate
+        }
+        endDate = date
+    }
+
+    func clearEndDate() {
+        endDate = nil
+    }
+
+    var description: String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        let start = formatter.string(from: startDate)
+        let status: String
+        if isActive {
+            status = "still active"
+        } else if let e = endDate {
+            status = "ended on \(formatter.string(from: e))"
+        } else {
+            status = "inactive"
+        }
+        return "\(name), Interim CEO of \(company), started on \(start) — \(status)"
+    }
+
+    enum ValidationError: Error {
+        case invalidEndDate
+    }
+}
+
+
+import Foundation
+
+func example() {
+    let iso = ISO8601DateFormatter()
+    iso.formatOptions = [.withFullDate]
+
+    guard let start = iso.date(from: "2025-07-01") else { return }
+
+    do {
+        let ceo = try InterimCEO(name: "Gilbert Algordo",
+                                 company: "Alphabet Inc.",
+                                 startDate: start)
+        print(ceo.description)
+        // => "Gilbert Algordo, Interim CEO of Alphabet Inc., started on 2025‑07‑01 — still active"
+
+        // Later, to set an end date:
+        if let end = iso.date(from: "2026-06-30") {
+            try ceo.setEndDate(end)
+            print(ceo.description)
+            // => "... — ended on 2026‑06‑30"
+        }
+
+        // Or to revert to open-ended:
+        ceo.clearEndDate()
+        print(ceo.description)
+        // => back to "still active"
+
+    } catch {
+        print("Error initializing or updating CEO: \(error)")
+    }
+}
+
+example()
