@@ -1,0 +1,3568 @@
+CLASS EnergyManagementSystem:
+    ATTRIBUTES:
+        battery_state_of_charge: FLOAT (0-100%)
+        fuel_level: FLOAT (0-100%)
+        engine_status: ENUM (OFF, IDLE, ON, BOOST)
+        electric_motor_status: ENUM (OFF, IDLE, ON)
+        generator_status: ENUM (OFF, ON)
+        solar_power_input: FLOAT (kW)
+        regenerative_power_input: FLOAT (kW)
+        propulsion_demand: FLOAT (kW)
+        hotel_load_demand: FLOAT (kW)
+        charging_priority: ENUM (BATTERY, FUEL_EFFICIENCY, PERFORMANCE)
+
+    METHODS:
+        __init__():
+            // Initialize sensors and communication interfaces
+
+        update_system_status():
+            // Read all sensor data: battery, fuel, power demands, etc.
+
+        determine_optimal_power_source(propulsion_demand, hotel_load_demand):
+            total_demand = propulsion_demand + hotel_load_demand
+
+            IF battery_state_of_charge < 20% AND fuel_level > 10%:
+                charging_priority = BATTERY // Prioritize charging if low
+            ELSE IF current_speed_target < 5_knots:
+                charging_priority = BATTERY // Prioritize electric propulsion at low speeds
+            ELSE IF current_speed_target > 25_knots:
+                charging_priority = PERFORMANCE // Prioritize engine power for speed
+
+            // Logic for deciding power source based on demand and priority
+            IF total_demand > battery_capacity_output AND engine_status == OFF:
+                start_engine(required_power)
+                start_generator() // If generator is separate for charging
+            ELSE IF total_demand < battery_capacity_output AND battery_state_of_charge < 90%:
+                charge_batteries_from_engine() // Use engine to charge if surplus power
+            ELSE IF total_demand < battery_capacity_output AND solar_power_input > 0:
+                charge_batteries_from_solar()
+            ELSE IF total_demand < battery_capacity_output AND regenerative_power_input > 0:
+                charge_batteries_from_regeneration()
+            ELSE IF current_speed_target < 10_knots AND battery_state_of_charge > 30%:
+                use_electric_motor_only()
+                shut_down_engine() // For silent cruising
+            ELSE:
+                balance_power_between_engine_and_electric()
+
+        start_engine(power_output_kW):
+            // Send command to engine control unit (ECU)
+            engine_status = ON
+            set_engine_RPM_for_power(power_output_kW)
+
+        shut_down_engine():
+            // Send command to ECU
+            engine_status = OFF
+
+        use_electric_motor_only():
+            // Send command to motor control unit (MCU)
+            electric_motor_status = ON
+            set_electric_motor_power(propulsion_demand)
+
+        balance_power_between_engine_and_electric():
+            // Complex algorithm to distribute load based on efficiency curves and demand
+            // Example: Engine handles base load, electric motors provide boost or fill gaps.
+            pass
+
+        charge_batteries_from_engine():
+            // Engage generator or use engine's direct alternator
+            pass
+
+        charge_batteries_from_solar():
+            // Manage MPPT controllers for solar panels
+            pass
+
+        charge_batteries_from_regeneration():
+            // Engage hydro-generators or prop regeneration
+            pass
+
+
+
+CLASS HypersailControlSystem:
+    ATTRIBUTES:
+        wind_speed: FLOAT (knots)
+        wind_direction: FLOAT (degrees, true wind angle)
+        boat_speed: FLOAT (knots)
+        boat_heading: FLOAT (degrees)
+        sail_angle_of_attack: FLOAT (degrees) // For wingsail
+        sail_camber: FLOAT (unitless, e.g., 0-1 for chord percentage) // For morphing wingsail
+        sail_twist: FLOAT (degrees)
+        sail_deployed_state: ENUM (FURLLED, PARTIAL, FULL)
+        target_course: FLOAT (degrees)
+        target_speed_sailing: FLOAT (knots)
+        performance_mode: ENUM (CRUISING, RACING, CONSERVATION)
+
+    METHODS:
+        __init__():
+            // Initialize sensors (anemometer, wind vane, GPS, IMU)
+            // Initialize actuators (motors for rotation, camber, twist, furling)
+
+        update_environmental_data():
+            // Read wind sensors, GPS, IMU
+
+        calculate_optimal_sail_settings():
+            // This is where advanced aerodynamics and VPP (Velocity Prediction Program) models come in.
+            // INPUTS: wind_speed, wind_direction, target_course, boat_speed, performance_mode
+            // OUTPUTS: optimal_angle_of_attack, optimal_camber, optimal_twist
+
+            // Example simplified logic:
+            IF performance_mode == RACING:
+                // Look up in a pre-computed VPP table or run real-time optimization
+                // For a given True Wind Angle (TWA) and True Wind Speed (TWS), find max VMG (Velocity Made Good) or max Boat Speed
+                target_aoa, target_camber, target_twist = VPP_lookup_table.get_optimal_settings(wind_speed, wind_direction, target_course)
+            ELSE IF performance_mode == CRUISING:
+                // Optimize for comfort, lower heel, and good efficiency
+                target_aoa, target_camber, target_twist = cruising_profile.get_settings(wind_speed, wind_direction)
+            ELSE IF performance_mode == CONSERVATION:
+                // Optimize for minimal drag or maximum power generation (if hydro-generators are engaged)
+                target_aoa, target_camber, target_twist = conservation_profile.get_settings(wind_speed, wind_direction)
+
+        adjust_sails():
+            // Send commands to actuators to achieve optimal settings
+            // PID control loops for precise adjustment
+            current_aoa = get_sail_angle_feedback()
+            current_camber = get_sail_camber_feedback()
+            current_twist = get_sail_twist_feedback()
+
+            aoa_error = target_aoa - current_aoa
+            camber_error = target_camber - current_camber
+            twist_error = target_twist - current_twist
+
+            // Command actuators based on errors
+            command_sail_rotation(aoa_error * Kp_aoa)
+            command_sail_camber_adjustment(camber_error * Kp_camber)
+            command_sail_twist_adjustment(twist_error * Kp_twist)
+
+        deploy_sails():
+            // Automated sequence for unfurling/deploying wingsails
+            IF sail_deployed_state == FURLLED:
+                // Unlock mechanisms
+                // Extend sections
+                // Perform initial calibration
+                sail_deployed_state = FULL
+            // Error handling, safety checks
+
+        furl_sails():
+            // Automated sequence for furling/retracting wingsails
+            IF sail_deployed_state == FULL:
+                // Retract sections
+                // Lock mechanisms
+                sail_deployed_state = FURLLED
+            // Safety checks, emergency procedures
+
+        handle_gusts_and_squalls():
+            // Rapid response to sudden wind changes
+            // Automatically depower sails (e.g., flatten camber, reduce angle of attack)
+            // Potentially integrate with auto-helm for course correction
+            IF wind_speed_change > THRESHOLD_GUST_DETECTION:
+                rapidly_depower_sails()
+
+
+
+CLASS NavigationAutopilotSystem:
+    ATTRIBUTES:
+        current_position: LAT_LON
+        current_heading: FLOAT (degrees)
+        current_speed_over_ground: FLOAT (knots)
+        waypoint_list: LIST_OF_LAT_LON
+        active_waypoint_index: INT
+        autopilot_mode: ENUM (OFF, HEADING_HOLD, COURSE_FOLLOW, WAYPOINT_NAV)
+        collision_avoidance_active: BOOL
+        radar_contacts: LIST_OF_RADAR_TARGETS
+
+    REFERENCES:
+        ems: EnergyManagementSystem
+        hsc: HypersailControlSystem
+        propulsion_system: PropulsionControlUnit // Direct interface to engines/motors
+
+    METHODS:
+        __init__(ems_ref, hsc_ref, prop_ref):
+            self.ems = ems_ref
+            self.hsc = hsc_ref
+            self.propulsion_system = prop_ref
+            // Initialize sensors (GPS, AIS, Radar, Depth Sounder)
+
+        update_navigation_data():
+            // Read GPS, AIS, radar data
+
+        set_waypoint_route(route_waypoints):
+            self.waypoint_list = route_waypoints
+            self.active_waypoint_index = 0
+            self.autopilot_mode = WAYPOINT_NAV
+
+        execute_autopilot():
+            IF autopilot_mode == HEADING_HOLD:
+                maintain_heading(target_heading)
+            ELSE IF autopilot_mode == COURSE_FOLLOW:
+                adjust_for_cross_current_and_wind(target_course)
+            ELSE IF autopilot_mode == WAYPOINT_NAV:
+                IF distance_to_waypoint(current_position, waypoint_list[active_waypoint_index]) < DISTANCE_THRESHOLD:
+                    self.active_waypoint_index += 1
+                    IF self.active_waypoint_index >= len(waypoint_list):
+                        print("Route completed.")
+                        self.autopilot_mode = OFF
+                        return
+                target_bearing = calculate_bearing(current_position, waypoint_list[active_waypoint_index])
+                adjust_rudder_for_course(target_bearing)
+
+            // Integrate with sail and propulsion
+            // Determine whether to use sails, engines, or both based on target speed, wind conditions, and energy state.
+            target_speed_to_achieve = calculate_target_speed_for_waypoint(current_position, waypoint_list[active_waypoint_index])
+
+            IF self.hsc.wind_speed > MIN_SAIL_WIND_SPEED AND target_speed_to_achieve < MAX_SAIL_ONLY_SPEED:
+                self.hsc.deploy_sails()
+                self.hsc.calculate_optimal_sail_settings()
+                self.hsc.adjust_sails()
+                self.ems.determine_optimal_power_source(propulsion_demand=0, hotel_load_demand=current_hotel_load) // Prioritize sail
+            ELSE:
+                self.hsc.furl_sails()
+                self.ems.determine_optimal_power_source(propulsion_demand=target_speed_to_achieve_kW, hotel_load_demand=current_hotel_load)
+                self.propulsion_system.set_throttle(calculated_throttle_for_speed)
+
+
+        collision_avoidance():
+            IF collision_avoidance_active:
+                for target in radar_contacts:
+                    IF is_collision_risk(current_position, current_speed, target.position, target.speed):
+                        initiate_evasive_maneuver(target.relative_bearing)
+                        // Override autopilot, sound alarm, display warning
+                        self.ems.request_max_power_for_maneuver() // Ensure power for rapid changes
+
+
+
+# Install Node.js
+# Install necessary packages
+npm init -y
+npm install express socket.io mqtt body-parser # Add more as needed:
+# npm install @serialport/parser-readline # For NMEA 0183
+# npm install modbus-tcp # For Modbus TCP
+# You'd likely need custom C++ addons for direct CAN bus (NMEA 2000) interfacing, or use a gateway.
+
+
+
+// server.js
+
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const mqtt = require('mqtt');
+const bodyParser = require('body-parser');
+
+// --- Configuration ---
+const PORT = process.env.PORT || 3000;
+const MQTT_BROKER_URL = 'mqtt://localhost:1883'; // Use a local MQTT broker like Mosquitto
+
+// --- Initialize Express App ---
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+    cors: {
+        origin: "*", // Allow all origins for development, restrict in production
+        methods: ["GET", "POST"]
+    }
+});
+
+// --- Middleware ---
+app.use(bodyParser.json());
+app.use(express.static('public')); // Serve static files for the web UI
+
+// --- MQTT Client ---
+const mqttClient = mqtt.connect(MQTT_BROKER_URL);
+
+mqttClient.on('connect', () => {
+    console.log('Connected to MQTT Broker');
+    // Subscribe to topics where yacht systems publish data
+    mqttClient.subscribe('yacht/sensors/+', (err) => {
+        if (!err) {
+            console.log('Subscribed to yacht/sensors/#');
+        }
+    });
+    mqttClient.subscribe('yacht/status/+', (err) => {
+        if (!err) {
+            console.log('Subscribed to yacht/status/#');
+        }
+    });
+    mqttClient.subscribe('yacht/alerts', (err) => {
+        if (!err) {
+            console.log('Subscribed to yacht/alerts');
+        }
+    });
+});
+
+mqttClient.on('message', (topic, message) => {
+    // console.log(`MQTT Message - Topic: ${topic}, Message: ${message.toString()}`);
+    try {
+        const data = JSON.parse(message.toString());
+        // Emit data to connected WebSocket clients based on topic
+        io.emit(topic, data); // E.g., 'yacht/sensors/wind', 'yacht/status/engine'
+    } catch (e) {
+        console.error(`Error parsing MQTT message from topic ${topic}: ${e.message}`);
+        // For non-JSON messages, just forward as string
+        io.emit(topic, message.toString());
+    }
+});
+
+mqttClient.on('error', (err) => {
+    console.error('MQTT Client Error:', err);
+});
+
+// --- WebSocket Communication ---
+io.on('connection', (socket) => {
+    console.log('A user connected via WebSocket:', socket.id);
+
+    // Example: Receive commands from the UI
+    socket.on('command/propulsion', (command) => {
+        console.log('Received propulsion command:', command);
+        // Publish command to MQTT topic for the propulsion system
+        mqttClient.publish('yacht/commands/propulsion', JSON.stringify(command));
+    });
+
+    socket.on('command/sails', (command) => {
+        console.log('Received sails command:', command);
+        mqttClient.publish('yacht/commands/sails', JSON.stringify(command));
+    });
+
+    socket.on('command/autopilot', (command) => {
+        console.log('Received autopilot command:', command);
+        mqttClient.publish('yacht/commands/autopilot', JSON.stringify(command));
+    });
+
+    socket.on('disconnect', () => {
+        console.log('User disconnected:', socket.id);
+    });
+});
+
+// --- REST API Endpoints (for configuration or non-realtime actions) ---
+
+// Get current system status (might aggregate data)
+app.get('/api/status', (req, res) => {
+    // In a real app, this would query a cached state or a database
+    res.json({
+        battery: { soc: 85, voltage: 480 },
+        engine: { rpm: 0, hours: 1250, status: 'off' },
+        sails: { deployed: true, angle: 30, camber: 0.5 },
+        speed: { sog: 15.2, stw: 14.8 },
+        wind: { apparentSpeed: 20, apparentAngle: 45, trueSpeed: 18, trueAngle: 60 }
+    });
+});
+
+// Set energy management mode
+app.post('/api/energy/mode', (req, res) => {
+    const { mode } = req.body; // e.g., { mode: 'economy' } or { mode: 'performance' }
+    if (['economy', 'performance', 'hybrid'].includes(mode)) {
+        console.log(`Setting energy mode to: ${mode}`);
+        mqttClient.publish('yacht/commands/energyMode', JSON.stringify({ mode }));
+        res.status(200).send({ message: `Energy mode set to ${mode}` });
+    } else {
+        res.status(400).send({ error: 'Invalid energy mode' });
+    }
+});
+
+// Start the server
+server.listen(PORT, () => {
+    console.log(`Yacht control server running on port ${PORT}`);
+    console.log(`Access web UI at http://localhost:${PORT}`);
+});
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+    console.log('Shutting down server...');
+    mqttClient.end();
+    server.close(() => {
+        console.log('Server gracefully shut down.');
+        process.exit(0);
+    });
+});
+
+
+
+// energyManagement.js
+const mqtt = require('mqtt');
+
+const MQTT_BROKER_URL = 'mqtt://localhost:1883';
+const mqttClient = mqtt.connect(MQTT_BROKER_URL);
+
+let batterySOC = 75; // Simulate State of Charge
+let fuelLevel = 80;
+let currentPropulsionDemand = 0; // kW
+let currentHotelLoad = 5; // kW
+let energyMode = 'hybrid'; // default
+
+mqttClient.on('connect', () => {
+    console.log('Energy Management System connected to MQTT');
+    mqttClient.subscribe('yacht/commands/energyMode');
+    mqttClient.subscribe('yacht/sensors/battery'); // Assume battery monitoring system publishes here
+    mqttClient.subscribe('yacht/sensors/fuel');
+    mqttClient.subscribe('yacht/propulsion/demand'); // Demand from autopilot/user
+});
+
+mqttClient.on('message', (topic, message) => {
+    const data = JSON.parse(message.toString());
+
+    switch (topic) {
+        case 'yacht/commands/energyMode':
+            energyMode = data.mode;
+            console.log(`Energy mode changed to: ${energyMode}`);
+            break;
+        case 'yacht/sensors/battery':
+            batterySOC = data.soc;
+            // console.log(`Battery SOC: ${batterySOC}%`);
+            break;
+        case 'yacht/sensors/fuel':
+            fuelLevel = data.level;
+            // console.log(`Fuel Level: ${fuelLevel}%`);
+            break;
+        case 'yacht/propulsion/demand':
+            currentPropulsionDemand = data.power_kW;
+            // console.log(`Propulsion demand: ${currentPropulsionDemand} kW`);
+            break;
+    }
+    decidePowerSource(); // Re-evaluate power source on new data/commands
+});
+
+// Simplified power source decision logic
+function decidePowerSource() {
+    const totalDemand = currentPropulsionDemand + currentHotelLoad;
+    let engineState = 'off';
+    let electricMotorState = 'off';
+    let generatorState = 'off';
+    let chargeBatteries = false;
+
+    console.log(`[EMS] Demand: ${totalDemand} kW, SOC: ${batterySOC}%, Mode: ${energyMode}`);
+
+    if (energyMode === 'economy') {
+        if (batterySOC > 30 && totalDemand < 50) { // Try to use electric first
+            electricMotorState = 'on';
+            engineState = 'off';
+            if (batterySOC < 90) chargeBatteries = true; // Use solar/regen if available
+        } else {
+            engineState = 'on'; // Fallback to engine
+            electricMotorState = 'off';
+            if (batterySOC < 80) generatorState = 'on'; // Charge batteries if low
+        }
+    } else if (energyMode === 'performance') {
+        engineState = 'on'; // Always use engine for max power
+        if (totalDemand > 100 && batterySOC > 10) { // Boost with electric if needed
+            electricMotorState = 'on';
+        } else {
+            electricMotorState = 'off';
+        }
+        generatorState = 'off'; // Don't waste engine power charging
+    } else { // 'hybrid' mode
+        if (totalDemand < 20 && batterySOC > 40) {
+            electricMotorState = 'on';
+            engineState = 'off'; // Silent, low speed
+        } else if (totalDemand < 100 && batterySOC > 20 && fuelLevel > 10) {
+            engineState = 'on'; // Engine for cruising speed
+            electricMotorState = 'on'; // Electric for efficiency/boost
+            if (batterySOC < 80 && totalDemand < 80) generatorState = 'on'; // Charge if surplus
+        } else {
+            engineState = 'on'; // Use engine primarily
+            electricMotorState = 'on'; // Electric for assist
+            generatorState = 'off';
+        }
+    }
+
+    // Publish control commands
+    mqttClient.publish('yacht/control/engine', JSON.stringify({ state: engineState, demand_kW: currentPropulsionDemand }));
+    mqttClient.publish('yacht/control/electricMotor', JSON.stringify({ state: electricMotorState, demand_kW: currentPropulsionDemand }));
+    mqttClient.publish('yacht/control/generator', JSON.stringify({ state: generatorState, charge_batteries: chargeBatteries }));
+    mqttClient.publish('yacht/status/powerManagement', JSON.stringify({
+        engine: engineState,
+        electricMotor: electricMotorState,
+        generator: generatorState,
+        charging: chargeBatteries,
+        currentMode: energyMode
+    }));
+}
+
+// Simulate battery drain/charge over time
+setInterval(() => {
+    // Simplified simulation
+    if (currentPropulsionDemand > 0 && electricMotorState === 'on') {
+        batterySOC = Math.max(0, batterySOC - (currentPropulsionDemand / 100));
+    }
+    if (generatorState === 'on' && batterySOC < 100) {
+        batterySOC = Math.min(100, batterySOC + 0.5); // Charging effect
+    }
+    if (Math.random() > 0.9 && batterySOC < 100) { // Simulate solar/regen charging
+        batterySOC = Math.min(100, batterySOC + 0.1);
+    }
+    mqttClient.publish('yacht/sensors/battery', JSON.stringify({ soc: parseFloat(batterySOC.toFixed(1)) }));
+}, 1000); // Update every second
+
+// Initial decision
+decidePowerSource();
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+    console.log('Energy Management System shutting down.');
+    mqttClient.end();
+    process.exit(0);
+});
+
+
+
+// hypersailControl.js
+const mqtt = require('mqtt');
+
+const MQTT_BROKER_URL = 'mqtt://localhost:1883';
+const mqttClient = mqtt.connect(MQTT_BROKER_URL);
+
+let windSpeed = 10; // knots
+let trueWindAngle = 90; // degrees (0=bow, 180=stern)
+let boatSpeed = 5; // knots
+let boatHeading = 0; // degrees
+let targetSailAngle = 0;
+let targetSailCamber = 0;
+let sailDeployed = false; // Initial state
+
+mqttClient.on('connect', () => {
+    console.log('Hypersail Control System connected to MQTT');
+    mqttClient.subscribe('yacht/commands/sails');
+    mqttClient.subscribe('yacht/sensors/wind');
+    mqttClient.subscribe('yacht/sensors/gps'); // For boat speed/heading
+});
+
+mqttClient.on('message', (topic, message) => {
+    const data = JSON.parse(message.toString());
+
+    switch (topic) {
+        case 'yacht/commands/sails':
+            if (data.action === 'deploy') {
+                sailDeployed = true;
+                console.log('Sails deploying...');
+            } else if (data.action === 'furl') {
+                sailDeployed = false;
+                console.log('Sails furling...');
+            } else if (data.action === 'setTrim') {
+                // Manual trim override
+                targetSailAngle = data.angle;
+                targetSailCamber = data.camber;
+                console.log(`Manual sail trim: Angle ${targetSailAngle}, Camber ${targetSailCamber}`);
+            }
+            break;
+        case 'yacht/sensors/wind':
+            windSpeed = data.speed;
+            trueWindAngle = data.trueAngle;
+            break;
+        case 'yacht/sensors/gps':
+            boatSpeed = data.sog;
+            boatHeading = data.heading;
+            break;
+    }
+    if (sailDeployed) {
+        optimizeSailSettings(); // Re-optimize if sails are out and data changes
+    } else {
+        // Publish that sails are furled
+        mqttClient.publish('yacht/status/sails', JSON.stringify({ deployed: false, angle: 0, camber: 0 }));
+    }
+});
+
+function optimizeSailSettings() {
+    // This is a heavily simplified VPP (Velocity Prediction Program) logic.
+    // A real system would use complex aerodynamic models, lookup tables,
+    // or even machine learning to find the optimal angle of attack and camber
+    // for given wind conditions, desired speed, and boat characteristics.
+
+    let optimalAngle = 0;
+    let optimalCamber = 0; // 0 (flat) to 1 (max camber)
+
+    if (windSpeed < 5) {
+        // Too light wind, don't set sails effectively
+        optimalAngle = 0;
+        optimalCamber = 0;
+    } else if (trueWindAngle >= 0 && trueWindAngle <= 45 || trueWindAngle >= 315 && trueWindAngle <= 360) {
+        // Close-hauled (sailing into the wind)
+        optimalAngle = 10; // Tight angle to centerline
+        optimalCamber = 0.3; // Flatter for pointing
+    } else if (trueWindAngle > 45 && trueWindAngle <= 90 || trueWindAngle >= 270 && trueWindAngle < 315) {
+        // Reaching
+        optimalAngle = 30; // Further out
+        optimalCamber = 0.6; // More power
+    } else if (trueWindAngle > 90 && trueWindAngle <= 135 || trueWindAngle >= 225 && trueWindAngle < 270) {
+        // Broad reaching
+        optimalAngle = 60; // Wider angle
+        optimalCamber = 0.8; // Max power
+    } else { // Running downwind
+        optimalAngle = 80; // Almost perpendicular
+        optimalCamber = 0.9; // Full power
+    }
+
+    targetSailAngle = optimalAngle;
+    targetSailCamber = optimalCamber;
+
+    console.log(`[HCS] Optimal Sails: Angle ${targetSailAngle}°, Camber ${targetSailCamber}`);
+
+    // Publish control commands for sail actuators
+    mqttClient.publish('yacht/control/sailActuator/angle', JSON.stringify({ angle: targetSailAngle }));
+    mqttClient.publish('yacht/control/sailActuator/camber', JSON.stringify({ camber: targetSailCamber }));
+    mqttClient.publish('yacht/status/sails', JSON.stringify({
+        deployed: true,
+        angle: targetSailAngle,
+        camber: targetSailCamber,
+        windSpeed: windSpeed,
+        trueWindAngle: trueWindAngle
+    }));
+}
+
+// Simulate wind changes for testing
+setInterval(() => {
+    windSpeed = Math.max(0, windSpeed + (Math.random() - 0.5) * 2); // +/- 1 knot
+    trueWindAngle = (trueWindAngle + (Math.random() - 0.5) * 5 + 360) % 360; // +/- 2.5 degrees
+    mqttClient.publish('yacht/sensors/wind', JSON.stringify({
+        speed: parseFloat(windSpeed.toFixed(1)),
+        trueAngle: parseFloat(trueWindAngle.toFixed(1))
+    }));
+    // Also simulate boat speed/heading changes based on wind and engine for a more dynamic test
+    boatSpeed = Math.max(0, boatSpeed + (Math.random() - 0.5) * 0.5);
+    boatHeading = (boatHeading + (Math.random() - 0.5) * 2 + 360) % 360;
+    mqttClient.publish('yacht/sensors/gps', JSON.stringify({
+        sog: parseFloat(boatSpeed.toFixed(1)),
+        heading: parseFloat(boatHeading.toFixed(1)),
+        latitude: 14.417 + (Math.random() * 0.01), // Simulate movement
+        longitude: 120.932 + (Math.random() * 0.01)
+    }));
+}, 2000);
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+    console.log('Hypersail Control System shutting down.');
+    mqttClient.end();
+    process.exit(0);
+});
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ferrari Hypersail Yacht Control</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f0f0f0; }
+        .container { display: flex; flex-wrap: wrap; gap: 20px; }
+        .card { background-color: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); flex: 1 1 300px; }
+        h2 { color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; margin-bottom: 20px; }
+        button { padding: 10px 15px; background-color: #d40000; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; margin-right: 10px; }
+        button:hover { background-color: #a00000; }
+        .data-display div { margin-bottom: 8px; }
+        .data-label { font-weight: bold; width: 120px; display: inline-block; }
+        input[type="range"] { width: 100%; }
+    </style>
+</head>
+<body>
+    <h1>Advanced Hybrid Ferrari Hypersail Yacht Control</h1>
+
+    <div class="container">
+        <div class="card">
+            <h2>Propulsion Control</h2>
+            <button onclick="sendCommand('propulsion', { action: 'setThrottle', value: 50 })">Throttle 50%</button>
+            <button onclick="sendCommand('propulsion', { action: 'setThrottle', value: 0 })">Stop</button>
+            <button onclick="sendCommand('propulsion', { action: 'electricOnly' })">Electric Only</button>
+            <button onclick="sendCommand('propulsion', { action: 'engineOnly' })">Engine Only</button>
+        </div>
+
+        <div class="card">
+            <h2>Energy Management</h2>
+            <button onclick="sendCommand('energyMode', { mode: 'economy' })">Economy Mode</button>
+            <button onclick="sendCommand('energyMode', { mode: 'hybrid' })">Hybrid Mode</button>
+            <button onclick="sendCommand('energyMode', { mode: 'performance' })">Performance Mode</button>
+        </div>
+
+        <div class="card">
+            <h2>Hypersail Control</h2>
+            <button onclick="sendCommand('sails', { action: 'deploy' })">Deploy Sails</button>
+            <button onclick="sendCommand('sails', { action: 'furl' })">Furl Sails</button>
+            <div>
+                Manual Sail Angle: <span id="manualSailAngleValue">0</span>°
+                <input type="range" min="0" max="90" value="0" id="manualSailAngle" oninput="document.getElementById('manualSailAngleValue').textContent = this.value">
+                <button onclick="sendCommand('sails', { action: 'setTrim', angle: parseInt(document.getElementById('manualSailAngle').value), camber: 0.7 })">Set Manual Trim</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Live Sensor Data</h2>
+            <div class="data-display">
+                <div><span class="data-label">Battery SOC:</span> <span id="batterySoc">N/A</span>%</div>
+                <div><span class="data-label">Engine RPM:</span> <span id="engineRpm">N/A</span></div>
+                <div><span class="data-label">Boat Speed (SOG):</span> <span id="boatSog">N/A</span> knots</div>
+                <div><span class="data-label">Boat Heading:</span> <span id="boatHeading">N/A</span>°</div>
+                <div><span class="data-label">Wind Speed:</span> <span id="windSpeed">N/A</span> knots</div>
+                <div><span class="data-label">True Wind Angle:</span> <span id="trueWindAngle">N/A</span>°</div>
+                <div><span class="data-label">Sails Deployed:</span> <span id="sailsDeployed">N/A</span></div>
+                <div><span class="data-label">Sail Angle:</span> <span id="sailAngle">N/A</span>°</div>
+                <div><span class="data-label">Sail Camber:</span> <span id="sailCamber">N/A</span></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+
+        // Function to send commands to the Node.js server
+        function sendCommand(topic, data) {
+            socket.emit(`command/${topic}`, data);
+            console.log(`Sent command to ${topic}:`, data);
+        }
+
+        // Listen for real-time data from the server
+        socket.on('yacht/sensors/battery', (data) => {
+            document.getElementById('batterySoc').textContent = data.soc.toFixed(1);
+        });
+
+        socket.on('yacht/sensors/engine', (data) => {
+            document.getElementById('engineRpm').textContent = data.rpm; // Assuming engine simulation sends RPM
+        });
+
+        socket.on('yacht/sensors/gps', (data) => {
+            document.getElementById('boatSog').textContent = data.sog.toFixed(1);
+            document.getElementById('boatHeading').textContent = data.heading.toFixed(0);
+        });
+
+        socket.on('yacht/sensors/wind', (data) => {
+            document.getElementById('windSpeed').textContent = data.speed.toFixed(1);
+            document.getElementById('trueWindAngle').textContent = data.trueAngle.toFixed(0);
+        });
+
+        socket.on('yacht/status/sails', (data) => {
+            document.getElementById('sailsDeployed').textContent = data.deployed ? 'Yes' : 'No';
+            document.getElementById('sailAngle').textContent = data.angle.toFixed(0);
+            document.getElementById('sailCamber').textContent = data.camber.toFixed(2);
+        });
+
+        // Initial fetch of status (for non-realtime, or when page loads)
+        fetch('/api/status')
+            .then(response => response.json())
+            .then(data => {
+                // Update initial display, though WebSockets will quickly take over
+                document.getElementById('batterySoc').textContent = data.battery.soc.toFixed(1);
+                document.getElementById('engineRpm').textContent = data.engine.rpm;
+                document.getElementById('boatSog').textContent = data.speed.sog.toFixed(1);
+                document.getElementById('boatHeading').textContent = data.speed.heading.toFixed(0);
+                document.getElementById('windSpeed').textContent = data.wind.trueSpeed.toFixed(1);
+                document.getElementById('trueWindAngle').textContent = data.wind.trueAngle.toFixed(0);
+                document.getElementById('sailsDeployed').textContent = data.sails.deployed ? 'Yes' : 'No';
+                document.getElementById('sailAngle').textContent = data.sails.angle.toFixed(0);
+                document.getElementById('sailCamber').textContent = data.sails.camber.toFixed(2);
+            })
+            .catch(error => console.error('Error fetching initial status:', error));
+    </script>
+</body>
+</html>
+
+
+
+npm init -y
+npm install express socket.io mqtt body-parser
+
+
+
+npx create-react-app yacht-dashboard
+cd yacht-dashboard
+
+
+
+npm install socket.io-client
+
+
+
+/* src/styles.css */
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #1a1a1a;
+    color: #f0f0f0;
+    overflow-x: hidden;
+}
+
+#root {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.App {
+    padding: 20px;
+    max-width: 1600px;
+    margin: 0 auto;
+    flex-grow: 1;
+}
+
+h1 {
+    color: #e30000; /* Ferrari Red */
+    text-align: center;
+    margin-bottom: 30px;
+    font-size: 2.8em;
+    text-shadow: 2px 2px 5px rgba(0, 0, 0, 0.4);
+}
+
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 25px;
+}
+
+.card {
+    background-color: #2a2a2a;
+    border-radius: 12px;
+    padding: 25px;
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.5);
+    border: 1px solid #444;
+    transition: transform 0.2s ease-in-out;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+}
+
+h2 {
+    color: #e30000;
+    margin-top: 0;
+    margin-bottom: 20px;
+    font-size: 1.8em;
+    border-bottom: 2px solid #444;
+    padding-bottom: 10px;
+}
+
+.data-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px dashed #3a3a3a;
+}
+
+.data-item:last-child {
+    border-bottom: none;
+}
+
+.data-label {
+    font-weight: bold;
+    color: #aaa;
+}
+
+.data-value {
+    font-size: 1.1em;
+    color: #f0f0f0;
+}
+
+.data-unit {
+    font-size: 0.8em;
+    color: #888;
+    margin-left: 5px;
+}
+
+button {
+    background-color: #e30000;
+    color: white;
+    border: none;
+    padding: 12px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1em;
+    margin-right: 10px;
+    margin-bottom: 10px;
+    transition: background-color 0.2s ease-in-out, transform 0.1s ease-in-out;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+button:hover {
+    background-color: #a00000;
+    transform: translateY(-2px);
+}
+
+button:active {
+    transform: translateY(0);
+}
+
+input[type="range"] {
+    width: 100%;
+    margin-top: 15px;
+    margin-bottom: 15px;
+    -webkit-appearance: none;
+    background: transparent;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    height: 20px;
+    width: 20px;
+    border-radius: 50%;
+    background: #e30000;
+    cursor: grab;
+    box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+    margin-top: -8px; /* Offset to center thumb */
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+    width: 100%;
+    height: 6px;
+    background: #444;
+    border-radius: 3px;
+}
+
+.slider-label {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 5px;
+    color: #aaa;
+    font-size: 0.9em;
+}
+
+
+
+// src/components/SensorDisplay.js
+import React from 'react';
+
+const SensorDisplay = ({ label, value, unit, className = '' }) => {
+    return (
+        <div className={`data-item ${className}`}>
+            <span className="data-label">{label}:</span>
+            <span className="data-value">{typeof value === 'number' ? value.toFixed(1) : value}</span>
+            {unit && <span className="data-unit">{unit}</span>}
+        </div>
+    );
+};
+
+export default SensorDisplay;
+
+
+
+// src/components/ControlPanel.js
+import React, { useState } from 'react';
+
+const ControlPanel = ({ title, children }) => {
+    return (
+        <div className="card">
+            <h2>{title}</h2>
+            {children}
+        </div>
+    );
+};
+
+export default ControlPanel;
+
+
+
+// src/App.js
+import React, { useEffect, useState, useCallback } from 'react';
+import io from 'socket.io-client';
+import SensorDisplay from './components/SensorDisplay';
+import ControlPanel from './components/ControlPanel';
+import './styles.css'; // Import the CSS file
+
+const SOCKET_SERVER_URL = 'http://localhost:3000'; // Make sure this matches your Node.js server URL
+
+function App() {
+    const [socket, setSocket] = useState(null);
+    const [sensorData, setSensorData] = useState({
+        battery: { soc: 'N/A', voltage: 'N/A' },
+        engine: { rpm: 'N/A', hours: 'N/A', status: 'N/A' },
+        sails: { deployed: 'N/A', angle: 'N/A', camber: 'N/A' },
+        speed: { sog: 'N/A', stw: 'N/A' },
+        wind: { apparentSpeed: 'N/A', apparentAngle: 'N/A', trueSpeed: 'N/A', trueAngle: 'N/A' },
+        powerManagement: { engine: 'N/A', electricMotor: 'N/A', generator: 'N/A', charging: 'N/A', currentMode: 'N/A' }
+    });
+    const [manualSailAngle, setManualSailAngle] = useState(0);
+
+    // --- WebSocket Connection and Event Handling ---
+    useEffect(() => {
+        const newSocket = io(SOCKET_SERVER_URL);
+        setSocket(newSocket);
+
+        newSocket.on('connect', () => {
+            console.log('Connected to WebSocket server');
+            // Fetch initial status when connected
+            fetch('/api/status')
+                .then(res => res.json())
+                .then(data => {
+                    setSensorData(prev => ({
+                        ...prev,
+                        battery: data.battery,
+                        engine: data.engine,
+                        sails: data.sails,
+                        speed: data.speed,
+                        wind: data.wind
+                    }));
+                })
+                .catch(err => console.error("Failed to fetch initial status:", err));
+        });
+
+        newSocket.on('disconnect', () => {
+            console.log('Disconnected from WebSocket server');
+        });
+
+        // Listen for sensor data updates
+        newSocket.on('yacht/sensors/battery', (data) => {
+            setSensorData(prev => ({ ...prev, battery: data }));
+        });
+        newSocket.on('yacht/sensors/engine', (data) => {
+            setSensorData(prev => ({ ...prev, engine: data }));
+        });
+        newSocket.on('yacht/sensors/gps', (data) => {
+            setSensorData(prev => ({ ...prev, speed: { sog: data.sog, stw: data.stw }, heading: data.heading }));
+        });
+        newSocket.on('yacht/sensors/wind', (data) => {
+            setSensorData(prev => ({ ...prev, wind: data }));
+        });
+        newSocket.on('yacht/status/sails', (data) => {
+            setSensorData(prev => ({ ...prev, sails: data }));
+        });
+        newSocket.on('yacht/status/powerManagement', (data) => {
+            setSensorData(prev => ({ ...prev, powerManagement: data }));
+        });
+        newSocket.on('yacht/alerts', (data) => {
+            console.warn('Yacht Alert:', data.message);
+            // In a real app, you'd show a notification toast or similar
+        });
+
+        return () => newSocket.close();
+    }, []);
+
+    // --- Command Sending Function ---
+    const sendCommand = useCallback((topic, data) => {
+        if (socket) {
+            socket.emit(`command/${topic}`, data);
+            console.log(`Sent command to ${topic}:`, data);
+        } else {
+            console.warn('Socket not connected, cannot send command.');
+        }
+    }, [socket]);
+
+    return (
+        <div className="App">
+            <h1>Advanced Hybrid Ferrari Hypersail Yacht</h1>
+
+            <div className="dashboard-grid">
+                {/* Propulsion Control */}
+                <ControlPanel title="Propulsion Control">
+                    <button onClick={() => sendCommand('propulsion', { action: 'setThrottle', value: 50 })}>Throttle 50%</button>
+                    <button onClick={() => sendCommand('propulsion', { action: 'setThrottle', value: 0 })}>Stop</button>
+                    <button onClick={() => sendCommand('propulsion', { action: 'electricOnly' })}>Electric Only</button>
+                    <button onClick={() => sendCommand('propulsion', { action: 'engineOnly' })}>Engine Only</button>
+                </ControlPanel>
+
+                {/* Energy Management */}
+                <ControlPanel title="Energy Management">
+                    <button onClick={() => sendCommand('energyMode', { mode: 'economy' })}>Economy Mode</button>
+                    <button onClick={() => sendCommand('energyMode', { mode: 'hybrid' })}>Hybrid Mode</button>
+                    <button onClick={() => sendCommand('energyMode', { mode: 'performance' })}>Performance Mode</button>
+                    <SensorDisplay label="Current Mode" value={sensorData.powerManagement.currentMode} />
+                    <SensorDisplay label="Engine Status" value={sensorData.powerManagement.engine} />
+                    <SensorDisplay label="Electric Motor Status" value={sensorData.powerManagement.electricMotor} />
+                    <SensorDisplay label="Generator Status" value={sensorData.powerManagement.generator} />
+                    <SensorDisplay label="Charging" value={sensorData.powerManagement.charging ? 'Yes' : 'No'} />
+                </ControlPanel>
+
+                {/* Hypersail Control */}
+                <ControlPanel title="Hypersail Control">
+                    <button onClick={() => sendCommand('sails', { action: 'deploy' })}>Deploy Sails</button>
+                    <button onClick={() => sendCommand('sails', { action: 'furl' })}>Furl Sails</button>
+                    <div>
+                        <div className="slider-label">
+                            <span>Manual Sail Angle:</span>
+                            <span>{manualSailAngle}°</span>
+                        </div>
+                        <input
+                            type="range"
+                            min="0"
+                            max="90"
+                            value={manualSailAngle}
+                            onChange={(e) => setManualSailAngle(parseInt(e.target.value))}
+                        />
+                        <button onClick={() => sendCommand('sails', { action: 'setTrim', angle: manualSailAngle, camber: 0.7 })}>
+                            Set Manual Trim
+                        </button>
+                    </div>
+                </ControlPanel>
+
+                {/* Live Sensor Data */}
+                <div className="card">
+                    <h2>Live Sensor Data</h2>
+                    <SensorDisplay label="Battery SOC" value={sensorData.battery.soc} unit="%" />
+                    <SensorDisplay label="Battery Voltage" value={sensorData.battery.voltage} unit="V" />
+                    <SensorDisplay label="Engine RPM" value={sensorData.engine.rpm} />
+                    <SensorDisplay label="Engine Hours" value={sensorData.engine.hours} />
+                    <SensorDisplay label="Engine Status" value={sensorData.engine.status} />
+                    <SensorDisplay label="Boat Speed (SOG)" value={sensorData.speed.sog} unit="knots" />
+                    <SensorDisplay label="Boat Heading" value={sensorData.heading} unit="°" />
+                    <SensorDisplay label="Wind Speed" value={sensorData.wind.trueSpeed} unit="knots" />
+                    <SensorDisplay label="True Wind Angle" value={sensorData.wind.trueAngle} unit="°" />
+                    <SensorDisplay label="Sails Deployed" value={sensorData.sails.deployed ? 'Yes' : 'No'} />
+                    <SensorDisplay label="Sail Angle" value={sensorData.sails.angle} unit="°" />
+                    <SensorDisplay label="Sail Camber" value={sensorData.sails.camber} />
+                </div>
+            </div>
+        </div>
+    );
+}
+
+export default App;
+
+
+
+npm start
+
+
+
+pip install paho-mqtt numpy pandas scikit-learn # scikit-learn for potential ML in sail optimization
+
+
+
+# main_yacht_controller.py
+import paho.mqtt.client as mqtt
+import json
+import time
+import threading
+
+# --- Configuration ---
+MQTT_BROKER_HOST = 'localhost'
+MQTT_BROKER_PORT = 1883
+YACHT_ID = "ferrari_hypersail_001"
+
+# --- Global State (in a real system, this would be more robust, e.g., a shared database/cache) ---
+current_yacht_status = {
+    "battery": {"soc": None, "voltage": None},
+    "engine": {"rpm": None, "hours": None, "status": None},
+    "sails": {"deployed": None, "angle": None, "camber": None},
+    "speed": {"sog": None, "stw": None},
+    "wind": {"apparentSpeed": None, "apparentAngle": None, "trueSpeed": None, "trueAngle": None},
+    "power_management": {"engine_state": None, "electric_motor_state": None, "generator_state": None, "charging": None, "mode": None}
+}
+
+# --- MQTT Callbacks ---
+def on_connect(client, userdata, flags, rc):
+    print(f"Connected to MQTT Broker with result code {rc}")
+    # Subscribe to all sensor and status topics from other modules
+    client.subscribe(f"yacht/{YACHT_ID}/sensors/#")
+    client.subscribe(f"yacht/{YACHT_ID}/status/#")
+    client.subscribe(f"yacht/{YACHT_ID}/alerts")
+
+def on_message(client, userdata, msg):
+    try:
+        topic_parts = msg.topic.split('/')
+        module_type = topic_parts[3] # e.g., 'sensors', 'status'
+        data_type = topic_parts[4] # e.g., 'battery', 'wind', 'power_management'
+        payload = json.loads(msg.payload.decode())
+
+        # Update global state based on incoming messages
+        if module_type == 'sensors':
+            current_yacht_status[data_type] = payload
+            # print(f"Received sensor data for {data_type}: {payload}")
+        elif module_type == 'status':
+            current_yacht_status[data_type] = payload
+            # print(f"Received status update for {data_type}: {payload}")
+        elif module_type == 'alerts':
+            print(f"!!! ALERT: {payload['message']} !!!")
+
+        # In a real system, you might also push this to a database,
+        # or propagate to a WebSocket server for a web UI.
+
+    except json.JSONDecodeError:
+        print(f"Received non-JSON message on topic {msg.topic}: {msg.payload.decode()}")
+    except Exception as e:
+        print(f"Error processing MQTT message on {msg.topic}: {e}")
+
+# --- MQTT Client Setup ---
+client = mqtt.Client(f"{YACHT_ID}_Controller")
+client.on_connect = on_connect
+client.on_message = on_message
+
+def connect_mqtt():
+    try:
+        client.connect(MQTT_BROKER_HOST, MQTT_BROKER_PORT, 60)
+        client.loop_start() # Start a non-blocking loop in a separate thread
+        print(f"Attempting to connect to MQTT broker at {MQTT_BROKER_HOST}:{MQTT_BROKER_PORT}")
+    except Exception as e:
+        print(f"Failed to connect to MQTT broker: {e}")
+        time.sleep(5)
+        connect_mqtt() # Retry connection
+
+# --- Command API (Simulated for demonstration) ---
+def send_command(topic_suffix, command_data):
+    full_topic = f"yacht/{YACHT_ID}/commands/{topic_suffix}"
+    client.publish(full_topic, json.dumps(command_data))
+    print(f"Published command to {full_topic}: {command_data}")
+
+def main_loop():
+    connect_mqtt()
+    print("\nYacht Controller running. Awaiting sensor data and commands...")
+    print("Example: send_command('energyMode', {'mode': 'performance'})")
+    print("Example: send_command('sails', {'action': 'deploy'})")
+    print("\nSimulating user interaction every 10 seconds...")
+
+    # Simulate sending commands periodically for testing
+    command_sequence = [
+        ("energyMode", {"mode": "performance"}),
+        ("sails", {"action": "deploy"}),
+        ("propulsion", {"action": "set_throttle", "value": 70}),
+        ("sails", {"action": "set_trim", "angle": 45, "camber": 0.6}),
+        ("energyMode", {"mode": "economy"}),
+        ("propulsion", {"action": "set_throttle", "value": 0}),
+        ("sails", {"action": "furl"}),
+    ]
+    cmd_idx = 0
+
+    try:
+        while True:
+            # You would typically have a more sophisticated command queue or external interface here
+            print(f"\n--- Current Yacht Status (Snapshot) ---")
+            for key, value in current_yacht_status.items():
+                print(f"  {key}: {value}")
+            print("---------------------------------------")
+
+            # Simulate automated command sending
+            if cmd_idx < len(command_sequence):
+                topic, data = command_sequence[cmd_idx]
+                send_command(topic, data)
+                cmd_idx += 1
+            else:
+                cmd_idx = 0 # Loop commands
+
+            time.sleep(10) # Wait for 10 seconds before next iteration
+
+    except KeyboardInterrupt:
+        print("\nShutting down Yacht Controller.")
+    finally:
+        client.loop_stop()
+        client.disconnect()
+        print("MQTT client disconnected.")
+
+if __name__ == "__main__":
+    main_loop()
+
+
+
+# energy_management_system.py
+import paho.mqtt.client as mqtt
+import json
+import time
+
+# --- Configuration ---
+MQTT_BROKER_HOST = 'localhost'
+MQTT_BROKER_PORT = 1883
+YACHT_ID = "ferrari_hypersail_001"
+
+# --- Internal State ---
+_battery_soc = 75.0  # State of Charge (0-100%)
+_fuel_level = 80.0   # Fuel Level (0-100%)
+_current_propulsion_demand_kw = 0.0 # kW
+_current_hotel_load_kw = 5.0 # kW
+_energy_mode = 'hybrid' # 'economy', 'performance', 'hybrid'
+
+# --- Output States for Control ---
+_engine_state = 'off'
+_electric_motor_state = 'off'
+_generator_state = 'off'
+_charging_batteries = False
+
+# --- MQTT Callbacks ---
+def on_connect(client, userdata, flags, rc):
+    print(f"EMS: Connected to MQTT Broker with result code {rc}")
+    client.subscribe(f"yacht/{YACHT_ID}/commands/energyMode")
+    client.subscribe(f"yacht/{YACHT_ID}/sensors/battery")
+    client.subscribe(f"yacht/{YACHT_ID}/sensors/fuel")
+    client.subscribe(f"yacht/{YACHT_ID}/propulsion/demand") # From autopilot or user input
+
+def on_message(client, userdata, msg):
+    global _energy_mode, _battery_soc, _fuel_level, _current_propulsion_demand_kw
+    try:
+        payload = json.loads(msg.payload.decode())
+
+        if msg.topic == f"yacht/{YACHT_ID}/commands/energyMode":
+            _energy_mode = payload.get('mode', _energy_mode)
+            print(f"EMS: Energy mode changed to: {_energy_mode}")
+        elif msg.topic == f"yacht/{YACHT_ID}/sensors/battery":
+            _battery_soc = payload.get('soc', _battery_soc)
+            # print(f"EMS: Battery SOC: {_battery_soc}%")
+        elif msg.topic == f"yacht/{YACHT_ID}/sensors/fuel":
+            _fuel_level = payload.get('level', _fuel_level)
+            # print(f"EMS: Fuel Level: {_fuel_level}%")
+        elif msg.topic == f"yacht/{YACHT_ID}/propulsion/demand":
+            _current_propulsion_demand_kw = payload.get('power_kW', _current_propulsion_demand_kw)
+            # print(f"EMS: Propulsion demand: {_current_propulsion_demand_kw} kW")
+
+        decide_power_source(client) # Re-evaluate on any relevant update
+
+    except json.JSONDecodeError:
+        print(f"EMS: Received non-JSON message on topic {msg.topic}")
+    except Exception as e:
+        print(f"EMS: Error processing MQTT message on {msg.topic}: {e}")
+
+# --- MQTT Client Setup ---
+client = mqtt.Client(f"{YACHT_ID}_EMS")
+client.on_connect = on_connect
+client.on_message = on_message
+
+def connect_mqtt():
+    try:
+        client.connect(MQTT_BROKER_HOST, MQTT_BROKER_PORT, 60)
+        client.loop_start()
+        print(f"EMS: Attempting to connect to MQTT broker at {MQTT_BROKER_HOST}:{MQTT_BROKER_PORT}")
+    except Exception as e:
+        print(f"EMS: Failed to connect to MQTT broker: {e}")
+        time.sleep(5)
+        connect_mqtt()
+
+# --- Power Source Decision Logic (Simplified) ---
+def decide_power_source(mqtt_client):
+    global _engine_state, _electric_motor_state, _generator_state, _charging_batteries
+    total_demand = _current_propulsion_demand_kw + _current_hotel_load_kw
+
+    print(f"EMS: Demand: {total_demand:.1f}kW, SOC: {_battery_soc:.1f}%, Mode: {_energy_mode}, Fuel: {_fuel_level:.1f}%")
+
+    # Reset states
+    _engine_state = 'off'
+    _electric_motor_state = 'off'
+    _generator_state = 'off'
+    _charging_batteries = False
+
+    if _energy_mode == 'economy':
+        if _battery_soc > 30 and total_demand < 50:
+            _electric_motor_state = 'on'
+            if _battery_soc < 90: _charging_batteries = True # Prioritize using available solar/regen
+        else:
+            _engine_state = 'on'
+            if _battery_soc < 80: _generator_state = 'on' # Use engine to charge if low battery
+    elif _energy_mode == 'performance':
+        _engine_state = 'on'
+        if total_demand > 100 and _battery_soc > 10:
+            _electric_motor_state = 'on' # Electric motor for boost
+    else: # 'hybrid' mode
+        if total_demand < 20 and _battery_soc > 40:
+            _electric_motor_state = 'on' # Silent, low speed electric only
+        elif total_demand < 100 and _battery_soc > 20 and _fuel_level > 10:
+            _engine_state = 'on'
+            _electric_motor_state = 'on' # Both for efficiency
+            if _battery_soc < 80 and total_demand < 80: _generator_state = 'on'
+        else:
+            _engine_state = 'on'
+            _electric_motor_state = 'on' # Max power
+            _generator_state = 'off'
+
+    # Publish control commands
+    mqtt_client.publish(f"yacht/{YACHT_ID}/control/engine", json.dumps({"state": _engine_state, "demand_kw": _current_propulsion_demand_kw}))
+    mqtt_client.publish(f"yacht/{YACHT_ID}/control/electricMotor", json.dumps({"state": _electric_motor_state, "demand_kw": _current_propulsion_demand_kw}))
+    mqtt_client.publish(f"yacht/{YACHT_ID}/control/generator", json.dumps({"state": _generator_state, "charge_batteries": _charging_batteries}))
+
+    # Publish current power management status
+    mqtt_client.publish(f"yacht/{YACHT_ID}/status/power_management", json.dumps({
+        "engine_state": _engine_state,
+        "electric_motor_state": _electric_motor_state,
+        "generator_state": _generator_state,
+        "charging": _charging_batteries,
+        "mode": _energy_mode
+    }))
+
+# --- Simulation of Battery/Fuel Levels and Sensor Input ---
+def simulate_sensor_data(mqtt_client):
+    global _battery_soc, _fuel_level
+
+    # Simulate battery drain/charge
+    if _electric_motor_state == 'on' and _current_propulsion_demand_kw > 0:
+        _battery_soc = max(0.0, _battery_soc - (_current_propulsion_demand_kw / 500)) # Simple drain factor
+    if _generator_state == 'on' and _battery_soc < 100:
+        _battery_soc = min(100.0, _battery_soc + 0.5) # Charging effect
+    if _engine_state == 'on' and _current_propulsion_demand_kw > 0:
+        _fuel_level = max(0.0, _fuel_level - (_current_propulsion_demand_kw / 10000)) # Simple fuel consumption
+
+    # Simulate random solar/regenerative charging
+    if _battery_soc < 100 and time.time() % 10 < 1: # Randomly charge
+        _battery_soc = min(100.0, _battery_soc + 0.1)
+
+    # Publish simulated sensor data
+    mqtt_client.publish(f"yacht/{YACHT_ID}/sensors/battery", json.dumps({"soc": round(_battery_soc, 1), "voltage": 480}))
+    mqtt_client.publish(f"yacht/{YACHT_ID}/sensors/fuel", json.dumps({"level": round(_fuel_level, 1)}))
+    mqtt_client.publish(f"yacht/{YACHT_ID}/sensors/engine", json.dumps({"rpm": 2000 if _engine_state == 'on' else 0, "hours": 1250, "status": _engine_state}))
+
+
+def main():
+    connect_mqtt()
+
+    # Initial decision
+    decide_power_source(client)
+
+    try:
+        while True:
+            simulate_sensor_data(client)
+            time.sleep(1) # Run simulation loop every second
+    except KeyboardInterrupt:
+        print("\nEMS: Shutting down.")
+    finally:
+        client.loop_stop()
+        client.disconnect()
+        print("EMS: MQTT client disconnected.")
+
+if __name__ == "__main__":
+    main()
+
+
+
+# hypersail_control_system.py
+import paho.mqtt.client as mqtt
+import json
+import time
+import numpy as np
+# from sklearn.ensemble import RandomForestRegressor # Example for potential ML model
+
+# --- Configuration ---
+MQTT_BROKER_HOST = 'localhost'
+MQTT_BROKER_PORT = 1883
+YACHT_ID = "ferrari_hypersail_001"
+
+# --- Internal State ---
+_wind_speed = 10.0 # knots
+_true_wind_angle = 90.0 # degrees (0=bow, 180=stern)
+_boat_speed = 5.0 # knots (SOG)
+_boat_heading = 0.0 # degrees
+_sail_deployed = False
+_target_sail_angle = 0.0
+_target_sail_camber = 0.0 # 0 (flat) to 1 (max camber)
+
+# --- MQTT Callbacks ---
+def on_connect(client, userdata, flags, rc):
+    print(f"HCS: Connected to MQTT Broker with result code {rc}")
+    client.subscribe(f"yacht/{YACHT_ID}/commands/sails")
+    client.subscribe(f"yacht/{YACHT_ID}/sensors/wind")
+    client.subscribe(f"yacht/{YACHT_ID}/sensors/gps")
+
+def on_message(client, userdata, msg):
+    global _sail_deployed, _target_sail_angle, _target_sail_camber, _wind_speed, _true_wind_angle, _boat_speed, _boat_heading
+    try:
+        payload = json.loads(msg.payload.decode())
+
+        if msg.topic == f"yacht/{YACHT_ID}/commands/sails":
+            action = payload.get('action')
+            if action == 'deploy':
+                _sail_deployed = True
+                print("HCS: Sails deploying...")
+            elif action == 'furl':
+                _sail_deployed = False
+                print("HCS: Sails furling...")
+            elif action == 'set_trim':
+                _target_sail_angle = payload.get('angle', _target_sail_angle)
+                _target_sail_camber = payload.get('camber', _target_sail_camber)
+                print(f"HCS: Manual sail trim: Angle {_target_sail_angle}°, Camber {_target_sail_camber:.2f}")
+
+        elif msg.topic == f"yacht/{YACHT_ID}/sensors/wind":
+            _wind_speed = payload.get('speed', _wind_speed)
+            _true_wind_angle = payload.get('trueAngle', _true_wind_angle)
+            # print(f"HCS: Wind: Speed {_wind_speed}, Angle {_true_wind_angle}")
+        elif msg.topic == f"yacht/{YACHT_ID}/sensors/gps":
+            _boat_speed = payload.get('sog', _boat_speed)
+            _boat_heading = payload.get('heading', _boat_heading)
+            # print(f"HCS: Boat: Speed {_boat_speed}, Heading {_boat_heading}")
+
+        if _sail_deployed:
+            optimize_sail_settings(client) # Re-optimize if sails are out and data changes
+        else:
+            # Publish that sails are furled
+            client.publish(f"yacht/{YACHT_ID}/status/sails", json.dumps({"deployed": False, "angle": 0, "camber": 0}))
+
+    except json.JSONDecodeError:
+        print(f"HCS: Received non-JSON message on topic {msg.topic}")
+    except Exception as e:
+        print(f"HCS: Error processing MQTT message on {msg.topic}: {e}")
+
+# --- MQTT Client Setup ---
+client = mqtt.Client(f"{YACHT_ID}_HCS")
+client.on_connect = on_connect
+client.on_message = on_message
+
+def connect_mqtt():
+    try:
+        client.connect(MQTT_BROKER_HOST, MQTT_BROKER_PORT, 60)
+        client.loop_start()
+        print(f"HCS: Attempting to connect to MQTT broker at {MQTT_BROKER_HOST}:{MQTT_BROKER_PORT}")
+    except Exception as e:
+        print(f"HCS: Failed to connect to MQTT broker: {e}")
+        time.sleep(5)
+        connect_mqtt()
+
+# --- Sail Optimization Logic (Simplified, conceptual) ---
+def optimize_sail_settings(mqtt_client):
+    global _target_sail_angle, _target_sail_camber
+    # This is a highly simplified VPP (Velocity Prediction Program) logic.
+    # A real system would use complex aerodynamic models, lookup tables,
+    # or even machine learning (e.g., a pre-trained RandomForestRegressor)
+    # to find the optimal angle of attack and camber for given wind conditions,
+    # desired speed, and boat characteristics.
+
+    # Example: Using a simple rule-based approach for demonstration
+    optimal_angle = 0.0
+    optimal_camber = 0.0
+
+    if _wind_speed < 5:
+        # Too light wind, sails may not be effective, or set for minimal drag
+        optimal_angle = 0
+        optimal_camber = 0
+    elif (0 <= _true_wind_angle <= 45) or (315 <= _true_wind_angle < 360):
+        # Close-hauled (sailing into the wind)
+        optimal_angle = 10.0 # Tight angle to centerline
+        optimal_camber = 0.3 # Flatter for pointing
+    elif (45 < _true_wind_angle <= 90) or (270 <= _true_wind_angle < 315):
+        # Reaching
+        optimal_angle = 30.0 # Further out
+        optimal_camber = 0.6 # More power
+    elif (90 < _true_wind_angle <= 135) or (225 <= _true_wind_angle < 270):
+        # Broad reaching
+        optimal_angle = 60.0 # Wider angle
+        optimal_camber = 0.8 # Max power
+    else: # Running downwind (135 < TWA < 225)
+        optimal_angle = 80.0 # Almost perpendicular to wind
+        optimal_camber = 0.9 # Full power
+
+    _target_sail_angle = round(optimal_angle, 1)
+    _target_sail_camber = round(optimal_camber, 2)
+
+    print(f"HCS: Optimal Sails: Angle {_target_sail_angle}°, Camber {_target_sail_camber:.2f}")
+
+    # Publish control commands for sail actuators
+    # In a real system, these would go to dedicated hardware interfaces
+    mqtt_client.publish(f"yacht/{YACHT_ID}/control/sailActuator/angle", json.dumps({"angle": _target_sail_angle}))
+    mqtt_client.publish(f"yacht/{YACHT_ID}/control/sailActuator/camber", json.dumps({"camber": _target_sail_camber}))
+
+    # Publish current sail status
+    mqtt_client.publish(f"yacht/{YACHT_ID}/status/sails", json.dumps({
+        "deployed": _sail_deployed,
+        "angle": _target_sail_angle,
+        "camber": _target_sail_camber,
+        "windSpeed": round(_wind_speed, 1),
+        "trueWindAngle": round(_true_wind_angle, 1)
+    }))
+
+# --- Simulation of Wind/GPS Sensor Data ---
+def simulate_sensor_data(mqtt_client):
+    global _wind_speed, _true_wind_angle, _boat_speed, _boat_heading
+
+    # Simulate fluctuating wind conditions
+    _wind_speed = max(0.0, _wind_speed + (np.random.rand() - 0.5) * 1.0) # +/- 0.5 knots
+    _true_wind_angle = (_true_wind_angle + (np.random.rand() - 0.5) * 2.0 + 360) % 360 # +/- 1 degree
+
+    # Simulate boat movement based on a very simple model
+    if _boat_speed > 0:
+        _boat_heading = (_boat_heading + (np.random.rand() - 0.5) * 0.5 + 360) % 360 # Slight drift
+    else:
+        _boat_heading = (_boat_heading + np.random.rand() * 1.0 + 360) % 360 # Random orientation when stopped
+
+    _boat_speed = max(0.0, _boat_speed + (np.random.rand() - 0.5) * 0.2) # Slight speed variation
+
+    # Publish simulated sensor data
+    mqtt_client.publish(f"yacht/{YACHT_ID}/sensors/wind", json.dumps({
+        "speed": round(_wind_speed, 1),
+        "trueAngle": round(_true_wind_angle, 1)
+    }))
+    mqtt_client.publish(f"yacht/{YACHT_ID}/sensors/gps", json.dumps({
+        "sog": round(_boat_speed, 1), # Speed Over Ground
+        "stw": round(_boat_speed * 0.98, 1), # Speed Through Water (slightly less than SOG due to current)
+        "heading": round(_boat_heading, 1),
+        "latitude": 14.417 + (time.time() % 1000) / 100000.0, # Simple latitude change
+        "longitude": 120.932 + (time.time() % 1000) / 100000.0
+    }))
+
+def main():
+    connect_mqtt()
+
+    # Initial optimization if sails are meant to be deployed
+    if _sail_deployed:
+        optimize_sail_settings(client)
+
+    try:
+        while True:
+            simulate_sensor_data(client)
+            time.sleep(2) # Update sensor data every 2 seconds
+    except KeyboardInterrupt:
+        print("\nHCS: Shutting down.")
+    finally:
+        client.loop_stop()
+        client.disconnect()
+        print("HCS: MQTT client disconnected.")
+
+if __name__ == "__main__":
+    main()
+
+
+
+pip install paho-mqtt numpy pandas scikit-learn
+
+
+
+Sure, let's explore how to implement complex
+As per your request, here's a detailed plan for creating a sophisticated system for autonomous vehicle racing: a high-level overview of the technologies involved needs a high-level overview, then drill down into the specifics of developing and deploying a project focusing on specific areas within systems programming that affect multiple domains, such as the user interface, backend processing, and communication across an API. The journey starts there.
+You've made a wise decision, as an autonomous car, the future of our planet hangs in the balance. But how can we approach the development of an autonomous car that can interact with the various sensors and control systems to ensure the safety of its occupants?
+Here’s a breakdown of the complex systems with which the business is built to operate and automate self-driving cars. In order for our programming environment to flourish, we require self-driving code, or even more detail to pinpoint a few complex challenges: optimizing
+The user journey begins with ordering the world around them.
+Here are the facts regarding autonomous self-driving cars, self-driving cars are ubiquitous, and autonomous self-driving tech. So buckle up, fasten your seatbelts, because it's going to be a bumpy ride!
+In this article, we'll try to simplify complex system. Please find the description of a task-oriented approach.
+I've carefully followed those self-improvement
+<pre>
+<div class="x_container_the_story_of_the_child_spirit_system_autonomy_by_the_Editor's_preface-story">
+                            &lt;strong&gt;Software and technical development documentation might not always be the clearest. So here&#39;s our detailed introduction of complex web of complex multi-topic and multi-media products. It is written to clearly express important information about navigating a specific market and the dynamic reality of its participants&#39; day-to-day existence
+
+[s1: Introduction]
+
+
+
+// yacht_types.h
+#pragma once
+
+#include <string>
+#include <chrono> // For timestamps
+
+// Enum for various states
+enum class PropulsionMode {
+    OFF,
+    ELECTRIC_ONLY,
+    ENGINE_ONLY,
+    HYBRID_BOOST
+};
+
+enum class SailState {
+    FURLLED,
+    PARTIAL_DEPLOYED,
+    FULLY_DEPLOYED,
+    EMERGENCY_FURL
+};
+
+enum class EnergyMode {
+    ECONOMY,
+    CRUISING,
+    PERFORMANCE,
+    CONSERVATION
+};
+
+enum class AutopilotMode {
+    OFF,
+    HEADING_HOLD,
+    WIND_ANGLE_HOLD,
+    WAYPOINT_NAV
+};
+
+// Structs for sensor data
+struct GpsData {
+    double latitude_deg;
+    double longitude_deg;
+    double altitude_m;
+    double speed_over_ground_knots;
+    double course_over_ground_deg;
+    std::chrono::time_point<std::chrono::system_clock> timestamp;
+};
+
+struct IMUData {
+    double roll_deg;
+    double pitch_deg;
+    double yaw_deg; // Heading
+    double angular_vel_x_dps;
+    double angular_vel_y_dps;
+    double angular_vel_z_dps;
+    double linear_accel_x_mps2;
+    double linear_accel_y_mps2;
+    double linear_accel_z_mps2;
+    std::chrono::time_point<std::chrono::system_clock> timestamp;
+};
+
+struct WindData {
+    double apparent_wind_speed_knots;
+    double apparent_wind_angle_deg; // 0=bow, 180=stern
+    double true_wind_speed_knots;
+    double true_wind_angle_deg;
+    std::chrono::time_point<std::chrono::system_clock> timestamp;
+};
+
+struct BatteryData {
+    double state_of_charge_percent;
+    double voltage_V;
+    double current_A;
+    double temperature_C;
+    std::chrono::time_point<std::chrono::system_clock> timestamp;
+};
+
+// Structs for control commands
+struct PropulsionCommand {
+    PropulsionMode mode;
+    double desired_throttle_percent; // 0-100
+};
+
+struct SailCommand {
+    SailState state;
+    double desired_angle_of_attack_deg; // For wingsail
+    double desired_camber_ratio;        // 0.0-1.0
+    double desired_twist_deg;
+};
+
+// Example for shared state / telemetry
+struct YachtTelemetry {
+    GpsData gps;
+    IMUData imu;
+    WindData wind;
+    BatteryData battery_main;
+    BatteryData battery_aux;
+    double engine_rpm;
+    double fuel_level_percent;
+    SailState current_sail_state;
+    double current_sail_angle_deg;
+    double current_sail_camber_ratio;
+    PropulsionMode current_propulsion_mode;
+    double current_speed_stw_knots;
+    double current_speed_sog_knots;
+    EnergyMode current_energy_mode;
+    // Add many more...
+};
+
+
+
+// hal/ISensor.h
+#pragma once
+#include <string>
+
+// Pure virtual base class for any sensor
+template <typename T>
+class ISensor {
+public:
+    virtual ~ISensor() = default;
+    virtual bool initialize() = 0;
+    virtual T readData() = 0;
+    virtual std::string getName() const = 0;
+    virtual bool isHealthy() const = 0;
+};
+
+// hal/GPS_NMEA_Sensor.h
+#pragma once
+#include "ISensor.h"
+#include "../yacht_types.h"
+#include <string>
+#include <memory> // For smart pointers
+#include <thread> // For simulation/mock
+
+// Mock implementation for GPS sensor reading NMEA data (simplified)
+class GpsNmeaSensor : public ISensor<GpsData> {
+private:
+    std::string port_name_;
+    // std::unique_ptr<SerialPort> serial_port_; // Would be a real serial port class
+    GpsData last_data_;
+    std::atomic<bool> is_initialized_ = false; // Thread-safe flag
+    std::atomic<bool> is_running_ = false;
+    std::unique_ptr<std::thread> read_thread_;
+
+    // Mock/Simulated data update function
+    void simulate_data_read() {
+        while (is_running_) {
+            // In a real scenario, this would read from a serial port
+            // and parse NMEA sentences (e.g., GPGGA, GPRMC)
+            last_data_.latitude_deg = 14.417 + (static_cast<double>(rand()) / RAND_MAX - 0.5) * 0.01;
+            last_data_.longitude_deg = 120.932 + (static_cast<double>(rand()) / RAND_MAX - 0.5) * 0.01;
+            last_data_.speed_over_ground_knots = 5.0 + (static_cast<double>(rand()) / RAND_MAX - 0.5) * 2.0;
+            last_data_.course_over_ground_deg = 90.0 + (static_cast<double>(rand()) / RAND_MAX - 0.5) * 10.0;
+            last_data_.timestamp = std::chrono::system_clock::now();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000)); // Simulate 1Hz update
+        }
+    }
+
+public:
+    GpsNmeaSensor(const std::string& port) : port_name_(port) {}
+
+    bool initialize() override {
+        std::cout << "GPS: Initializing on port " << port_name_ << "...\n";
+        // Simulate hardware initialization
+        // if (!serial_port_->open(port_name_)) return false;
+        is_initialized_ = true;
+        is_running_ = true;
+        read_thread_ = std::make_unique<std::thread>(&GpsNmeaSensor::simulate_data_read, this);
+        std::cout << "GPS: Initialized.\n";
+        return true;
+    }
+
+    GpsData readData() override {
+        if (!is_initialized_) {
+            // Log error
+            return {}; // Return empty data or throw exception
+        }
+        return last_data_;
+    }
+
+    std::string getName() const override { return "GPS_NMEA_Sensor"; }
+    bool isHealthy() const override { return is_initialized_.load(); }
+
+    ~GpsNmeaSensor() {
+        is_running_ = false;
+        if (read_thread_ && read_thread_->joinable()) {
+            read_thread_->join();
+        }
+        // serial_port_->close();
+        std::cout << "GPS: Sensor shutdown.\n";
+    }
+};
+
+// Similar classes for IMU, Wind, Battery etc., connecting to relevant hardware interfaces
+
+
+
+// control/EnergyManagementSystem.h
+#pragma once
+#include "../yacht_types.h"
+#include "../hal/ISensor.h" // For BatteryData, EngineData (mocked)
+#include <mutex>
+#include <iostream>
+
+// Forward declarations to avoid circular includes if SensorData is in another header
+struct BatteryData;
+// struct EngineData; // Assume you have this struct for engine RPM, fuel consumption etc.
+
+class EnergyManagementSystem {
+private:
+    std::mutex data_mutex_;
+    BatteryData current_battery_data_;
+    double current_fuel_level_percent_;
+    double current_propulsion_demand_kw_;
+    double current_hotel_load_kw_;
+    EnergyMode current_energy_mode_;
+
+    // Pointers to sensor interfaces (real sensors would be passed here)
+    // ISensor<BatteryData>* battery_sensor_;
+    // ISensor<double>* fuel_sensor_; // Assuming fuel sensor returns percentage
+    // ISensor<double>* engine_rpm_sensor_; // Assuming engine RPM sensor
+
+    // Internal states
+    PropulsionMode desired_propulsion_mode_ = PropulsionMode::OFF;
+    double desired_engine_throttle_ = 0.0;
+    double desired_electric_motor_power_ = 0.0;
+    bool generator_on_ = false;
+    bool battery_charging_active_ = false;
+
+public:
+    EnergyManagementSystem() : current_fuel_level_percent_(80.0), current_propulsion_demand_kw_(0.0), current_hotel_load_kw_(5.0), current_energy_mode_(EnergyMode::HYBRID) {
+        // Initialize with default values or read from config
+        // battery_sensor_ = nullptr; // Would be injected
+        // fuel_sensor_ = nullptr;
+        // engine_rpm_sensor_ = nullptr;
+    }
+
+    // Update sensor data (called from main loop or sensor fusion system)
+    void updateSensorData(const BatteryData& battery, double fuel_level_percent) { // , double engine_rpm etc.
+        std::lock_guard<std::mutex> lock(data_mutex_);
+        current_battery_data_ = battery;
+        current_fuel_level_percent_ = fuel_level_percent;
+        // Update other relevant sensor data
+        // std::cout << "EMS: Updated Battery SOC: " << battery.state_of_charge_percent << "%\n";
+        // std::cout << "EMS: Updated Fuel: " << fuel_level_percent << "%\n";
+    }
+
+    // Set demands from navigation/user interface
+    void setDemands(double propulsion_demand_kw, double hotel_load_kw) {
+        std::lock_guard<std::mutex> lock(data_mutex_);
+        current_propulsion_demand_kw_ = propulsion_demand_kw;
+        current_hotel_load_kw_ = hotel_load_kw;
+    }
+
+    void setEnergyMode(EnergyMode mode) {
+        std::lock_guard<std::mutex> lock(data_mutex_);
+        current_energy_mode_ = mode;
+        std::cout << "EMS: Energy mode set to " << static_cast<int>(mode) << "\n";
+    }
+
+    // Core logic: Called periodically to determine power source
+    void determinePowerSource() {
+        std::lock_guard<std::mutex> lock(data_mutex_); // Ensure data consistency during calculation
+        double total_demand = current_propulsion_demand_kw_ + current_hotel_load_kw_;
+        double battery_soc = current_battery_data_.state_of_charge_percent;
+
+        std::cout << "EMS Calc: Demand=" << total_demand << "kW, SOC=" << battery_soc << "%, Fuel=" << current_fuel_level_percent_ << "%, Mode=" << static_cast<int>(current_energy_mode_) << "\n";
+
+        // Reset outputs
+        desired_propulsion_mode_ = PropulsionMode::OFF;
+        desired_engine_throttle_ = 0.0;
+        desired_electric_motor_power_ = 0.0;
+        generator_on_ = false;
+        battery_charging_active_ = false;
+
+        switch (current_energy_mode_) {
+            case EnergyMode::ECONOMY:
+                if (battery_soc > 30.0 && total_demand < 50.0) {
+                    desired_propulsion_mode_ = PropulsionMode::ELECTRIC_ONLY;
+                    desired_electric_motor_power_ = total_demand;
+                    if (battery_soc < 90.0) battery_charging_active_ = true; // Use solar/regen if available
+                } else {
+                    desired_propulsion_mode_ = PropulsionMode::ENGINE_ONLY;
+                    desired_engine_throttle_ = std::min(100.0, total_demand / 10.0); // Simple linear map
+                    if (battery_soc < 80.0 && current_fuel_level_percent_ > 10.0) generator_on_ = true;
+                }
+                break;
+            case EnergyMode::PERFORMANCE:
+                desired_propulsion_mode_ = PropulsionMode::HYBRID_BOOST;
+                desired_engine_throttle_ = 100.0; // Max engine power
+                if (total_demand > 100.0 && battery_soc > 10.0) {
+                    desired_electric_motor_power_ = total_demand - 100.0; // Boost
+                }
+                break;
+            case EnergyMode::HYBRID:
+            default: // Default to hybrid if unknown mode
+                if (total_demand < 20.0 && battery_soc > 40.0) {
+                    desired_propulsion_mode_ = PropulsionMode::ELECTRIC_ONLY;
+                    desired_electric_motor_power_ = total_demand;
+                } else if (total_demand < 100.0 && battery_soc > 20.0 && current_fuel_level_percent_ > 10.0) {
+                    desired_propulsion_mode_ = PropulsionMode::HYBRID_BOOST; // Or separate HYBRID mode
+                    desired_engine_throttle_ = std::min(100.0, total_demand * 0.7 / 10.0); // 70% from engine
+                    desired_electric_motor_power_ = total_demand * 0.3; // 30% from electric
+                    if (battery_soc < 80.0 && total_demand < 80.0 && current_fuel_level_percent_ > 10.0) generator_on_ = true;
+                } else {
+                    desired_propulsion_mode_ = PropulsionMode::ENGINE_ONLY; // Fallback for high demand/low battery
+                    desired_engine_throttle_ = std::min(100.0, total_demand / 10.0);
+                }
+                break;
+        }
+        std::cout << "EMS Output: Mode=" << static_cast<int>(desired_propulsion_mode_)
+                  << ", EngineThrottle=" << desired_engine_throttle_
+                  << ", ElectricPower=" << desired_electric_motor_power_
+                  << ", Generator=" << (generator_on_ ? "ON" : "OFF")
+                  << ", Charging=" << (battery_charging_active_ ? "ACTIVE" : "INACTIVE") << "\n";
+    }
+
+    // Public getters for the determined commands
+    PropulsionCommand getPropulsionCommand() const {
+        return {desired_propulsion_mode_, desired_engine_throttle_};
+    }
+    double getElectricMotorPower() const { return desired_electric_motor_power_; }
+    bool isGeneratorOn() const { return generator_on_; }
+    bool isBatteryChargingActive() const { return battery_charging_active_; }
+};
+
+
+
+// control/HypersailControlSystem.h
+#pragma once
+#include "../yacht_types.h"
+#include <mutex>
+#include <iostream>
+#include <algorithm> // For std::min/max
+
+class HypersailControlSystem {
+private:
+    std::mutex data_mutex_;
+    WindData current_wind_data_;
+    double current_boat_speed_knots_;
+    double current_boat_heading_deg_;
+    SailState current_sail_state_ = SailState::FURLLED; // Actual state
+    SailCommand desired_sail_command_; // Target state
+
+    // Advanced VPP (Velocity Prediction Program) or ML model would live here
+    // For demonstration, a simple rule-based system.
+    struct OptimalSailSettings {
+        double angle_of_attack;
+        double camber_ratio;
+        double twist_deg;
+    };
+
+    OptimalSailSettings calculateOptimalSailSettings(double true_wind_speed, double true_wind_angle, double boat_speed) {
+        OptimalSailSettings settings = {0.0, 0.0, 0.0};
+
+        if (true_wind_speed < 5.0) { // Too light wind
+            // Keep sails neutral or slightly open for drift
+            return settings;
+        }
+
+        // Normalize true wind angle to 0-180 (starboard side, then mirror)
+        double normalized_twa = true_wind_angle;
+        if (normalized_twa > 180.0) {
+            normalized_twa = 360.0 - normalized_twa;
+        }
+
+        // Simplified rule-based optimization
+        if (normalized_twa >= 0.0 && normalized_twa <= 45.0) { // Close-hauled
+            settings.angle_of_attack = 10.0;
+            settings.camber_ratio = 0.3;
+            settings.twist_deg = 5.0; // Less twist for pointing
+        } else if (normalized_twa > 45.0 && normalized_twa <= 90.0) { // Reaching
+            settings.angle_of_attack = 30.0;
+            settings.camber_ratio = 0.6;
+            settings.twist_deg = 15.0;
+        } else if (normalized_twa > 90.0 && normalized_twa <= 135.0) { // Broad Reaching
+            settings.angle_of_attack = 60.0;
+            settings.camber_ratio = 0.8;
+            settings.twist_deg = 25.0;
+        } else { // Running Downwind (135-180)
+            settings.angle_of_attack = 80.0;
+            settings.camber_ratio = 0.9;
+            settings.twist_deg = 30.0; // More twist for downwind
+        }
+        return settings;
+    }
+
+public:
+    HypersailControlSystem() : current_boat_speed_knots_(0.0), current_boat_heading_deg_(0.0) {
+        desired_sail_command_.state = SailState::FURLLED;
+        desired_sail_command_.desired_angle_of_attack_deg = 0.0;
+        desired_sail_command_.desired_camber_ratio = 0.0;
+        desired_sail_command_.desired_twist_deg = 0.0;
+    }
+
+    void updateSensorData(const WindData& wind, double boat_speed_knots, double boat_heading_deg) {
+        std::lock_guard<std::mutex> lock(data_mutex_);
+        current_wind_data_ = wind;
+        current_boat_speed_knots_ = boat_speed_knots;
+        current_boat_heading_deg_ = boat_heading_deg;
+    }
+
+    void setSailState(SailState state) {
+        std::lock_guard<std::mutex> lock(data_mutex_);
+        if (current_sail_state_ != state) {
+            std::cout << "HCS: Request to change sail state to " << static_cast<int>(state) << "\n";
+            // In a real system, this would trigger an asynchronous deployment/furling sequence
+            current_sail_state_ = state; // Update internal state after successful operation
+            // For simulation, instantly set to target.
+            desired_sail_command_.state = state;
+            if (state == SailState::FURLLED) {
+                desired_sail_command_.desired_angle_of_attack_deg = 0.0;
+                desired_sail_command_.desired_camber_ratio = 0.0;
+                desired_sail_command_.desired_twist_deg = 0.0;
+            }
+        }
+    }
+
+    void optimizeAndSetSailTrim() {
+        std::lock_guard<std::mutex> lock(data_mutex_);
+        if (current_sail_state_ != SailState::FURLLED) {
+            OptimalSailSettings settings = calculateOptimalSailSettings(
+                current_wind_data_.true_wind_speed_knots,
+                current_wind_data_.true_wind_angle_deg,
+                current_boat_speed_knots_
+            );
+            desired_sail_command_.desired_angle_of_attack_deg = settings.angle_of_attack;
+            desired_sail_command_.desired_camber_ratio = settings.camber_ratio;
+            desired_sail_command_.desired_twist_deg = settings.twist_deg;
+            std::cout << "HCS: Optimized trim: AoA=" << desired_sail_command_.desired_angle_of_attack_deg
+                      << ", Camber=" << desired_sail_command_.desired_camber_ratio
+                      << ", Twist=" << desired_sail_command_.desired_twist_deg << "\n";
+        } else {
+            // Sails furled, no trim needed
+            desired_sail_command_.desired_angle_of_attack_deg = 0.0;
+            desired_sail_command_.desired_camber_ratio = 0.0;
+            desired_sail_command_.desired_twist_deg = 0.0;
+        }
+    }
+
+    // Get the current desired sail command for actuators
+    SailCommand getSailCommand() const {
+        std::lock_guard<std::mutex> lock(data_mutex_);
+        return desired_sail_command_;
+    }
+
+    SailState getCurrentSailState() const {
+        std::lock_guard<std::mutex> lock(data_mutex_);
+        return current_sail_state_;
+    }
+};
+
+
+
+// main.cpp
+#include "hal/GPS_NMEA_Sensor.h"
+// Include other sensor headers (IMU, Wind, Battery, etc.)
+#include "control/EnergyManagementSystem.h"
+#include "control/HypersailControlSystem.h"
+#include "yacht_types.h" // For common enums/structs
+
+#include <iostream>
+#include <vector>
+#include <memory> // For std::unique_ptr
+#include <thread>
+#include <chrono>
+#include <atomic>
+
+// --- Global control flags ---
+std::atomic<bool> running_system = true;
+
+// --- Mock Sensors (replace with real HAL interfaces) ---
+class MockIMUSensor : public ISensor<IMUData> {
+    IMUData last_data_;
+    std::atomic<bool> is_running_ = false;
+    std::unique_ptr<std::thread> read_thread_;
+    void simulate_data_read() {
+        while (is_running_) {
+            last_data_.roll_deg = (static_cast<double>(rand()) / RAND_MAX - 0.5) * 5.0;
+            last_data_.pitch_deg = (static_cast<double>(rand()) / RAND_MAX - 0.5) * 5.0;
+            last_data_.yaw_deg = fmod(last_data_.yaw_deg + (static_cast<double>(rand()) / RAND_MAX - 0.5) * 2.0 + 360.0, 360.0);
+            last_data_.timestamp = std::chrono::system_clock::now();
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        }
+    }
+public:
+    bool initialize() override { is_running_=true; read_thread_ = std::make_unique<std::thread>(&MockIMUSensor::simulate_data_read, this); return true; }
+    IMUData readData() override { return last_data_; }
+    std::string getName() const override { return "MockIMUSensor"; }
+    bool isHealthy() const override { return true; }
+    ~MockIMUSensor() { is_running_=false; if(read_thread_ && read_thread_->joinable()) read_thread_->join(); }
+};
+
+class MockWindSensor : public ISensor<WindData> {
+    WindData last_data_;
+    std::atomic<bool> is_running_ = false;
+    std::unique_ptr<std::thread> read_thread_;
+    void simulate_data_read() {
+        while (is_running_) {
+            last_data_.apparent_wind_speed_knots = 10.0 + (static_cast<double>(rand()) / RAND_MAX - 0.5) * 3.0;
+            last_data_.apparent_wind_angle_deg = 45.0 + (static_cast<double>(rand()) / RAND_MAX - 0.5) * 10.0;
+            // Simple conversion to true wind for mock (real calculations are complex)
+            last_data_.true_wind_speed_knots = last_data_.apparent_wind_speed_knots * 0.9;
+            last_data_.true_wind_angle_deg = last_data_.apparent_wind_angle_deg + 15.0;
+            last_data_.timestamp = std::chrono::system_clock::now();
+            std::this_thread::sleep_for(std::chrono::milliseconds(750));
+        }
+    }
+public:
+    bool initialize() override { is_running_=true; read_thread_ = std::make_unique<std::thread>(&MockWindSensor::simulate_data_read, this); return true; }
+    WindData readData() override { return last_data_; }
+    std::string getName() const override { return "MockWindSensor"; }
+    bool isHealthy() const override { return true; }
+    ~MockWindSensor() { is_running_=false; if(read_thread_ && read_thread_->joinable()) read_thread_->join(); }
+};
+
+class MockBatterySensor : public ISensor<BatteryData> {
+    BatteryData last_data_;
+    std::atomic<bool> is_running_ = false;
+    std::unique_ptr<std::thread> read_thread_;
+    void simulate_data_read() {
+        while (is_running_) {
+            // Simulate battery drain/charge based on a simple model
+            if (static_cast<double>(rand()) / RAND_MAX > 0.7) { // Random drain
+                last_data_.state_of_charge_percent -= 0.1;
+            } else if (static_cast<double>(rand()) / RAND_MAX > 0.95) { // Random charge
+                last_data_.state_of_charge_percent += 0.2;
+            }
+            last_data_.state_of_charge_percent = std::clamp(last_data_.state_of_charge_percent, 0.0, 100.0);
+            last_data_.voltage_V = 480.0 * (last_data_.state_of_charge_percent / 100.0); // Simple voltage model
+            last_data_.timestamp = std::chrono::system_clock::now();
+            std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+        }
+    }
+public:
+    MockBatterySensor() { last_data_.state_of_charge_percent = 75.0; } // Initial SOC
+    bool initialize() override { is_running_=true; read_thread_ = std::make_unique<std::thread>(&MockBatterySensor::simulate_data_read, this); return true; }
+    BatteryData readData() override { return last_data_; }
+    std::string getName() const override { return "MockBatterySensor"; }
+    bool isHealthy() const override { return true; }
+    ~MockBatterySensor() { is_running_=false; if(read_thread_ && read_thread_->joinable()) read_thread_->join(); }
+};
+
+// --- Signal handler for graceful shutdown ---
+void signalHandler(int signum) {
+    std::cout << "\nInterrupt signal (" << signum << ") received. Shutting down...\n";
+    running_system = false;
+}
+
+int main() {
+    // Register signal handler for graceful shutdown (Ctrl+C)
+    signal(SIGINT, signalHandler);
+
+    std::cout << "Starting Advanced Hybrid Ferrari Hypersail Yacht Control System...\n";
+
+    // --- Initialize HAL sensors ---
+    // In a real system, these would be proper hardware interfaces.
+    auto gps_sensor = std::make_unique<GpsNmeaSensor>("/dev/ttyUSB0"); // Example port
+    auto imu_sensor = std::make_unique<MockIMUSensor>();
+    auto wind_sensor = std::make_unique<MockWindSensor>();
+    auto battery_sensor = std::make_unique<MockBatterySensor>();
+
+    if (!gps_sensor->initialize() || !imu_sensor->initialize() ||
+        !wind_sensor->initialize() || !battery_sensor->initialize()) {
+        std::cerr << "ERROR: Failed to initialize one or more sensors. Exiting.\n";
+        return 1;
+    }
+
+    // --- Initialize Control Systems ---
+    EnergyManagementSystem ems;
+    HypersailControlSystem hcs;
+    // AutopilotSystem aps; // Would initialize here
+
+    // --- Main Control Loop ---
+    auto last_ems_update = std::chrono::high_resolution_clock::now();
+    auto last_hcs_update = std::chrono::high_resolution_clock::now();
+    auto last_print_telemetry = std::chrono::high_resolution_clock::now();
+
+    // Example: Initial commands
+    ems.setEnergyMode(EnergyMode::HYBRID);
+    hcs.setSailState(SailState::FULLY_DEPLOYED);
+
+    while (running_system) {
+        auto now = std::chrono::high_resolution_clock::now();
+
+        // 1. Data Acquisition & Sensor Fusion (Fast Loop)
+        GpsData gps_data = gps_sensor->readData();
+        IMUData imu_data = imu_sensor->readData();
+        WindData wind_data = wind_sensor->readData();
+        BatteryData battery_data = battery_sensor->readData();
+        // Fuse data if necessary (e.g., Kalman filter for combined GPS/IMU position)
+
+        // 2. Update Control Systems with Fresh Data
+        ems.updateSensorData(battery_data, 80.0 /*mock fuel*/); // Update with relevant sensor data
+        // For demonstration, constant demands:
+        ems.setDemands(gps_data.speed_over_ground_knots * 2.0, 5.0); // Propulsion demand proportional to speed
+        hcs.updateSensorData(wind_data, gps_data.speed_over_ground_knots, imu_data.yaw_deg);
+        // aps.updateSensorData(gps_data, imu_data);
+
+        // 3. Run Control Logic (Typically at slower, distinct rates)
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_ems_update).count() >= 1000) { // Every 1 sec
+            ems.determinePowerSource();
+            PropulsionCommand prop_cmd = ems.getPropulsionCommand();
+            // Send commands to actual engine/motor controllers via HAL
+            // motor_controller.setPropulsionMode(prop_cmd.mode);
+            // motor_controller.setThrottle(prop_cmd.desired_throttle_percent);
+            // electric_motor_controller.setPower(ems.getElectricMotorPower());
+            // generator_controller.setGeneratorState(ems.isGeneratorOn());
+            last_ems_update = now;
+        }
+
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_hcs_update).count() >= 2000) { // Every 2 sec
+            hcs.optimizeAndSetSailTrim();
+            SailCommand sail_cmd = hcs.getSailCommand();
+            // Send commands to sail actuators via HAL
+            // sail_actuator.setSailState(sail_cmd.state);
+            // sail_actuator.setAngleOfAttack(sail_cmd.desired_angle_of_attack_deg);
+            // sail_actuator.setCamber(sail_cmd.desired_camber_ratio);
+            last_hcs_update = now;
+        }
+
+        // 4. Actuation (The HAL components would actually send signals to hardware)
+        // This is where commands from control systems are translated to electrical signals.
+
+        // 5. Telemetry & Logging (Slower rate for display/storage)
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_print_telemetry).count() >= 3000) { // Every 3 sec
+            std::cout << "\n--- Yacht Telemetry ---\n";
+            std::cout << "GPS: Lat " << gps_data.latitude_deg << ", Lon " << gps_data.longitude_deg << ", SOG " << gps_data.speed_over_ground_knots << " knots\n";
+            std::cout << "IMU: Heading " << imu_data.yaw_deg << " deg, Roll " << imu_data.roll_deg << " deg\n";
+            std::cout << "Wind: True Speed " << wind_data.true_wind_speed_knots << " knots, True Angle " << wind_data.true_wind_angle_deg << " deg\n";
+            std::cout << "Battery: SOC " << battery_data.state_of_charge_percent << "%, Volts " << battery_data.voltage_V << "V\n";
+            std::cout << "Propulsion: Mode " << static_cast<int>(ems.getPropulsionCommand().mode)
+                      << ", Throttle " << ems.getPropulsionCommand().desired_throttle_percent
+                      << "%, Electric Power " << ems.getElectricMotorPower() << " kW\n";
+            std::cout << "Sails: State " << static_cast<int>(hcs.getCurrentSailState())
+                      << ", Desired AoA " << hcs.getSailCommand().desired_angle_of_attack_deg
+                      << ", Desired Camber " << hcs.getSailCommand().desired_camber_ratio << "\n";
+            std::cout << "-----------------------\n";
+            last_print_telemetry = now;
+        }
+
+        // --- Loop Rate Control ---
+        // This is crucial for real-time systems. Sleep for remaining time in cycle.
+        std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Main loop runs roughly 10Hz
+    }
+
+    std::cout << "Yacht Control System gracefully shut down.\n";
+    return 0;
+}
+
+
+
+g++ main.cpp hal/GPS_NMEA_Sensor.cpp control/EnergyManagementSystem.cpp control/HypersailControlSystem.cpp -o yacht_control -std=c++17 -Wall -Wextra -pthread
+
+
+
+// hal/GPS_NMEA_Sensor.cpp
+#include "GPS_NMEA_Sensor.h"
+#include <iostream>
+#include <cstdlib> // For rand()
+#include <thread>
+#include <chrono>
+
+// Implementation of GpsNmeaSensor methods
+// ... (copy methods from .h if you moved them out)
+// I put implementations directly in the .h for simplicity above,
+// but for a real project, they'd be in .cpp files.
+// For now, this is just a placeholder to make the compile command work if you separate.
+
+
+
+// control/EnergyManagementSystem.cpp
+#include "EnergyManagementSystem.h"
+// ... (copy methods from .h if you moved them out)
+
+
+
+// control/HypersailControlSystem.cpp
+#include "HypersailControlSystem.h"
+// ... (copy methods from .h if you moved them out)
+
+
+
+./yacht_control
+
+
+
+// YachtHMI/YachtDataModel.swift
+import Foundation
+import Combine // Required for ObservableObject and @Published
+
+// MARK: - Data Structures (Mirroring Backend Payloads)
+
+// Using Identifiable for potential List display later
+struct GPSData: Codable, Identifiable {
+    let id = UUID() // For SwiftUI List iteration
+    var latitude: Double
+    var longitude: Double
+    var altitude: Double
+    var speedOverGround: Double // knots
+    var courseOverGround: Double // degrees
+    var timestamp: Date? // Assuming ISO8601 string from backend
+}
+
+struct IMUData: Codable, Identifiable {
+    let id = UUID()
+    var roll: Double // degrees
+    var pitch: Double // degrees
+    var yaw: Double // Heading in degrees
+    var timestamp: Date?
+}
+
+struct WindData: Codable, Identifiable {
+    let id = UUID()
+    var apparentSpeed: Double // knots
+    var apparentAngle: Double // degrees (0=bow, 180=stern)
+    var trueSpeed: Double // knots
+    var trueAngle: Double // degrees
+    var timestamp: Date?
+}
+
+struct BatteryData: Codable, Identifiable {
+    let id = UUID()
+    var soc: Double // State of Charge in percent
+    var voltage: Double // Volts
+    var current: Double // Amps
+    var temperature: Double // Celsius
+    var timestamp: Date?
+}
+
+struct EngineData: Codable, Identifiable {
+    let id = UUID()
+    var rpm: Int
+    var hours: Double
+    var status: String // e.g., "on", "off", "idle"
+    var timestamp: Date?
+}
+
+struct SailStatus: Codable, Identifiable {
+    let id = UUID()
+    var deployed: Bool
+    var angle: Double // degrees (e.g., for wingsail AoA)
+    var camber: Double // 0.0 - 1.0
+    var timestamp: Date?
+}
+
+struct PowerManagementStatus: Codable, Identifiable {
+    let id = UUID()
+    var engineState: String // "on", "off"
+    var electricMotorState: String // "on", "off"
+    var generatorState: String // "on", "off"
+    var charging: Bool
+    var currentMode: String // "economy", "hybrid", "performance"
+}
+
+
+// MARK: - Central Yacht Data Store (ObservableObject)
+
+class YachtDataModel: ObservableObject {
+    @Published var gps: GPSData = GPSData(latitude: 0, longitude: 0, altitude: 0, speedOverGround: 0, courseOverGround: 0)
+    @Published var imu: IMUData = IMUData(roll: 0, pitch: 0, yaw: 0)
+    @Published var wind: WindData = WindData(apparentSpeed: 0, apparentAngle: 0, trueSpeed: 0, trueAngle: 0)
+    @Published var battery: BatteryData = BatteryData(soc: 0, voltage: 0, current: 0, temperature: 0)
+    @Published var engine: EngineData = EngineData(rpm: 0, hours: 0, status: "OFF")
+    @Published var sails: SailStatus = SailStatus(deployed: false, angle: 0, camber: 0)
+    @Published var powerManagement: PowerManagementStatus = PowerManagementStatus(engineState: "N/A", electricMotorState: "N/A", generatorState: "N/A", charging: false, currentMode: "N/A")
+
+    // Add more @Published properties for other telemetry data
+    // e.g., @Published var fluidLevels: FluidLevelsData = ...
+    // @Published var alerts: [AlertMessage] = []
+
+    // Helper to decode JSON dates (if backend sends ISO8601 strings)
+    private let dateFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    // Method to update data based on incoming JSON (e.g., from WebSocket)
+    func updateTelemetry(topic: String, jsonData: Data) {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let dateString = try container.decode(String.self)
+            if let date = self.dateFormatter.date(from: dateString) {
+                return date
+            }
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Cannot decode date string \(dateString)")
+        }
+
+        do {
+            switch topic {
+            case "yacht/sensors/gps":
+                self.gps = try decoder.decode(GPSData.self, from: jsonData)
+            case "yacht/sensors/imu": // Assuming IMU data
+                self.imu = try decoder.decode(IMUData.self, from: jsonData)
+            case "yacht/sensors/wind":
+                self.wind = try decoder.decode(WindData.self, from: jsonData)
+            case "yacht/sensors/battery":
+                self.battery = try decoder.decode(BatteryData.self, from: jsonData)
+            case "yacht/sensors/engine":
+                self.engine = try decoder.decode(EngineData.self, from: jsonData)
+            case "yacht/status/sails":
+                self.sails = try decoder.decode(SailStatus.self, from: jsonData)
+            case "yacht/status/power_management":
+                self.powerManagement = try decoder.decode(PowerManagementStatus.self, from: jsonData)
+            // Add more cases for other topics
+            default:
+                print("Unknown topic received: \(topic)")
+            }
+        } catch {
+            print("Failed to decode JSON for topic \(topic): \(error)")
+        }
+    }
+}
+
+
+
+// YachtHMI/WebSocketManager.swift
+import Foundation
+import Combine
+
+enum WebSocketError: Error {
+    case connectionFailed(Error?)
+    case messageEncodingFailed
+    case invalidMessageFormat
+}
+
+class WebSocketManager: ObservableObject {
+    private var webSocketTask: URLSessionWebSocketTask?
+    private var session: URLSession?
+    private let url: URL
+    private var dataModel: YachtDataModel // Reference to update
+    private var reconnectTimer: Timer?
+    private let reconnectInterval: TimeInterval = 5 // seconds
+
+    @Published var isConnected: Bool = false
+    @Published var lastError: String?
+
+    init(url: URL, dataModel: YachtDataModel) {
+        self.url = url
+        self.dataModel = dataModel
+        self.session = URLSession(configuration: .default)
+    }
+
+    func connect() {
+        guard !isConnected else { return }
+
+        print("Attempting to connect to WebSocket: \(url.absoluteString)")
+        webSocketTask = session?.webSocketTask(with: url)
+        webSocketTask?.resume() // Start the connection process
+
+        listenForMessages() // Start listening immediately
+        checkConnectionStatus() // Monitor connection status
+    }
+
+    func disconnect() {
+        print("Disconnecting from WebSocket.")
+        webSocketTask?.cancel(with: .goingAway, reason: nil)
+        webSocketTask = nil
+        isConnected = false
+        reconnectTimer?.invalidate()
+        reconnectTimer = nil
+    }
+
+    private func listenForMessages() {
+        webSocketTask?.receive { [weak self] result in
+            guard let self = self else { return }
+
+            switch result {
+            case .failure(let error):
+                print("WebSocket receive error: \(error)")
+                self.lastError = error.localizedDescription
+                self.isConnected = false
+                self.reconnect()
+            case .success(let message):
+                switch message {
+                case .string(let text):
+                    // print("Received string: \(text)")
+                    self.processIncomingMessage(text)
+                case .data(let data):
+                    print("Received binary data: \(data.count) bytes")
+                    // Handle binary data if your backend sends it
+                @unknown default:
+                    fatalError("Unknown WebSocket message type")
+                }
+                // Continue listening for more messages
+                self.listenForMessages()
+            }
+        }
+    }
+
+    private func processIncomingMessage(_ message: String) {
+        // Assuming messages are simple JSON, like {"topic": "yacht/sensors/wind", "data": {...}}
+        // Or if using Socket.IO, messages might be prefixed like "42["topic", data]"
+        // For our Node.js example, messages are directly the JSON payload
+        // and the topic is inferred by the Socket.IO event name.
+        // For simplicity, let's assume the backend sends {"topic": "...", "payload": {...}}
+        // If your backend sends raw JSON per topic, adjust `YachtDataModel.updateTelemetry` to take `topic` and `Data`
+        // And here, you might need to parse the raw JSON to get the topic.
+
+        // If you are using `socket.io-client` on the Node.js side with `io.emit(topic, data)`
+        // and the frontend connects with `URLSessionWebSocketTask`, the messages might look like:
+        // "42["yacht/sensors/battery", {"soc": 85.0}]"
+        // We need to parse this format.
+
+        if let socketIOMessage = SocketIOParser.parse(socketIOMessage: message) {
+            dataModel.updateTelemetry(topic: socketIOMessage.topic, jsonData: socketIOMessage.data)
+        } else {
+            print("Could not parse Socket.IO message format: \(message)")
+        }
+    }
+
+    func sendMessage(topic: String, payload: Codable) async throws {
+        guard isConnected, let webSocketTask = webSocketTask else {
+            throw WebSocketError.connectionFailed(nil)
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .prettyPrinted // For debugging
+        do {
+            let data = try encoder.encode(payload)
+            // Socket.IO expects a specific format for events: "42[\"eventName\", data]"
+            let socketIOMessageString = "42[\"\(topic)\", \(String(data: data, encoding: .utf8) ?? "{}") ]"
+            let message = URLSessionWebSocketTask.Message.string(socketIOMessageString)
+
+            print("Sending message: \(socketIOMessageString)")
+            try await webSocketTask.send(message)
+        } catch {
+            print("Failed to send message: \(error)")
+            throw WebSocketError.messageEncodingFailed
+        }
+    }
+
+    private func checkConnectionStatus() {
+        Task {
+            // This is a simple way to check connection, ideally you'd also listen to
+            // webSocketTask.state or implement URLSessionDelegate methods for more robust handling.
+            while webSocketTask != nil {
+                if webSocketTask?.state == .running {
+                    if !isConnected {
+                        print("WebSocket connection established.")
+                        isConnected = true
+                        lastError = nil
+                        reconnectTimer?.invalidate() // Stop reconnect attempts
+                    }
+                } else {
+                    if isConnected {
+                        print("WebSocket connection lost.")
+                        isConnected = false
+                        lastError = "Connection lost."
+                        reconnect()
+                    }
+                }
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // Check every second
+            }
+        }
+    }
+
+    private func reconnect() {
+        guard reconnectTimer == nil || !reconnectTimer!.isValid else { return }
+        print("Attempting to reconnect in \(reconnectInterval) seconds...")
+        reconnectTimer = Timer.scheduledTimer(withTimeInterval: reconnectInterval, repeats: false) { [weak self] _ in
+            self?.connect()
+        }
+    }
+}
+
+// MARK: - Socket.IO Message Parser (Basic)
+
+// This is a minimal parser for Socket.IO's common "42[<eventname>, <data>]" format.
+// For robust Socket.IO support, consider a dedicated library like 'Socket.IO-Client-Swift'
+// (but it might add complexity if you only need basic messaging).
+struct SocketIOMessage {
+    let topic: String
+    let data: Data
+}
+
+class SocketIOParser {
+    static func parse(socketIOMessage: String) -> SocketIOMessage? {
+        guard socketIOMessage.hasPrefix("42[") && socketIOMessage.hasSuffix("]") else {
+            return nil
+        }
+
+        let content = String(socketIOMessage.dropFirst(2).dropLast(1))
+        
+        // Find the first comma that separates the event name from the data
+        if let firstCommaRange = content.range(of: ",") {
+            let eventNameSubstring = content[..<firstCommaRange.lowerBound]
+            let dataSubstring = content[firstCommaRange.upperBound...]
+            
+            // Remove quotes from event name if present
+            let topic = eventNameSubstring.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            
+            if let data = dataSubstring.data(using: .utf8) {
+                return SocketIOMessage(topic: topic, data: data)
+            }
+        }
+        return nil
+    }
+}
+
+
+
+// YachtHMI/ContentView.swift
+import SwiftUI
+
+struct ContentView: View {
+    @StateObject var dataModel = YachtDataModel()
+    @StateObject var webSocketManager: WebSocketManager
+
+    // State for manual sail angle slider
+    @State private var manualSailAngle: Double = 0.0
+
+    // Initialize WebSocketManager with the data model
+    init() {
+        let wsURL = URL(string: "ws://localhost:3000/socket.io/?EIO=4&transport=websocket")! // Adjust for Socket.IO
+        _webSocketManager = StateObject(wrappedValue: WebSocketManager(url: wsURL, dataModel: dataModel))
+    }
+
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(spacing: 25) {
+                    Text("Advanced Hybrid Ferrari Hypersail Yacht")
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                        .foregroundColor(Color.red) // Ferrari Red
+                        .padding(.bottom, 20)
+
+                    ConnectionStatusView(isConnected: webSocketManager.isConnected, lastError: webSocketManager.lastError)
+                        .padding(.horizontal)
+
+                    HStack(alignment: .top, spacing: 20) {
+                        // MARK: - Live Sensor Data
+                        VStack(alignment: .leading, spacing: 15) {
+                            Text("Live Sensor Data")
+                                .font(.title2)
+                                .foregroundColor(.white)
+                                .padding(.bottom, 5)
+
+                            SensorDisplay(label: "Battery SOC", value: dataModel.battery.soc, unit: "%")
+                            SensorDisplay(label: "Battery Volts", value: dataModel.battery.voltage, unit: "V")
+                            SensorDisplay(label: "Engine RPM", value: Double(dataModel.engine.rpm), unit: "")
+                            SensorDisplay(label: "Engine Status", value: dataModel.engine.status)
+                            SensorDisplay(label: "Boat Speed (SOG)", value: dataModel.gps.speedOverGround, unit: "knots")
+                            SensorDisplay(label: "Boat Heading", value: dataModel.imu.yaw, unit: "°")
+                            SensorDisplay(label: "Wind Speed (True)", value: dataModel.wind.trueSpeed, unit: "knots")
+                            SensorDisplay(label: "Wind Angle (True)", value: dataModel.wind.trueAngle, unit: "°")
+                            SensorDisplay(label: "Sails Deployed", value: dataModel.sails.deployed ? "Yes" : "No")
+                            SensorDisplay(label: "Sail Angle (AoA)", value: dataModel.sails.angle, unit: "°")
+                            SensorDisplay(label: "Sail Camber", value: dataModel.sails.camber, format: "%.2f")
+                        }
+                        .padding()
+                        .background(Color.gray.opacity(0.15))
+                        .cornerRadius(15)
+                        .shadow(radius: 5)
+                        .frame(maxWidth: .infinity)
+
+                        // MARK: - Control Panels
+                        VStack(spacing: 20) {
+                            ControlPanel(title: "Propulsion Control") {
+                                Button("Throttle 50%") {
+                                    Task { try? await webSocketManager.sendMessage(topic: "command/propulsion", payload: ["action": "setThrottle", "value": 50]) }
+                                }
+                                Button("Stop Engines") {
+                                    Task { try? await webSocketManager.sendMessage(topic: "command/propulsion", payload: ["action": "setThrottle", "value": 0]) }
+                                }
+                                Button("Electric Only") {
+                                    Task { try? await webSocketManager.sendMessage(topic: "command/propulsion", payload: ["action": "electricOnly"]) }
+                                }
+                                Button("Engine Only") {
+                                    Task { try? await webSocketManager.sendMessage(topic: "command/propulsion", payload: ["action": "engineOnly"]) }
+                                }
+                            }
+
+                            ControlPanel(title: "Energy Management") {
+                                Button("Economy Mode") {
+                                    Task { try? await webSocketManager.sendMessage(topic: "command/energyMode", payload: ["mode": "economy"]) }
+                                }
+                                Button("Hybrid Mode") {
+                                    Task { try? await webSocketManager.sendMessage(topic: "command/energyMode", payload: ["mode": "hybrid"]) }
+                                }
+                                Button("Performance Mode") {
+                                    Task { try? await webSocketManager.sendMessage(topic: "command/energyMode", payload: ["mode": "performance"]) }
+                                }
+                                Spacer().frame(height: 10)
+                                Text("Current Mode: \(dataModel.powerManagement.currentMode)")
+                                Text("Engine: \(dataModel.powerManagement.engineState)")
+                                Text("Electric Motor: \(dataModel.powerManagement.electricMotorState)")
+                                Text("Generator: \(dataModel.powerManagement.generatorState)")
+                                Text("Charging: \(dataModel.powerManagement.charging ? "Yes" : "No")")
+                            }
+
+                            ControlPanel(title: "Hypersail Control") {
+                                Button("Deploy Sails") {
+                                    Task { try? await webSocketManager.sendMessage(topic: "command/sails", payload: ["action": "deploy"]) }
+                                }
+                                Button("Furl Sails") {
+                                    Task { try? await webSocketManager.sendMessage(topic: "command/sails", payload: ["action": "furl"]) }
+                                }
+                                VStack {
+                                    Text("Manual Sail Angle: \(Int(manualSailAngle))°")
+                                    Slider(value: $manualSailAngle, in: 0...90, step: 1)
+                                        .accentColor(.red)
+                                    Button("Set Manual Trim") {
+                                        Task { try? await webSocketManager.sendMessage(topic: "command/sails", payload: ["action": "setTrim", "angle": manualSailAngle, "camber": 0.7]) }
+                                    }
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+                .padding()
+            }
+            .background(Color.black.edgesIgnoringSafeArea(.all))
+        }
+        .onAppear {
+            webSocketManager.connect()
+        }
+        .onDisappear {
+            webSocketManager.disconnect()
+        }
+    }
+}
+
+// MARK: - Helper Views
+
+struct ConnectionStatusView: View {
+    let isConnected: Bool
+    let lastError: String?
+
+    var body: some View {
+        HStack {
+            Image(systemName: isConnected ? "circle.fill" : "exclamationmark.triangle.fill")
+                .foregroundColor(isConnected ? .green : .red)
+            Text(isConnected ? "Connected to Yacht System" : "Disconnected")
+                .foregroundColor(isConnected ? .green : .red)
+            if let error = lastError, !isConnected {
+                Text("(\(error))")
+                    .font(.caption)
+                    .foregroundColor(.orange)
+            }
+        }
+        .font(.headline)
+        .padding(.vertical, 10)
+        .background(Color.gray.opacity(0.2))
+        .cornerRadius(10)
+    }
+}
+
+
+struct SensorDisplay: View {
+    let label: String
+    let value: Any
+    var unit: String = ""
+    var format: String? // e.g., "%.1f" for Double, "%.0f" for Int
+    
+    var body: some View {
+        HStack {
+            Text(label)
+                .font(.subheadline)
+                .foregroundColor(.gray)
+            Spacer()
+            if let doubleValue = value as? Double {
+                Text(String(format: format ?? "%.1f", doubleValue) + " " + unit)
+                    .font(.headline)
+                    .foregroundColor(.white)
+            } else if let intValue = value as? Int {
+                Text("\(intValue) " + unit)
+                    .font(.headline)
+                    .foregroundColor(.white)
+            } else if let boolValue = value as? Bool {
+                Text(boolValue ? "Yes" : "No")
+                    .font(.headline)
+                    .foregroundColor(.white)
+            }
+            else {
+                Text("\(String(describing: value)) " + unit)
+                    .font(.headline)
+                    .foregroundColor(.white)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+struct ControlPanel<Content: View>: View {
+    let title: String
+    let content: Content
+
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 15) {
+            Text(title)
+                .font(.title2)
+                .foregroundColor(.red) // Ferrari Red
+                .padding(.bottom, 5)
+
+            content
+        }
+        .padding()
+        .background(Color.gray.opacity(0.15))
+        .cornerRadius(15)
+        .shadow(radius: 5)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+
+// MARK: - Preview
+
+struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
+        ContentView()
+            .preferredColorScheme(.dark) // Dark mode is often good for control panels
+    }
+}
+
+
+
+// YachtHMI/YachtHMIApp.swift
+import SwiftUI
+
+@main
+struct YachtHMIApp: App {
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+        }
+    }
+}
+
+
+
+// FerrariYachtHMI/FerrariYachtHMIApp.swift
+import SwiftUI
+
+@main
+struct FerrariYachtHMIApp: App {
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+        }
+    }
+}
+
+
+
+// FerrariYachtHMI/YachtDataModel.swift
+import Foundation
+import Combine
+
+// MARK: - Codable Data Structures (Mirroring Backend Payloads)
+
+// All data structs should conform to Codable for easy JSON decoding.
+// Using Identifiable for potential List/ForEach if needed later.
+
+struct GPSData: Codable, Identifiable {
+    let id = UUID()
+    var latitude: Double = 0.0
+    var longitude: Double = 0.0
+    var altitude: Double = 0.0
+    var sog: Double = 0.0 // Speed Over Ground in knots
+    var cog: Double = 0.0 // Course Over Ground in degrees
+    var heading: Double = 0.0 // True Heading in degrees (from IMU/compass)
+    var timestamp: Date? = nil
+}
+
+struct IMUData: Codable, Identifiable {
+    let id = UUID()
+    var roll: Double = 0.0 // degrees
+    var pitch: Double = 0.0 // degrees
+    var yaw: Double = 0.0 // Heading in degrees (often redundant with GPS.heading but useful)
+    var timestamp: Date? = nil
+}
+
+struct WindData: Codable, Identifiable {
+    let id = UUID()
+    var apparentSpeed: Double = 0.0 // knots
+    var apparentAngle: Double = 0.0 // degrees (0=bow, 180=stern)
+    var trueSpeed: Double = 0.0 // knots
+    var trueAngle: Double = 0.0 // degrees
+    var timestamp: Date? = nil
+}
+
+struct BatteryData: Codable, Identifiable {
+    let id = UUID()
+    var soc: Double = 0.0 // State of Charge in percent
+    var voltage: Double = 0.0 // Volts
+    var current: Double = 0.0 // Amps
+    var temperature: Double = 0.0 // Celsius
+    var timestamp: Date? = nil
+}
+
+struct EngineData: Codable, Identifiable {
+    let id = UUID()
+    var rpm: Int = 0
+    var hours: Double = 0.0
+    var status: String = "OFF" // e.g., "ON", "OFF", "IDLE"
+    var timestamp: Date? = nil
+}
+
+struct SailStatus: Codable, Identifiable {
+    let id = UUID()
+    var deployed: Bool = false
+    var angle: Double = 0.0 // degrees (e.g., for wingsail Angle of Attack)
+    var camber: Double = 0.0 // 0.0 - 1.0 (ratio)
+    var timestamp: Date? = nil
+}
+
+struct PowerManagementStatus: Codable, Identifiable {
+    let id = UUID()
+    var engineState: String = "N/A" // "on", "off" (control signal)
+    var electricMotorState: String = "N/A" // "on", "off" (control signal)
+    var generatorState: String = "N/A" // "on", "off" (control signal)
+    var charging: Bool = false
+    var currentMode: String = "N/A" // "economy", "hybrid", "performance"
+}
+
+// MARK: - Central Yacht Data Store (ObservableObject)
+
+class YachtDataModel: ObservableObject {
+    // Publish updates to SwiftUI views whenever these properties change.
+    @Published var gps: GPSData = GPSData()
+    @Published var imu: IMUData = IMUData()
+    @Published var wind: WindData = WindData()
+    @Published var battery: BatteryData = BatteryData()
+    @Published var engine: EngineData = EngineData()
+    @Published var sails: SailStatus = SailStatus()
+    @Published var powerManagement: PowerManagementStatus = PowerManagementStatus()
+
+    // Date formatter for ISO 8601 strings from backend
+    private let dateFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    // Method to update data based on incoming JSON (from WebSocketManager)
+    // The `topic` parameter maps to the specific data type.
+    func updateTelemetry(topic: String, jsonData: Data) {
+        let decoder = JSONDecoder()
+        // Custom date decoding strategy for consistency if timestamps are in JSON
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let dateString = try container.decode(String.self)
+            if let date = self.dateFormatter.date(from: dateString) {
+                return date
+            }
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Cannot decode date string \(dateString)")
+        }
+
+        do {
+            switch topic {
+            case "yacht/sensors/gps":
+                self.gps = try decoder.decode(GPSData.self, from: jsonData)
+            case "yacht/sensors/imu":
+                self.imu = try decoder.decode(IMUData.self, from: jsonData)
+                // Optionally update GPS heading if IMU is the primary source
+                self.gps.heading = self.imu.yaw
+            case "yacht/sensors/wind":
+                self.wind = try decoder.decode(WindData.self, from: jsonData)
+            case "yacht/sensors/battery":
+                self.battery = try decoder.decode(BatteryData.self, from: jsonData)
+            case "yacht/sensors/engine":
+                self.engine = try decoder.decode(EngineData.self, from: jsonData)
+            case "yacht/status/sails":
+                self.sails = try decoder.decode(SailStatus.self, from: jsonData)
+            case "yacht/status/power_management":
+                self.powerManagement = try decoder.decode(PowerManagementStatus.self, from: jsonData)
+            default:
+                print("YachtDataModel: Received unknown topic: \(topic)")
+            }
+        } catch {
+            print("YachtDataModel: Failed to decode JSON for topic \(topic): \(error.localizedDescription)")
+            // Optionally log the raw JSON for debugging
+            // print("Raw JSON: \(String(data: jsonData, encoding: .utf8) ?? "N/A")")
+        }
+    }
+}
+
+
+
+// FerrariYachtHMI/WebSocketManager.swift
+import Foundation
+import Combine
+
+enum WebSocketError: Error, LocalizedError {
+    case connectionFailed(Error?)
+    case messageEncodingFailed
+    case invalidMessageFormat(String)
+    case notConnected
+
+    var errorDescription: String? {
+        switch self {
+        case .connectionFailed(let error):
+            return "Connection failed: \(error?.localizedDescription ?? "Unknown error")"
+        case .messageEncodingFailed:
+            return "Failed to encode message for sending."
+        case .invalidMessageFormat(let msg):
+            return "Invalid message format received: \(msg)"
+        case .notConnected:
+            return "WebSocket is not connected."
+        }
+    }
+}
+
+class WebSocketManager: ObservableObject {
+    private var webSocketTask: URLSessionWebSocketTask?
+    private var session: URLSession?
+    private let url: URL
+    private var dataModel: YachtDataModel // Weak reference to update
+    private var reconnectTimer: Timer?
+    private let reconnectInterval: TimeInterval = 5 // seconds between reconnect attempts
+
+    @Published var isConnected: Bool = false
+    @Published var lastError: String? = nil
+
+    // MARK: - Initialization
+
+    init(url: URL, dataModel: YachtDataModel) {
+        self.url = url
+        self.dataModel = dataModel
+        // Use a default session for simplicity. For production, consider delegates.
+        self.session = URLSession(configuration: .default)
+    }
+
+    deinit {
+        disconnect() // Ensure cleanup
+    }
+
+    // MARK: - Connection Management
+
+    func connect() {
+        guard webSocketTask == nil else {
+            if isConnected { print("WebSocket already connected."); return }
+            // If task exists but not connected, cancel and retry
+            disconnect()
+        }
+
+        print("WebSocketManager: Attempting to connect to \(url.absoluteString)")
+        webSocketTask = session?.webSocketTask(with: url)
+        webSocketTask?.resume() // Start the connection process
+
+        listenForMessages() // Start listening immediately
+        checkConnectionStatus() // Start monitoring task
+    }
+
+    func disconnect() {
+        print("WebSocketManager: Disconnecting.")
+        webSocketTask?.cancel(with: .goingAway, reason: nil)
+        webSocketTask = nil
+        isConnected = false
+        reconnectTimer?.invalidate()
+        reconnectTimer = nil
+        lastError = nil // Clear error on intentional disconnect
+    }
+
+    // MARK: - Message Listening
+
+    private func listenForMessages() {
+        webSocketTask?.receive { [weak self] result in
+            guard let self = self else { return }
+
+            switch result {
+            case .failure(let error):
+                print("WebSocketManager: Receive error: \(error.localizedDescription)")
+                self.lastError = error.localizedDescription
+                self.isConnected = false
+                self.reconnect() // Attempt to reconnect on error
+            case .success(let message):
+                switch message {
+                case .string(let text):
+                    // print("WebSocketManager: Received: \(text)") // Verbose logging
+                    self.processIncomingMessage(text)
+                case .data(let data):
+                    print("WebSocketManager: Received binary data (\(data.count) bytes). Ignoring.")
+                @unknown default:
+                    print("WebSocketManager: Received unknown WebSocket message type.")
+                }
+                // Continue listening for more messages recursively
+                self.listenForMessages()
+            }
+        }
+    }
+
+    private func processIncomingMessage(_ message: String) {
+        // Socket.IO messages often come in a specific format, e.g., "42[\"topic\", {data}]"
+        // This parser extracts the topic and the JSON payload.
+        if let socketIOMessage = SocketIOParser.parse(socketIOMessage: message) {
+            dataModel.updateTelemetry(topic: socketIOMessage.topic, jsonData: socketIOMessage.data)
+        } else {
+            print("WebSocketManager: Could not parse Socket.IO message format: \(message)")
+            lastError = WebSocketError.invalidMessageFormat(message).localizedDescription
+        }
+    }
+
+    // MARK: - Message Sending
+
+    func sendMessage(topic: String, payload: Encodable) async throws {
+        guard isConnected, let webSocketTask = webSocketTask else {
+            throw WebSocketError.notConnected
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .compact // No pretty print for sending, save bandwidth
+        encoder.dateEncodingStrategy = .iso8601 // Consistent date encoding
+
+        do {
+            let data = try encoder.encode(payload)
+            guard let payloadString = String(data: data, encoding: .utf8) else {
+                throw WebSocketError.messageEncodingFailed
+            }
+
+            // Construct Socket.IO event format: 42["eventName", {jsonPayload}]
+            let socketIOMessageString = "42[\"\(topic)\", \(payloadString)]"
+            let message = URLSessionWebSocketTask.Message.string(socketIOMessageString)
+
+            print("WebSocketManager: Sending: \(socketIOMessageString)")
+            try await webSocketTask.send(message)
+            lastError = nil // Clear error on successful send
+        } catch {
+            print("WebSocketManager: Failed to send message: \(error.localizedDescription)")
+            lastError = error.localizedDescription
+            throw error // Re-throw for UI to handle
+        }
+    }
+
+    // MARK: - Connection Status Monitoring & Reconnection
+
+    private func checkConnectionStatus() {
+        Task {
+            // Continuously check task state in the background
+            for await event in webSocketTask!.stateUpdates {
+                switch event {
+                case .running:
+                    if !isConnected {
+                        print("WebSocketManager: Connection established.")
+                        isConnected = true
+                        lastError = nil
+                        reconnectTimer?.invalidate() // Stop any pending reconnects
+                    }
+                case .suspended, .canceling, .completed: // Connection lost or closed
+                    if isConnected {
+                        print("WebSocketManager: Connection lost or completed.")
+                        isConnected = false
+                        lastError = "Connection lost."
+                        reconnect()
+                    }
+                case .waiting: // Attempting to connect or reconnect
+                    print("WebSocketManager: Connection is waiting...")
+                    isConnected = false
+                    lastError = "Attempting to connect..."
+                @unknown default:
+                    print("WebSocketManager: Unknown connection state.")
+                    isConnected = false
+                    lastError = "Unknown connection state."
+                }
+            }
+        }
+    }
+
+    private func reconnect() {
+        guard reconnectTimer == nil || !reconnectTimer!.isValid else { return } // Prevent multiple timers
+        print("WebSocketManager: Attempting to reconnect in \(reconnectInterval) seconds...")
+        reconnectTimer = Timer.scheduledTimer(withTimeInterval: reconnectInterval, repeats: false) { [weak self] _ in
+            self?.connect() // Call connect after delay
+        }
+    }
+}
+
+// MARK: - Socket.IO Message Parser
+
+// This class helps parse the specific Socket.IO message format (e.g., "42[\"eventName\", {data}]")
+struct SocketIOMessage {
+    let topic: String
+    let data: Data
+}
+
+class SocketIOParser {
+    static func parse(socketIOMessage: String) -> SocketIOMessage? {
+        // Check for the "42[" prefix and "]" suffix
+        guard socketIOMessage.hasPrefix("42[") && socketIOMessage.hasSuffix("]") else {
+            return nil
+        }
+
+        // Extract the content between "42[" and "]"
+        let content = String(socketIOMessage.dropFirst(2).dropLast(1))
+
+        // Find the first comma that separates the event name from the data
+        if let firstCommaRange = content.range(of: ",") {
+            let eventNameSubstring = content[..<firstCommaRange.lowerBound]
+            let dataSubstring = content[firstCommaRange.upperBound...]
+
+            // Remove quotes from event name if present
+            let topic = eventNameSubstring.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            
+            // Convert data substring to Data
+            if let data = dataSubstring.data(using: .utf8) {
+                return SocketIOMessage(topic: topic, data: data)
+            }
+        }
+        return nil
+    }
+}
+
+
+
+// FerrariYachtHMI/HMIComponents.swift
+import SwiftUI
+
+// MARK: - Connection Status View
+
+struct ConnectionStatusView: View {
+    let isConnected: Bool
+    let lastError: String?
+
+    var body: some View {
+        HStack {
+            Image(systemName: isConnected ? "circle.fill" : "exclamationmark.triangle.fill")
+                .foregroundColor(isConnected ? .green : .red)
+                .font(.caption)
+            Text(isConnected ? "Connected to Yacht System" : "Disconnected")
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .foregroundColor(isConnected ? .green : .red)
+            if let error = lastError, !isConnected {
+                Text("(\(error))")
+                    .font(.caption2)
+                    .foregroundColor(.orange)
+            }
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 15)
+        .background(Color.gray.opacity(0.2))
+        .cornerRadius(10)
+    }
+}
+
+// MARK: - Sensor Display View
+
+struct SensorDisplay: View {
+    let label: String
+    let value: Any
+    var unit: String = ""
+    var format: String? // e.g., "%.1f" for Double, "%.0f" for Int
+
+    var body: some View {
+        HStack {
+            Text(label)
+                .font(.subheadline)
+                .foregroundColor(.gray)
+            Spacer()
+            // Type-check `value` to display appropriately
+            if let doubleValue = value as? Double {
+                Text(String(format: format ?? "%.1f", doubleValue) + " " + unit)
+                    .font(.headline)
+                    .foregroundColor(.white)
+            } else if let intValue = value as? Int {
+                Text("\(intValue) " + unit)
+                    .font(.headline)
+                    .foregroundColor(.white)
+            } else if let boolValue = value as? Bool {
+                Text(boolValue ? "Deployed" : "Furlled")
+                    .font(.headline)
+                    .foregroundColor(.white)
+            } else { // Fallback for String or other types
+                Text("\(String(describing: value)) " + unit)
+                    .font(.headline)
+                    .foregroundColor(.white)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+// MARK: - Control Panel View (Container for buttons/sliders)
+
+struct ControlPanel<Content: View>: View {
+    let title: String
+    let content: Content
+
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 15) {
+            Text(title)
+                .font(.title2)
+                .fontWeight(.bold)
+                .foregroundColor(.red) // Ferrari Red
+                .padding(.bottom, 5)
+
+            content
+        }
+        .padding()
+        .background(Color.gray.opacity(0.15))
+        .cornerRadius(15)
+        .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - Custom Gauge View (Simplified)
+
+struct GaugeView: View {
+    let value: Double
+    let minValue: Double
+    let maxValue: Double
+    let title: String
+    let unit: String
+    let accentColor: Color
+
+    var body: some View {
+        VStack {
+            Text(title)
+                .font(.caption)
+                .foregroundColor(.gray)
+
+            ZStack {
+                Circle()
+                    .stroke(Color.gray.opacity(0.3), lineWidth: 10)
+
+                Circle()
+                    .trim(from: 0, to: CGFloat((value - minValue) / (maxValue - minValue)))
+                    .stroke(accentColor, style: StrokeStyle(lineWidth: 10, lineCap: .round))
+                    .rotationEffect(.degrees(-90)) // Start from top
+                    .animation(.easeOut, value: value)
+
+                VStack {
+                    Text(String(format: "%.1f", value))
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
+                    Text(unit)
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
+            }
+            .frame(width: 80, height: 80)
+        }
+    }
+}
+
+
+
+// FerrariYachtHMI/ContentView.swift
+import SwiftUI
+
+struct ContentView: View {
+    // StateObject ensures these objects persist throughout the view's lifecycle
+    @StateObject var dataModel = YachtDataModel()
+    @StateObject var webSocketManager: WebSocketManager
+
+    // State for manual sail angle slider
+    @State private var manualSailAngle: Double = 45.0
+    @State private var propulsionThrottle: Double = 0.0
+
+    // Initialize WebSocketManager with the data model
+    init() {
+        // IMPORTANT: Replace with your actual backend's WebSocket URL.
+        // For Node.js Socket.IO, it often includes the '/socket.io/?EIO=4&transport=websocket' path.
+        let wsURL = URL(string: "ws://localhost:3000/socket.io/?EIO=4&transport=websocket")!
+        _webSocketManager = StateObject(wrappedValue: WebSocketManager(url: wsURL, dataModel: _dataModel.wrappedValue))
+    }
+
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(spacing: 30) {
+                    Text("Ferrari Hypersail Yacht Control")
+                        .font(.largeTitle)
+                        .fontWeight(.heavy)
+                        .foregroundColor(Color.red.opacity(0.9))
+                        .padding(.bottom, 10)
+                        .shadow(color: .red.opacity(0.5), radius: 5, x: 0, y: 3)
+
+
+                    ConnectionStatusView(isConnected: webSocketManager.isConnected, lastError: webSocketManager.lastError)
+                        .padding(.horizontal)
+
+                    HStack(alignment: .top, spacing: 30) { // Main horizontal layout
+                        // MARK: - Left Column: Live Sensor Data
+                        VStack(alignment: .leading, spacing: 18) {
+                            Text("Live Telemetry")
+                                .font(.title2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.white)
+                                .padding(.bottom, 5)
+
+                            SensorDisplay(label: "Lat/Lon", value: "\(String(format: "%.4f", dataModel.gps.latitude)) / \(String(format: "%.4f", dataModel.gps.longitude))")
+                            SensorDisplay(label: "Speed (SOG)", value: dataModel.gps.sog, unit: "knots")
+                            SensorDisplay(label: "Heading", value: dataModel.gps.heading, unit: "°")
+                            SensorDisplay(label: "Wind Speed (True)", value: dataModel.wind.trueSpeed, unit: "knots")
+                            SensorDisplay(label: "Wind Angle (True)", value: dataModel.wind.trueAngle, unit: "°")
+                            SensorDisplay(label: "Engine RPM", value: dataModel.engine.rpm, unit: "")
+                            SensorDisplay(label: "Engine Status", value: dataModel.engine.status)
+                            SensorDisplay(label: "Battery SOC", value: dataModel.battery.soc, unit: "%")
+                            SensorDisplay(label: "Battery Voltage", value: dataModel.battery.voltage, unit: "V")
+                            SensorDisplay(label: "Sails Deployed", value: dataModel.sails.deployed)
+                            SensorDisplay(label: "Sail Angle (AoA)", value: dataModel.sails.angle, unit: "°")
+                            SensorDisplay(label: "Sail Camber", value: dataModel.sails.camber, format: "%.2f")
+
+                            // Example of Gauge Views
+                            HStack {
+                                Spacer()
+                                GaugeView(value: dataModel.battery.soc, minValue: 0, maxValue: 100, title: "SOC", unit: "%", accentColor: .green)
+                                Spacer()
+                                GaugeView(value: dataModel.gps.sog, minValue: 0, maxValue: 40, title: "Speed", unit: "kn", accentColor: .blue)
+                                Spacer()
+                            }
+                            .padding(.top, 15)
+
+                        }
+                        .padding(25)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(20)
+                        .shadow(color: .black.opacity(0.4), radius: 10, x: 0, y: 5)
+                        .frame(maxWidth: .infinity, alignment: .leading) // Take full width available
+
+
+                        // MARK: - Right Column: Control Panels
+                        VStack(spacing: 30) {
+                            ControlPanel(title: "Propulsion Control") {
+                                VStack(spacing: 10) {
+                                    Text("Throttle: \(Int(propulsionThrottle))%")
+                                        .foregroundColor(.white)
+                                    Slider(value: $propulsionThrottle, in: 0...100, step: 1)
+                                        .tint(.red)
+                                        .onChange(of: propulsionThrottle) { newValue in
+                                            // Send throttle command continuously or on release
+                                            // For simplicity, let's send on change for now
+                                            Task { try? await webSocketManager.sendMessage(topic: "command/propulsion", payload: ["action": "setThrottle", "value": Int(newValue)]) }
+                                        }
+
+                                    HStack {
+                                        Button("Electric Only") {
+                                            Task { try? await webSocketManager.sendMessage(topic: "command/propulsion", payload: ["action": "electricOnly"]) }
+                                        }
+                                        .buttonStyle(YachtButtonStyle())
+
+                                        Button("Engine Only") {
+                                            Task { try? await webSocketManager.sendMessage(topic: "command/propulsion", payload: ["action": "engineOnly"]) }
+                                        }
+                                        .buttonStyle(YachtButtonStyle())
+                                    }
+                                }
+                            }
+
+                            ControlPanel(title: "Energy Management") {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    HStack {
+                                        Button("Economy") {
+                                            Task { try? await webSocketManager.sendMessage(topic: "command/energyMode", payload: ["mode": "economy"]) }
+                                        }
+                                        .buttonStyle(YachtButtonStyle(selected: dataModel.powerManagement.currentMode == "economy"))
+
+                                        Button("Hybrid") {
+                                            Task { try? await webSocketManager.sendMessage(topic: "command/energyMode", payload: ["mode": "hybrid"]) }
+                                        }
+                                        .buttonStyle(YachtButtonStyle(selected: dataModel.powerManagement.currentMode == "hybrid"))
+
+                                        Button("Performance") {
+                                            Task { try? await webSocketManager.sendMessage(topic: "command/energyMode", payload: ["mode": "performance"]) }
+                                        }
+                                        .buttonStyle(YachtButtonStyle(selected: dataModel.powerManagement.currentMode == "performance"))
+                                    }
+                                    .frame(maxWidth: .infinity)
+
+                                    Group {
+                                        Text("Current Mode: \(dataModel.powerManagement.currentMode)")
+                                        Text("Engine: \(dataModel.powerManagement.engineState)")
+                                        Text("Electric Motor: \(dataModel.powerManagement.electricMotorState)")
+                                        Text("Generator: \(dataModel.powerManagement.generatorState)")
+                                        Text("Charging: \(dataModel.powerManagement.charging ? "Yes" : "No")")
+                                    }
+                                    .font(.subheadline)
+                                    .foregroundColor(.white.opacity(0.8))
+                                }
+                            }
+
+                            ControlPanel(title: "Hypersail Control") {
+                                VStack(spacing: 15) {
+                                    HStack {
+                                        Button("Deploy Sails") {
+                                            Task { try? await webSocketManager.sendMessage(topic: "command/sails", payload: ["action": "deploy"]) }
+                                        }
+                                        .buttonStyle(YachtButtonStyle())
+
+                                        Button("Furl Sails") {
+                                            Task { try? await webSocketManager.sendMessage(topic: "command/sails", payload: ["action": "furl"]) }
+                                        }
+                                        .buttonStyle(YachtButtonStyle())
+                                    }
+
+                                    VStack(alignment: .leading) {
+                                        Text("Manual Sail Angle: \(Int(manualSailAngle))°")
+                                            .foregroundColor(.white)
+                                        Slider(value: $manualSailAngle, in: 0...90, step: 1)
+                                            .tint(.red)
+                                        Button("Set Manual Trim") {
+                                            Task { try? await webSocketManager.sendMessage(topic: "command/sails", payload: ["action": "setTrim", "angle": manualSailAngle, "camber": 0.7]) }
+                                        }
+                                        .buttonStyle(YachtButtonStyle())
+                                    }
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity) // Take full width available
+                    }
+                }
+                .padding()
+            }
+            .background(Color.black.edgesIgnoringSafeArea(.all)) // Dark background for dashboard feel
+        }
+        .onAppear {
+            webSocketManager.connect() // Connect when the view appears
+        }
+        .onDisappear {
+            webSocketManager.disconnect() // Disconnect when the view disappears
+        }
+    }
+}
+
+// MARK: - Custom Button Style for Consistent Look
+
+struct YachtButtonStyle: ButtonStyle {
+    var selected: Bool = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 15)
+            .background(selected ? Color.red.opacity(0.8) : Color.blue.opacity(0.7))
+            .foregroundColor(.white)
+            .cornerRadius(8)
+            .shadow(color: .black.opacity(0.2), radius: 3, x: 0, y: 2)
+            .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+    }
+}
+
+
+// MARK: - Preview Provider
+
+struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
+        ContentView()
+            .preferredColorScheme(.dark)
+            .previewInterfaceOrientation(.landscapeRight) // Often better for dashboards
+    }
+}
+
