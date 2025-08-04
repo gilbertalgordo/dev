@@ -1,0 +1,1560 @@
+# The Vehicle class represents the entire hybrid car/drone system.
+class HybridVehicle:
+    def __init__(self):
+        self.mode = "ground"  # Initial mode is ground-based driving
+        self.battery = 100  # Battery charge percentage
+        self.fuel = 100  # Fuel tank percentage
+        self.propeller_system = PropellerSystem()
+        self.blade_covers = BladeCovers()
+        self.passenger_count = 0
+        self.location = (0, 0, 0)  # (x, y, z) coordinates
+
+    def switch_mode(self, new_mode):
+        """Switches between ground and flight modes."""
+        if new_mode == "flight" and self.check_preflight_conditions():
+            print("Switching to flight mode...")
+            self.blade_covers.open()
+            self.propeller_system.start_propellers()
+            self.mode = "flight"
+            return True
+        elif new_mode == "ground" and self.mode == "flight":
+            print("Switching to ground mode...")
+            self.land()  # A safe landing sequence must be called first
+            self.propeller_system.stop_propellers()
+            self.blade_covers.close()
+            self.mode = "ground"
+            return True
+        else:
+            print(f"Cannot switch to {new_mode} mode. Conditions not met.")
+            return False
+
+    def check_preflight_conditions(self):
+        """Checks if the vehicle is safe to fly."""
+        if self.battery < 30:
+            print("Warning: Battery too low for flight.")
+            return False
+        if self.passenger_count == 0:
+            print("Warning: No passengers detected.")
+            # A flight with no passengers might be a valid use case, but the system should check
+            # for a specific command for an unmanned flight.
+            return True
+        if self.blade_covers.is_open() == False:
+            print("Warning: Blade covers must be open for flight.")
+            return False
+        # Additional checks would be required, like weather, weight balance, and propeller health.
+        return True
+
+    def fly_to_location(self, destination):
+        """Initiates a flight to a specific destination."""
+        if self.mode == "flight":
+            # This is where complex flight control logic would go.
+            print(f"Flying to destination: {destination}")
+            # Pseudo-code for flight control:
+            # 1. Calculate flight path and altitude.
+            # 2. Adjust propeller speeds and angles to ascend.
+            # 3. Maintain stable flight toward destination.
+            # 4. Handle unexpected turbulence or obstacles.
+            self.location = destination
+        else:
+            print("Vehicle is not in flight mode.")
+
+    def land(self):
+        """Executes a safe landing procedure."""
+        print("Initiating landing sequence...")
+        # Pseudo-code for landing:
+        # 1. Find a safe landing spot.
+        # 2. Slowly descend, adjusting propeller speeds for a soft landing.
+        # 3. Secure the vehicle on the ground.
+        print("Landing complete. Vehicle is on the ground.")
+
+
+# The PropellerSystem class manages the four main propellers.
+class PropellerSystem:
+    def __init__(self):
+        self.propellers = [Propeller(i) for i in range(4)]
+        self.is_running = False
+
+    def start_propellers(self):
+        if not self.is_running:
+            print("Propellers spinning up...")
+            for prop in self.propellers:
+                prop.start()
+            self.is_running = True
+
+    def stop_propellers(self):
+        if self.is_running:
+            print("Propellers spinning down...")
+            for prop in self.propellers:
+                prop.stop()
+            self.is_running = False
+
+    def set_speed(self, propeller_id, speed):
+        # This would be used for steering and altitude control.
+        if 0 <= propeller_id < 4:
+            self.propellers[propeller_id].set_speed(speed)
+
+# The Propeller class represents a single propeller.
+class Propeller:
+    def __init__(self, propeller_id):
+        self.id = propeller_id
+        self.speed = 0
+
+    def start(self):
+        self.set_speed(100) # Initial speed for takeoff
+
+    def stop(self):
+        self.set_speed(0)
+
+    def set_speed(self, speed):
+        self.speed = speed
+        # This would send a signal to the physical motor controller.
+        print(f"Propeller {self.id} speed set to {self.speed} RPM.")
+
+
+# The BladeCovers class manages the retractable covers for the propellers.
+class BladeCovers:
+    def __init__(self):
+        self.covers_status = "closed"
+
+    def open(self):
+        print("Opening blade covers...")
+        self.covers_status = "open"
+
+    def close(self):
+        print("Closing blade covers...")
+        self.covers_status = "closed"
+
+    def is_open(self):
+        return self.covers_status == "open"
+
+# --- Main simulation loop ---
+if __name__ == "__main__":
+    vehicle = HybridVehicle()
+
+    print("Vehicle is in ground mode.")
+
+    # Let's try to fly without opening covers.
+    print("\nAttempting to fly without pre-flight checks...")
+    vehicle.switch_mode("flight")
+
+    # Now, let's follow the correct procedure.
+    print("\nExecuting proper pre-flight sequence...")
+    # Assume passengers have boarded.
+    vehicle.passenger_count = 2
+    vehicle.switch_mode("flight")
+    
+    if vehicle.mode == "flight":
+        vehicle.fly_to_location((100, 200, 50))
+    
+    print("\nReturning to ground mode.")
+    vehicle.switch_mode("ground")
+
+
+// Import the built-in EventEmitter to handle communication between components
+const EventEmitter = require('events');
+
+// --- Component Classes ---
+
+// The HybridVehicle class is the main control hub.
+class HybridVehicle extends EventEmitter {
+    constructor() {
+        super();
+        this.mode = 'ground'; // 'ground', 'flight'
+        this.status = 'idle'; // 'idle', 'preparing', 'flying', 'landing', 'charging'
+        this.batteryLevel = 100; // Percentage
+        this.fuelLevel = 100; // Percentage
+        this.propellerSystem = new PropellerSystem();
+        this.bladeCovers = new BladeCovers();
+        this.location = { x: 0, y: 0, z: 0 };
+        this.passengers = 0;
+
+        // Listen for events from sub-systems
+        this.on('takeoff_request', this.handleTakeoffRequest);
+        this.on('land_request', this.handleLandRequest);
+        this.on('propellers_ready', this.startFlight);
+        this.on('blade_covers_open', this.propellerSystem.startSpinUp);
+    }
+
+    async handleTakeoffRequest(passengerCount) {
+        if (this.mode === 'ground' && this.status === 'idle') {
+            console.log("Takeoff request received. Starting pre-flight checks...");
+            this.passengers = passengerCount;
+            this.status = 'preparing';
+            const checksPassed = await this.performPreFlightChecks();
+
+            if (checksPassed) {
+                console.log("Pre-flight checks passed. Initiating takeoff sequence.");
+                this.bladeCovers.openCovers();
+            } else {
+                this.status = 'idle';
+                console.log("Pre-flight checks failed. Takeoff aborted.");
+            }
+        } else {
+            console.log(`Cannot takeoff. Vehicle is in ${this.mode} mode and ${this.status} status.`);
+        }
+    }
+
+    async performPreFlightChecks() {
+        if (this.batteryLevel < 30) {
+            console.error("Error: Battery level is too low for flight.");
+            return false;
+        }
+        if (this.passengers === 0) {
+            console.log("Warning: No passengers detected. Proceeding with unmanned flight protocol.");
+        }
+        // Additional checks like weight, weather, system diagnostics would go here.
+        return true;
+    }
+
+    async startFlight() {
+        console.log("Propellers ready. Ascending...");
+        this.status = 'flying';
+        this.mode = 'flight';
+        // A complex flight control loop would go here, updating location etc.
+        // For this example, we'll just simulate a flight to a destination.
+        const destination = { x: 500, y: 500, z: 100 };
+        this.flyToLocation(destination);
+    }
+
+    async flyToLocation(destination) {
+        console.log(`Flying to destination: (${destination.x}, ${destination.y}, ${destination.z})`);
+        // Simulate flight time
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        this.location = destination;
+        console.log("Destination reached. Preparing for landing.");
+        this.emit('land_request');
+    }
+
+    async handleLandRequest() {
+        if (this.mode === 'flight' && this.status === 'flying') {
+            console.log("Landing sequence initiated.");
+            this.status = 'landing';
+            // A landing algorithm would go here
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            this.location = { ...this.location, z: 0 }; // Set altitude to 0
+            this.propellerSystem.stopSpinDown();
+        }
+    }
+
+    async stopFlight() {
+        this.mode = 'ground';
+        this.status = 'idle';
+        this.bladeCovers.closeCovers();
+        console.log("Vehicle is safely on the ground and idle.");
+    }
+}
+
+// The PropellerSystem class manages the four propellers.
+class PropellerSystem extends EventEmitter {
+    constructor() {
+        super();
+        this.propellers = [new Propeller(1), new Propeller(2), new Propeller(3), new Propeller(4)];
+        this.isSpinning = false;
+        
+        this.on('spin_down_complete', () => {
+            console.log("All propellers are off. Flight sequence complete.");
+            vehicle.stopFlight();
+        });
+    }
+
+    async startSpinUp() {
+        console.log("Propellers are spinning up...");
+        this.isSpinning = true;
+        // Simulate propellers spinning up asynchronously
+        const spinUpPromises = this.propellers.map(p => p.setSpeed(100));
+        await Promise.all(spinUpPromises);
+        console.log("Propellers are ready for flight.");
+        vehicle.emit('propellers_ready');
+    }
+
+    async stopSpinDown() {
+        console.log("Propellers are spinning down...");
+        const spinDownPromises = this.propellers.map(p => p.setSpeed(0));
+        await Promise.all(spinDownPromises);
+        this.isSpinning = false;
+        this.emit('spin_down_complete');
+    }
+}
+
+// The Propeller class represents a single propeller motor.
+class Propeller {
+    constructor(id) {
+        this.id = id;
+        this.speed = 0; // RPM
+    }
+
+    async setSpeed(speed) {
+        console.log(`Propeller ${this.id}: adjusting speed to ${speed} RPM.`);
+        // Simulate the time it takes to change speed
+        await new Promise(resolve => setTimeout(resolve, 500));
+        this.speed = speed;
+    }
+}
+
+// The BladeCovers class manages the retractable covers.
+class BladeCovers {
+    constructor() {
+        this.status = 'closed';
+    }
+
+    async openCovers() {
+        if (this.status === 'closed') {
+            console.log("Opening blade covers...");
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            this.status = 'open';
+            console.log("Blade covers are open.");
+            vehicle.emit('blade_covers_open');
+        }
+    }
+
+    async closeCovers() {
+        if (this.status === 'open') {
+            console.log("Closing blade covers...");
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            this.status = 'closed';
+            console.log("Blade covers are closed.");
+        }
+    }
+}
+
+
+// --- Main execution ---
+const vehicle = new HybridVehicle();
+
+console.log("Vehicle System Manager started.");
+
+// Simulate a user command to take off
+vehicle.emit('takeoff_request', 2); // 2 passengers
+
+// The sequence of events will now unfold:
+// 1. 'takeoff_request' is emitted.
+// 2. The HybridVehicle's `handleTakeoffRequest` method runs.
+// 3. Pre-flight checks are performed.
+// 4. `bladeCovers.openCovers()` is called.
+// 5. 'blade_covers_open' is emitted.
+// 6. The `PropellerSystem`'s `startSpinUp` method runs.
+// 7. 'propellers_ready' is emitted.
+// 8. The HybridVehicle's `startFlight` method runs.
+// 9. The simulated flight to a destination completes.
+// 10. 'land_request' is emitted.
+// 11. The landing sequence begins, followed by propeller spin down.
+// 12. 'spin_down_complete' is emitted.
+// 13. The vehicle's `stopFlight` method is called.
+// 14. The blade covers close, and the system returns to an idle state.
+
+
+
+
+import React, { useState, useEffect } from 'react';
+import './App.css'; // Assuming you have a basic CSS file for styling
+
+// --- Component Definitions ---
+
+const ModeSelector = ({ mode, setMode, status }) => (
+    <div className="mode-selector">
+        <h2>Vehicle Mode</h2>
+        <button
+            className={`mode-btn ${mode === 'ground' ? 'active' : ''}`}
+            onClick={() => setMode('ground')}
+            disabled={status !== 'idle'}
+        >
+            Ground
+        </button>
+        <button
+            className={`mode-btn ${mode === 'flight' ? 'active' : ''}`}
+            onClick={() => setMode('flight')}
+            disabled={status !== 'idle'}
+        >
+            Flight
+        </button>
+    </div>
+);
+
+const Controls = ({ vehicleStatus, handleTakeoff, handleLand }) => (
+    <div className="controls">
+        <h2>Flight Controls</h2>
+        <button
+            className="control-btn takeoff"
+            onClick={handleTakeoff}
+            disabled={vehicleStatus.mode !== 'ground' || vehicleStatus.status !== 'idle'}
+        >
+            Takeoff
+        </button>
+        <button
+            className="control-btn land"
+            onClick={handleLand}
+            disabled={vehicleStatus.mode !== 'flight' || vehicleStatus.status !== 'flying'}
+        >
+            Land
+        </button>
+    </div>
+);
+
+const VehicleStatus = ({ status, mode }) => (
+    <div className="vehicle-status">
+        <h2>Status Panel</h2>
+        <p><strong>Mode:</strong> <span className={`status-text ${mode}`}>{mode.toUpperCase()}</span></p>
+        <p><strong>Status:</strong> <span className={`status-text ${status}`}>{status.toUpperCase()}</span></p>
+    </div>
+);
+
+const PropellerDisplay = ({ propellerStatus }) => (
+    <div className="propeller-display">
+        <h2>Propeller System</h2>
+        <div className="propeller-grid">
+            {propellerStatus.map((status, index) => (
+                <div key={index} className="propeller">
+                    <div className={`blade-cover ${status.coversOpen ? 'open' : 'closed'}`}></div>
+                    <div className={`propeller-blades ${status.spinning ? 'spinning' : ''}`}></div>
+                    <p>Propeller {index + 1}</p>
+                    <p className={`status-text ${status.spinning ? 'active' : 'inactive'}`}>
+                        {status.spinning ? 'Spinning' : 'Idle'}
+                    </p>
+                </div>
+            ))}
+        </div>
+    </div>
+);
+
+// --- Main App Component ---
+
+function App() {
+    const [vehicleStatus, setVehicleStatus] = useState({
+        mode: 'ground',
+        status: 'idle',
+    });
+
+    const [propellerStatus, setPropellerStatus] = useState([
+        { spinning: false, coversOpen: false },
+        { spinning: false, coversOpen: false },
+        { spinning: false, coversOpen: false },
+        { spinning: false, coversOpen: false },
+    ]);
+
+    const updatePropeller = (index, updates) => {
+        setPropellerStatus(prev => {
+            const newStatus = [...prev];
+            newStatus[index] = { ...newStatus[index], ...updates };
+            return newStatus;
+        });
+    };
+
+    const openBladeCovers = async () => {
+        console.log("Opening blade covers...");
+        setVehicleStatus(prev => ({ ...prev, status: 'preparing' }));
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        for (let i = 0; i < 4; i++) {
+            updatePropeller(i, { coversOpen: true });
+        }
+        console.log("Blade covers are open.");
+    };
+
+    const closeBladeCovers = async () => {
+        console.log("Closing blade covers...");
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        for (let i = 0; i < 4; i++) {
+            updatePropeller(i, { coversOpen: false });
+        }
+        console.log("Blade covers are closed.");
+    };
+
+    const spinUpPropellers = async () => {
+        console.log("Propellers spinning up...");
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        for (let i = 0; i < 4; i++) {
+            updatePropeller(i, { spinning: true });
+        }
+        console.log("Propellers are ready for flight.");
+    };
+
+    const spinDownPropellers = async () => {
+        console.log("Propellers spinning down...");
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        for (let i = 0; i < 4; i++) {
+            updatePropeller(i, { spinning: false });
+        }
+        console.log("Propellers are stopped.");
+    };
+
+    const handleTakeoff = async () => {
+        if (vehicleStatus.mode === 'ground' && vehicleStatus.status === 'idle') {
+            console.log("Initiating takeoff sequence...");
+            setVehicleStatus(prev => ({ ...prev, status: 'preparing' }));
+            await openBladeCovers();
+            await spinUpPropellers();
+            setVehicleStatus({ mode: 'flight', status: 'flying' });
+            console.log("Takeoff complete. Vehicle is in the air.");
+        }
+    };
+
+    const handleLand = async () => {
+        if (vehicleStatus.mode === 'flight' && vehicleStatus.status === 'flying') {
+            console.log("Initiating landing sequence...");
+            setVehicleStatus(prev => ({ ...prev, status: 'landing' }));
+            await new Promise(resolve => setTimeout(resolve, 3000)); // Simulate flight time
+            await spinDownPropellers();
+            await closeBladeCovers();
+            setVehicleStatus({ mode: 'ground', status: 'idle' });
+            console.log("Landing complete. Vehicle is on the ground.");
+        }
+    };
+
+    return (
+        <div className="App">
+            <header className="App-header">
+                <h1>Hybrid Vehicle Dashboard</h1>
+                <p>Flight & Systems Management</p>
+            </header>
+            <main className="dashboard-container">
+                <div className="left-panel">
+                    <ModeSelector
+                        mode={vehicleStatus.mode}
+                        setMode={(newMode) => setVehicleStatus(prev => ({ ...prev, mode: newMode }))}
+                        status={vehicleStatus.status}
+                    />
+                    <Controls
+                        vehicleStatus={vehicleStatus}
+                        handleTakeoff={handleTakeoff}
+                        handleLand={handleLand}
+                    />
+                </div>
+                <div className="right-panel">
+                    <VehicleStatus
+                        status={vehicleStatus.status}
+                        mode={vehicleStatus.mode}
+                    />
+                    <PropellerDisplay
+                        propellerStatus={propellerStatus}
+                    />
+                </div>
+            </main>
+        </div>
+    );
+}
+
+export default App;
+
+
+
+body {
+    font-family: sans-serif;
+    margin: 0;
+    background-color: #282c34;
+    color: white;
+}
+
+.App {
+    text-align: center;
+}
+
+.App-header {
+    background-color: #20232a;
+    padding: 20px;
+    border-bottom: 2px solid #61dafb;
+}
+
+.dashboard-container {
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    padding: 20px;
+}
+
+.left-panel, .right-panel {
+    background-color: #333;
+    padding: 20px;
+    border-radius: 10px;
+    width: 400px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.mode-selector, .controls, .vehicle-status, .propeller-display {
+    margin-bottom: 30px;
+}
+
+.mode-btn, .control-btn {
+    padding: 10px 20px;
+    margin: 5px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    background-color: #555;
+    color: white;
+    font-size: 16px;
+    transition: background-color 0.3s;
+}
+
+.mode-btn.active {
+    background-color: #61dafb;
+    color: #282c34;
+    font-weight: bold;
+}
+
+.mode-btn:disabled, .control-btn:disabled {
+    background-color: #444;
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.takeoff { background-color: #28a745; }
+.land { background-color: #dc3545; }
+
+.propeller-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+    margin-top: 20px;
+}
+
+.propeller {
+    position: relative;
+    width: 150px;
+    height: 150px;
+    background-color: #444;
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
+}
+
+.blade-cover {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(68, 68, 68, 0.9);
+    border-radius: 10px;
+    transition: transform 1s ease-in-out;
+    z-index: 10;
+}
+
+.blade-cover.open {
+    transform: scale(0);
+}
+
+.propeller-blades {
+    width: 100px;
+    height: 100px;
+    background-color: transparent;
+    border-radius: 50%;
+    position: relative;
+    border: 2px solid #61dafb;
+}
+
+.propeller-blades::before, .propeller-blades::after {
+    content: '';
+    position: absolute;
+    background-color: #61dafb;
+}
+
+/* Simulate two blades */
+.propeller-blades::before {
+    width: 100%;
+    height: 10px;
+    top: 50%;
+    left: 0;
+    transform: translateY(-50%);
+}
+
+.propeller-blades::after {
+    width: 10px;
+    height: 100%;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.propeller-blades.spinning {
+    animation: spin 1s infinite linear;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.status-text {
+    font-weight: bold;
+    padding: 5px 10px;
+    border-radius: 5px;
+}
+
+.status-text.ground { background-color: #4CAF50; }
+.status-text.flight { background-color: #2196F3; }
+.status-text.idle { background-color: #aaa; }
+.status-text.preparing { background-color: #FFC107; color: black; }
+.status-text.flying { background-color: #2196F3; }
+.status-text.landing { background-color: #FF9800; color: black; }
+.status-text.active { background-color: #28a745; }
+.status-text.inactive { background-color: #dc3545; }
+
+
+
+import time
+
+# --- Component Classes ---
+
+class Propeller:
+    """Represents a single propeller with its motor."""
+    def __init__(self, propeller_id):
+        self.id = propeller_id
+        self.speed = 0  # RPM
+        self.is_spinning = False
+
+    def start_spin(self, target_speed):
+        """Simulates the propeller spinning up to a target speed."""
+        print(f"  Propeller {self.id}: Spinning up to {target_speed} RPM...")
+        self.is_spinning = True
+        self.speed = target_speed
+        time.sleep(1)  # Simulate spin-up time
+        print(f"  Propeller {self.id}: Ready.")
+
+    def stop_spin(self):
+        """Simulates the propeller spinning down and stopping."""
+        print(f"  Propeller {self.id}: Spinning down...")
+        self.is_spinning = False
+        self.speed = 0
+        time.sleep(1)  # Simulate spin-down time
+        print(f"  Propeller {self.id}: Stopped.")
+
+class BladeCovers:
+    """Manages the retractable blade covers for all four propellers."""
+    def __init__(self):
+        self.is_open = False
+
+    def open(self):
+        """Opens the propeller blade covers."""
+        if not self.is_open:
+            print("  Blade covers are opening...")
+            time.sleep(2)  # Simulate opening time
+            self.is_open = True
+            print("  Blade covers are now open.")
+        else:
+            print("  Blade covers are already open.")
+
+    def close(self):
+        """Closes the propeller blade covers."""
+        if self.is_open:
+            print("  Blade covers are closing...")
+            time.sleep(2)  # Simulate closing time
+            self.is_open = False
+            print("  Blade covers are now closed.")
+        else:
+            print("  Blade covers are already closed.")
+
+# --- Main Vehicle Class ---
+
+class HybridVehicle:
+    """
+    The central class representing the car-sized hybrid vehicle.
+    It manages the state, controls, and components.
+    """
+    def __init__(self):
+        # Vehicle state and status
+        self.mode = "ground"  # "ground" or "flight"
+        self.status = "idle"  # "idle", "preparing", "flying", "landing"
+        self.location = (0, 0, 0)  # (x, y, z) coordinates
+
+        # Components
+        self.propeller_system = [Propeller(i) for i in range(4)]
+        self.blade_covers = BladeCovers()
+        self.battery_charge = 100  # Percentage
+        self.fuel_level = 100  # Percentage
+        self.passengers = 0
+
+    def check_preflight_conditions(self):
+        """Verifies that the vehicle is safe to take off."""
+        print("--- Running pre-flight checks... ---")
+        if self.mode != "ground" or self.status != "idle":
+            print("  ERROR: Vehicle is not in a ready state for takeoff.")
+            return False
+        if self.battery_charge < 30:
+            print(f"  ERROR: Battery too low for flight. Current charge: {self.battery_charge}%")
+            return False
+        if self.passengers == 0:
+            print("  WARNING: No passengers detected. This will be an unmanned flight.")
+        print("  All essential pre-flight checks passed.")
+        return True
+
+    def perform_takeoff(self, passenger_count=1):
+        """Initiates the takeoff sequence."""
+        self.passengers = passenger_count
+        if not self.check_preflight_conditions():
+            print("Takeoff aborted.")
+            return
+
+        print("\n--- Initiating Takeoff Sequence ---")
+        self.status = "preparing"
+        self.blade_covers.open()
+        
+        # Simulate propeller spin-up
+        for prop in self.propeller_system:
+            prop.start_spin(target_speed=2000)
+        
+        # All systems go, switch to flight mode
+        print("All propellers are at flight speed. Ascending.")
+        self.mode = "flight"
+        self.status = "flying"
+        self.location = (0, 0, 50)  # Ascend to 50 meters
+        print(f"Takeoff successful. Vehicle is now in flight mode at altitude {self.location[2]}m.")
+        print("--- Takeoff Sequence Complete ---")
+
+    def fly_to_location(self, destination):
+        """Simulates flying to a new location."""
+        if self.mode == "flight" and self.status == "flying":
+            print(f"\nFlying to destination: {destination}...")
+            # Here, a real system would have complex flight control algorithms
+            # and sensor fusion. We'll simulate it with a simple time delay.
+            time.sleep(5)
+            self.location = destination
+            print(f"Arrived at destination: {self.location}.")
+        else:
+            print("Cannot fly. Vehicle is not in flight mode.")
+
+    def perform_landing(self):
+        """Initiates the landing sequence."""
+        if self.mode == "flight" and self.status == "flying":
+            print("\n--- Initiating Landing Sequence ---")
+            self.status = "landing"
+            
+            # Simulate descent
+            print("Descending to ground level...")
+            time.sleep(3)
+            self.location = (self.location[0], self.location[1], 0)
+            
+            # Simulate propeller spin-down and cover close
+            for prop in self.propeller_system:
+                prop.stop_spin()
+            self.blade_covers.close()
+            
+            # All systems down, switch to ground mode
+            self.mode = "ground"
+            self.status = "idle"
+            print("Landing successful. Vehicle is safely on the ground and ready for drive mode.")
+            print("--- Landing Sequence Complete ---")
+        else:
+            print("Cannot land. Vehicle is not currently flying.")
+
+# --- Main simulation loop ---
+if __name__ == "__main__":
+    vehicle = HybridVehicle()
+
+    print("Initial state: Vehicle is in ground mode, status is idle.")
+
+    # Scenario 1: Attempt to take off without a passenger and with low battery
+    print("\n--- Scenario 1: Aborting due to low battery ---")
+    vehicle.battery_charge = 10
+    vehicle.perform_takeoff(passenger_count=1)
+
+    # Scenario 2: A successful flight
+    print("\n" + "="*50)
+    print("--- Scenario 2: A Successful Flight and Landing ---")
+    vehicle.battery_charge = 90  # Reset battery to a safe level
+    vehicle.perform_takeoff(passenger_count=2)
+    
+    # Fly to a new location
+    vehicle.fly_to_location(destination=(100, 50, 60))
+    
+    # Return and land
+    vehicle.perform_landing()
+
+    # Scenario 3: Attempt to land when not flying
+    print("\n" + "="*50)
+    print("--- Scenario 3: Attempting to land from ground mode ---")
+    vehicle.perform_landing()
+
+
+
+import Foundation
+
+// --- Enums for State Management ---
+
+enum VehicleMode: String {
+    case ground = "Ground"
+    case flight = "Flight"
+}
+
+enum VehicleStatus: String {
+    case idle = "Idle"
+    case preparing = "Preparing"
+    case flying = "Flying"
+    case landing = "Landing"
+    case charging = "Charging"
+    case error = "Error"
+}
+
+// --- Component Classes ---
+
+class Propeller {
+    let id: Int
+    var isSpinning: Bool = false
+    var speed: Double = 0.0 // RPM
+
+    init(id: Int) {
+        self.id = id
+    }
+
+    func spinUp(to targetSpeed: Double) async {
+        print("  Propeller \(id): Spinning up to \(targetSpeed) RPM...")
+        isSpinning = true
+        // Simulate real-world time for propellers to spin up
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        self.speed = targetSpeed
+        print("  Propeller \(id): Ready.")
+    }
+
+    func spinDown() async {
+        print("  Propeller \(id): Spinning down...")
+        isSpinning = false
+        // Simulate real-world time for propellers to spin down
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        self.speed = 0.0
+        print("  Propeller \(id): Stopped.")
+    }
+}
+
+class BladeCovers {
+    var isOpen: Bool = false
+
+    func open() async {
+        if !isOpen {
+            print("  Blade covers are opening...")
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            isOpen = true
+            print("  Blade covers are now open.")
+        } else {
+            print("  Blade covers are already open.")
+        }
+    }
+
+    func close() async {
+        if isOpen {
+            print("  Blade covers are closing...")
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            isOpen = false
+            print("  Blade covers are now closed.")
+        } else {
+            print("  Blade covers are already closed.")
+        }
+    }
+}
+
+// --- Main Vehicle Class ---
+
+class HybridVehicle {
+    
+    // MARK: - Properties
+    
+    var mode: VehicleMode = .ground {
+        didSet {
+            print("Vehicle mode changed to: \(mode.rawValue)")
+        }
+    }
+    var status: VehicleStatus = .idle {
+        didSet {
+            print("Vehicle status changed to: \(status.rawValue)")
+        }
+    }
+    
+    var batteryLevel: Int = 100 // Percentage
+    var fuelLevel: Int = 100 // Percentage
+    var passengerCount: Int = 0
+    var location: (x: Double, y: Double, z: Double) = (0, 0, 0)
+    
+    private var propellerSystem: [Propeller] = [Propeller(id: 0), Propeller(id: 1), Propeller(id: 2), Propeller(id: 3)]
+    private var bladeCovers = BladeCovers()
+
+    // MARK: - Control Functions
+    
+    private func checkPreflightConditions() -> Bool {
+        print("\n--- Running pre-flight checks... ---")
+        guard mode == .ground && status == .idle else {
+            print("  ERROR: Vehicle is not in a ready state for takeoff.")
+            return false
+        }
+        guard batteryLevel >= 30 else {
+            print("  ERROR: Battery too low for flight. Current charge: \(batteryLevel)%")
+            return false
+        }
+        if passengerCount == 0 {
+            print("  WARNING: No passengers detected. Proceeding with unmanned flight protocol.")
+        }
+        print("  All essential pre-flight checks passed.")
+        return true
+    }
+    
+    func performTakeoff(passengers: Int) async {
+        self.passengerCount = passengers
+        
+        guard checkPreflightConditions() else {
+            print("Takeoff aborted.")
+            return
+        }
+
+        print("\n--- Initiating Takeoff Sequence ---")
+        self.status = .preparing
+        
+        await bladeCovers.open()
+        
+        await withTaskGroup(of: Void.self) { group in
+            for propeller in propellerSystem {
+                group.addTask { await propeller.spinUp(to: 2000) }
+            }
+        }
+        
+        print("All propellers are at flight speed. Ascending.")
+        
+        self.mode = .flight
+        self.status = .flying
+        
+        // Ascend to 50 meters
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        self.location = (location.x, location.y, 50.0)
+        
+        print("Takeoff successful. Vehicle is now in flight mode at altitude \(self.location.z)m.")
+        print("--- Takeoff Sequence Complete ---")
+    }
+
+    func fly(to destination: (x: Double, y: Double, z: Double)) async {
+        guard mode == .flight && status == .flying else {
+            print("Cannot fly. Vehicle is not in flight mode.")
+            return
+        }
+
+        print("\nFlying to destination: \(destination)...")
+        // Simulate flight time
+        try? await Task.sleep(nanoseconds: 5_000_000_000)
+        self.location = destination
+        print("Arrived at destination: \(self.location).")
+    }
+    
+    func performLanding() async {
+        guard mode == .flight && status == .flying else {
+            print("Cannot land. Vehicle is not currently flying.")
+            return
+        }
+        
+        print("\n--- Initiating Landing Sequence ---")
+        self.status = .landing
+        
+        // Simulate descent
+        print("Descending to ground level...")
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        self.location = (location.x, location.y, 0)
+        
+        await withTaskGroup(of: Void.self) { group in
+            for propeller in propellerSystem {
+                group.addTask { await propeller.spinDown() }
+            }
+        }
+        
+        await bladeCovers.close()
+        
+        self.mode = .ground
+        self.status = .idle
+        print("Landing successful. Vehicle is safely on the ground.")
+        print("--- Landing Sequence Complete ---")
+    }
+}
+
+// --- Main execution block for simulation ---
+// In a real Xcode project, this would be triggered by a button press
+// in a SwiftUI or UIKit view.
+
+func runSimulation() async {
+    let vehicle = HybridVehicle()
+    print("Initial state: Vehicle is in ground mode, status is idle.")
+
+    // Scenario 1: Aborting due to low battery
+    print("\n" + String(repeating: "=", count: 50))
+    print("--- Scenario 1: Aborting due to low battery ---")
+    vehicle.batteryLevel = 10
+    await vehicle.performTakeoff(passengers: 1)
+
+    // Scenario 2: A successful flight
+    print("\n" + String(repeating: "=", count: 50))
+    print("--- Scenario 2: A Successful Flight and Landing ---")
+    vehicle.batteryLevel = 90
+    await vehicle.performTakeoff(passengers: 2)
+    
+    await vehicle.fly(to: (x: 100, y: 50, z: 60))
+    
+    await vehicle.performLanding()
+}
+
+// To run the simulation, use a Task in a top-level scope or a button action.
+// Task {
+//     await runSimulation()
+// }
+
+
+
+#include <iostream>
+#include <vector>
+#include <string>
+#include <thread>
+#include <chrono>
+
+// --- Enums for State Management ---
+// Using enum class for strong typing and scope
+enum class VehicleMode {
+    GROUND,
+    FLIGHT
+};
+
+enum class VehicleStatus {
+    IDLE,
+    PREPARING,
+    FLYING,
+    LANDING
+};
+
+// --- Component Classes ---
+
+class Propeller {
+public:
+    Propeller(int id) : id_(id), speed_(0), is_spinning_(false) {}
+
+    void spinUp(int target_speed) {
+        if (!is_spinning_) {
+            std::cout << "  Propeller " << id_ << ": Spinning up to " << target_speed << " RPM..." << std::endl;
+            is_spinning_ = true;
+            // Simulate the time it takes to spin up
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            speed_ = target_speed;
+            std::cout << "  Propeller " << id_ << ": Ready." << std::endl;
+        }
+    }
+
+    void spinDown() {
+        if (is_spinning_) {
+            std::cout << "  Propeller " << id_ << ": Spinning down..." << std::endl;
+            is_spinning_ = false;
+            // Simulate the time it takes to spin down
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            speed_ = 0;
+            std::cout << "  Propeller " << id_ << ": Stopped." << std::endl;
+        }
+    }
+
+    bool isSpinning() const { return is_spinning_; }
+
+private:
+    int id_;
+    int speed_;
+    bool is_spinning_;
+};
+
+class BladeCovers {
+public:
+    BladeCovers() : is_open_(false) {}
+
+    void open() {
+        if (!is_open_) {
+            std::cout << "  Blade covers are opening..." << std::endl;
+            // Simulate time for covers to open
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+            is_open_ = true;
+            std::cout << "  Blade covers are now open." << std::endl;
+        } else {
+            std::cout << "  Blade covers are already open." << std::endl;
+        }
+    }
+
+    void close() {
+        if (is_open_) {
+            std::cout << "  Blade covers are closing..." << std::endl;
+            // Simulate time for covers to close
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+            is_open_ = false;
+            std::cout << "  Blade covers are now closed." << std::endl;
+        } else {
+            std::cout << "  Blade covers are already closed." << std::endl;
+        }
+    }
+
+    bool isOpen() const { return is_open_; }
+
+private:
+    bool is_open_;
+};
+
+// --- Main Vehicle Class ---
+
+class HybridVehicle {
+public:
+    HybridVehicle() 
+        : mode_(VehicleMode::GROUND), status_(VehicleStatus::IDLE), 
+          battery_charge_(100), fuel_level_(100), passenger_count_(0),
+          location_({0.0, 0.0, 0.0}) {
+        for (int i = 0; i < 4; ++i) {
+            propellers_.emplace_back(i);
+        }
+    }
+
+    void performTakeoff(int passengers) {
+        passenger_count_ = passengers;
+        if (!checkPreflightConditions()) {
+            std::cout << "Takeoff aborted." << std::endl;
+            return;
+        }
+
+        std::cout << "\n--- Initiating Takeoff Sequence ---" << std::endl;
+        status_ = VehicleStatus::PREPARING;
+        
+        blade_covers_.open();
+        
+        // Simulate propeller spin-up using separate threads
+        std::vector<std::thread> threads;
+        for (auto& prop : propellers_) {
+            threads.emplace_back(&Propeller::spinUp, &prop, 2000);
+        }
+        for (auto& t : threads) {
+            t.join(); // Wait for all propellers to be ready
+        }
+        
+        std::cout << "All propellers are at flight speed. Ascending." << std::endl;
+        
+        mode_ = VehicleMode::FLIGHT;
+        status_ = VehicleStatus::FLYING;
+        
+        // Simulate ascending
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        location_.z = 50.0;
+        
+        std::cout << "Takeoff successful. Vehicle is now in flight mode at altitude " << location_.z << "m." << std::endl;
+        std::cout << "--- Takeoff Sequence Complete ---" << std::endl;
+    }
+
+    void flyToLocation(double x, double y, double z) {
+        if (mode_ == VehicleMode::FLIGHT && status_ == VehicleStatus::FLYING) {
+            std::cout << "\nFlying to destination: (" << x << ", " << y << ", " << z << ")..." << std::endl;
+            // Simulate flight time
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+            location_ = {x, y, z};
+            std::cout << "Arrived at destination: (" << location_.x << ", " << location_.y << ", " << location_.z << ")." << std::endl;
+        } else {
+            std::cout << "Cannot fly. Vehicle is not in flight mode." << std::endl;
+        }
+    }
+
+    void performLanding() {
+        if (mode_ == VehicleMode::FLIGHT && status_ == VehicleStatus::FLYING) {
+            std::cout << "\n--- Initiating Landing Sequence ---" << std::endl;
+            status_ = VehicleStatus::LANDING;
+            
+            // Simulate descent
+            std::cout << "Descending to ground level..." << std::endl;
+            std::this_thread::sleep_for(std::chrono::seconds(3));
+            location_.z = 0.0;
+            
+            // Simulate propeller spin-down using threads
+            std::vector<std::thread> threads;
+            for (auto& prop : propellers_) {
+                threads.emplace_back(&Propeller::spinDown, &prop);
+            }
+            for (auto& t : threads) {
+                t.join(); // Wait for all propellers to stop
+            }
+            
+            blade_covers_.close();
+            
+            mode_ = VehicleMode::GROUND;
+            status_ = VehicleStatus::IDLE;
+            std::cout << "Landing successful. Vehicle is safely on the ground and ready for drive mode." << std::endl;
+            std::cout << "--- Landing Sequence Complete ---" << std::endl;
+        } else {
+            std::cout << "Cannot land. Vehicle is not currently flying." << std::endl;
+        }
+    }
+
+    void setBatteryCharge(int charge) { battery_charge_ = charge; }
+
+private:
+    bool checkPreflightConditions() const {
+        std::cout << "--- Running pre-flight checks... ---" << std::endl;
+        if (mode_ != VehicleMode::GROUND || status_ != VehicleStatus::IDLE) {
+            std::cout << "  ERROR: Vehicle is not in a ready state for takeoff." << std::endl;
+            return false;
+        }
+        if (battery_charge_ < 30) {
+            std::cout << "  ERROR: Battery too low for flight. Current charge: " << battery_charge_ << "%" << std::endl;
+            return false;
+        }
+        if (passenger_count_ == 0) {
+            std::cout << "  WARNING: No passengers detected. This will be an unmanned flight." << std::endl;
+        }
+        std::cout << "  All essential pre-flight checks passed." << std::endl;
+        return true;
+    }
+    
+    VehicleMode mode_;
+    VehicleStatus status_;
+    int battery_charge_;
+    int fuel_level_;
+    int passenger_count_;
+    struct { double x, y, z; } location_;
+    
+    std::vector<Propeller> propellers_;
+    BladeCovers blade_covers_;
+};
+
+// --- Main function to run the simulation ---
+int main() {
+    HybridVehicle vehicle;
+
+    std::cout << "Initial state: Vehicle is in ground mode, status is idle." << std::endl;
+
+    // Scenario 1: Attempt to take off with low battery
+    std::cout << "\n" << std::string(50, '=') << std::endl;
+    std::cout << "--- Scenario 1: Aborting due to low battery ---" << std::endl;
+    vehicle.setBatteryCharge(10);
+    vehicle.performTakeoff(1);
+
+    // Scenario 2: A successful flight and landing
+    std::cout << "\n" << std::string(50, '=') << std::endl;
+    std::cout << "--- Scenario 2: A Successful Flight and Landing ---" << std::endl;
+    vehicle.setBatteryCharge(90); // Reset battery to a safe level
+    vehicle.performTakeoff(2);
+    
+    vehicle.flyToLocation(100.0, 50.0, 60.0);
+    
+    vehicle.performLanding();
+
+    // Scenario 3: Attempt to land when not flying
+    std::cout << "\n" << std::string(50, '=') << std::endl;
+    std::cout << "--- Scenario 3: Attempting to land from ground mode ---" << std::endl;
+    vehicle.performLanding();
+
+    return 0;
+}
+
+
+
+import Foundation
+
+// --- Enums for State Management ---
+
+enum VehicleMode: String {
+    case ground = "Ground"
+    case flight = "Flight"
+}
+
+enum VehicleStatus: String {
+    case idle = "Idle"
+    case preparing = "Preparing"
+    case flying = "Flying"
+    case landing = "Landing"
+    case charging = "Charging"
+    case error = "Error"
+}
+
+// --- Component Classes ---
+
+class Propeller {
+    let id: Int
+    var isSpinning: Bool = false
+    var speed: Double = 0.0 // RPM
+
+    init(id: Int) {
+        self.id = id
+    }
+
+    func spinUp(to targetSpeed: Double) async {
+        print("  Propeller \(id): Spinning up to \(targetSpeed) RPM...")
+        isSpinning = true
+        // Simulate real-world time for propellers to spin up
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        self.speed = targetSpeed
+        print("  Propeller \(id): Ready.")
+    }
+
+    func spinDown() async {
+        print("  Propeller \(id): Spinning down...")
+        isSpinning = false
+        // Simulate real-world time for propellers to spin down
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        self.speed = 0.0
+        print("  Propeller \(id): Stopped.")
+    }
+}
+
+class BladeCovers {
+    var isOpen: Bool = false
+
+    func open() async {
+        if !isOpen {
+            print("  Blade covers are opening...")
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            isOpen = true
+            print("  Blade covers are now open.")
+        } else {
+            print("  Blade covers are already open.")
+        }
+    }
+
+    func close() async {
+        if isOpen {
+            print("  Blade covers are closing...")
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            isOpen = false
+            print("  Blade covers are now closed.")
+        } else {
+            print("  Blade covers are already closed.")
+        }
+    }
+}
+
+// --- Main Vehicle Class ---
+
+class HybridVehicle {
+    
+    // MARK: - Properties
+    
+    var mode: VehicleMode = .ground {
+        didSet {
+            print("Vehicle mode changed to: \(mode.rawValue)")
+        }
+    }
+    var status: VehicleStatus = .idle {
+        didSet {
+            print("Vehicle status changed to: \(status.rawValue)")
+        }
+    }
+    
+    var batteryLevel: Int = 100 // Percentage
+    var fuelLevel: Int = 100 // Percentage
+    var passengerCount: Int = 0
+    var location: (x: Double, y: Double, z: Double) = (0, 0, 0)
+    
+    private var propellerSystem: [Propeller] = [Propeller(id: 0), Propeller(id: 1), Propeller(id: 2), Propeller(id: 3)]
+    private var bladeCovers = BladeCovers()
+
+    // MARK: - Control Functions
+    
+    private func checkPreflightConditions() -> Bool {
+        print("\n--- Running pre-flight checks... ---")
+        guard mode == .ground && status == .idle else {
+            print("  ERROR: Vehicle is not in a ready state for takeoff.")
+            return false
+        }
+        guard batteryLevel >= 30 else {
+            print("  ERROR: Battery too low for flight. Current charge: \(batteryLevel)%")
+            return false
+        }
+        if passengerCount == 0 {
+            print("  WARNING: No passengers detected. Proceeding with unmanned flight protocol.")
+        }
+        print("  All essential pre-flight checks passed.")
+        return true
+    }
+    
+    func performTakeoff(passengers: Int) async {
+        self.passengerCount = passengers
+        
+        guard checkPreflightConditions() else {
+            print("Takeoff aborted.")
+            return
+        }
+
+        print("\n--- Initiating Takeoff Sequence ---")
+        self.status = .preparing
+        
+        await bladeCovers.open()
+        
+        await withTaskGroup(of: Void.self) { group in
+            for propeller in propellerSystem {
+                group.addTask { await propeller.spinUp(to: 2000) }
+            }
+        }
+        
+        print("All propellers are at flight speed. Ascending.")
+        
+        self.mode = .flight
+        self.status = .flying
+        
+        // Ascend to 50 meters
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        self.location = (location.x, location.y, 50.0)
+        
+        print("Takeoff successful. Vehicle is now in flight mode at altitude \(self.location.z)m.")
+        print("--- Takeoff Sequence Complete ---")
+    }
+
+    func fly(to destination: (x: Double, y: Double, z: Double)) async {
+        guard mode == .flight && status == .flying else {
+            print("Cannot fly. Vehicle is not in flight mode.")
+            return
+        }
+
+        print("\nFlying to destination: \(destination)...")
+        // Simulate flight time
+        try? await Task.sleep(nanoseconds: 5_000_000_000)
+        self.location = destination
+        print("Arrived at destination: \(self.location).")
+    }
+    
+    func performLanding() async {
+        guard mode == .flight && status == .flying else {
+            print("Cannot land. Vehicle is not currently flying.")
+            return
+        }
+        
+        print("\n--- Initiating Landing Sequence ---")
+        self.status = .landing
+        
+        // Simulate descent
+        print("Descending to ground level...")
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        self.location = (location.x, location.y, 0)
+        
+        await withTaskGroup(of: Void.self) { group in
+            for propeller in propellerSystem {
+                group.addTask { await propeller.spinDown() }
+            }
+        }
+        
+        await bladeCovers.close()
+        
+        self.mode = .ground
+        self.status = .idle
+        print("Landing successful. Vehicle is safely on the ground.")
+        print("--- Landing Sequence Complete ---")
+    }
+}
+
+// --- Main execution block for simulation ---
+// In a real Xcode project, this would be triggered by a button press
+// in a SwiftUI or UIKit view.
+
+func runSimulation() async {
+    let vehicle = HybridVehicle()
+    print("Initial state: Vehicle is in ground mode, status is idle.")
+
+    // Scenario 1: Aborting due to low battery
+    print("\n" + String(repeating: "=", count: 50))
+    print("--- Scenario 1: Aborting due to low battery ---")
+    vehicle.batteryLevel = 10
+    await vehicle.performTakeoff(passengers: 1)
+
+    // Scenario 2: A successful flight
+    print("\n" + String(repeating: "=", count: 50))
+    print("--- Scenario 2: A Successful Flight and Landing ---")
+    vehicle.batteryLevel = 90
+    await vehicle.performTakeoff(passengers: 2)
+    
+    await vehicle.fly(to: (x: 100, y: 50, z: 60))
+    
+    await vehicle.performLanding()
+
+    // Scenario 3: Attempt to land when not flying
+    print("\n" + String(repeating: "=", count: 50))
+    print("--- Scenario 3: Attempting to land from ground mode ---")
+    await vehicle.performLanding()
+}
+
+// To run the simulation, use a Task in a top-level scope or a button action.
+// Task {
+//     await runSimulation()
+// }
