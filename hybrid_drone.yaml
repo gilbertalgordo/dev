@@ -1558,3 +1558,222 @@ func runSimulation() async {
 // Task {
 //     await runSimulation()
 // }
+
+
+
+import kotlinx.coroutines.*
+import kotlin.random.Random
+
+// --- Enums for State Management ---
+enum class VehicleMode {
+    GROUND, FLIGHT
+}
+
+enum class VehicleStatus {
+    IDLE, PREPARING, FLYING, LANDING, ERROR
+}
+
+// --- Component Classes ---
+
+class Propeller(val id: Int) {
+    var isSpinning: Boolean = false
+        private set
+    var speed: Int = 0
+        private set
+
+    suspend fun spinUp(targetSpeed: Int) {
+        if (!isSpinning) {
+            println("  Propeller $id: Spinning up to $targetSpeed RPM...")
+            isSpinning = true
+            // Simulate the time it takes to spin up
+            delay(1000)
+            speed = targetSpeed
+            println("  Propeller $id: Ready.")
+        }
+    }
+
+    suspend fun spinDown() {
+        if (isSpinning) {
+            println("  Propeller $id: Spinning down...")
+            isSpinning = false
+            // Simulate the time it takes to spin down
+            delay(1000)
+            speed = 0
+            println("  Propeller $id: Stopped.")
+        }
+    }
+}
+
+class BladeCovers {
+    var isOpen: Boolean = false
+        private set
+
+    suspend fun open() {
+        if (!isOpen) {
+            println("  Blade covers are opening...")
+            // Simulate time for covers to open
+            delay(2000)
+            isOpen = true
+            println("  Blade covers are now open.")
+        } else {
+            println("  Blade covers are already open.")
+        }
+    }
+
+    suspend fun close() {
+        if (isOpen) {
+            println("  Blade covers are closing...")
+            // Simulate time for covers to close
+            delay(2000)
+            isOpen = false
+            println("  Blade covers are now closed.")
+        } else {
+            println("  Blade covers are already closed.")
+        }
+    }
+}
+
+// --- Main Vehicle Class ---
+
+class HybridVehicle {
+
+    // Vehicle state and status
+    var mode: VehicleMode = VehicleMode.GROUND
+        private set
+    var status: VehicleStatus = VehicleStatus.IDLE
+        private set
+
+    var batteryCharge: Int = 100 // Percentage
+        private set
+    var fuelLevel: Int = 100 // Percentage
+        private set
+    var passengerCount: Int = 0
+        private set
+
+    var location: Triple<Double, Double, Double> = Triple(0.0, 0.0, 0.0)
+        private set
+
+    private val propellers: List<Propeller> = (0..3).map { Propeller(it) }
+    private val bladeCovers = BladeCovers()
+
+    private fun checkPreflightConditions(): Boolean {
+        println("\n--- Running pre-flight checks... ---")
+        if (mode != VehicleMode.GROUND || status != VehicleStatus.IDLE) {
+            println("  ERROR: Vehicle is not in a ready state for takeoff.")
+            return false
+        }
+        if (batteryCharge < 30) {
+            println("  ERROR: Battery too low for flight. Current charge: $batteryCharge%")
+            return false
+        }
+        if (passengerCount == 0) {
+            println("  WARNING: No passengers detected. This will be an unmanned flight.")
+        }
+        println("  All essential pre-flight checks passed.")
+        return true
+    }
+
+    suspend fun performTakeoff(passengers: Int) {
+        this.passengerCount = passengers
+
+        if (!checkPreflightConditions()) {
+            println("Takeoff aborted.")
+            return
+        }
+
+        println("\n--- Initiating Takeoff Sequence ---")
+        status = VehicleStatus.PREPARING
+
+        bladeCovers.open()
+
+        // Use coroutines to spin up all propellers concurrently
+        coroutineScope {
+            propellers.forEach { prop ->
+                launch { prop.spinUp(2000) }
+            }
+        }
+
+        println("All propellers are at flight speed. Ascending.")
+        mode = VehicleMode.FLIGHT
+        status = VehicleStatus.FLYING
+
+        // Simulate ascending
+        delay(1000)
+        location = Triple(location.first, location.second, 50.0)
+
+        println("Takeoff successful. Vehicle is now in flight mode at altitude ${location.third}m.")
+        println("--- Takeoff Sequence Complete ---")
+    }
+
+    suspend fun flyToLocation(x: Double, y: Double, z: Double) {
+        if (mode == VehicleMode.FLIGHT && status == VehicleStatus.FLYING) {
+            println("\nFlying to destination: ($x, $y, $z)...")
+            // Simulate flight time
+            delay(5000)
+            location = Triple(x, y, z)
+            println("Arrived at destination: (${location.first}, ${location.second}, ${location.third}).")
+        } else {
+            println("Cannot fly. Vehicle is not in flight mode.")
+        }
+    }
+
+    suspend fun performLanding() {
+        if (mode == VehicleMode.FLIGHT && status == VehicleStatus.FLYING) {
+            println("\n--- Initiating Landing Sequence ---")
+            status = VehicleStatus.LANDING
+
+            // Simulate descent
+            println("Descending to ground level...")
+            delay(3000)
+            location = Triple(location.first, location.second, 0.0)
+
+            // Use coroutines to spin down all propellers concurrently
+            coroutineScope {
+                propellers.forEach { prop ->
+                    launch { prop.spinDown() }
+                }
+            }
+
+            bladeCovers.close()
+
+            mode = VehicleMode.GROUND
+            status = VehicleStatus.IDLE
+            println("Landing successful. Vehicle is safely on the ground and ready for drive mode.")
+            println("--- Landing Sequence Complete ---")
+        } else {
+            println("Cannot land. Vehicle is not currently flying.")
+        }
+    }
+
+    fun setBatteryCharge(charge: Int) {
+        batteryCharge = charge
+    }
+}
+
+// --- Main function to run the simulation ---
+fun main() = runBlocking {
+    val vehicle = HybridVehicle()
+
+    println("Initial state: Vehicle is in ground mode, status is idle.")
+
+    // Scenario 1: Attempt to take off with low battery
+    println("\n" + "=".repeat(50))
+    println("--- Scenario 1: Aborting due to low battery ---")
+    vehicle.setBatteryCharge(10)
+    vehicle.performTakeoff(1)
+
+    // Scenario 2: A successful flight and landing
+    println("\n" + "=".repeat(50))
+    println("--- Scenario 2: A Successful Flight and Landing ---")
+    vehicle.setBatteryCharge(90) // Reset battery to a safe level
+    vehicle.performTakeoff(2)
+
+    vehicle.flyToLocation(100.0, 50.0, 60.0)
+
+    vehicle.performLanding()
+
+    // Scenario 3: Attempt to land when not flying
+    println("\n" + "=".repeat(50))
+    println("--- Scenario 3: Attempting to land from ground mode ---")
+    vehicle.performLanding()
+}
