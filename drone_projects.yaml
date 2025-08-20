@@ -1,0 +1,4270 @@
+pip install flask flask_cors numpy opencv-python matplotlib
+
+
+"""
+advanced_drone_sim.py
+
+Single-file simulation/control stack for:
+ - advanced drone and hybrid car-sized drone (simulated)
+ - multiple cameras + map views
+ - object avoidance, trajectory planning, rally-point & race modes
+ - crash detection & avoidance, crash response
+ - simulated sensors (lidar, radar, sonar)
+ - telemetry/connectivity (simulated)
+ - antimalware (stub), autorepair AI (health monitoring + restart logic)
+
+Run:
+    python advanced_drone_sim.py
+Then open http://127.0.0.1:5000 in a browser.
+
+This is a safe software simulation. Replace sensor stubs with real drivers carefully.
+"""
+
+import threading
+import asyncio
+import time
+import math
+import random
+from queue import Queue, Empty
+from dataclasses import dataclass, field
+from typing import List, Tuple, Dict, Optional
+
+import numpy as np
+import cv2
+from flask import Flask, Response, render_template_string, request, jsonify
+from flask_cors import CORS
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from io import BytesIO
+from PIL import Image
+
+# -------------------------
+# Configuration & Globals
+# -------------------------
+SIM_DT = 0.1  # simulation timestep (s)
+MAP_SIZE = (100, 100)  # grid map for planning
+OBSTACLE_COUNT = 40
+CAMERA_RES = (320, 240)
+
+app = Flask(__name__)
+CORS(app)
+
+# Shared state (thread-safe primitives preferred, but for simplicity we guard with locks)
+state_lock = threading.Lock()
+
+@dataclass
+class VehicleState:
+    x: float = 10.0
+    y: float = 10.0
+    yaw: float = 0.0  # radians
+    vx: float = 0.0
+    vy: float = 0.0
+    speed: float = 0.0
+    battery: float = 100.0
+    health: float = 100.0
+    status: str = "IDLE"
+    last_crash: Optional[float] = None
+
+vehicle = VehicleState()
+
+# Map with obstacles: 0 free, 1 obstacle
+grid_map = np.zeros(MAP_SIZE, dtype=np.uint8)
+
+def generate_random_obstacles(count=OBSTACLE_COUNT):
+    grid_map.fill(0)
+    for _ in range(count):
+        x = random.randint(0, MAP_SIZE[0]-1)
+        y = random.randint(0, MAP_SIZE[1]-1)
+        grid_map[y, x] = 1
+
+generate_random_obstacles()
+
+# Rally & race config
+rally_point = (80, 80)
+race_waypoints = [(20,80), (80,20), (80,80)]
+
+# Queues for sensor data/telemetry
+camera_queues: Dict[str, Queue] = {"front": Queue(maxsize=4), "rear": Queue(maxsize=4), "side": Queue(maxsize=4)}
+sensor_queue = Queue(maxsize=32)
+telemetry_queue = Queue(maxsize=64)
+
+# -------------------------
+# Sensor Simulators
+# -------------------------
+class LidarSim:
+    """Simulate 2D lidar point returns around vehicle."""
+    def __init__(self, max_range=25.0, n_points=180):
+        self.max_range = max_range
+        self.n_points = n_points
+
+    def scan(self, state: VehicleState):
+        angles = np.linspace(-math.pi, math.pi, self.n_points)
+        points = []
+        for a in angles:
+            ray_angle = state.yaw + a
+            # ray march until obstacle or max range
+            for r in np.linspace(0, self.max_range, 200):
+                rx = state.x + r * math.cos(ray_angle)
+                ry = state.y + r * math.sin(ray_angle)
+                gx = int(round(rx))
+                gy = int(round(ry))
+                if gx < 0 or gy < 0 or gx >= MAP_SIZE[0] or gy >= MAP_SIZE[1]:
+                    # end of map
+                    points.append((r, a))
+                    break
+                if grid_map[gy, gx] == 1:
+                    points.append((r, a))
+                    break
+            else:
+                points.append((self.max_range, a))
+        return points
+
+class RadarSim:
+    """Simulate long-range coarse radar (range + bearing)."""
+    def __init__(self, max_range=60.0):
+        self.max_range = max_range
+    def ping(self, state):
+        # return list of tuples (range, angle, velocity_estimate)
+        hits = []
+        # check obstacles from grid_map as cluster centers
+        ys, xs = np.where(grid_map == 1)
+        for gx, gy in zip(xs, ys):
+            dx = gx - state.x
+            dy = gy - state.y
+            r = math.hypot(dx, dy)
+            if r <= self.max_range:
+                angle = math.atan2(dy, dx) - state.yaw
+                vel = 0.0  # static obstacles
+                hits.append((r, angle, vel))
+        # randomly add dynamic object
+        if random.random() < 0.02:
+            r = random.uniform(5, self.max_range)
+            angle = random.uniform(-math.pi, math.pi)
+            hits.append((r, angle, random.uniform(-5,5)))
+        return hits
+
+class SonarSim:
+    """Short range proximity."""
+    def __init__(self, max_range=5.0):
+        self.max_range = max_range
+    def ping(self, state):
+        # return nearest obstacle distance
+        for r in np.linspace(0.2, self.max_range, 50):
+            rx = state.x + r * math.cos(state.yaw)
+            ry = state.y + r * math.sin(state.yaw)
+            gx = int(round(rx))
+            gy = int(round(ry))
+            if gx<0 or gy<0 or gx>=MAP_SIZE[0] or gy>=MAP_SIZE[1] or grid_map[gy,gx]==1:
+                return r
+        return None
+
+# -------------------------
+# Camera Simulator
+# -------------------------
+def draw_minimap(state: VehicleState):
+    # Create a small minimap image with obstacles and vehicle pose
+    scale = 4  # pixels per grid cell
+    h = MAP_SIZE[1]*scale
+    w = MAP_SIZE[0]*scale
+    img = np.ones((h, w, 3), dtype=np.uint8)*200
+    ys, xs = np.where(grid_map==1)
+    for gx, gy in zip(xs, ys):
+        cv2.rectangle(img, (gx*scale, gy*scale), ((gx+1)*scale-1, (gy+1)*scale-1), (50,50,50), -1)
+    # vehicle
+    cx = int(state.x*scale)
+    cy = int(state.y*scale)
+    cv2.circle(img, (cx, cy), 4, (0,0,255), -1)
+    # heading
+    hx = int(cx + 12*math.cos(state.yaw))
+    hy = int(cy + 12*math.sin(state.yaw))
+    cv2.line(img, (cx,cy), (hx,hy), (0,255,0), 2)
+    return img
+
+def camera_frame_generator(name: str):
+    """Simulated camera producing MJPEG frames."""
+    while True:
+        with state_lock:
+            s = VehicleState(**vars(vehicle))
+        # base image
+        img = np.zeros((CAMERA_RES[1], CAMERA_RES[0], 3), dtype=np.uint8)
+        t = time.time()
+        cv2.putText(img, f"{name} CAM", (10,20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,255), 1)
+        cv2.putText(img, f"x={s.x:.1f} y={s.y:.1f} yaw={s.yaw:.2f}", (10,40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,200,200), 1)
+        # overlay minimap in corner
+        mm = draw_minimap(s)
+        mm_small = cv2.resize(mm, (100,100))
+        img[10:110, CAMERA_RES[0]-110:CAMERA_RES[0]-10] = mm_small
+        # moving pattern to simulate motion
+        center = (int(CAMERA_RES[0]/2 + 30*math.sin(t*0.5 + len(name))), int(CAMERA_RES[1]/2 + 20*math.cos(t*0.6)))
+        cv2.circle(img, center, 20, (int(100+50*math.sin(t)),120,200), -1)
+        # encode to JPEG
+        ret, jpeg = cv2.imencode('.jpg', img)
+        if not ret:
+            continue
+        frame = jpeg.tobytes()
+        camera_queues[name].put(frame)
+        time.sleep(0.08)
+
+# -------------------------
+# Perception & Safety
+# -------------------------
+def perception_loop(lidar: LidarSim, radar: RadarSim, sonar: SonarSim):
+    """Continuously populate sensor_queue with fused perceptions."""
+    while True:
+        with state_lock:
+            s = VehicleState(**vars(vehicle))
+        lidar_points = lidar.scan(s)
+        radar_hits = radar.ping(s)
+        sonar_d = sonar.ping(s)
+        perception = {
+            "timestamp": time.time(),
+            "lidar": lidar_points,
+            "radar": radar_hits,
+            "sonar": sonar_d,
+            "pose": (s.x, s.y, s.yaw),
+        }
+        try:
+            sensor_queue.put_nowait(perception)
+        except:
+            pass
+        time.sleep(SIM_DT)
+
+# Crash detection logic
+def analyze_crash(perception, state):
+    """Return True if a crash likely occurred (very close obstacle or sudden decel)."""
+    # sonar very close
+    if perception.get("sonar") is not None and perception["sonar"] < 0.5:
+        return True
+    # lidar minimum range
+    lens = [r for r,a in perception["lidar"]]
+    if len(lens) and min(lens)<0.4:
+        return True
+    # health based
+    if state.health < 10:
+        return True
+    return False
+
+# -------------------------
+# Planner (A* on grid)
+# -------------------------
+from heapq import heappush, heappop
+
+def heuristic(a, b):
+    return abs(a[0]-b[0]) + abs(a[1]-b[1])
+
+def astar(start, goal, grid):
+    start = (int(round(start[0])), int(round(start[1])))
+    goal = (int(round(goal[0])), int(round(goal[1])))
+    w,h = grid.shape[1], grid.shape[0]
+    close_set = set()
+    came_from = {}
+    gscore = {start:0}
+    fscore = {start:heuristic(start, goal)}
+    oheap = []
+    heappush(oheap, (fscore[start], start))
+    while oheap:
+        current = heappop(oheap)[1]
+        if current == goal:
+            data = []
+            while current in came_from:
+                data.append(current)
+                current = came_from[current]
+            data.append(start)
+            return data[::-1]
+        close_set.add(current)
+        x,y = current
+        for dx,dy in [(1,0),(-1,0),(0,1),(0,-1),(1,1),(-1,-1),(1,-1),(-1,1)]:
+            neighbor = (x+dx, y+dy)
+            nx, ny = neighbor
+            if nx<0 or ny<0 or nx>=w or ny>=h:
+                continue
+            if grid[ny,nx]==1:
+                continue
+            tentative_g = gscore[current] + math.hypot(dx,dy)
+            if neighbor in close_set and tentative_g >= gscore.get(neighbor, 1e9):
+                continue
+            if tentative_g < gscore.get(neighbor, 1e9) or neighbor not in [i[1] for i in oheap]:
+                came_from[neighbor] = current
+                gscore[neighbor] = tentative_g
+                fscore[neighbor] = tentative_g + heuristic(neighbor, goal)
+                heappush(oheap, (fscore[neighbor], neighbor))
+    return None
+
+# -------------------------
+# Control & Modes
+# -------------------------
+control_mode = {"mode": "MANUAL"}  # MANUAL | AUTO_RALLY | AUTO_RACE | FAST_RACE
+
+current_path = []
+path_lock = threading.Lock()
+
+def planner_loop():
+    """Planner chooses path depending on mode, refills current_path."""
+    global current_path
+    while True:
+        with state_lock:
+            s = VehicleState(**vars(vehicle))
+            mode = control_mode["mode"]
+        if mode == "AUTO_RALLY":
+            path = astar((s.x, s.y), rally_point, grid_map)
+            with path_lock:
+                current_path = path or []
+        elif mode.startswith("AUTO_RACE"):
+            # pick next race waypoint; simple cyclical
+            closest_idx = 0
+            best = 1e9
+            for i,wp in enumerate(race_waypoints):
+                d = math.hypot(wp[0]-s.x, wp[1]-s.y)
+                if d<best:
+                    best = d; closest_idx = i
+            target = race_waypoints[(closest_idx+1)%len(race_waypoints)]
+            path = astar((s.x, s.y), target, grid_map)
+            with path_lock:
+                current_path = path or []
+        else:
+            # manual or idle keep path empty
+            with path_lock:
+                current_path = []
+        time.sleep(0.5)
+
+def follow_path_control():
+    """Convert path waypoints to simple velocity commands and update vehicle state."""
+    while True:
+        with state_lock:
+            s = vehicle
+            mode = control_mode["mode"]
+        if mode in ("AUTO_RALLY", "AUTO_RACE", "FAST_RACE"):
+            with path_lock:
+                path = list(current_path)
+            if len(path) >= 2:
+                # follow next point
+                nx, ny = path[1]
+                dx = nx - s.x
+                dy = ny - s.y
+                heading = math.atan2(dy, dx)
+                # speed target depends on mode
+                spd = 2.0 if mode=="AUTO_RALLY" else (6.0 if mode=="AUTO_RACE" else 10.0)
+                # simple proportional control
+                with state_lock:
+                    # yaw smoothing
+                    s.yaw += 0.2 * (heading - s.yaw)
+                    # velocity towards heading
+                    s.vx = spd * math.cos(s.yaw)
+                    s.vy = spd * math.sin(s.yaw)
+                    s.x += s.vx * SIM_DT
+                    s.y += s.vy * SIM_DT
+                    s.speed = math.hypot(s.vx, s.vy)
+                    s.battery -= 0.01 * (1 + s.speed/5.0)
+                    # degrade health a bit when high speed
+                    if s.speed > 8.0:
+                        s.health -= 0.05
+        else:
+            # manual: no automatic motion
+            time.sleep(0.05)
+            continue
+        time.sleep(SIM_DT)
+
+# -------------------------
+# Safety Supervisory Loop
+# -------------------------
+def safety_loop():
+    """Consumes perceptions and enforces emergency brakes / avoidance."""
+    while True:
+        try:
+            perception = sensor_queue.get(timeout=1.0)
+        except Empty:
+            continue
+        with state_lock:
+            s = VehicleState(**vars(vehicle))
+        # immediate crash detection
+        if analyze_crash(perception, s):
+            with state_lock:
+                vehicle.status = "CRASH_DETECTED"
+                vehicle.last_crash = time.time()
+                # emergency stop
+                vehicle.vx = 0.0
+                vehicle.vy = 0.0
+                vehicle.speed = 0.0
+                # degrade health rapidly
+                vehicle.health -= 10.0
+            # enqueue telemetry event
+            telemetry_queue.put({"evt":"crash","time": time.time(), "pose": perception["pose"]})
+            # attempt crash avoidance/escape maneuver if not catastrophic
+            if vehicle.health > 0:
+                # simple avoidance: rotate 90deg and back off
+                with state_lock:
+                    vehicle.yaw += math.pi/2
+                    vehicle.x += math.cos(vehicle.yaw)*1.0
+                    vehicle.y += math.sin(vehicle.yaw)*1.0
+                    vehicle.status = "AVOIDANCE_MANEUVER"
+            continue
+
+        # otherwise monitor for close obstacles and brake/steer
+        # find min lidar distance
+        dists = [r for r,a in perception["lidar"]]
+        if dists:
+            min_d = min(dists)
+            if min_d < 2.0:
+                # slow down proportionally
+                with state_lock:
+                    decel = (2.0 - min_d) * 1.5
+                    vehicle.vx *= max(0, 1 - decel*SIM_DT)
+                    vehicle.vy *= max(0, 1 - decel*SIM_DT)
+                    vehicle.speed = math.hypot(vehicle.vx, vehicle.vy)
+                    vehicle.status = "BRAKING"
+
+# -------------------------
+# Telemetry & Antimalware & Autorepair
+# -------------------------
+def telemetry_loop():
+    """Emit periodic telemetry to telemetry_queue (could be sent over network)."""
+    while True:
+        with state_lock:
+            s = VehicleState(**vars(vehicle))
+        data = {
+            "time": time.time(),
+            "pose": (s.x, s.y, s.yaw),
+            "speed": s.speed,
+            "battery": s.battery,
+            "health": s.health,
+            "status": s.status
+        }
+        try:
+            telemetry_queue.put_nowait(data)
+        except:
+            pass
+        # run a lightweight antimalware scan occasionally
+        if random.random() < 0.02:
+            antimalware_scan()
+        # autorepair check occasionally
+        if random.random() < 0.03:
+            autorepair_check()
+        time.sleep(0.5)
+
+def antimalware_scan():
+    """Very lightweight stub that pretends to scan running modules / incoming packets.
+       Replace with real endpoint protection on actual systems."""
+    # For safety, we do not provide malware-writing or evasion instructions.
+    # This is a simulation: pick a random result
+    result = random.choice(["clean","suspicious","clean"])
+    telemetry_queue.put({"evt":"antimalware_scan","result":result,"time":time.time()})
+    # if suspicious, queue remediation
+    if result == "suspicious":
+        telemetry_queue.put({"evt":"antimalware_remediate","action":"isolate_process","time":time.time()})
+
+def autorepair_check():
+    """Autorepair AI: monitor health & battery, attempt soft-fix, else escalate."""
+    with state_lock:
+        s = vehicle
+        if s.health < 50:
+            # attempt soft repair
+            telemetry_queue.put({"evt":"autorepair_attempt","type":"soft_reset","time":time.time()})
+            # soft fix increases health a bit
+            s.health += random.uniform(1.0, 5.0)
+        if s.health < 20:
+            telemetry_queue.put({"evt":"autorepair_critical","action":"request_return_to_base","time":time.time()})
+            # switch to manual safe mode
+            control_mode["mode"] = "MANUAL"
+            s.status = "NEEDS_REPAIR"
+
+# -------------------------
+# Web UI (Flask)
+# -------------------------
+INDEX_HTML = """
+<!doctype html>
+<html>
+<head>
+  <title>Advanced Drone Sim</title>
+  <style>
+    body { background:#111; color:#ddd; font-family:monospace; }
+    .cams { display:flex; gap:8px; }
+    .controls { margin-top:12px; }
+    .map { margin-top:12px; }
+  </style>
+</head>
+<body>
+  <h2>Advanced Drone Simulation Dashboard</h2>
+  <div class="cams">
+    <div><img id="cam_front" src="/camera/front" /></div>
+    <div><img id="cam_rear" src="/camera/rear" /></div>
+    <div><img id="cam_side" src="/camera/side" /></div>
+  </div>
+
+  <div class="controls">
+    <button onclick="setMode('MANUAL')">MANUAL</button>
+    <button onclick="setMode('AUTO_RALLY')">AUTO RALLY</button>
+    <button onclick="setMode('AUTO_RACE')">AUTO RACE</button>
+    <button onclick="setMode('FAST_RACE')">FAST RACE</button>
+    <button onclick="regenMap()">Regenerate Map</button>
+    <pre id="telemetry"></pre>
+  </div>
+
+<script>
+function setMode(m){
+  fetch('/api/mode', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mode:m})})
+    .then(r=>r.json()).then(j=>console.log(j));
+}
+function regenMap(){
+  fetch('/api/regenerate',{method:'POST'}).then(r=>r.json()).then(j=>console.log(j));
+}
+function pollTelemetry(){
+  fetch('/api/telemetry').then(r=>r.json()).then(j=>{
+    document.getElementById('telemetry').innerText = JSON.stringify(j, null, 2);
+  });
+}
+setInterval(pollTelemetry, 600);
+</script>
+</body>
+</html>
+"""
+
+@app.route('/')
+def index():
+    return render_template_string(INDEX_HTML)
+
+def mjpeg_stream(queue: Queue):
+    """Return a generator yielding multipart MJPEG frames from a queue."""
+    while True:
+        try:
+            frame = queue.get(timeout=2.0)
+        except Empty:
+            # send a tiny keepalive image
+            blank = np.zeros((10,10,3), dtype=np.uint8)
+            ret, jpeg = cv2.imencode('.jpg', blank)
+            frame = jpeg.tobytes()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+        time.sleep(0.02)
+
+@app.route('/camera/<name>')
+def camera(name):
+    if name not in camera_queues:
+        return "Unknown camera", 404
+    return Response(mjpeg_stream(camera_queues[name]), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/api/mode', methods=['POST'])
+def api_mode():
+    data = request.get_json()
+    m = data.get('mode')
+    if m not in ("MANUAL","AUTO_RALLY","AUTO_RACE","FAST_RACE"):
+        return jsonify({"error":"unknown mode"}), 400
+    control_mode["mode"] = m
+    return jsonify({"mode":m})
+
+@app.route('/api/telemetry')
+def api_telemetry():
+    # return last telemetry snapshot and vehicle
+    with state_lock:
+        s = VehicleState(**vars(vehicle))
+    # fetch latest telemetry events
+    events = []
+    try:
+        while True:
+            events.append(telemetry_queue.get_nowait())
+    except Empty:
+        pass
+    return jsonify({"vehicle": vars(s), "events": events})
+
+@app.route('/api/regenerate', methods=['POST'])
+def api_regenerate():
+    generate_random_obstacles()
+    return jsonify({"status":"ok"})
+
+# -------------------------
+# Initialization & Threads
+# -------------------------
+def start_camera_threads():
+    for name in camera_queues.keys():
+        t = threading.Thread(target=camera_frame_generator, args=(name,), daemon=True)
+        t.start()
+
+def start_sensor_perception():
+    lidar = LidarSim()
+    radar = RadarSim()
+    sonar = SonarSim()
+    t = threading.Thread(target=perception_loop, args=(lidar, radar, sonar), daemon=True)
+    t.start()
+
+def start_planner_and_control():
+    t1 = threading.Thread(target=planner_loop, daemon=True)
+    t2 = threading.Thread(target=follow_path_control, daemon=True)
+    t1.start()
+    t2.start()
+
+def start_safety_and_telemetry():
+    t1 = threading.Thread(target=safety_loop, daemon=True)
+    t2 = threading.Thread(target=telemetry_loop, daemon=True)
+    t1.start(); t2.start()
+
+def start_mjpeg_producers():
+    start_camera_threads()
+    start_sensor_perception()
+    start_planner_and_control()
+    start_safety_and_telemetry()
+
+# Start simulator main loop to integrate dynamics backup
+def sim_dynamics_loop():
+    """Simple integrator to update vehicle pose from vx/vy if in MANUAL (for simulation completeness)."""
+    while True:
+        with state_lock:
+            s = vehicle
+            # natural drift if not moving
+            s.x += s.vx * SIM_DT
+            s.y += s.vy * SIM_DT
+            # battery drain passive
+            s.battery -= 0.002
+            if s.battery < 0:
+                s.battery = 0
+                s.status = "NO_POWER"
+            # cap health
+            s.health = max(0.0, min(100.0, s.health))
+        time.sleep(SIM_DT)
+
+# -------------------------
+# Entrypoint
+# -------------------------
+if __name__ == '__main__':
+    print("Starting Advanced Drone Simulation...")
+    # start background systems
+    start_mjpeg_producers()
+    t = threading.Thread(target=sim_dynamics_loop, daemon=True)
+    t.start()
+    # start flask
+    app.run(host='0.0.0.0', port=5000, threaded=True)
+
+
+    npm install
+npm run dev
+
+
+{
+  "name": "advanced-drone-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.0.0",
+    "vite": "^5.0.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  }
+}
+
+
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>Advanced Drone Dashboard</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
+
+
+import React from "react";
+import { createRoot } from "react-dom/client";
+import App from "./App";
+import "./styles.css";
+
+createRoot(document.getElementById("root")).render(<App />);
+
+
+:root{
+  --bg:#0f1720;
+  --panel:#0b1115;
+  --muted:#9aa6b2;
+  --accent:#22c1c3;
+  --danger:#ff4d4d;
+  --ok:#7cffb2;
+}
+*{box-sizing:border-box;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial;}
+body{margin:0;background:linear-gradient(180deg,var(--bg),#071017);color:#e6eef6;}
+.app {display:grid; grid-template-columns: 420px 1fr 360px; gap:12px; padding:14px; height:100vh;}
+.panel {background:linear-gradient(180deg,var(--panel),#071018); padding:12px; border-radius:10px; box-shadow:0 6px 18px rgba(0,0,0,0.5); overflow:auto;}
+.header {display:flex; align-items:center; gap:12px; margin-bottom:10px;}
+.logo {width:44px;height:44px;border-radius:8px;background:linear-gradient(135deg,var(--accent),#2e9cff);display:flex;align-items:center;justify-content:center;font-weight:700;color:#042;box-shadow:0 4px 14px rgba(0,0,0,0.6);}
+.title {font-size:18px;}
+.cameras {display:flex;flex-direction:column;gap:10px;}
+.camera {background:#07121a;padding:6px;border-radius:8px;display:flex;gap:8px;align-items:center;}
+.cam-canvas {width:180px;height:120px;background:#0b1216;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--muted);}
+.map-wrapper {border-radius:10px; overflow:hidden; height:100%; display:flex; flex-direction:column;}
+.map-canvas {flex:1; background:#061521;}
+.controls {display:flex;flex-direction:column;gap:8px;}
+.btn {padding:8px 10px;border-radius:8px;border:none;background:#142833;color:#d3eef2;cursor:pointer;}
+.btn.warn{background:var(--danger);}
+.btn.ghost{background:transparent;border:1px solid rgba(255,255,255,0.04);}
+.telemetry {font-family:monospace; background:#041219;padding:8px;border-radius:8px;color:var(--muted);max-height:320px;overflow:auto;}
+.mode-pill {padding:6px 10px;border-radius:20px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.02);display:inline-block;}
+.small {font-size:12px;color:var(--muted);}
+.footer {display:flex;justify-content:space-between;align-items:center;margin-top:8px;}
+.log {background:#021118;padding:8px;border-radius:8px;color:var(--muted);height:200px;overflow:auto;}
+.status {padding:6px 10px;border-radius:8px;}
+
+
+// src/sim.js
+// Pure browser-side simulation for dashboard. No external deps.
+// Exports createSimulator() which yields a {subscribe, command} API.
+
+export function createSimulator(opts = {}) {
+  const width = opts.width || 100;
+  const height = opts.height || 70;
+
+  // internal state
+  const state = {
+    x: 10, y: 10, yaw: 0, vx: 0, vy: 0, speed: 0,
+    battery: 100, health: 100, status: "IDLE", lastCrash: null,
+    mode: "MANUAL", // MANUAL | AUTO_RALLY | AUTO_RACE | FAST_RACE
+    rally: { x: 80, y: 50 },
+    race: [{x:20,y:60},{x:80,y:10},{x:90,y:50}],
+    map: [],
+    path: [],
+    time: Date.now(),
+    logs: []
+  };
+
+  // generate obstacles
+  function regenObstacles(n = 120) {
+    const map = new Array(height).fill(0).map(()=>new Array(width).fill(0));
+    for (let i=0;i<n;i++){
+      const ox = Math.floor(Math.random()*width);
+      const oy = Math.floor(Math.random()*height);
+      map[oy][ox] = 1;
+    }
+    // carve start zone
+    map[10][10] = 0;
+    state.map = map;
+  }
+  regenObstacles();
+
+  // simple A* on grid
+  function astar(start, goal) {
+    const s = {x: Math.round(start.x), y: Math.round(start.y)};
+    const g = {x: Math.round(goal.x), y: Math.round(goal.y)};
+    const w = width, h = height;
+    const key = (p)=>`${p.x},${p.y}`;
+    const dirs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,-1],[1,-1],[-1,1]];
+    const open = new Map();
+    open.set(key(s), {p:s, g:0, f:heur(s,g), parent:null});
+    const closed = new Set();
+    while(open.size){
+      // pick smallest f
+      let min=null;
+      for (const v of open.values()) {
+        if (!min || v.f < min.f) min = v;
+      }
+      const curKey = key(min.p);
+      if (min.p.x === g.x && min.p.y === g.y) {
+        // reconstruct
+        const path = [];
+        let cur = min;
+        while(cur){ path.push(cur.p); cur = cur.parent; }
+        return path.reverse();
+      }
+      open.delete(curKey);
+      closed.add(curKey);
+      for (const d of dirs){
+        const np = {x:min.p.x+d[0], y:min.p.y+d[1]};
+        if (np.x<0||np.y<0||np.x>=w||np.y>=h) continue;
+        if (state.map[np.y][np.x] === 1) continue;
+        const nk = key(np);
+        if (closed.has(nk)) continue;
+        const ng = min.g + Math.hypot(d[0],d[1]);
+        const existing = open.get(nk);
+        if (!existing || ng < existing.g) {
+          open.set(nk, {p:np, g:ng, f: ng + heuristic(np,g), parent:min});
+        }
+      }
+    }
+    return null;
+  }
+  function heuristic(a,b){ return Math.abs(a.x-b.x)+Math.abs(a.y-b.y); }
+
+  // sensors (simulated)
+  function lidarScan() {
+    // cast rays and return distances (coarse)
+    const rays = [];
+    const n = 90;
+    const maxR = 25;
+    for (let i=0;i<n;i++){
+      const ang = (i/n)*Math.PI*2 - Math.PI;
+      let found = maxR;
+      for (let r=0;r<maxR;r+=0.5){
+        const rx = state.x + Math.cos(state.yaw+ang)*r;
+        const ry = state.y + Math.sin(state.yaw+ang)*r;
+        const gx = Math.round(rx), gy = Math.round(ry);
+        if (gx<0||gy<0||gx>=width||gy>=height){ found=r; break; }
+        if (state.map[gy][gx] === 1){ found=r; break; }
+      }
+      rays.push({r: found, a: ang});
+    }
+    return rays;
+  }
+
+  function radarPing() {
+    // coarse returns: nearby obstacle centroids
+    const hits = [];
+    for (let y=0;y<height;y+=4){
+      for (let x=0;x<width;x+=4){
+        if (state.map[y][x]===1){
+          const dx = x-state.x, dy = y-state.y;
+          const d = Math.hypot(dx,dy);
+          if (d < 60) hits.push({x,y,d});
+        }
+      }
+    }
+    // occasionally add a dynamic blip
+    if (Math.random() < 0.02) hits.push({x: state.x + 10, y: state.y + 2, d: 10});
+    return hits;
+  }
+
+  function sonarPing() {
+    // straight ahead nearest object
+    for (let r=0.2; r<6; r+=0.1){
+      const rx = state.x + Math.cos(state.yaw)*r;
+      const ry = state.y + Math.sin(state.yaw)*r;
+      const gx = Math.round(rx), gy = Math.round(ry);
+      if (gx<0||gy<0||gx>=width||gy>=height) return r;
+      if (state.map[gy][gx]===1) return r;
+    }
+    return null;
+  }
+
+  // event log helper
+  function log(evt) {
+    const entry = {t: Date.now(), evt};
+    state.logs.unshift(entry);
+    if (state.logs.length>200) state.logs.length = 200;
+  }
+
+  // control & dynamics loop
+  let running = true;
+  const subscribers = new Set();
+
+  function publish() {
+    const snapshot = {
+      state: {...state},
+      sensors: {
+        lidar: lidarScan(),
+        radar: radarPing(),
+        sonar: sonarPing()
+      },
+      time: Date.now()
+    };
+    subscribers.forEach(cb=>cb(snapshot));
+  }
+
+  // crash analyzer (very simple)
+  function analyzeCrash(snap) {
+    const sonar = snap.sensors.sonar;
+    const minL = Math.min(...snap.sensors.lidar.map(p=>p.r));
+    if ((sonar && sonar < 0.5) || minL < 0.4 || state.health < 6) return true;
+    return false;
+  }
+
+  function step() {
+    // planner depending on mode
+    state.time = Date.now();
+    if (state.mode === "AUTO_RALLY") {
+      const path = astar({x:state.x,y:state.y}, state.rally);
+      state.path = path || [];
+    } else if (state.mode === "AUTO_RACE" || state.mode === "FAST_RACE") {
+      // choose nearest waypoint as next
+      let best = Infinity, idx=0;
+      state.race.forEach((r,i)=>{
+        const d = Math.hypot(r.x-state.x, r.y-state.y);
+        if (d < best){ best = d; idx=i; }
+      });
+      const target = state.race[(idx+1)%state.race.length];
+      const path = astar({x:state.x,y:state.y}, target);
+      state.path = path || [];
+    } else {
+      state.path = [];
+    }
+
+    // follow path
+    if (state.path && state.path.length >= 2) {
+      const next = state.path[1];
+      const dx = next.x - state.x, dy = next.y - state.y;
+      const heading = Math.atan2(dy, dx);
+      const speedTarget = state.mode === "FAST_RACE" ? 10 : (state.mode === "AUTO_RACE" ? 6 : 2);
+      // yaw smoothing
+      state.yaw += 0.18 * (heading - state.yaw);
+      // velocity
+      state.vx = speedTarget * Math.cos(state.yaw);
+      state.vy = speedTarget * Math.sin(state.yaw);
+      state.x += state.vx * 0.1;
+      state.y += state.vy * 0.1;
+      state.speed = Math.hypot(state.vx, state.vy);
+      state.battery -= 0.02 * (1 + state.speed/6);
+      if (state.speed > 8) state.health -= 0.02;
+      state.status = "AUTONOMOUS";
+    } else {
+      // drift / idle
+      state.x += state.vx * 0.05;
+      state.y += state.vy * 0.05;
+      state.battery -= 0.004;
+      state.status = state.mode === "MANUAL" ? "MANUAL" : state.status;
+    }
+
+    // safety: read sensors and trigger avoidance/crash
+    const snap = {sensors:{lidar:lidarScan(), sonar:sonarPing()}, state:{...state}};
+    if (analyzeCrash(snap)) {
+      log("CRASH_DETECTED");
+      state.lastCrash = Date.now();
+      state.health -= 8;
+      // emergency avoidance: back off & rotate
+      state.vx = 0; state.vy = 0;
+      state.x += Math.cos(state.yaw + Math.PI/2)*1.0;
+      state.y += Math.sin(state.yaw + Math.PI/2)*1.0;
+      state.yaw += Math.PI/2 * (Math.random() < 0.5 ? 1 : -1);
+      state.status = "AVOIDANCE";
+    } else {
+      // proximity braking
+      const minL = Math.min(...snap.sensors.lidar.map(p=>p.r));
+      if (minL < 2.0){
+        // scale down velocity
+        state.vx *= 0.9;
+        state.vy *= 0.9;
+        state.speed = Math.hypot(state.vx, state.vy);
+        state.status = "BRAKING";
+      }
+    }
+
+    // autorepair & antimalware stubs
+    if (Math.random() < 0.01) {
+      const r = Math.random();
+      if (r < 0.2) { log("ANTIMALWARE_SCAN: clean"); }
+      else if (r < 0.3) { log("ANTIMALWARE_SCAN: suspicious -> isolate"); state.logs.unshift({t:Date.now(), evt:"ANTIMALWARE: isolate process"}); }
+    }
+    if (Math.random() < 0.02 && state.health < 60) {
+      // soft repair
+      log("AUTOREPAIR: soft_reset");
+      state.health = Math.min(100, state.health + (3 + Math.random()*6));
+    }
+    // keep values sane
+    state.battery = Math.max(0, Math.min(100, state.battery));
+    state.health = Math.max(0, Math.min(100, state.health));
+    publish();
+  }
+
+  // run loop
+  const interval = setInterval(() => { if (running) step(); }, 100);
+
+  return {
+    subscribe(cb){ subscribers.add(cb); return ()=>subscribers.delete(cb); },
+    command(cmd, payload){
+      if (cmd === "SET_MODE") { state.mode = payload; log(`MODE:${payload}`); }
+      if (cmd === "REGEN_MAP") { regenObstacles(); log("MAP: regenerated"); }
+      if (cmd === "SET_RALLY") { state.rally = payload; log("RALLY_SET"); }
+      if (cmd === "MANUAL_CONTROL") {
+        if (payload.vx !== undefined) state.vx = payload.vx;
+        if (payload.vy !== undefined) state.vy = payload.vy;
+      }
+      publish();
+    },
+    snapshot(){ return {state:{...state}}; },
+    stop(){ running=false; clearInterval(interval); }
+  };
+}
+
+
+import React, {useEffect, useRef} from "react";
+
+export default function Camera({name, snapshot}) {
+  const ref = useRef();
+  useEffect(()=>{
+    const canvas = ref.current;
+    const ctx = canvas.getContext("2d");
+    function draw(){
+      ctx.fillStyle = "#07121a";
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.fillStyle = "#bfe";
+      ctx.font = "14px monospace";
+      ctx.fillText(name + " CAMERA", 10, 18);
+      if (!snapshot) { requestAnimationFrame(draw); return; }
+      // draw a moving circle to simulate motion
+      const t = (snapshot.time/1000) % 10;
+      const cx = 60 + 40*Math.sin(t + name.length);
+      const cy = 60 + 30*Math.cos(t*1.2);
+      ctx.beginPath(); ctx.fillStyle = "#2a9"; ctx.arc(cx,cy,22,0,Math.PI*2); ctx.fill();
+      // overlay minimap smallbox
+      ctx.fillStyle = "#00161a"; ctx.fillRect(canvas.width-140,10,130,80);
+      ctx.fillStyle = "#8fb"; ctx.fillText(`x:${snapshot.state.x.toFixed(1)} y:${snapshot.state.y.toFixed(1)}`, canvas.width-130, 30);
+      // draw LIDAR arc as overlay
+      if (snapshot.sensors && snapshot.sensors.lidar){
+        ctx.save();
+        ctx.translate(120,100);
+        ctx.strokeStyle = "rgba(255,200,60,0.7)";
+        const rays = snapshot.sensors.lidar.slice(0,40);
+        rays.forEach((r,i)=>{
+          const a = r.a + snapshot.state.yaw;
+          const rr = Math.min(60, r.r*3);
+          ctx.beginPath();
+          ctx.moveTo(0,0);
+          ctx.lineTo(rr*Math.cos(a), rr*Math.sin(a));
+          ctx.stroke();
+        });
+        ctx.restore();
+      }
+      requestAnimationFrame(draw);
+    }
+    draw();
+  }, [snapshot, name]);
+  return <canvas ref={ref} width={320} height={180} className="cam-canvas" />;
+}
+
+
+import React, {useRef, useEffect} from "react";
+
+export default function MapCanvas({snapshot, width=640, height=420}) {
+  const ref = useRef();
+  useEffect(()=>{
+    const canvas = ref.current;
+    const ctx = canvas.getContext("2d");
+    function draw(){
+      ctx.fillStyle = "#03151a";
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+      if (!snapshot) { requestAnimationFrame(draw); return; }
+      const map = snapshot.state.map;
+      const rows = map.length, cols = map[0].length;
+      const cellW = canvas.width / cols, cellH = canvas.height / rows;
+      // draw obstacles
+      for (let y=0;y<rows;y++){
+        for (let x=0;x<cols;x++){
+          if (map[y][x]===1){
+            ctx.fillStyle = "#223";
+            ctx.fillRect(x*cellW, y*cellH, cellW, cellH);
+          }
+        }
+      }
+      // draw path
+      const path = snapshot.state.path || [];
+      if (path.length){
+        ctx.strokeStyle = "#2ef";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i=0;i<path.length;i++){
+          const p = path[i];
+          const px = (p.x+0.5)*cellW, py=(p.y+0.5)*cellH;
+          if (i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+        }
+        ctx.stroke();
+      }
+      // draw race waypoints
+      (snapshot.state.race || []).forEach((r,i)=>{
+        ctx.fillStyle = "#ffd";
+        ctx.beginPath(); ctx.arc((r.x+0.5)*cellW,(r.y+0.5)*cellH,6,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle = "#001"; ctx.fillText(`${i+1}`, (r.x+0.5)*cellW-3,(r.y+0.5)*cellH+4);
+      });
+      // draw rally point
+      const r = snapshot.state.rally;
+      ctx.fillStyle = "#2f2";
+      ctx.beginPath(); ctx.arc((r.x+0.5)*cellW,(r.y+0.5)*cellH,8,0,Math.PI*2); ctx.fill();
+
+      // draw vehicle
+      const s = snapshot.state;
+      const vx = (s.x+0.5)*cellW, vy=(s.y+0.5)*cellH;
+      ctx.save();
+      ctx.translate(vx, vy);
+      ctx.rotate(s.yaw);
+      ctx.fillStyle = "#e66";
+      ctx.fillRect(-10,-6,20,12);
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(6,-4,6,8);
+      ctx.restore();
+
+      // draw radar blips
+      (snapshot.sensors.radar || []).slice(0,30).forEach(hit=>{
+        ctx.fillStyle = "rgba(255,220,80,0.6)";
+        ctx.fillRect((hit.x+0.5)*cellW-3, (hit.y+0.5)*cellH-3, 6,6);
+      });
+
+      // HUD
+      ctx.fillStyle = "#9ab";
+      ctx.font = "12px monospace";
+      ctx.fillText(`Mode: ${s.mode}`, 10, 18);
+      ctx.fillText(`Speed: ${s.speed.toFixed(2)}`, 10, 34);
+      ctx.fillText(`Battery: ${s.battery.toFixed(0)}%`, 10, 50);
+      ctx.fillText(`Health: ${s.health.toFixed(0)}%`, 10, 66);
+
+      requestAnimationFrame(draw);
+    }
+    draw();
+  }, [snapshot]);
+  return <canvas ref={ref} width={width} height={height} className="map-canvas"/>;
+}
+
+
+import React, {useState} from "react";
+
+export default function ControlPanel({sim}) {
+  const [mode, setMode] = useState("MANUAL");
+  const [manual, setManual] = useState({vx:0,vy:0});
+  function changeMode(m){
+    setMode(m);
+    sim.command("SET_MODE", m);
+  }
+  function regen(){ sim.command("REGEN_MAP"); }
+  function setRally(ev){
+    const parts = ev.target.value.split(",").map(x=>parseFloat(x));
+    if (parts.length===2) sim.command("SET_RALLY", {x: parts[0], y: parts[1]});
+  }
+  function manualDrive(delta){
+    const next = {vx: manual.vx + delta.vx, vy: manual.vy + delta.vy};
+    setManual(next);
+    sim.command("MANUAL_CONTROL", next);
+  }
+  return (
+    <div className="controls">
+      <div style={{display:"flex",gap:8}}>
+        <button className="btn" onClick={()=>changeMode("MANUAL")}>MANUAL</button>
+        <button className="btn" onClick={()=>changeMode("AUTO_RALLY")}>AUTO RALLY</button>
+        <button className="btn" onClick={()=>changeMode("AUTO_RACE")}>AUTO RACE</button>
+        <button className="btn" onClick={()=>changeMode("FAST_RACE")}>FAST RACE</button>
+      </div>
+      <div style={{display:"flex",gap:8,marginTop:8}}>
+        <button className="btn ghost" onClick={regen}>REGENERATE MAP</button>
+        <input placeholder="rally x,y" onBlur={setRally} style={{padding:8,background:"#071217",color:"#cfe",border:"1px solid rgba(255,255,255,0.04)",borderRadius:8}}/>
+      </div>
+
+      <div style={{marginTop:10}}>
+        <div className="small">Manual control</div>
+        <div style={{display:"flex",gap:8,marginTop:6}}>
+          <button className="btn" onClick={()=>manualDrive({vx:0,vy:-1})}>Forward</button>
+          <button className="btn" onClick={()=>manualDrive({vx:0,vy:1})}>Back</button>
+          <button className="btn" onClick={()=>manualDrive({vx:-1,vy:0})}>Left</button>
+          <button className="btn" onClick={()=>manualDrive({vx:1,vy:0})}>Right</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+import React from "react";
+
+export default function Telemetry({snapshot}) {
+  if (!snapshot) return <div className="telemetry">No data yet...</div>;
+  const s = snapshot.state;
+  return (
+    <div>
+      <div className="panel small" style={{padding:10,marginBottom:8}}>
+        <div><b>Status:</b> <span className="mode-pill">{s.status}</span></div>
+        <div className="small">Mode: {s.mode} • Speed: {s.speed.toFixed(2)} • Battery: {s.battery.toFixed(0)}% • Health: {s.health.toFixed(0)}%</div>
+      </div>
+      <div className="log">
+        {s.logs.slice(0,80).map((l, i)=>(
+          <div key={i} style={{padding:"6px 0", borderBottom: "1px solid rgba(255,255,255,0.02)"}}>
+            <div style={{fontSize:12,color:"#7aa"}}>{new Date(l.t).toLocaleTimeString()}</div>
+            <div style={{fontSize:13}}>{l.evt}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
+import React, {useEffect, useRef, useState} from "react";
+import { createSimulator } from "./sim";
+import Camera from "./components/Camera";
+import MapCanvas from "./components/MapCanvas";
+import ControlPanel from "./components/ControlPanel";
+import Telemetry from "./components/Telemetry";
+
+export default function App(){
+  const simRef = useRef();
+  const [snapshot, setSnapshot] = useState(null);
+
+  useEffect(()=>{
+    const sim = createSimulator();
+    simRef.current = sim;
+    const unsub = sim.subscribe(setSnapshot);
+    // initial snapshot request
+    setSnapshot(sim.snapshot ? sim.snapshot() : null);
+    return ()=>{ unsub(); sim.stop && sim.stop(); };
+  },[]);
+
+  if (!simRef.current) return <div>Loading sim...</div>;
+
+  return (
+    <div className="app">
+      <div className="panel">
+        <div className="header">
+          <div className="logo">AD</div>
+          <div>
+            <div className="title">Advanced Drone — Control Deck</div>
+            <div className="small">Simulated multi-sensor dashboard — object avoidance | rally | race | repair AI</div>
+          </div>
+        </div>
+
+        <div className="cameras">
+          <div className="camera">
+            <Camera name="Front" snapshot={snapshot} />
+            <div style={{flex:1}}>
+              <div className="small">Front</div>
+              <div className="small">Resolution: simulated</div>
+            </div>
+          </div>
+
+          <div className="camera">
+            <Camera name="Rear" snapshot={snapshot} />
+            <div style={{flex:1}}>
+              <div className="small">Rear</div>
+            </div>
+          </div>
+
+          <div className="camera">
+            <Camera name="Side" snapshot={snapshot} />
+            <div style={{flex:1}}>
+              <div className="small">Side</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="panel map-wrapper">
+        <MapCanvas snapshot={snapshot} width={900} height={640} />
+        <div style={{padding:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div className="small">Map / Planner view — shows obstacles, path, radar blips, waypoints</div>
+          <div>
+            <button className="btn" onClick={()=>simRef.current.command("REGEN_MAP")}>Regenerate</button>
+            <button className="btn ghost" style={{marginLeft:8}} onClick={()=>simRef.current.command("SET_MODE", "AUTO_RACE")}>Quick Race</button>
+          </div>
+        </div>
+      </div>
+
+      <div className="panel">
+        <ControlPanel sim={simRef.current} />
+        <div style={{height:12}} />
+        <Telemetry snapshot={snapshot} />
+        <div className="footer">
+          <div className="small">Autorepair & Antimalware (simulated)</div>
+          <div className="small">Honest simulation — not flight hardware</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+{
+  "name": "advanced-drone-node-sim",
+  "version": "1.0.0",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.13.0",
+    "uuid": "^9.0.0"
+  }
+}
+
+
+/**
+ * server.js
+ *
+ * Node.js Express + WebSocket server that runs a browser-friendly simulation
+ * of an advanced drone / hybrid car-sized drone.
+ *
+ * - Serves static UI from /public
+ * - WebSocket endpoint /ws streams telemetry + sensor snapshots
+ * - REST endpoints to change mode, regenerate map, set rally point, manual control
+ *
+ * Run: node server.js
+ */
+
+const express = require('express');
+const http = require('http');
+const WebSocket = require('ws');
+const path = require('path');
+const { createSimulator } = require('./sim');
+const { v4: uuidv4 } = require('uuid');
+
+const app = express();
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Create simulator instance (runs in-process)
+const sim = createSimulator({
+  width: 120,
+  height: 80,
+  obstacleCount: 200
+});
+
+// Simple client registry
+const clients = new Map();
+
+// WebSocket server for real-time telemetry
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server, path: '/ws' });
+
+wss.on('connection', (ws, req) => {
+  const id = uuidv4();
+  clients.set(id, ws);
+  console.log('client connected', id);
+  // send initial snapshot immediately
+  ws.send(JSON.stringify({ type: 'snapshot', payload: sim.snapshot() }));
+
+  const sub = sim.subscribe((snap) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'telemetry', payload: snap }));
+    }
+  });
+
+  ws.on('message', (msg) => {
+    // Expect JSON commands from UI (optional)
+    try {
+      const data = JSON.parse(msg.toString());
+      if (data?.cmd) {
+        handleClientCommand(data, id);
+      }
+    } catch (e) { /* ignore malformed */ }
+  });
+
+  ws.on('close', () => {
+    console.log('client disconnected', id);
+    sub(); // unsubscribe
+    clients.delete(id);
+  });
+});
+
+// REST control endpoints (can be called by UI or other services)
+app.post('/api/mode', (req, res) => {
+  const { mode } = req.body;
+  const allowed = ['MANUAL', 'AUTO_RALLY', 'AUTO_RACE', 'FAST_RACE'];
+  if (!allowed.includes(mode)) return res.status(400).json({ error: 'invalid mode' });
+  sim.command('SET_MODE', mode);
+  return res.json({ ok: true, mode });
+});
+
+app.post('/api/regenerate', (req, res) => {
+  sim.command('REGEN_MAP');
+  return res.json({ ok: true });
+});
+
+app.post('/api/rally', (req, res) => {
+  const { x, y } = req.body;
+  if (typeof x !== 'number' || typeof y !== 'number') return res.status(400).json({ error: 'bad coordinates' });
+  sim.command('SET_RALLY', { x, y });
+  return res.json({ ok: true, rally: { x, y } });
+});
+
+app.post('/api/manual', (req, res) => {
+  const { vx = 0, vy = 0 } = req.body;
+  sim.command('MANUAL_CONTROL', { vx, vy });
+  return res.json({ ok: true });
+});
+
+function handleClientCommand(obj, clientId) {
+  const { cmd, payload } = obj;
+  // Basic validation / logging — keep server in charge
+  console.log(`From ${clientId}: cmd=${cmd}`, payload || '');
+  switch (cmd) {
+    case 'SET_MODE': sim.command('SET_MODE', payload); break;
+    case 'REGEN_MAP': sim.command('REGEN_MAP'); break;
+    case 'SET_RALLY': sim.command('SET_RALLY', payload); break;
+    case 'MANUAL_CONTROL': sim.command('MANUAL_CONTROL', payload); break;
+    default: break;
+  }
+}
+
+// small health-check
+app.get('/api/ping', (req, res) => res.json({ ok: true, time: Date.now() }));
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`Server listening on http://localhost:${PORT}`);
+});
+
+
+/**
+ * sim.js
+ *
+ * Browser/Node-safe simulation engine exported for server use.
+ * Simulation runs in-process on a setInterval. It is deterministic-ish and
+ * intentionally simple so you can replace modules with real integrations.
+ *
+ * Exports:
+ *   createSimulator(opts) -> { subscribe(cb), command(cmd,payload), snapshot(), stop() }
+ *
+ * Safety: all sensors are simulated. No real-hardware instructions.
+ */
+
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+function defaultOpts() {
+  return { width: 100, height: 60, obstacleCount: 120 };
+}
+
+function makeEmptyMap(w, h) {
+  const map = new Array(h);
+  for (let y = 0; y < h; y++) {
+    map[y] = new Array(w).fill(0);
+  }
+  return map;
+}
+
+function randomInt(max) { return Math.floor(Math.random() * max); }
+
+function createSimulator(opts = {}) {
+  opts = Object.assign(defaultOpts(), opts);
+  const width = opts.width, height = opts.height;
+
+  const state = {
+    x: 10, y: 10, yaw: 0, vx: 0, vy: 0, speed: 0,
+    battery: 100, health: 100, status: "IDLE", lastCrash: null,
+    mode: "MANUAL",
+    rally: { x: Math.max(0, width - 10), y: Math.max(0, height - 10) },
+    race: [{ x: 15, y: height - 10 }, { x: width - 15, y: 12 }, { x: width - 10, y: height - 20 }],
+    map: makeEmptyMap(width, height),
+    path: [],
+    logs: [],
+    time: Date.now()
+  };
+
+  function log(evt) {
+    const entry = { t: Date.now(), evt };
+    state.logs.unshift(entry);
+    if (state.logs.length > 200) state.logs.length = 200;
+  }
+
+  function regenObstacles(n = opts.obstacleCount) {
+    state.map = makeEmptyMap(width, height);
+    for (let i = 0; i < n; i++) {
+      const ox = randomInt(width);
+      const oy = randomInt(height);
+      // keep spawn area free
+      if (Math.hypot(ox - 10, oy - 10) < 6) continue;
+      state.map[oy][ox] = 1;
+    }
+    log('MAP: regenerated');
+  }
+  regenObstacles();
+
+  // very simple A* tailored to this grid
+  function heuristic(a, b) { return Math.abs(a.x - b.x) + Math.abs(a.y - b.y); }
+  function astar(start, goal) {
+    const s = { x: Math.round(start.x), y: Math.round(start.y) };
+    const g = { x: Math.round(goal.x), y: Math.round(goal.y) };
+    const w = width, h = height;
+    const key = (p) => `${p.x},${p.y}`;
+    const dirs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,-1],[1,-1],[-1,1]];
+    const open = new Map();
+    open.set(key(s), { p: s, g: 0, f: heuristic(s, g), parent: null });
+    const closed = new Set();
+
+    while (open.size) {
+      // pick min f
+      let min = null;
+      for (const v of open.values()) if (!min || v.f < min.f) min = v;
+      const curKey = key(min.p);
+      if (min.p.x === g.x && min.p.y === g.y) {
+        // reconstruct
+        const path = [];
+        let cur = min;
+        while (cur) { path.push(cur.p); cur = cur.parent; }
+        return path.reverse();
+      }
+      open.delete(curKey);
+      closed.add(curKey);
+      for (const d of dirs) {
+        const np = { x: min.p.x + d[0], y: min.p.y + d[1] };
+        if (np.x < 0 || np.y < 0 || np.x >= w || np.y >= h) continue;
+        if (state.map[np.y][np.x] === 1) continue;
+        const nk = key(np);
+        if (closed.has(nk)) continue;
+        const ng = min.g + Math.hypot(d[0], d[1]);
+        const existing = open.get(nk);
+        if (!existing || ng < existing.g) {
+          open.set(nk, { p: np, g: ng, f: ng + heuristic(np, g), parent: min });
+        }
+      }
+    }
+    return null;
+  }
+
+  // sensors (simulated)
+  function lidarScan() {
+    const rays = [];
+    const n = 120;
+    const maxR = 30;
+    for (let i = 0; i < n; i++) {
+      const ang = (i / n) * Math.PI * 2 - Math.PI;
+      let found = maxR;
+      for (let r = 0; r < maxR; r += 0.5) {
+        const rx = state.x + Math.cos(state.yaw + ang) * r;
+        const ry = state.y + Math.sin(state.yaw + ang) * r;
+        const gx = Math.round(rx), gy = Math.round(ry);
+        if (gx < 0 || gy < 0 || gx >= width || gy >= height) { found = r; break; }
+        if (state.map[gy][gx] === 1) { found = r; break; }
+      }
+      rays.push({ r: found, a: ang });
+    }
+    return rays;
+  }
+
+  function radarPing() {
+    const hits = [];
+    for (let y = 0; y < height; y += 3) {
+      for (let x = 0; x < width; x += 3) {
+        if (state.map[y][x] === 1) {
+          const dx = x - state.x, dy = y - state.y;
+          const d = Math.hypot(dx, dy);
+          if (d < 80) hits.push({ x, y, d });
+        }
+      }
+    }
+    if (Math.random() < 0.02) hits.push({ x: Math.round(state.x + 10), y: Math.round(state.y + 2), d: 10 });
+    return hits;
+  }
+
+  function sonarPing() {
+    for (let r = 0.2; r < 6; r += 0.1) {
+      const rx = state.x + Math.cos(state.yaw) * r;
+      const ry = state.y + Math.sin(state.yaw) * r;
+      const gx = Math.round(rx), gy = Math.round(ry);
+      if (gx < 0 || gy < 0 || gx >= width || gy >= height) return r;
+      if (state.map[gy][gx] === 1) return r;
+    }
+    return null;
+  }
+
+  // crash analyzer
+  function analyzeCrash(snap) {
+    const sonar = snap.sensors.sonar;
+    const minL = Math.min(...snap.sensors.lidar.map(p => p.r));
+    if ((sonar && sonar < 0.5) || minL < 0.4 || state.health < 6) return true;
+    return false;
+  }
+
+  // publish/subscriber
+  const subscribers = new Set();
+  function publish() {
+    const snapshot = {
+      state: { ...state },
+      sensors: {
+        lidar: lidarScan(),
+        radar: radarPing(),
+        sonar: sonarPing()
+      },
+      time: Date.now()
+    };
+    for (const cb of subscribers) try { cb(snapshot); } catch (e) { /* ignore */ }
+  }
+
+  // commands
+  function command(cmd, payload) {
+    switch (cmd) {
+      case 'SET_MODE':
+        state.mode = payload; log(`MODE:${payload}`); break;
+      case 'REGEN_MAP':
+        regenObstacles(); break;
+      case 'SET_RALLY':
+        state.rally = payload; log('RALLY_SET'); break;
+      case 'MANUAL_CONTROL':
+        if (typeof payload.vx === 'number') state.vx = payload.vx;
+        if (typeof payload.vy === 'number') state.vy = payload.vy;
+        break;
+      default:
+        break;
+    }
+    publish();
+  }
+
+  function snapshot() {
+    return { state: { ...state } };
+  }
+
+  // main step loop
+  let running = true;
+  function step() {
+    state.time = Date.now();
+    // planner
+    if (state.mode === 'AUTO_RALLY') {
+      const path = astar({ x: state.x, y: state.y }, state.rally);
+      state.path = path || [];
+    } else if (state.mode === 'AUTO_RACE' || state.mode === 'FAST_RACE') {
+      // pick next waypoint
+      let best = Infinity, idx = 0;
+      state.race.forEach((r, i) => {
+        const d = Math.hypot(r.x - state.x, r.y - state.y);
+        if (d < best) { best = d; idx = i; }
+      });
+      const target = state.race[(idx + 1) % state.race.length];
+      const path = astar({ x: state.x, y: state.y }, target);
+      state.path = path || [];
+    } else {
+      state.path = [];
+    }
+
+    // follow path
+    if (state.path && state.path.length >= 2) {
+      const next = state.path[1];
+      const dx = next.x - state.x, dy = next.y - state.y;
+      const heading = Math.atan2(dy, dx);
+      const speedTarget = state.mode === 'FAST_RACE' ? 10 : (state.mode === 'AUTO_RACE' ? 6 : 2);
+      state.yaw += 0.18 * (heading - state.yaw);
+      state.vx = speedTarget * Math.cos(state.yaw);
+      state.vy = speedTarget * Math.sin(state.yaw);
+      state.x += state.vx * 0.1;
+      state.y += state.vy * 0.1;
+      state.speed = Math.hypot(state.vx, state.vy);
+      state.battery -= 0.02 * (1 + state.speed / 6);
+      if (state.speed > 8) state.health -= 0.02;
+      state.status = 'AUTONOMOUS';
+    } else {
+      // idle drift
+      state.x += state.vx * 0.05;
+      state.y += state.vy * 0.05;
+      state.battery -= 0.004;
+      if (state.mode === 'MANUAL') state.status = 'MANUAL';
+    }
+
+    // safety
+    const snap = { sensors: { lidar: lidarScan(), sonar: sonarPing() }, state: { ...state } };
+    if (analyzeCrash(snap)) {
+      log('CRASH_DETECTED');
+      state.lastCrash = Date.now();
+      state.health -= 8;
+      state.vx = 0; state.vy = 0;
+      state.x += Math.cos(state.yaw + Math.PI / 2) * 1.0;
+      state.y += Math.sin(state.yaw + Math.PI / 2) * 1.0;
+      state.yaw += Math.PI / 2 * (Math.random() < 0.5 ? 1 : -1);
+      state.status = 'AVOIDANCE';
+    } else {
+      const minL = Math.min(...snap.sensors.lidar.map(p => p.r));
+      if (minL < 2.0) {
+        state.vx *= 0.9; state.vy *= 0.9; state.speed = Math.hypot(state.vx, state.vy); state.status = 'BRAKING';
+      }
+    }
+
+    // antimalware & autorepair stubs
+    if (Math.random() < 0.01) {
+      const r = Math.random();
+      if (r < 0.2) { log('ANTIMALWARE_SCAN: clean'); }
+      else if (r < 0.3) { log('ANTIMALWARE_SCAN: suspicious -> isolate'); log('ANTIMALWARE: isolate process'); }
+    }
+    if (Math.random() < 0.02 && state.health < 60) {
+      log('AUTOREPAIR: soft_reset');
+      state.health = clamp(state.health + (3 + Math.random() * 6), 0, 100);
+    }
+
+    state.battery = clamp(state.battery, 0, 100);
+    state.health = clamp(state.health, 0, 100);
+
+    publish();
+  }
+
+  const interval = setInterval(() => { if (running) step(); }, 120);
+
+  return {
+    subscribe(cb) { subscribers.add(cb); return () => subscribers.delete(cb); },
+    command,
+    snapshot,
+    stop() { running = false; clearInterval(interval); }
+  };
+}
+
+module.exports = { createSimulator };
+
+
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Advanced Drone — Node Sim</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Roboto,Arial;background:#051018;color:#dfeef6;margin:0;padding:12px;}
+    .layout{display:grid;grid-template-columns:380px 1fr 360px;gap:12px;height:calc(100vh - 24px);}
+    .panel{background:linear-gradient(180deg,#07121a,#031018);padding:12px;border-radius:8px;overflow:auto;}
+    .cam{background:#001219;height:140px;border-radius:6px;display:flex;align-items:center;justify-content:center;margin-bottom:8px;color:#7fb;}
+    .map{height:100%;background:#00161a;border-radius:6px;display:flex;align-items:center;justify-content:center;}
+    button{padding:8px 10px;border-radius:8px;border:none;background:#114;color:#dff;cursor:pointer;margin-right:6px;}
+    .small{font-size:12px;color:#9ab;}
+    .log{background:#011216;padding:8px;border-radius:6px;height:220px;overflow:auto;color:#8fb;}
+    .hud{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+    input{padding:8px;border-radius:6px;background:#04121a;border:1px solid rgba(255,255,255,0.03);color:#dfe;}
+  </style>
+</head>
+<body>
+  <h2>Advanced Drone — Node.js Simulation Server</h2>
+  <div class="layout">
+    <div class="panel">
+      <div class="hud">
+        <button onclick="sendMode('MANUAL')">MANUAL</button>
+        <button onclick="sendMode('AUTO_RALLY')">AUTO_RALLY</button>
+        <button onclick="sendMode('AUTO_RACE')">AUTO_RACE</button>
+        <button onclick="sendMode('FAST_RACE')">FAST_RACE</button>
+        <button onclick="regen()">REGEN MAP</button>
+      </div>
+
+      <div style="margin-top:10px">
+        <div class="cam" id="cam-front">FRONT CAM (sim)</div>
+        <div class="cam" id="cam-rear">REAR CAM (sim)</div>
+        <div class="cam" id="cam-side">SIDE CAM (sim)</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <canvas id="map" width="900" height="700" style="width:100%;height:100%"></canvas>
+    </div>
+
+    <div class="panel">
+      <div><b>Telemetry</b></div>
+      <pre id="tele" class="small">connecting...</pre>
+      <div style="height:10px"></div>
+      <div>
+        <input id="rally" placeholder="rally x,y (e.g. 80,40)" />
+        <button onclick="setRally()">Set Rally</button>
+      </div>
+      <div style="height:10px"></div>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+
+  <script>
+    const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+    let latest = null;
+    ws.onopen = () => { log('ws: connected'); };
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === 'telemetry') {
+          latest = msg.payload;
+          draw(mapCanvas, latest);
+          document.getElementById('tele').innerText = JSON.stringify(latest.state, null, 2);
+        } else if (msg.type === 'snapshot') {
+          latest = msg.payload;
+          draw(mapCanvas, latest);
+          document.getElementById('tele').innerText = JSON.stringify(latest.state, null, 2);
+        }
+      } catch(e){ console.error(e); }
+    };
+    ws.onclose = ()=> log('ws: closed');
+
+    function sendMode(m){ fetch('/api/mode', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mode:m})}) .then(r=>r.json()).then(j=>log('mode: '+JSON.stringify(j))); }
+    function regen(){ fetch('/api/regenerate', {method:'POST'}).then(r=>r.json()).then(j=>log('regen: ok')); }
+    function setRally(){ const v = document.getElementById('rally').value.split(',').map(x=>parseFloat(x.trim())); if (v.length===2) fetch('/api/rally', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({x:v[0], y:v[1]})}).then(r=>r.json()).then(j=>log('rally set')); }
+
+    function log(msg){ const d = new Date().toLocaleTimeString(); const el = document.getElementById('log'); el.innerText = `${d} ${msg}\n` + el.innerText; }
+
+    // map rendering
+    const mapCanvas = document.getElementById('map');
+    const ctx = mapCanvas.getContext('2d');
+
+    function draw(canvas, snap){
+      if (!snap) return;
+      const w = canvas.width, h = canvas.height;
+      ctx.fillStyle = '#031419'; ctx.fillRect(0,0,w,h);
+      const map = snap.state.map;
+      const rows = map.length, cols = map[0].length;
+      const cellW = w/cols, cellH = h/rows;
+      // obstacles
+      for (let y=0;y<rows;y++){
+        for (let x=0;x<cols;x++){
+          if (map[y][x]===1){
+            ctx.fillStyle = '#123'; ctx.fillRect(x*cellW, y*cellH, cellW, cellH);
+          }
+        }
+      }
+      // path
+      const path = snap.state.path || [];
+      if (path.length){
+        ctx.strokeStyle = '#2ef';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i=0;i<path.length;i++){
+          const p = path[i];
+          const px = (p.x+0.5)*cellW, py = (p.y+0.5)*cellH;
+          if (i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+        }
+        ctx.stroke();
+      }
+
+      // race waypoints
+      (snap.state.race || []).forEach((r,i)=>{
+        ctx.fillStyle = '#ffd'; ctx.beginPath(); ctx.arc((r.x+0.5)*cellW,(r.y+0.5)*cellH,6,0,Math.PI*2); ctx.fill();
+      });
+
+      // rally
+      const r = snap.state.rally;
+      ctx.fillStyle = '#2f2'; ctx.beginPath(); ctx.arc((r.x+0.5)*cellW,(r.y+0.5)*cellH,8,0,Math.PI*2); ctx.fill();
+
+      // vehicle
+      const s = snap.state;
+      const vx = (s.x+0.5)*cellW, vy = (s.y+0.5)*cellH;
+      ctx.save();
+      ctx.translate(vx, vy);
+      ctx.rotate(s.yaw);
+      ctx.fillStyle = '#e66'; ctx.fillRect(-10,-6,20,12);
+      ctx.fillStyle = '#fff'; ctx.fillRect(6,-4,6,8);
+      ctx.restore();
+
+      // radar blips
+      (snap.sensors.radar || []).slice(0,40).forEach(blip=>{
+        ctx.fillStyle = 'rgba(255,220,80,0.6)';
+        ctx.fillRect((blip.x+0.5)*cellW-3,(blip.y+0.5)*cellH-3,6,6);
+      });
+
+      // HUD
+      ctx.fillStyle = '#9ab'; ctx.font = '12px monospace';
+      ctx.fillText(`Mode: ${s.mode}`, 10, 18);
+      ctx.fillText(`Speed: ${s.speed.toFixed(2)}`, 10, 34);
+      ctx.fillText(`Battery: ${s.battery.toFixed(0)}%`, 10, 50);
+      ctx.fillText(`Health: ${s.health.toFixed(0)}%`, 10, 66);
+    }
+  </script>
+</body>
+</html>
+
+
+"""
+tf_drone_stack.py
+
+Single-file TensorFlow prototype for:
+ - Perception: camera-based obstacle detector (tiny CNN)
+ - Sensor fusion: lidar/radar/sonar + vision -> avoidance / waypoint delta
+ - Crash detection: binary classifier
+ - Autorepair health predictor: regression
+ - Antimalware: anomaly detector (autoencoder) over telemetry-like features
+ - Synthetic data generator for safe simulation
+
+Run:
+  pip install tensorflow numpy matplotlib opencv-python scikit-learn
+  python tf_drone_stack.py
+
+Notes:
+ - This is a simulated / prototyping stack. Replace synthetic generators with real datasets carefully.
+ - No hardware flight-control instructions included.
+"""
+
+import os
+import time
+import math
+import random
+import numpy as np
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
+import matplotlib.pyplot as plt
+import cv2
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+
+# -------------------------
+# Config
+# -------------------------
+IMG_H, IMG_W, IMG_C = 96, 128, 3   # small camera crops for detector
+LIDAR_BINS = 64                    # simulated 1D lidar vector length
+RADAR_FEAT = 8                     # small radar features (blobs)
+SEED = 42
+tf.random.set_seed(SEED)
+np.random.seed(SEED)
+random.seed(SEED)
+
+# -------------------------
+# Synthetic Data Generator
+# -------------------------
+def synth_camera_frame(obstacle_x=None, obstacle_y=None, obstacle_size=None):
+    """Generate a simple synthetic RGB frame with a single round obstacle (circle).
+       Returns uint8 image and bbox (cx, cy, r) in pixel coords (or None)."""
+    img = np.zeros((IMG_H, IMG_W, IMG_C), dtype=np.uint8)
+    # background gradient
+    for y in range(IMG_H):
+        img[y,:, :] = np.clip(20 + y * (220/IMG_H), 0, 255)
+    # obstacle randomly placed if requested
+    if obstacle_x is None:
+        if random.random() < 0.6:
+            obstacle_x = random.randint(int(IMG_W*0.15), int(IMG_W*0.85))
+            obstacle_y = random.randint(int(IMG_H*0.2), int(IMG_H*0.8))
+            obstacle_size = random.randint(6, 20)
+        else:
+            obstacle_x = obstacle_y = obstacle_size = None
+    if obstacle_size is not None:
+        color = (int(random.uniform(150,255)), int(random.uniform(60,180)), int(random.uniform(60,200)))
+        cv2.circle(img, (obstacle_x, obstacle_y), obstacle_size, color, -1)
+    # add noise & blur
+    img = cv2.GaussianBlur(img, (3,3), 0)
+    img = (img + np.random.randn(*img.shape) * 6).clip(0,255).astype(np.uint8)
+    bbox = (obstacle_x, obstacle_y, obstacle_size) if obstacle_size is not None else None
+    return img, bbox
+
+def synth_lidar(state_x, state_y, map_grid, n_bins=LIDAR_BINS, max_range=30.0):
+    """Simulate a 1D lidar scan around the vehicle (range per angle bin)."""
+    angles = np.linspace(-math.pi, math.pi, n_bins, endpoint=False)
+    ranges = np.ones(n_bins) * max_range
+    h, w = map_grid.shape
+    for i,a in enumerate(angles):
+        for r in np.linspace(0.5, max_range, 200):
+            rx = state_x + r * math.cos(a)
+            ry = state_y + r * math.sin(a)
+            gx = int(round(rx)); gy = int(round(ry))
+            if gx < 0 or gy < 0 or gx >= w or gy >= h:
+                ranges[i] = r
+                break
+            if map_grid[gy, gx] == 1:
+                ranges[i] = r
+                break
+    # normalize 0..1
+    return np.clip(ranges / max_range, 0.0, 1.0).astype(np.float32)
+
+def synth_radar(map_grid, state_x, state_y, max_blobs=6):
+    """Return a fixed-length radar features vector summarizing closest blobs.
+       We'll output 8 features: for top-K blobs -> (dx,dy,norm_dist) flattened, others zero."""
+    h, w = map_grid.shape
+    blobs = []
+    ys, xs = np.where(map_grid == 1)
+    for gx, gy in zip(xs, ys):
+        dx = gx - state_x; dy = gy - state_y
+        dist = math.hypot(dx, dy)
+        blobs.append((dist, dx, dy))
+    blobs.sort(key=lambda x: x[0])
+    feat = np.zeros(RADAR_FEAT, dtype=np.float32)
+    k = min(max_blobs, len(blobs))
+    for i in range(k):
+        dist, dx, dy = blobs[i]
+        # normalize dx,dy to [-1,1] by dividing by map diagonal
+        norm = math.hypot(w, h)
+        feat_i = np.array([dx/norm, dy/norm, dist/norm], dtype=np.float32)
+        if i*3+3 <= RADAR_FEAT:
+            feat[i*3:i*3+3] = feat_i[:min(3, RADAR_FEAT - i*3)]
+    return feat
+
+def synth_sonar(state_x, state_y, state_yaw, map_grid, max_range=6.0):
+    """Return a single sonar reading in meters normalized to 0..1"""
+    for r in np.linspace(0.2, max_range, 60):
+        rx = state_x + r * math.cos(state_yaw)
+        ry = state_y + r * math.sin(state_yaw)
+        gx = int(round(rx)); gy = int(round(ry))
+        if gx < 0 or gy < 0 or gx >= map_grid.shape[1] or gy >= map_grid.shape[0]:
+            return r / max_range
+        if map_grid[gy, gx] == 1:
+            return r / max_range
+    return 1.0
+
+def make_random_map(w=120, h=80, obstacle_prob=0.02):
+    grid = np.zeros((h,w), dtype=np.uint8)
+    for y in range(h):
+        for x in range(w):
+            if random.random() < obstacle_prob:
+                grid[y,x] = 1
+    # clear start zone
+    grid[10:14, 8:14] = 0
+    return grid
+
+# Label functions: from map and pose, compute "safe waypoint delta" (simple A* surrogate)
+# We'll use a short target delta vector that points toward rally/next waypoint while avoiding obstacles.
+
+def simple_local_goal_delta(state_x, state_y, goal_x, goal_y, map_grid):
+    """Return a small vector (dx, dy) pointing toward a locally safe step to reach goal.
+       Implementation: pick among candidate headings that maximize clearance while reducing distance."""
+    best = (0.0, 0.0)
+    best_score = 1e9
+    for ang in np.linspace(0, 2*math.pi, 18, endpoint=False):
+        test_x = state_x + math.cos(ang)*1.5
+        test_y = state_y + math.sin(ang)*1.5
+        gx = int(round(test_x)); gy = int(round(test_y))
+        # if collides, skip
+        if gx<0 or gy<0 or gx>=map_grid.shape[1] or gy>=map_grid.shape[0]: continue
+        if map_grid[gy,gx]==1: continue
+        # score: distance-to-goal + inverse clearance (we favor more clearance)
+        dist_to_goal = math.hypot(goal_x-test_x, goal_y-test_y)
+        # clearance: min distance to obstacle in small radius
+        clearance = 1.0
+        for r in np.linspace(0.5, 4.0, 6):
+            rx = test_x + r*math.cos(ang)
+            ry = test_y + r*math.sin(ang)
+            gx2 = int(round(rx)); gy2 = int(round(ry))
+            if gx2<0 or gy2<0 or gx2>=map_grid.shape[1] or gy2>=map_grid.shape[0]:
+                clearance = min(clearance, r)
+                break
+            if map_grid[gy2,gx2] == 1:
+                clearance = min(clearance, r)
+                break
+        score = dist_to_goal - 0.5*clearance  # lower better
+        if score < best_score:
+            best_score = score
+            best = (test_x-state_x, test_y-state_y)
+    # normalize delta to reasonable magnitude
+    norm = math.hypot(best[0], best[1]) + 1e-6
+    max_step = 2.0
+    return (best[0]/norm*min(norm, max_step), best[1]/norm*min(norm, max_step))
+
+# -------------------------
+# TF Models
+# -------------------------
+
+def build_tiny_detector(input_shape=(IMG_H, IMG_W, IMG_C)):
+    """Tiny CNN that outputs probability of obstacle in frame and rough bbox center offsets."""
+    inp = keras.Input(shape=input_shape, name="camera")
+    x = layers.Rescaling(1./255)(inp)
+    x = layers.Conv2D(16, 3, activation='relu', padding='same')(x)
+    x = layers.MaxPool2D()(x)
+    x = layers.Conv2D(32, 3, activation='relu', padding='same')(x)
+    x = layers.MaxPool2D()(x)
+    x = layers.Conv2D(64, 3, activation='relu', padding='same')(x)
+    x = layers.GlobalAveragePooling2D()(x)
+    x = layers.Dense(64, activation='relu')(x)
+    # outputs: obstacle probability, cx_norm, cy_norm, r_norm (relative to image)
+    prob = layers.Dense(1, activation='sigmoid', name='prob')(x)
+    bbox = layers.Dense(3, activation='sigmoid', name='bbox')(x)
+    model = keras.Model(inp, [prob, bbox], name='tiny_detector')
+    model.compile(optimizer='adam',
+                  loss={'prob': 'binary_crossentropy', 'bbox': 'mse'},
+                  loss_weights={'prob': 1.0, 'bbox': 0.5})
+    return model
+
+def build_sensor_fusion(lidar_len=LIDAR_BINS, radar_len=RADAR_FEAT, sonar_len=1):
+    """Simple MLP that fuses lidar + radar + sonar + detection logits to produce:
+       - avoid_action: 3-way (0=keep,1=turn_left,2=turn_right) (classification) OR continuous delta
+       - waypoint_delta: continuous dx,dy (regression)
+    """
+    lidar_in = keras.Input(shape=(lidar_len,), name='lidar')
+    radar_in = keras.Input(shape=(radar_len,), name='radar')
+    sonar_in = keras.Input(shape=(sonar_len,), name='sonar')
+    det_logit = keras.Input(shape=(1,), name='det_logit')  # detection probability or logit
+    x = layers.Concatenate()([lidar_in, radar_in, sonar_in, det_logit])
+    x = layers.Dense(256, activation='relu')(x)
+    x = layers.Dense(128, activation='relu')(x)
+    # avoidance classification + regression waypoint
+    avoid = layers.Dense(3, activation='softmax', name='avoid')(x)
+    delta = layers.Dense(2, activation='tanh', name='delta')(x)  # dx,dy in normalized range
+    model = keras.Model([lidar_in, radar_in, sonar_in, det_logit], [avoid, delta], name='sensor_fusion')
+    model.compile(optimizer=keras.optimizers.Adam(1e-3),
+                  loss={'avoid': 'sparse_categorical_crossentropy', 'delta': 'mse'},
+                  loss_weights={'avoid': 1.0, 'delta': 2.0})
+    return model
+
+def build_crash_detector(input_dim= (LIDAR_BINS + RADAR_FEAT + 1 + 3) ):
+    """Binary classifier to detect crash/imminent collision from fused features (lidar+radar+sonar+detector bbox)."""
+    inp = keras.Input(shape=(input_dim,), name='features')
+    x = layers.Dense(128, activation='relu')(inp)
+    x = layers.Dense(64, activation='relu')(x)
+    out = layers.Dense(1, activation='sigmoid')(x)
+    model = keras.Model(inp, out, name='crash_detector')
+    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+    return model
+
+def build_autorepair_predictor(input_dim=10):
+    """Predict health level (0..100) in regression form from telemetry features."""
+    inp = keras.Input(shape=(input_dim,), name='telem')
+    x = layers.Dense(64, activation='relu')(inp)
+    x = layers.Dense(32, activation='relu')(x)
+    out = layers.Dense(1, activation='linear')(x)
+    model = keras.Model(inp, out, name='autorepair')
+    model.compile(optimizer='adam', loss='mse')
+    return model
+
+def build_anomaly_autoencoder(input_dim=12, latent=6):
+    inp = keras.Input(shape=(input_dim,), name='ae_in')
+    x = layers.Dense(32, activation='relu')(inp)
+    x = layers.Dense(latent, activation='relu', name='code')(x)
+    x = layers.Dense(32, activation='relu')(x)
+    out = layers.Dense(input_dim, activation='linear')(x)
+    model = keras.Model(inp, out, name='telemetry_ae')
+    model.compile(optimizer='adam', loss='mse')
+    return model
+
+# -------------------------
+# Training helpers
+# -------------------------
+def generate_dataset(n_samples=2000, map_w=120, map_h=80):
+    """Create dataset for training:
+       - camera images + bbox/prob labels for detector
+       - fused sensor vectors and target (avoid_class, waypoint_delta)
+       - crash labels (0/1)
+       - telemetry for autorepair and antimalware
+    """
+    X_cam = []
+    Y_prob = []
+    Y_bbox = []
+    X_lidar = []
+    X_radar = []
+    X_sonar = []
+    X_detlogit = []
+    Y_avoid = []
+    Y_delta = []
+    crash_labels = []
+    telemetry = []
+
+    for i in range(n_samples):
+        # create random map and pose
+        grid = make_random_map(map_w, map_h, obstacle_prob=0.015)
+        sx = random.uniform(5, map_w-5)
+        sy = random.uniform(5, map_h-5)
+        yaw = random.uniform(-math.pi, math.pi)
+        # randomly choose a rally or race goal
+        gx = random.uniform(5, map_w-5)
+        gy = random.uniform(5, map_h-5)
+        # generate camera: sometimes obstacle in frame, sometimes not
+        # For safety we simulate small obstacles in camera that loosely correlate with map obstacles
+        cam_img, bbox = synth_camera_frame()
+        # lidar, radar, sonar
+        lidar = synth_lidar(sx, sy, grid, n_bins=LIDAR_BINS)
+        radar = synth_radar(grid, sx, sy)
+        sonar = np.array([synth_sonar(sx, sy, yaw, grid)])
+        # compute target waypoint delta (local safe step)
+        dx, dy = simple_local_goal_delta(sx, sy, gx, gy, grid)
+        # decide avoid action: 0 keep, 1 left, 2 right using simple heuristic on lidar front sector
+        front_sector = lidar[LIDAR_BINS//3: 2*LIDAR_BINS//3]
+        min_front = front_sector.min()
+        if min_front < 0.12:
+            avoid = 1 if random.random() < 0.5 else 2  # ambiguous, random left/right bias
+        else:
+            avoid = 0
+        # crash label if very near obstacle
+        crash = 1 if (min_front < 0.05 or sonar[0] < 0.05) else 0
+
+        # telemetry features: battery, health, speed, temperature, error_rates, network rtt etc (simulated)
+        battery = max(0, 100 - random.random()*30 - (1.0 if avoid!=0 else 0.0))
+        health = max(5, 100 - random.random()*40 - (10 if crash else 0))
+        speed = random.uniform(0, 10) * (0.6 if avoid!=0 else 1.0)
+        temp = random.uniform(30, 60)
+        errors = random.random() * (2.0 if random.random() < 0.03 else 0.2)
+        rtt = random.uniform(5, 120)
+        telem = np.array([battery, health, speed, temp, errors, rtt, sx/map_w, sy/map_h, gx/map_w, gy/map_h, avoid, crash], dtype=np.float32)
+
+        # append
+        X_cam.append(cam_img)
+        Y_prob.append(1.0 if bbox is not None else 0.0)
+        if bbox is None:
+            Y_bbox.append([0.5, 0.5, 0.0])
+        else:
+            Y_bbox.append([bbox[0]/IMG_W, bbox[1]/IMG_H, bbox[2]/max(IMG_H,IMG_W)])
+        X_lidar.append(lidar)
+        X_radar.append(radar)
+        X_sonar.append(sonar)
+        # det logit use a noisy oracle from bbox presence
+        detlog = np.array([1.2 if bbox is not None else -0.2], dtype=np.float32)
+        X_detlogit.append(detlog)
+        Y_avoid.append(avoid)
+        # normalize dx,dy by small constant
+        Y_delta.append([dx/3.0, dy/3.0])
+        crash_labels.append(crash)
+        telemetry.append(telem)
+
+    # convert to numpy arrays
+    X_cam = np.stack(X_cam).astype(np.uint8)
+    Y_prob = np.array(Y_prob, dtype=np.float32)
+    Y_bbox = np.array(Y_bbox, dtype=np.float32)
+    X_lidar = np.stack(X_lidar).astype(np.float32)
+    X_radar = np.stack(X_radar).astype(np.float32)
+    X_sonar = np.stack(X_sonar).astype(np.float32)
+    X_detlogit = np.stack(X_detlogit).astype(np.float32)
+    Y_avoid = np.array(Y_avoid, dtype=np.int32)
+    Y_delta = np.array(Y_delta, dtype=np.float32)
+    crash_labels = np.array(crash_labels, dtype=np.int32)
+    telemetry = np.stack(telemetry).astype(np.float32)
+
+    return {
+        'cam': X_cam, 'prob': Y_prob, 'bbox': Y_bbox,
+        'lidar': X_lidar, 'radar': X_radar, 'sonar': X_sonar, 'detlog': X_detlogit,
+        'avoid': Y_avoid, 'delta': Y_delta, 'crash': crash_labels, 'telemetry': telemetry
+    }
+
+# -------------------------
+# Training & Example Usage
+# -------------------------
+
+def train_all(save_dir='models', epochs=6):
+    os.makedirs(save_dir, exist_ok=True)
+    print("Generating dataset (simulated) ...")
+    data = generate_dataset(n_samples=2000)
+    # split
+    idx = np.arange(len(data['cam']))
+    train_idx, val_idx = train_test_split(idx, test_size=0.15, random_state=SEED)
+    # Detector
+    det = build_tiny_detector()
+    print(det.summary())
+    X_train = data['cam'][train_idx].astype(np.float32)
+    X_val = data['cam'][val_idx].astype(np.float32)
+    yprob_train = data['prob'][train_idx]
+    yprob_val = data['prob'][val_idx]
+    ybox_train = data['bbox'][train_idx]
+    ybox_val = data['bbox'][val_idx]
+    # scale images to float in dataset generator via model rescaling layer
+    det.fit(X_train, {'prob': yprob_train, 'bbox': ybox_train},
+            validation_data=(X_val, {'prob': yprob_val, 'bbox': ybox_val}),
+            epochs=epochs, batch_size=32)
+    det.save(os.path.join(save_dir, 'tiny_detector.tf'))
+    print("Saved detector.")
+
+    # Sensor fusion
+    fusion = build_sensor_fusion()
+    print(fusion.summary())
+    # prepare inputs
+    X_lidar_all = data['lidar']
+    X_radar_all = data['radar']
+    X_sonar_all = data['sonar'].reshape(-1,1)
+    X_detlog_all = data['detlog'].reshape(-1,1)
+    y_avoid_all = data['avoid']
+    y_delta_all = data['delta']
+    Xl_train, Xl_val, Xr_train, Xr_val, Xs_train, Xs_val, Xd_train, Xd_val, ya_train, ya_val, yd_train, yd_val = train_test_split(
+        X_lidar_all, X_radar_all, X_sonar_all, X_detlog_all, y_avoid_all, y_delta_all, test_size=0.15, random_state=SEED)
+    fusion.fit([Xl_train, Xr_train, Xs_train, Xd_train], [ya_train, yd_train],
+               validation_data=([Xl_val, Xr_val, Xs_val, Xd_val],[ya_val, yd_val]),
+               epochs=epochs, batch_size=32)
+    fusion.save(os.path.join(save_dir, 'sensor_fusion.tf'))
+    print("Saved fusion model.")
+
+    # Crash detector
+    crash_in = np.concatenate([data['lidar'], data['radar'], data['sonar'].reshape(-1,1), data['bbox']], axis=1)
+    crash_model = build_crash_detector(input_dim=crash_in.shape[1])
+    crash_model.fit(crash_in[train_idx], data['crash'][train_idx],
+                    validation_data=(crash_in[val_idx], data['crash'][val_idx]),
+                    epochs=epochs, batch_size=32)
+    crash_model.save(os.path.join(save_dir, 'crash_detector.tf'))
+    print("Saved crash detector.")
+
+    # Autorepair health predictor
+    tele = data['telemetry']
+    scaler = StandardScaler()
+    tele_scaled = scaler.fit_transform(tele)
+    ar_model = build_autorepair_predictor(input_dim=tele_scaled.shape[1])
+    # target is health (index 1)
+    ar_model.fit(tele_scaled[train_idx], tele[train_idx,1:2], validation_data=(tele_scaled[val_idx], tele[val_idx,1:2]), epochs=epochs, batch_size=32)
+    ar_model.save(os.path.join(save_dir, 'autorepair.tf'))
+    # save scaler
+    import pickle
+    with open(os.path.join(save_dir, 'telemetry_scaler.pkl'), 'wb') as f:
+        pickle.dump(scaler, f)
+    print("Saved autorepair + scaler.")
+
+    # Antimalware autoencoder
+    ae_in = tele[:, :12] if tele.shape[1] >= 12 else np.pad(tele, ((0,0),(0, 12-tele.shape[1])), mode='constant')
+    ae = build_anomaly_autoencoder(input_dim=ae_in.shape[1], latent=6)
+    ae.fit(ae_in[train_idx], ae_in[train_idx], validation_data=(ae_in[val_idx], ae_in[val_idx]), epochs=epochs, batch_size=32)
+    ae.save(os.path.join(save_dir, 'telemetry_autoencoder.tf'))
+    print("Saved autoencoder.")
+
+    print("Training complete.")
+
+# -------------------------
+# Inference / runtime stubs
+# -------------------------
+def load_models(models_dir='models'):
+    models = {}
+    models['detector'] = keras.models.load_model(os.path.join(models_dir, 'tiny_detector.tf'))
+    models['fusion'] = keras.models.load_model(os.path.join(models_dir, 'sensor_fusion.tf'))
+    models['crash'] = keras.models.load_model(os.path.join(models_dir, 'crash_detector.tf'))
+    models['autorepair'] = keras.models.load_model(os.path.join(models_dir, 'autorepair.tf'))
+    models['ae'] = keras.models.load_model(os.path.join(models_dir, 'telemetry_autoencoder.tf'))
+    # load scaler
+    import pickle
+    with open(os.path.join(models_dir, 'telemetry_scaler.pkl'), 'rb') as f:
+        models['scaler'] = pickle.load(f)
+    return models
+
+def inference_loop_once(models, camera_img, lidar_vec, radar_vec, sonar_val, telem_vec):
+    """Single-step inference that returns decisions: detection, avoid_action, waypoint_delta, crash_prob, estimated_health, anomaly_score"""
+    # detector
+    cam_input = camera_img.astype(np.float32)[None, ...]
+    prob, bbox = models['detector'].predict(cam_input)
+    prob = float(prob[0,0])
+    bbox = bbox[0].tolist()
+    # fusion
+    lidar_in = lidar_vec[None, ...]
+    radar_in = radar_vec[None, ...]
+    sonar_in = np.array(sonar_val, dtype=np.float32).reshape(1,1)
+    detlog = np.array([prob], dtype=np.float32).reshape(1,1)
+    avoid_logits, delta = models['fusion'].predict([lidar_in, radar_in, sonar_in, detlog])
+    avoid_class = int(np.argmax(avoid_logits[0]))
+    delta = (float(delta[0,0]), float(delta[0,1]))
+    # crash detector
+    crash_input = np.concatenate([lidar_vec, radar_vec, np.array([sonar_val]), np.array(bbox)], axis=0)[None, ...]
+    crash_prob = float(models['crash'].predict(crash_input)[0,0])
+    # autorepair
+    tele = telem_vec.reshape(1,-1)
+    tele_scaled = models['scaler'].transform(tele)
+    est_health = float(models['autorepair'].predict(tele_scaled)[0,0])
+    # anomaly score (ae reconstruction error)
+    ae_in = tele[0,:12] if tele.shape[1] >= 12 else np.pad(tele, (0,12 - tele.shape[1]), mode='constant').reshape(1,-1)
+    rec = models['ae'].predict(ae_in)
+    anomaly_score = float(np.mean((rec - ae_in)**2))
+    return {
+        'det_prob': prob,
+        'bbox': bbox,
+        'avoid_class': avoid_class,
+        'delta': delta,
+        'crash_prob': crash_prob,
+        'est_health': est_health,
+        'anomaly': anomaly_score
+    }
+
+# -------------------------
+# Demo: train small models and run an inference session
+# -------------------------
+def demo_quick_train_and_run():
+    print("Quick training and demo run (low epochs)...")
+    train_all(save_dir='models_demo', epochs=4)
+    models = load_models('models_demo')
+    # make a small map and a pose
+    grid = make_random_map(120,80, obstacle_prob=0.02)
+    sx, sy, syaw = 30.0, 40.0, 0.4
+    # synthetic sensor
+    cam, bbox = synth_camera_frame()
+    lidar = synth_lidar(sx, sy, grid)
+    radar = synth_radar(grid, sx, sy)
+    sonar = synth_sonar(sx, sy, syaw, grid)
+    # synthetic telemetry (length 12)
+    tele = np.array([95.0, 90.0, 3.2, 40.0, 0.1, 25.0, sx/120, sy/80, 0.8, 0.4, 0, 0], dtype=np.float32)
+    out = inference_loop_once(models, cam, lidar, radar, sonar, tele)
+    print("Inference output:")
+    for k,v in out.items():
+        print(f"  {k}: {v}")
+    # visualize camera with bbox
+    imgvis = cam.copy()
+    if out['det_prob'] > 0.5:
+        cx = int(out['bbox'][0]*IMG_W)
+        cy = int(out['bbox'][1]*IMG_H)
+        r = int(out['bbox'][2]*max(IMG_W, IMG_H))
+        cv2.circle(imgvis, (cx,cy), max(2,r), (0,255,0), 2)
+    cv2.imwrite("demo_cam_out.jpg", imgvis)
+    print("Wrote demo_cam_out.jpg (camera with detected bbox overlay).")
+
+# -------------------------
+# If run as script
+# -------------------------
+if __name__ == "__main__":
+    # Run a full demo: train small models and show inference example
+    demo_quick_train_and_run()
+
+
+
+    import SwiftUI
+
+@main
+struct DroneSimApp: App {
+    @StateObject var sim = Simulator.shared
+
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+                .environmentObject(sim)
+                .onAppear {
+                    sim.start() // start simulation loops
+                }
+                .onDisappear {
+                    sim.stop()
+                }
+        }
+    }
+}
+
+
+import SwiftUI
+
+struct ContentView: View {
+    @EnvironmentObject var sim: Simulator
+
+    var body: some View {
+        NavigationView {
+            HStack(spacing: 12) {
+                // Left column: cameras & small controls
+                VStack(spacing: 12) {
+                    HStack {
+                        Text("Advanced Drone — Control Deck")
+                            .font(.headline)
+                        Spacer()
+                        Text(sim.mode.rawValue)
+                            .font(.subheadline)
+                            .padding(6)
+                            .background(Color.black.opacity(0.4))
+                            .cornerRadius(6)
+                    }
+                    CameraView(title: "Front", image: sim.frontCameraImage)
+                    CameraView(title: "Rear", image: sim.rearCameraImage)
+                    CameraView(title: "Side", image: sim.sideCameraImage)
+                    Spacer()
+                    ModeButtons()
+                }
+                .frame(width: 360)
+                .padding()
+                .background(Color(.secondarySystemBackground).opacity(0.06))
+                .cornerRadius(12)
+
+                // Center: big map + telemetry overlay
+                VStack(spacing: 10) {
+                    MapView()
+                        .environmentObject(sim)
+                        .frame(minWidth: 600, minHeight: 520)
+                        .cornerRadius(12)
+                        .shadow(radius: 6)
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text("Telemetry")
+                                .font(.subheadline)
+                            Text(sim.telemetrySummary)
+                                .font(.system(.subheadline, design: .monospaced))
+                                .foregroundColor(.secondary)
+                                .lineLimit(3)
+                        }
+                        Spacer()
+                        HStack {
+                            Button("Regenerate Map") { sim.regenerateMap() }
+                            Button("Quick Race") { sim.setMode(.autoRace) }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+                .padding()
+
+                // Right column: controls, logs, repairs
+                VStack(spacing: 10) {
+                    ControlPanel()
+                        .environmentObject(sim)
+                    Divider()
+                    Text("Logs")
+                        .font(.subheadline)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(sim.logs.prefix(120), id: \.id) { entry in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(entry.timestampString).font(.caption).foregroundColor(.secondary)
+                                    Text(entry.message).font(.system(.body, design: .monospaced))
+                                }
+                                .padding(6)
+                                .background(Color.black.opacity(0.05))
+                                .cornerRadius(6)
+                            }
+                        }.padding(.bottom, 20)
+                    }
+                    Spacer()
+                    HStack {
+                        Text("Autorepair • Antimalware (simulated)")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Button("Run Self-Check") { sim.runSelfCheck() }
+                    }
+                }
+                .frame(width: 360)
+                .padding()
+                .background(Color(.secondarySystemBackground).opacity(0.04))
+                .cornerRadius(12)
+            }
+            .padding()
+            .navigationTitle("Advanced Drone Simulator")
+        }
+        .navigationViewStyle(.stack)
+    }
+}
+
+struct CameraView: View {
+    let title: String
+    let image: CGImage?
+
+    var body: some View {
+        VStack(alignment: .leading) {
+            Text(title).font(.subheadline).foregroundColor(.secondary)
+            if let cg = image {
+                Image(decorative: cg, scale: 1.0, orientation: .up)
+                    .resizable()
+                    .aspectRatio(16/9, contentMode: .fit)
+                    .cornerRadius(8)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.black.opacity(0.2)))
+            } else {
+                Rectangle().fill(Color.black.opacity(0.12)).aspectRatio(16/9, contentMode: .fit).cornerRadius(8)
+            }
+        }
+    }
+}
+
+
+import Foundation
+import SwiftUI
+import Combine
+
+/// High-level simulation object: vehicle state, sensor sim, planner, safety, telemetry.
+/// This class is intentionally purely software simulation — no real hardware code.
+@MainActor
+final class Simulator: ObservableObject {
+    static let shared = Simulator()
+
+    enum Mode: String {
+        case manual = "MANUAL"
+        case autoRally = "AUTO_RALLY"
+        case autoRace = "AUTO_RACE"
+        case fastRace = "FAST_RACE"
+    }
+
+    // vehicle state (observable)
+    @Published private(set) var x: Double = 10
+    @Published private(set) var y: Double = 10
+    @Published private(set) var yaw: Double = 0
+    @Published private(set) var vx: Double = 0
+    @Published private(set) var vy: Double = 0
+    @Published private(set) var speed: Double = 0
+    @Published private(set) var battery: Double = 100
+    @Published private(set) var health: Double = 100
+    @Published private(set) var status: String = "IDLE"
+    @Published var mode: Mode = .manual
+
+    // images for camera views (CGImage)
+    @Published var frontCameraImage: CGImage? = nil
+    @Published var rearCameraImage: CGImage? = nil
+    @Published var sideCameraImage: CGImage? = nil
+
+    // map
+    @Published private(set) var mapGrid: [[Int]] = []
+    let mapWidth = 120
+    let mapHeight = 80
+
+    // planner state
+    @Published var path: [GridPoint] = []
+    var rallyPoint: GridPoint = GridPoint(x: 100, y: 60)
+    var raceWaypoints: [GridPoint] = [GridPoint(x:20,y:60), GridPoint(x:100,y:20), GridPoint(x:100,y:60)]
+
+    // logs
+    @Published var logs: [LogEntry] = []
+
+    // telemetry summary
+    var telemetrySummary: String {
+        String(format: "x: %.1f y: %.1f | speed: %.1f | battery: %.0f%% | health: %.0f%% | status: %@", x, y, speed, battery, health, status)
+    }
+
+    // control timers & loops
+    private var loops: [Task<Void, Never>] = []
+    private var running = false
+
+    private init() {
+        generateMap()
+        log("Simulator initialized")
+    }
+
+    func start() {
+        guard !running else { return }
+        running = true
+        // spawn concurrent loops: perception, planner, control, safety, cameras
+        loops = [
+            Task.detached { await self.perceptionLoop() },
+            Task.detached { await self.plannerLoop() },
+            Task.detached { await self.controlLoop() },
+            Task.detached { await self.safetyLoop() },
+            Task.detached { await self.cameraProducerLoop() },
+            Task.detached { await self.telemetryLoop() }
+        ]
+        log("Simulation started")
+    }
+
+    func stop() {
+        running = false
+        loops.forEach { $0.cancel() }
+        loops.removeAll()
+        log("Simulation stopped")
+    }
+
+    // MARK: - Map & Utilities
+    struct GridPoint: Codable, Equatable { var x: Int; var y: Int }
+
+    func generateMap(obstacleDensity: Double = 0.03) {
+        var grid = Array(repeating: Array(repeating: 0, count: mapWidth), count: mapHeight)
+        for y in 0..<mapHeight {
+            for x in 0..<mapWidth {
+                if Double.random(in: 0..<1) < obstacleDensity {
+                    grid[y][x] = 1
+                }
+            }
+        }
+        // clear spawn region
+        for yy in 8..<16 { for xx in 6..<14 { if yy<mapHeight && xx<mapWidth { grid[yy][xx] = 0 } } }
+        DispatchQueue.main.async { self.mapGrid = grid }
+    }
+
+    func regenerateMap() {
+        generateMap()
+        log("Map regenerated")
+    }
+
+    func setMode(_ m: Mode) {
+        mode = m
+        log("Mode set to \(m.rawValue)")
+    }
+
+    func setRally(x: Int, y: Int) {
+        rallyPoint = GridPoint(x: x, y: y)
+        log("Rally set to (\(x),\(y))")
+    }
+
+    // MARK: - Logs
+    struct LogEntry: Identifiable {
+        let id = UUID()
+        let timestamp: Date
+        let message: String
+        var timestampString: String { DateFormatter.localizedString(from: timestamp, dateStyle: .none, timeStyle: .medium) }
+        var messagePreview: String { message }
+    }
+
+    func log(_ message: String) {
+        let e = LogEntry(timestamp: Date(), message: message)
+        DispatchQueue.main.async {
+            self.logs.insert(e, at: 0)
+            if self.logs.count > 300 { self.logs.removeLast() }
+        }
+    }
+
+    // MARK: - Simulation Loops
+    // Perception loop: simulate sensor reads (lidar/radar/sonar) and push to a short buffer
+    struct PerceptionSnapshot {
+        var lidar: [Double] = []
+        var radar: [(Double, Double)] = [] // (range, bearing)
+        var sonar: Double? = nil
+    }
+    private var latestPerception = PerceptionSnapshot()
+
+    func perceptionLoop() async {
+        while running {
+            await Task.sleep(UInt64(100_000_000)) // 100ms
+            // sample vehicle state
+            let sx = x, sy = y, syaw = yaw
+            // simulate lidar: radial bins
+            let bins = 90
+            var lidar = [Double](repeating: 30.0, count: bins)
+            for i in 0..<bins {
+                let angle = -Double.pi + (Double(i)/Double(bins))*2*Double.pi + syaw
+                for r in stride(from: 0.5, to: 30.0, by: 0.5) {
+                    let rx = sx + cos(angle)*r
+                    let ry = sy + sin(angle)*r
+                    if isObstacleAt(x: Int(rx), y: Int(ry)) {
+                        lidar[i] = r
+                        break
+                    }
+                }
+            }
+            // radar: coarse detections (return up to few blobs)
+            var radar: [(Double, Double)] = []
+            for _ in 0..<5 {
+                if Double.random(in: 0..<1) < 0.08 { // sporadic dynamic blips
+                    let r = Double.random(in: 5...40)
+                    let b = Double.random(in: -Double.pi...Double.pi)
+                    radar.append((r, b))
+                }
+            }
+            // sonar straight ahead
+            var sonar: Double? = nil
+            for r in stride(from: 0.2, to: 6.0, by: 0.1) {
+                let rx = sx + cos(syaw)*r, ry = sy + sin(syaw)*r
+                if isObstacleAt(x: Int(rx), y: Int(ry)) { sonar = r; break }
+            }
+
+            latestPerception = PerceptionSnapshot(lidar: lidar, radar: radar, sonar: sonar)
+            // store a small telemetry/log entry
+            if lidar.min() ?? 999.0 < 0.6 {
+                log("Proximity alert: min lidar = \(String(format: "%.2f", lidar.min() ?? 0))")
+            }
+        }
+    }
+
+    func isObstacleAt(x: Int, y: Int) -> Bool {
+        if y < 0 || y >= mapGrid.count || x < 0 || x >= mapGrid[0].count { return true }
+        return mapGrid[y][x] == 1
+    }
+
+    // Planner loop: compute path depending on mode (A* on grid)
+    func plannerLoop() async {
+        while running {
+            await Task.sleep(UInt64(400_000_000)) // 400ms
+            switch mode {
+            case .autoRally:
+                path = computeAStarPath(from: gridPointFromState(), to: rallyPoint)
+            case .autoRace, .fastRace:
+                // choose next waypoint
+                if let next = nextRaceWaypoint() {
+                    path = computeAStarPath(from: gridPointFromState(), to: next) ?? []
+                } else {
+                    path = []
+                }
+            default:
+                path = []
+            }
+        }
+    }
+
+    func gridPointFromState() -> GridPoint {
+        GridPoint(x: max(0, min(mapWidth-1, Int(round(x)))), y: max(0, min(mapHeight-1, Int(round(y)))))
+    }
+
+    func nextRaceWaypoint() -> GridPoint? {
+        var bestDist = Double.infinity
+        var bestIdx = 0
+        for (i, wp) in raceWaypoints.enumerated() {
+            let d = hypot(Double(wp.x) - x, Double(wp.y) - y)
+            if d < bestDist { bestDist = d; bestIdx = i }
+        }
+        return raceWaypoints[(bestIdx + 1) % raceWaypoints.count]
+    }
+
+    // Very small A* implementation (grid-based)
+    func computeAStarPath(from start: GridPoint, to goal: GridPoint) -> [GridPoint]? {
+        typealias Node = (p: GridPoint, g: Double, f: Double, parent: GridPoint?)
+        var open: [String: Node] = [:]
+        func key(_ p: GridPoint) -> String { "\(p.x),\(p.y)" }
+        open[key(start)] = Node(p: start, g: 0, f: heuristic(start, goal), parent: nil)
+        var closed = Set<String>()
+        let dirs = [ (1,0), (-1,0), (0,1), (0,-1), (1,1), (-1,-1), (1,-1), (-1,1) ]
+        while !open.isEmpty {
+            let current = open.values.min(by: { $0.f < $1.f })!
+            open.removeValue(forKey: key(current.p))
+            if current.p == goal {
+                var res: [GridPoint] = [current.p]
+                var parent = current.parent
+                while let p = parent {
+                    res.append(p)
+                    // find parent node in closed? we won't store full map — lightweight approach:
+                    parent = nil
+                    // break because this is a simple heuristic; reconstructing exact path would require more bookkeeping.
+                }
+                return res.reversed()
+            }
+            closed.insert(key(current.p))
+            for d in dirs {
+                let nx = current.p.x + d.0
+                let ny = current.p.y + d.1
+                if nx < 0 || ny < 0 || nx >= mapWidth || ny >= mapHeight { continue }
+                if mapGrid[ny][nx] == 1 { continue }
+                let neighbor = GridPoint(x: nx, y: ny)
+                if closed.contains(key(neighbor)) { continue }
+                let tentativeG = current.g + hypot(Double(d.0), Double(d.1))
+                if let existing = open[key(neighbor)], tentativeG >= existing.g { continue }
+                open[key(neighbor)] = Node(p: neighbor, g: tentativeG, f: tentativeG + heuristic(neighbor, goal), parent: current.p)
+            }
+        }
+        return nil
+    }
+
+    func heuristic(_ a: GridPoint, _ b: GridPoint) -> Double {
+        Double(abs(a.x - b.x) + abs(a.y - b.y))
+    }
+
+    // Control loop: follow path by issuing simple velocity setpoints
+    func controlLoop() async {
+        while running {
+            await Task.sleep(UInt64(100_000_000)) // 100ms
+            if mode == .autoRally || mode == .autoRace || mode == .fastRace {
+                if path.count >= 2 {
+                    let next = path[1] // next grid point
+                    let nx = Double(next.x) + 0.5
+                    let ny = Double(next.y) + 0.5
+                    let dx = nx - x, dy = ny - y
+                    let heading = atan2(dy, dx)
+                    let speedTarget: Double = (mode == .fastRace) ? 10 : (mode == .autoRace ? 6 : 2)
+                    // smooth yaw and velocity
+                    yaw += 0.18 * (heading - yaw)
+                    vx = speedTarget * cos(yaw)
+                    vy = speedTarget * sin(yaw)
+                    x += vx * 0.1
+                    y += vy * 0.1
+                    speed = hypot(vx, vy)
+                    battery = max(0, battery - 0.01 * (1 + speed/6))
+                    if speed > 8 { health -= 0.05 }
+                    status = "AUTONOMOUS"
+                } else {
+                    // idle drift
+                    x += vx * 0.05
+                    y += vy * 0.05
+                    battery = max(0, battery - 0.002)
+                }
+            } else {
+                // manual: small drift, no action
+                x += vx * 0.05
+                y += vy * 0.05
+                battery = max(0, battery - 0.001)
+            }
+        }
+    }
+
+    // Safety loop: read perception and trigger crash handling
+    func safetyLoop() async {
+        while running {
+            await Task.sleep(UInt64(150_000_000)) // 150ms
+            let p = latestPerception
+            let minRange = p.lidar.min() ?? 30.0
+            if let sonar = p.sonar, sonar < 0.5 || minRange < 0.4 || health < 10 {
+                log("CRASH/IMPACT detected (min \(String(format: "%.2f", minRange)))")
+                lastCrash()
+            } else if minRange < 2.0 {
+                // braking
+                vx *= 0.85
+                vy *= 0.85
+                speed = hypot(vx, vy)
+                status = "BRAKING"
+            }
+        }
+    }
+
+    func lastCrash() {
+        status = "CRASH_DETECTED"
+        health -= 8
+        vx = 0; vy = 0; speed = 0
+        // avoidance maneuver: back off and rotate
+        let avoidAngle = yaw + Double.pi/2 * (Double.random(in: 0...1) < 0.5 ? 1 : -1)
+        x += cos(avoidAngle) * 1.0
+        y += sin(avoidAngle) * 1.0
+        yaw += Double.pi/2
+        status = "AVOIDANCE_MANEUVER"
+        log("Performed avoidance maneuver")
+    }
+
+    // Camera producer: draw simple synthetic frames using CoreGraphics-like renderer
+    func cameraProducerLoop() async {
+        while running {
+            await Task.sleep(UInt64(80_000_000)) // ~80ms
+            // produce front / rear / side frames based on current state and map
+            let front = renderCameraFrame(label: "FRONT")
+            let rear = renderCameraFrame(label: "REAR")
+            let side = renderCameraFrame(label: "SIDE")
+            DispatchQueue.main.async {
+                self.frontCameraImage = front
+                self.rearCameraImage = rear
+                self.sideCameraImage = side
+            }
+        }
+    }
+
+    func renderCameraFrame(label: String, width: Int = 640, height: Int = 360) -> CGImage? {
+        // Use UIGraphicsImageRenderer on iOS to draw simple overlays (safe simulated visuals)
+        UIGraphicsBeginImageContext(CGSize(width: width, height: height))
+        defer { UIGraphicsEndImageContext() }
+        guard let ctx = UIGraphicsGetCurrentContext() else { return nil }
+
+        // background gradient
+        let col1 = UIColor(red: 0.06, green: 0.12, blue: 0.16, alpha: 1.0)
+        let col2 = UIColor(red: 0.15, green: 0.18, blue: 0.22, alpha: 1.0)
+        let g = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [col1.cgColor, col2.cgColor] as CFArray, locations: [0,1])!
+        ctx.drawLinearGradient(g, start: CGPoint(x:0,y:0), end: CGPoint(x:0,y:height), options: [])
+
+        // dynamic shapes to show motion
+        let t = CFAbsoluteTimeGetCurrent()
+        let cx = width/2 + Int(40.0 * sin(t * 0.8 + Double(label.count)))
+        let cy = height/2 + Int(20.0 * cos(t * 0.9 + Double(label.count)))
+
+        ctx.setFillColor(UIColor(red:0.18, green:0.78, blue:0.62, alpha:1.0).cgColor)
+        ctx.fillEllipse(in: CGRect(x: cx-36, y: cy-24, width: 72, height: 48))
+
+        // draw HUD: position + heading
+        let text = "\(label) CAM • x:\(Int(x)) y:\(Int(y)) yaw:\(String(format:"%.2f", yaw))"
+        let attrs: [NSAttributedString.Key: Any] = [ .font: UIFont.monospacedSystemFont(ofSize: 14, weight: .medium), .foregroundColor: UIColor.white ]
+        text.draw(at: CGPoint(x: 10, y: 8), withAttributes: attrs)
+
+        // draw small minimap inset
+        let insetW = 120, insetH = 80
+        let insetX = width - insetW - 12, insetY = 8
+        ctx.setFillColor(UIColor(white: 0.02, alpha: 0.8).cgColor)
+        ctx.fill(CGRect(x: insetX, y: insetY, width: insetW, height: insetH))
+        // obstacles as tiny dots
+        for yy in 0..<mapGrid.count {
+            for xx in 0..<mapGrid[0].count {
+                if mapGrid[yy][xx] == 1 {
+                    let px = insetX + Int(Double(xx) / Double(mapWidth) * Double(insetW))
+                    let py = insetY + Int(Double(yy) / Double(mapHeight) * Double(insetH))
+                    ctx.setFillColor(UIColor(red:0.2,green:0.2,blue:0.25,alpha:1).cgColor)
+                    ctx.fill(CGRect(x: px, y: py, width: 2, height: 2))
+                }
+            }
+        }
+        // vehicle dot
+        let vx = insetX + Int(Double(x) / Double(mapWidth) * Double(insetW))
+        let vy = insetY + Int(Double(y) / Double(mapHeight) * Double(insetH))
+        ctx.setFillColor(UIColor.systemRed.cgColor)
+        ctx.fillEllipse(in: CGRect(x: vx-3, y: vy-3, width: 6, height: 6))
+
+        // return CGImage
+        let ui = UIGraphicsGetImageFromCurrentImageContext()
+        return ui?.cgImage
+    }
+
+    // Telemetry loop: push occasional antimalware/autorepair events
+    func telemetryLoop() async {
+        while running {
+            await Task.sleep(UInt64(500_000_000)) // 500ms
+            if Double.random(in: 0..<1) < 0.03 {
+                log("ANTIMALWARE_SCAN: clean")
+            }
+            if Double.random(in: 0..<1) < 0.02 && health < 70 {
+                // soft autorepair
+                health = min(100, health + Double.random(in: 2...8))
+                log("AUTOREPAIR: performed soft reset, health -> \(Int(health))")
+            }
+        }
+    }
+
+    // utility
+    func runSelfCheck() {
+        log("Running self-check...")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            self.log("Self-check: nominal")
+        }
+    }
+
+    // public API wrappers
+    func regenerateMap() { regenerateMap() } // keep external name same
+}
+
+
+import SwiftUI
+
+struct ControlPanel: View {
+    @EnvironmentObject var sim: Simulator
+    @State private var rallyText: String = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Controls").font(.headline)
+            HStack {
+                Button("MANUAL") { sim.setMode(.manual) }
+                Button("AUTO RALLY") { sim.setMode(.autoRally) }
+                Button("AUTO RACE") { sim.setMode(.autoRace) }
+                Button("FAST RACE") { sim.setMode(.fastRace) }
+            }
+            .buttonStyle(.bordered)
+            HStack {
+                TextField("rally x,y", text: $rallyText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 160)
+                Button("Set Rally") {
+                    let parts = rallyText.split(separator: ",").map { Int($0.trimmingCharacters(in: .whitespaces)) ?? 0 }
+                    if parts.count == 2 {
+                        sim.setRally(x: parts[0], y: parts[1])
+                    }
+                }
+            }
+            HStack {
+                Button("Regenerate Map") { sim.regenerateMap() }
+                Button("Run Repair") { sim.runSelfCheck() }
+            }
+            VStack(alignment: .leading) {
+                Text("Manual drive (short nudges)").font(.subheadline)
+                HStack {
+                    Button("Forward") { sim.vx += 0; sim.vy -= 1 }
+                    Button("Back") { sim.vy += 1 }
+                    Button("Left") { sim.vx -= 1 }
+                    Button("Right") { sim.vx += 1 }
+                }
+            }
+        }
+        .padding()
+    }
+}
+
+
+g++ -std=c++17 -O2 -pthread advanced_drone_sim.cpp `pkg-config --cflags --libs opencv4` -o advanced_drone_sim
+
+
+./advanced_drone_sim
+
+
+
+// advanced_drone_sim.cpp
+// Single-file advanced drone + hybrid car-sized drone simulation for prototyping.
+// Requires OpenCV 4 and C++17.
+//
+// Compile (example):
+// g++ -std=c++17 -O2 -pthread advanced_drone_sim.cpp `pkg-config --cflags --libs opencv4` -o advanced_drone_sim
+//
+// Run:
+// ./advanced_drone_sim
+//
+// Simulation features:
+//  - multiple simulated camera streams (front, rear, side) via OpenCV windows
+//  - map / minimap, A* planner, rally & race modes
+//  - simulated LIDAR, RADAR, SONAR
+//  - object avoidance, crash detection & avoidance
+//  - telemetry, antimalware & autorepair stubs
+//
+// Safety: This is simulation-only. Do not treat these algorithms as certified flight control.
+// Always follow regulations and safety procedures when working with real vehicles.
+
+#include <opencv2/opencv.hpp>
+
+#include <atomic>
+#include <chrono>
+#include <cmath>
+#include <condition_variable>
+#include <functional>
+#include <iostream>
+#include <map>
+#include <mutex>
+#include <queue>
+#include <random>
+#include <string>
+#include <thread>
+#include <vector>
+
+using namespace std::chrono_literals;
+
+// ----------------------- Configuration -----------------------
+constexpr int MAP_W = 140;
+constexpr int MAP_H = 100;
+constexpr int CELL_SIZE = 6;               // pixels per map cell for rendering
+constexpr int CAMERA_W = 640;
+constexpr int CAMERA_H = 360;
+constexpr double SIM_DT = 0.08;            // seconds per sim tick
+constexpr int OBSTACLE_COUNT = 350;
+constexpr int LIDAR_BINS = 180;
+constexpr double LIDAR_MAX_R = 40.0;
+constexpr double SONAR_MAX_R = 6.0;
+
+// ----------------------- Thread-safe logging / telemetry -----------------------
+struct TelemetryEvent {
+    double ts;
+    std::string msg;
+};
+
+class Telemetry {
+public:
+    void push(const std::string &msg) {
+        std::lock_guard<std::mutex> g(mu);
+        events.push_back({now(), msg});
+        if (events.size() > 500) events.erase(events.begin(), events.begin() + 50);
+    }
+    std::vector<TelemetryEvent> snapshot() {
+        std::lock_guard<std::mutex> g(mu);
+        return events;
+    }
+private:
+    double now() {
+        return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+    std::mutex mu;
+    std::vector<TelemetryEvent> events;
+};
+
+Telemetry telemetry;
+
+// ----------------------- Random engine -----------------------
+std::mt19937 rng(std::random_device{}());
+
+// ----------------------- Vehicle state -----------------------
+struct VehicleState {
+    double x = 10.0;
+    double y = 10.0;
+    double yaw = 0.0;   // radians
+    double vx = 0.0;
+    double vy = 0.0;
+    double speed = 0.0;
+    double battery = 100.0;
+    double health = 100.0;
+    std::string status = "IDLE";
+    double lastCrashTs = 0.0;
+};
+
+VehicleState vehicle;
+std::mutex vehicle_mtx;
+
+// ----------------------- Map & obstacles -----------------------
+std::vector<std::vector<uint8_t>> grid; // 0 free, 1 obstacle
+std::mutex grid_mtx;
+
+void generate_random_obstacles(int count=OBSTACLE_COUNT) {
+    std::lock_guard<std::mutex> g(grid_mtx);
+    grid.assign(MAP_H, std::vector<uint8_t>(MAP_W, 0));
+    std::uniform_int_distribution<int> dx(0, MAP_W-1), dy(0, MAP_H-1);
+    for (int i=0;i<count;i++){
+        int x = dx(rng), y = dy(rng);
+        grid[y][x] = 1;
+    }
+    // free spawn area
+    for (int yy=6; yy<16 && yy<MAP_H; ++yy) for (int xx=6; xx<16 && xx<MAP_W; ++xx) grid[yy][xx] = 0;
+    telemetry.push("Map regenerated");
+}
+
+// simple helpers
+inline bool grid_is_obs(int gx, int gy) {
+    std::lock_guard<std::mutex> g(grid_mtx);
+    if (gx < 0 || gy < 0 || gx >= MAP_W || gy >= MAP_H) return true;
+    return grid[gy][gx] != 0;
+}
+
+// ----------------------- Modes & waypoints -----------------------
+enum class Mode { MANUAL, AUTO_RALLY, AUTO_RACE, FAST_RACE };
+std::atomic<Mode> control_mode{Mode::MANUAL};
+std::pair<int,int> rally_point = {MAP_W - 12, MAP_H - 12};
+std::vector<std::pair<int,int>> race_waypoints = { {20, MAP_H-12}, {MAP_W-12, 12}, {MAP_W-12, MAP_H-12} };
+
+// ----------------------- Sensor simulators -----------------------
+struct LidarReading {
+    std::vector<double> ranges; // length LIDAR_BINS
+};
+
+LidarReading lidar_scan(const VehicleState &s) {
+    LidarReading r;
+    r.ranges.resize(LIDAR_BINS);
+    for (int i=0;i<LIDAR_BINS;i++){
+        double angle = s.yaw + ( (double)i / (double)LIDAR_BINS ) * 2.0*M_PI - M_PI;
+        double found = LIDAR_MAX_R;
+        for (double dist = 0.5; dist <= LIDAR_MAX_R; dist += 0.5) {
+            double rx = s.x + dist * std::cos(angle);
+            double ry = s.y + dist * std::sin(angle);
+            int gx = int(std::round(rx)), gy = int(std::round(ry));
+            if (gx < 0 || gy < 0 || gx >= MAP_W || gy >= MAP_H) { found = dist; break; }
+            if (grid_is_obs(gx, gy)) { found = dist; break; }
+        }
+        r.ranges[i] = found;
+    }
+    return r;
+}
+
+struct RadarHit { double r; double angle; double vx; };
+std::vector<RadarHit> radar_ping(const VehicleState &s) {
+    std::vector<RadarHit> hits;
+    std::uniform_real_distribution<double> p(0.0,1.0);
+    // coarse: sample some obstacle cells as hits
+    std::lock_guard<std::mutex> g(grid_mtx);
+    for (int y=0;y<MAP_H;y+=3){
+        for (int x=0;x<MAP_W;x+=3){
+            if (grid[y][x]==1){
+                double dx = (double)x - s.x, dy = (double)y - s.y;
+                double d = std::hypot(dx,dy);
+                if (d <= 80.0) {
+                    double angle = std::atan2(dy, dx) - s.yaw;
+                    hits.push_back({d, angle, 0.0});
+                }
+            }
+        }
+    }
+    // occasionally dynamic blip
+    if (p(rng) < 0.03) {
+        std::uniform_real_distribution<double> dr(5.0, 60.0), da(-M_PI, M_PI), dv(-5.0,5.0);
+        hits.push_back({dr(rng), da(rng), dv(rng)});
+    }
+    return hits;
+}
+
+double sonar_ping(const VehicleState &s) {
+    for (double dist = 0.2; dist <= SONAR_MAX_R; dist += 0.05) {
+        double rx = s.x + dist * std::cos(s.yaw);
+        double ry = s.y + dist * std::sin(s.yaw);
+        int gx = int(std::round(rx)), gy = int(std::round(ry));
+        if (gx < 0 || gy < 0 || gx >= MAP_W || gy >= MAP_H) return dist;
+        if (grid_is_obs(gx, gy)) return dist;
+    }
+    return SONAR_MAX_R;
+}
+
+// ----------------------- Planner: A* (grid) -----------------------
+struct Node {
+    int x, y;
+    double g, f;
+    Node* parent;
+};
+
+std::vector<std::pair<int,int>> astar_path(std::pair<int,int> start, std::pair<int,int> goal) {
+    // simple A* on grid; not the most optimized but adequate for demo
+    auto key = [](int x,int y){ return (y<<16) ^ (x & 0xffff); };
+    std::map<int, Node*> allnodes;
+    auto cmp = [](Node* a, Node* b){ return a->f > b->f; };
+    std::priority_queue<Node*, std::vector<Node*>, decltype(cmp)> open(cmp);
+    std::set<int> closed;
+    Node* s = new Node{start.first, start.second, 0.0, 0.0, nullptr};
+    s->f = s->g + std::abs(start.first - goal.first) + std::abs(start.second - goal.second);
+    open.push(s); allnodes[key(s->x,s->y)] = s;
+    const int dirs[8][2] = {{1,0},{-1,0},{0,1},{0,-1},{1,1},{1,-1},{-1,1},{-1,-1}};
+    while (!open.empty()) {
+        Node* cur = open.top(); open.pop();
+        int kcur = key(cur->x, cur->y);
+        if (closed.count(kcur)) continue;
+        closed.insert(kcur);
+        if (cur->x == goal.first && cur->y == goal.second) {
+            // reconstruct
+            std::vector<std::pair<int,int>> path;
+            Node* p = cur;
+            while (p) {
+                path.push_back({p->x, p->y});
+                p = p->parent;
+            }
+            // free nodes
+            for (auto &pr : allnodes) delete pr.second;
+            std::reverse(path.begin(), path.end());
+            return path;
+        }
+        for (auto &d : dirs) {
+            int nx = cur->x + d[0];
+            int ny = cur->y + d[1];
+            if (nx < 0 || ny < 0 || nx >= MAP_W || ny >= MAP_H) continue;
+            if (grid_is_obs(nx, ny)) continue;
+            double ng = cur->g + std::hypot((double)d[0], (double)d[1]);
+            int nk = key(nx, ny);
+            if (closed.count(nk)) continue;
+            if (allnodes.count(nk)==0) {
+                Node* nn = new Node{nx, ny, ng, ng + std::abs(nx - goal.first) + std::abs(ny - goal.second), cur};
+                allnodes[nk] = nn;
+                open.push(nn);
+            } else {
+                Node* existing = allnodes[nk];
+                if (ng < existing->g) {
+                    existing->g = ng;
+                    existing->f = ng + std::abs(nx - goal.first) + std::abs(ny - goal.second);
+                    existing->parent = cur;
+                    open.push(existing);
+                }
+            }
+        }
+    }
+    for (auto &pr : allnodes) delete pr.second;
+    return {}; // no path
+}
+
+// ----------------------- Safety & crash detection -----------------------
+bool analyze_crash(const LidarReading &lid, double sonar, const VehicleState &s) {
+    // simple rules: sonar very close or min lidar < threshold or health low
+    double minL = *std::min_element(lid.ranges.begin(), lid.ranges.end());
+    if (sonar < 0.5) return true;
+    if (minL < 0.4) return true;
+    if (s.health < 8.0) return true;
+    return false;
+}
+
+// ----------------------- Camera frame generator (synthetic) -----------------------
+cv::Mat render_camera_frame(const std::string &label, const VehicleState &s, const std::vector<std::pair<int,int>> &path) {
+    cv::Mat img(CAMERA_H, CAMERA_W, CV_8UC3);
+    // gradient background
+    for (int y=0;y<CAMERA_H;y++){
+        uchar v = (uchar)cv::saturate_cast<uchar>(40 + 160.0 * (double)y / CAMERA_H);
+        for (int x=0;x<CAMERA_W;x++){
+            img.at<cv::Vec3b>(y,x) = {v/2, v, (uchar)(v+10)};
+        }
+    }
+    // draw HUD text
+    char buf[200];
+    std::snprintf(buf, sizeof(buf), "%s  x=%.1f y=%.1f yaw=%.2f sp=%.2f", label.c_str(), s.x, s.y, s.yaw, s.speed);
+    cv::putText(img, buf, {12, 22}, cv::FONT_HERSHEY_SIMPLEX, 0.6, {230,230,230}, 1);
+
+    // draw moving circle to simulate objects
+    double t = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    int cx = int(CAMERA_W/2 + 80.0 * std::sin(t*0.6 + label.size()));
+    int cy = int(CAMERA_H/2 + 40.0 * std::cos(t*0.85 + label.size()));
+    cv::circle(img, {cx,cy}, 28, {110,200,150}, -1);
+
+    // overlay minimap small in corner
+    int insetW=150, insetH=100;
+    cv::Mat mini(insetH, insetW, CV_8UC3, cv::Scalar(20,30,40));
+    {
+        std::lock_guard<std::mutex> g(grid_mtx);
+        for (int yy=0; yy<MAP_H; ++yy){
+            for (int xx=0; xx<MAP_W; ++xx){
+                if (grid[yy][xx]==1){
+                    int px = int((double)xx / MAP_W * insetW);
+                    int py = int((double)yy / MAP_H * insetH);
+                    mini.at<cv::Vec3b>(py, px) = {50,50,50};
+                }
+            }
+        }
+    }
+    // vehicle dot
+    int vpx = int((s.x / MAP_W) * insetW);
+    int vpy = int((s.y / MAP_H) * insetH);
+    cv::circle(mini, {vpx,vpy}, 4, {0,0,255}, -1);
+    // path points
+    for (auto &p : path){
+        int px = int((double)p.first / MAP_W * insetW);
+        int py = int((double)p.second / MAP_H * insetH);
+        cv::circle(mini, {px,py}, 2, {200,200,50}, -1);
+    }
+    // copy inset to main image
+    cv::Mat roi = img(cv::Rect(CAMERA_W - insetW - 10, 10, insetW, insetH));
+    mini.copyTo(roi);
+    return img;
+}
+
+// ----------------------- UI map drawing -----------------------
+cv::Mat render_map(const VehicleState &s, const std::vector<std::pair<int,int>> &path, const LidarReading *lidar=nullptr, const std::vector<RadarHit> *radar=nullptr) {
+    int W = MAP_W*CELL_SIZE, H = MAP_H*CELL_SIZE;
+    cv::Mat img(H, W, CV_8UC3, cv::Scalar(6,18,22));
+    // draw obstacles
+    {
+        std::lock_guard<std::mutex> g(grid_mtx);
+        for (int y=0;y<MAP_H;y++){
+            for (int x=0;x<MAP_W;x++){
+                if (grid[y][x]==1){
+                    cv::rectangle(img, cv::Point(x*CELL_SIZE, y*CELL_SIZE), cv::Point((x+1)*CELL_SIZE-1, (y+1)*CELL_SIZE-1), cv::Scalar(40,40,44), cv::FILLED);
+                }
+            }
+        }
+    }
+    // draw path
+    if (!path.empty()) {
+        for (size_t i=1;i<path.size();++i){
+            cv::Point p1(path[i-1].first*CELL_SIZE + CELL_SIZE/2, path[i-1].second*CELL_SIZE + CELL_SIZE/2);
+            cv::Point p2(path[i].first*CELL_SIZE + CELL_SIZE/2, path[i].second*CELL_SIZE + CELL_SIZE/2);
+            cv::line(img, p1, p2, cv::Scalar(220,160,40), 2);
+        }
+    }
+    // draw lidar rays if provided (cropped for speed)
+    if (lidar){
+        int midx = int(s.x * CELL_SIZE), midy = int(s.y * CELL_SIZE);
+        for (int i=0;i<(int)lidar->ranges.size(); i+=6) {
+            double a = s.yaw + ((double)i / lidar->ranges.size()) * 2*M_PI - M_PI;
+            double rr = std::min(lidar->ranges[i], LIDAR_MAX_R);
+            int ex = int(midx + rr * CELL_SIZE * std::cos(a));
+            int ey = int(midy + rr * CELL_SIZE * std::sin(a));
+            cv::line(img, {midx,midy}, {ex,ey}, cv::Scalar(80,80,160), 1);
+        }
+    }
+    // draw radar hits
+    if (radar){
+        int midx = int(s.x * CELL_SIZE), midy = int(s.y * CELL_SIZE);
+        for (auto &h : *radar){
+            int ex = int(midx + (h.r * CELL_SIZE) * std::cos(h.angle + s.yaw));
+            int ey = int(midy + (h.r * CELL_SIZE) * std::sin(h.angle + s.yaw));
+            cv::circle(img, {ex,ey}, 3, cv::Scalar(200,200,120), -1);
+        }
+    }
+    // draw vehicle
+    int vx = int(s.x * CELL_SIZE), vy = int(s.y * CELL_SIZE);
+    cv::Point pts[3];
+    double yaw = s.yaw;
+    pts[0] = cv::Point(int(vx + 12*std::cos(yaw)), int(vy + 12*std::sin(yaw)));
+    pts[1] = cv::Point(int(vx + 8*std::cos(yaw+2.3)), int(vy + 8*std::sin(yaw+2.3)));
+    pts[2] = cv::Point(int(vx + 8*std::cos(yaw-2.3)), int(vy + 8*std::sin(yaw-2.3)));
+    cv::fillConvexPoly(img, pts, 3, cv::Scalar(200,60,60));
+    // HUD
+    char buf[200];
+    std::snprintf(buf, sizeof(buf), "Mode: %s  Speed: %.2f  Battery: %.0f%%  Health: %.0f%%  Status: %s",
+                  (control_mode.load()==Mode::MANUAL?"MANUAL":control_mode.load()==Mode::AUTO_RALLY?"AUTO_RALLY":control_mode.load()==Mode::AUTO_RACE?"AUTO_RACE":"FAST_RACE"),
+                  s.speed, s.battery, s.health, s.status.c_str());
+    cv::putText(img, buf, {10,18}, cv::FONT_HERSHEY_SIMPLEX, 0.5, {200,200,200}, 1);
+    return img;
+}
+
+// ----------------------- Behavior: planner + control threads -----------------------
+std::vector<std::pair<int,int>> current_path;
+std::mutex path_mtx;
+
+void planner_thread_func() {
+    while (true) {
+        Mode m = control_mode.load();
+        VehicleState s;
+        {
+            std::lock_guard<std::mutex> g(vehicle_mtx);
+            s = vehicle;
+        }
+        if (m == Mode::AUTO_RALLY) {
+            auto start = std::make_pair(int(std::round(s.x)), int(std::round(s.y)));
+            auto path = astar_path(start, rally_point);
+            {
+                std::lock_guard<std::mutex> g(path_mtx);
+                current_path = path;
+            }
+        } else if (m == Mode::AUTO_RACE || m == Mode::FAST_RACE) {
+            // pick next waypoint cyclically
+            double best = 1e9; int idx = 0;
+            for (size_t i=0;i<race_waypoints.size();++i){
+                double d = std::hypot(race_waypoints[i].first - s.x, race_waypoints[i].second - s.y);
+                if (d < best) { best = d; idx = (int)i; }
+            }
+            auto target = race_waypoints[(idx+1) % race_waypoints.size()];
+            auto path = astar_path({int(std::round(s.x)), int(std::round(s.y))}, target);
+            {
+                std::lock_guard<std::mutex> g(path_mtx);
+                current_path = path;
+            }
+        } else {
+            std::lock_guard<std::mutex> g(path_mtx);
+            current_path.clear();
+        }
+        std::this_thread::sleep_for(300ms);
+    }
+}
+
+void follow_path_control_thread() {
+    while (true) {
+        Mode m = control_mode.load();
+        if (m == Mode::AUTO_RALLY || m == Mode::AUTO_RACE || m == Mode::FAST_RACE) {
+            std::vector<std::pair<int,int>> pathCopy;
+            {
+                std::lock_guard<std::mutex> g(path_mtx);
+                pathCopy = current_path;
+            }
+            if (pathCopy.size() >= 2) {
+                VehicleState s;
+                {
+                    std::lock_guard<std::mutex> g(vehicle_mtx);
+                    s = vehicle;
+                }
+                auto next = pathCopy[1];
+                double nx = (double)next.first + 0.5;
+                double ny = (double)next.second + 0.5;
+                double dx = nx - s.x;
+                double dy = ny - s.y;
+                double heading = std::atan2(dy, dx);
+                double spd = (m == Mode::FAST_RACE) ? 10.0 : (m == Mode::AUTO_RACE ? 6.0 : 2.0);
+                {
+                    std::lock_guard<std::mutex> g(vehicle_mtx);
+                    // simple yaw smoothing
+                    double &yaw = vehicle.yaw;
+                    yaw += 0.2 * (heading - yaw);
+                    vehicle.vx = spd * std::cos(vehicle.yaw);
+                    vehicle.vy = spd * std::sin(vehicle.yaw);
+                    vehicle.x += vehicle.vx * SIM_DT;
+                    vehicle.y += vehicle.vy * SIM_DT;
+                    vehicle.speed = std::hypot(vehicle.vx, vehicle.vy);
+                    vehicle.battery -= 0.01 * (1.0 + vehicle.speed / 5.0);
+                    if (vehicle.speed > 8.0) vehicle.health -= 0.05;
+                    vehicle.status = "AUTONOMOUS";
+                }
+            }
+        } else {
+            // manual — little drift
+            {
+                std::lock_guard<std::mutex> g(vehicle_mtx);
+                vehicle.x += vehicle.vx * SIM_DT;
+                vehicle.y += vehicle.vy * SIM_DT;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::duration<double>(SIM_DT));
+    }
+}
+
+// ----------------------- Safety loop -----------------------
+void safety_thread_func() {
+    while (true) {
+        VehicleState s;
+        {
+            std::lock_guard<std::mutex> g(vehicle_mtx);
+            s = vehicle;
+        }
+        auto lidar = lidar_scan(s);
+        double sonar = sonar_ping(s);
+        if (analyze_crash(lidar, sonar, s)) {
+            // emergency stop & avoidance
+            {
+                std::lock_guard<std::mutex> g(vehicle_mtx);
+                vehicle.status = "CRASH_DETECTED";
+                vehicle.lastCrashTs = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+                vehicle.vx = 0.0; vehicle.vy = 0.0; vehicle.speed = 0.0;
+                vehicle.health -= 8.0;
+                // avoidance: rotate 90 deg and back off
+                vehicle.yaw += M_PI/2.0;
+                vehicle.x += std::cos(vehicle.yaw) * 1.0;
+                vehicle.y += std::sin(vehicle.yaw) * 1.0;
+                vehicle.status = "AVOIDANCE_MANEUVER";
+            }
+            telemetry.push("Crash detected -> avoidance");
+        } else {
+            // braking if near obstacle
+            double minL = *std::min_element(lidar.ranges.begin(), lidar.ranges.end());
+            if (minL < 2.0) {
+                std::lock_guard<std::mutex> g(vehicle_mtx);
+                double decel = (2.0 - minL) * 1.5;
+                vehicle.vx *= std::max(0.0, 1.0 - decel * SIM_DT);
+                vehicle.vy *= std::max(0.0, 1.0 - decel * SIM_DT);
+                vehicle.speed = std::hypot(vehicle.vx, vehicle.vy);
+                vehicle.status = "BRAKING";
+            }
+        }
+        // run at sensor rate
+        std::this_thread::sleep_for(100ms);
+    }
+}
+
+// ----------------------- Telemetry, antimalware & autorepair stubs -----------------------
+void telemetry_thread_func() {
+    std::uniform_real_distribution<double> p(0.0, 1.0);
+    while (true) {
+        {
+            std::lock_guard<std::mutex> g(vehicle_mtx);
+            char buf[200];
+            std::snprintf(buf, sizeof(buf), "POS=%.1f,%.1f SPD=%.2f BAT=%.0f%% HLT=%.0f%% STAT=%s",
+                          vehicle.x, vehicle.y, vehicle.speed, vehicle.battery, vehicle.health, vehicle.status.c_str());
+            telemetry.push(buf);
+        }
+        // antimalware scan occasionally
+        if (p(rng) < 0.02) {
+            if (p(rng) < 0.25) telemetry.push("ANTIMALWARE: scan clean");
+            else { telemetry.push("ANTIMALWARE: suspicious -> isolate process"); telemetry.push("ANTIMALWARE: isolated module"); }
+        }
+        // autorepair behavior
+        if (p(rng) < 0.03) {
+            std::lock_guard<std::mutex> g(vehicle_mtx);
+            if (vehicle.health < 60.0) {
+                vehicle.health += 2.0 + (p(rng) * 6.0);
+                telemetry.push("AUTOREPAIR: soft reset applied");
+            }
+            if (vehicle.health < 20.0) {
+                telemetry.push("AUTOREPAIR: critical -> request return to base");
+                control_mode.store(Mode::MANUAL);
+                vehicle.status = "NEEDS_REPAIR";
+            }
+        }
+        std::this_thread::sleep_for(500ms);
+    }
+}
+
+// ----------------------- UI & keyboard control -----------------------
+void ui_thread_func() {
+    cv::namedWindow("FrontCam", cv::WINDOW_AUTOSIZE);
+    cv::namedWindow("RearCam", cv::WINDOW_AUTOSIZE);
+    cv::namedWindow("SideCam", cv::WINDOW_AUTOSIZE);
+    cv::namedWindow("Map", cv::WINDOW_AUTOSIZE);
+
+    while (true) {
+        VehicleState s;
+        {
+            std::lock_guard<std::mutex> g(vehicle_mtx);
+            s = vehicle;
+        }
+        std::vector<std::pair<int,int>> pathCopy;
+        {
+            std::lock_guard<std::mutex> g(path_mtx);
+            pathCopy = current_path;
+        }
+        auto lidar = lidar_scan(s);
+        auto radar = radar_ping(s);
+        double sonar = sonar_ping(s);
+
+        cv::Mat front = render_camera_frame("FRONT", s, pathCopy);
+        cv::Mat rear  = render_camera_frame("REAR",  s, pathCopy);
+        cv::Mat side  = render_camera_frame("SIDE",  s, pathCopy);
+        cv::Mat map   = render_map(s, pathCopy, &lidar, &radar);
+
+        // telemetry overlay on map (right side)
+        auto events = telemetry.snapshot();
+        int ty = 24;
+        for (size_t i=0;i< std::min<size_t>(events.size(), 12); ++i) {
+            char buf[256];
+            std::snprintf(buf, sizeof(buf), "%s", events[events.size()-1-i].msg.c_str());
+            cv::putText(map, buf, {8, map.rows - 20 - int(i*18)}, cv::FONT_HERSHEY_SIMPLEX, 0.4, {190,210,220}, 1);
+        }
+
+        cv::imshow("FrontCam", front);
+        cv::imshow("RearCam", rear);
+        cv::imshow("SideCam", side);
+        cv::imshow("Map", map);
+
+        int key = cv::waitKey(30);
+        if (key == 27) { // ESC
+            telemetry.push("UI: exit requested");
+            break;
+        } else if (key == 'm') {
+            control_mode.store(Mode::MANUAL); telemetry.push("Mode -> MANUAL");
+        } else if (key == 'r') {
+            control_mode.store(Mode::AUTO_RALLY); telemetry.push("Mode -> AUTO_RALLY");
+        } else if (key == 'a') {
+            control_mode.store(Mode::AUTO_RACE); telemetry.push("Mode -> AUTO_RACE");
+        } else if (key == 'f') {
+            control_mode.store(Mode::FAST_RACE); telemetry.push("Mode -> FAST_RACE");
+        } else if (key == 'g') {
+            generate_random_obstacles();
+        } else if (key == 'p') {
+            // nudge manual forward
+            std::lock_guard<std::mutex> g(vehicle_mtx);
+            vehicle.vx += 0.2 * std::cos(vehicle.yaw);
+            vehicle.vy += 0.2 * std::sin(vehicle.yaw);
+            vehicle.status = "MANUAL";
+        } else if (key == 'l') {
+            // toggle small yaw
+            std::lock_guard<std::mutex> g(vehicle_mtx);
+            vehicle.yaw += 0.2;
+        }
+        // loop end
+    }
+    cv::destroyAllWindows();
+    exit(0);
+}
+
+// ----------------------- Main -----------------------
+int main(int argc, char **argv) {
+    std::cout << "Advanced Drone Simulation (C++)\n";
+    std::cout << "Keys: ESC=exit  m=MANUAL  r=RALLY  a=RACE  f=FAST_RACE  g=REGEN_MAP  p=MANUAL_PUSH  l=TURN\n";
+    generate_random_obstacles();
+
+    // start threads
+    std::thread planner_thread(planner_thread_func);
+    std::thread control_thread(follow_path_control_thread);
+    std::thread safety_thread(safety_thread_func);
+    std::thread telemetry_thread(telemetry_thread_func);
+    std::thread ui_thread(ui_thread_func);
+
+    planner_thread.join();
+    control_thread.join();
+    safety_thread.join();
+    telemetry_thread.join();
+    ui_thread.join();
+
+    return 0;
+}
+
+
+pip install flask flask_cors numpy opencv-python pillow
+
+
+python advanced_drone_full.py
+
+
+# advanced_drone_full.py
+# Safe simulation & control stack for an advanced drone + hybrid car-sized drone.
+# - Flask UI with MJPEG simulated cameras and REST control
+# - Simulated sensors: LIDAR, RADAR, SONAR
+# - A* grid planner, rally/race/fast modes, fast race tradeoffs
+# - Object avoidance, crash detection & avoidance maneuvers
+# - Telemetry queue, antimalware & autorepair stubs
+# - All simulation only; no low-level flight or hardware actuation instructions.
+#
+# Run: python advanced_drone_full.py
+# Dependencies: flask flask_cors numpy opencv-python pillow
+
+from flask import Flask, Response, render_template_string, request, jsonify
+from flask_cors import CORS
+import threading, time, math, random
+import numpy as np
+import cv2
+from queue import Queue, Empty
+from dataclasses import dataclass, field
+from heapq import heappush, heappop
+from io import BytesIO
+from PIL import Image
+
+# --------------------
+# Config
+# --------------------
+SIM_DT = 0.1
+MAP_W, MAP_H = 120, 80
+OBSTACLE_COUNT = 220
+CAM_RES = (480, 320)
+
+app = Flask(__name__)
+CORS(app)
+
+# --------------------
+# Shared state
+# --------------------
+state_lock = threading.Lock()
+
+@dataclass
+class Vehicle:
+    x: float = 10.0
+    y: float = 10.0
+    yaw: float = 0.0
+    vx: float = 0.0
+    vy: float = 0.0
+    speed: float = 0.0
+    battery: float = 100.0
+    health: float = 100.0
+    status: str = "IDLE"
+    last_crash: float = 0.0
+
+vehicle = Vehicle()
+
+grid_map = np.zeros((MAP_H, MAP_W), dtype=np.uint8)
+
+def generate_map(n=OBSTACLE_COUNT):
+    global grid_map
+    grid_map = np.zeros((MAP_H, MAP_W), dtype=np.uint8)
+    for _ in range(n):
+        x = random.randrange(0, MAP_W)
+        y = random.randrange(0, MAP_H)
+        grid_map[y, x] = 1
+    # clear spawn area
+    grid_map[8:16, 6:14] = 0
+
+generate_map()
+
+# modes & waypoints
+modes = {"mode": "MANUAL"}  # MANUAL | AUTO_RALLY | AUTO_RACE | FAST_RACE
+rally_point = (MAP_W - 8, MAP_H - 10)
+race_waypoints = [(20, MAP_H-10), (MAP_W-10, 12), (MAP_W-10, MAP_H-10)]
+
+# queues
+camera_queues = {"front": Queue(maxsize=4), "rear": Queue(maxsize=4), "side": Queue(maxsize=4)}
+sensor_queue = Queue(maxsize=64)
+telemetry_queue = Queue(maxsize=256)
+
+# --------------------
+# Sensor simulators
+# --------------------
+class LidarSim:
+    def __init__(self, n=180, max_r=40.0):
+        self.n = n
+        self.max_r = max_r
+    def scan(self, s: Vehicle):
+        angles = np.linspace(-math.pi, math.pi, self.n, endpoint=False)
+        ranges = np.ones(self.n) * self.max_r
+        for i,a in enumerate(angles):
+            ray = s.yaw + a
+            for r in np.linspace(0.5, self.max_r, 200):
+                rx = s.x + r*math.cos(ray)
+                ry = s.y + r*math.sin(ray)
+                gx, gy = int(round(rx)), int(round(ry))
+                if gx < 0 or gy < 0 or gx >= MAP_W or gy >= MAP_H:
+                    ranges[i] = r; break
+                if grid_map[gy, gx] == 1:
+                    ranges[i] = r; break
+        return ranges
+
+class RadarSim:
+    def __init__(self, max_r=80.0):
+        self.max_r = max_r
+    def ping(self, s: Vehicle):
+        hits = []
+        ys, xs = np.where(grid_map == 1)
+        for gx, gy in zip(xs, ys):
+            dx, dy = gx - s.x, gy - s.y
+            r = math.hypot(dx, dy)
+            if r <= self.max_r:
+                hits.append((r, math.atan2(dy, dx) - s.yaw, 0.0))
+        # random dynamic
+        if random.random() < 0.03:
+            hits.append((random.uniform(5, self.max_r), random.uniform(-math.pi, math.pi), random.uniform(-5,5)))
+        return hits
+
+class SonarSim:
+    def __init__(self, max_r=6.0):
+        self.max_r = max_r
+    def ping(self, s: Vehicle):
+        for r in np.linspace(0.2, self.max_r, 60):
+            rx = s.x + r*math.cos(s.yaw)
+            ry = s.y + r*math.sin(s.yaw)
+            gx, gy = int(round(rx)), int(round(ry))
+            if gx<0 or gy<0 or gx>=MAP_W or gy>=MAP_H or grid_map[gy,gx]==1:
+                return r
+        return None
+
+# --------------------
+# Camera simulation (simple MJPEG)
+# --------------------
+def draw_minimap(s: Vehicle, size=(200,120)):
+    w,h = size
+    img = np.ones((h,w,3), dtype=np.uint8)*40
+    # draw obstacles
+    ys, xs = np.where(grid_map==1)
+    for gx, gy in zip(xs, ys):
+        px = int(gx / MAP_W * w)
+        py = int(gy / MAP_H * h)
+        cv2.rectangle(img, (px,py), (px+2,py+2), (20,20,22), -1)
+    # vehicle
+    vx = int(s.x / MAP_W * w)
+    vy = int(s.y / MAP_H * h)
+    cv2.circle(img, (vx,vy), 4, (0,0,255), -1)
+    # heading line
+    hx = int(vx + 12*math.cos(s.yaw))
+    hy = int(vy + 12*math.sin(s.yaw))
+    cv2.line(img, (vx,vy), (hx,hy), (0,200,0), 2)
+    return img
+
+def camera_producer(name):
+    while True:
+        with state_lock:
+            s = Vehicle(**vars(vehicle))
+        base = np.zeros((CAM_RES[1], CAM_RES[0], 3), dtype=np.uint8)
+        t = time.time()
+        cv2.putText(base, f"{name.upper()} CAM", (8,20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,255), 1)
+        cv2.putText(base, f"x={s.x:.1f} y={s.y:.1f} yaw={s.yaw:.2f}", (8,40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180,180,180), 1)
+        # moving blob
+        center = (int(CAM_RES[0]/2 + 80*math.sin(t*0.8+len(name))), int(CAM_RES[1]/2 + 40*math.cos(t*0.6)))
+        cv2.circle(base, center, 30, (int(120+60*math.sin(t)),140,200), -1)
+        # minimap inset
+        mini = draw_minimap(s, size=(140,90))
+        try:
+            base[8:98, CAM_RES[0]-150:CAM_RES[0]-10] = mini
+        except:
+            pass
+        ret, jpeg = cv2.imencode('.jpg', base)
+        frame = jpeg.tobytes()
+        try:
+            camera_queues[name].put(frame, timeout=0.2)
+        except:
+            pass
+        time.sleep(0.07)
+
+# --------------------
+# Perception loop (fuse sensors into queue)
+# --------------------
+def perception_loop():
+    lidar = LidarSim()
+    radar = RadarSim()
+    sonar = SonarSim()
+    while True:
+        with state_lock:
+            s = Vehicle(**vars(vehicle))
+        lidar_r = lidar.scan(s)
+        radar_h = radar.ping(s)
+        sonar_d = sonar.ping(s)
+        perception = {"t": time.time(), "lidar": lidar_r, "radar": radar_h, "sonar": sonar_d, "pose": (s.x, s.y, s.yaw)}
+        try:
+            sensor_queue.put_nowait(perception)
+        except:
+            pass
+        time.sleep(SIM_DT)
+
+# --------------------
+# Crash analysis & safety
+# --------------------
+def analyze_crash(perception, s):
+    sonar = perception.get("sonar")
+    if sonar and sonar < 0.5:
+        return True
+    lidar = perception.get("lidar", [])
+    if len(lidar) and min(lidar) < 0.4:
+        return True
+    if s.health < 8:
+        return True
+    return False
+
+# --------------------
+# Planner: A* on grid
+# --------------------
+def heuristic(a,b):
+    return abs(a[0]-b[0]) + abs(a[1]-b[1])
+
+def astar(start, goal):
+    sx, sy = int(round(start[0])), int(round(start[1]))
+    gx, gy = int(round(goal[0])), int(round(goal[1]))
+    if sx<0 or sy<0 or gx<0 or gy<0 or sx>=MAP_W or sy>=MAP_H or gx>=MAP_W or gy>=MAP_H:
+        return None
+    close = set()
+    came = {}
+    gscore = { (sx,sy): 0 }
+    fscore = { (sx,sy): heuristic((sx,sy),(gx,gy)) }
+    oheap = []
+    heappush(oheap, (fscore[(sx,sy)], (sx,sy)))
+    while oheap:
+        current = heappop(oheap)[1]
+        if current == (gx,gy):
+            path = []
+            while current in came:
+                path.append(current)
+                current = came[current]
+            path.append((sx,sy))
+            return path[::-1]
+        close.add(current)
+        x,y = current
+        for dx,dy in [(1,0),(-1,0),(0,1),(0,-1),(1,1),(-1,-1),(1,-1),(-1,1)]:
+            nx, ny = x+dx, y+dy
+            if nx<0 or ny<0 or nx>=MAP_W or ny>=MAP_H: continue
+            if grid_map[ny,nx] == 1: continue
+            tentative = gscore[current] + math.hypot(dx,dy)
+            if (nx,ny) in close and tentative >= gscore.get((nx,ny), 1e9): continue
+            if tentative < gscore.get((nx,ny), 1e9) or (tentative + heuristic((nx,ny),(gx,gy)), (nx,ny)) not in oheap:
+                came[(nx,ny)] = current
+                gscore[(nx,ny)] = tentative
+                fscore[(nx,ny)] = tentative + heuristic((nx,ny),(gx,gy))
+                heappush(oheap, (fscore[(nx,ny)], (nx,ny)))
+    return None
+
+# planner & control state
+current_path = []
+path_lock = threading.Lock()
+
+def planner_loop():
+    global current_path
+    while True:
+        with state_lock:
+            s = Vehicle(**vars(vehicle))
+            mode = modes["mode"]
+        if mode == "AUTO_RALLY":
+            path = astar((s.x, s.y), rally_point)
+            with path_lock:
+                current_path = path or []
+        elif mode in ("AUTO_RACE", "FAST_RACE"):
+            # choose next race waypoint
+            best_idx = 0
+            best_d = 1e9
+            for i,wp in enumerate(race_waypoints):
+                d = math.hypot(wp[0]-s.x, wp[1]-s.y)
+                if d < best_d:
+                    best_d = d; best_idx = i
+            target = race_waypoints[(best_idx+1)%len(race_waypoints)]
+            path = astar((s.x, s.y), target)
+            with path_lock:
+                current_path = path or []
+        else:
+            with path_lock:
+                current_path = []
+        time.sleep(0.4)
+
+# follow path
+def follow_path_control():
+    while True:
+        with state_lock:
+            mode = modes["mode"]
+        if mode in ("AUTO_RALLY", "AUTO_RACE", "FAST_RACE"):
+            with path_lock:
+                path = list(current_path)
+            if len(path) >= 2:
+                nx, ny = path[1]
+                with state_lock:
+                    s = vehicle
+                    dx, dy = nx - s.x, ny - s.y
+                    heading = math.atan2(dy, dx)
+                    spd = 2.0 if mode=="AUTO_RALLY" else (6.0 if mode=="AUTO_RACE" else 10.0)
+                    # yaw smoothing
+                    s.yaw += 0.2 * (heading - s.yaw)
+                    s.vx = spd * math.cos(s.yaw)
+                    s.vy = spd * math.sin(s.yaw)
+                    s.x += s.vx * SIM_DT
+                    s.y += s.vy * SIM_DT
+                    s.speed = math.hypot(s.vx, s.vy)
+                    s.battery -= 0.01 * (1 + s.speed/5.0)
+                    if s.speed > 8.0:
+                        s.health -= 0.05
+        else:
+            time.sleep(0.05)
+            continue
+        time.sleep(SIM_DT)
+
+# safety loop
+def safety_loop():
+    while True:
+        try:
+            perception = sensor_queue.get(timeout=1.0)
+        except Empty:
+            continue
+        with state_lock:
+            s = Vehicle(**vars(vehicle))
+        if analyze_crash(perception, s):
+            with state_lock:
+                vehicle.status = "CRASH_DETECTED"
+                vehicle.last_crash = time.time()
+                vehicle.vx = 0.0
+                vehicle.vy = 0.0
+                vehicle.speed = 0.0
+                vehicle.health -= 10.0
+            telemetry_queue.put({"evt":"crash","t":time.time(),"pose":perception["pose"]})
+            if vehicle.health > 0:
+                with state_lock:
+                    vehicle.yaw += math.pi/2
+                    vehicle.x += math.cos(vehicle.yaw)*1.0
+                    vehicle.y += math.sin(vehicle.yaw)*1.0
+                    vehicle.status = "AVOIDANCE_MANEUVER"
+            continue
+        # proximity braking
+        dists = perception.get("lidar", [])
+        if len(dists):
+            min_d = float(np.min(dists))
+            if min_d < 2.0:
+                with state_lock:
+                    decel = (2.0 - min_d) * 1.5
+                    vehicle.vx *= max(0, 1 - decel*SIM_DT)
+                    vehicle.vy *= max(0, 1 - decel*SIM_DT)
+                    vehicle.speed = math.hypot(vehicle.vx, vehicle.vy)
+                    vehicle.status = "BRAKING"
+
+# telemetry & resilience stubs
+def telemetry_loop():
+    while True:
+        with state_lock:
+            s = Vehicle(**vars(vehicle))
+        data = {"t": time.time(), "pose": (s.x,s.y,s.yaw), "speed": s.speed, "battery": s.battery, "health": s.health, "status": s.status}
+        try:
+            telemetry_queue.put_nowait(data)
+        except:
+            pass
+        # antimalware scan
+        if random.random() < 0.02:
+            antimalware_scan()
+        # autorepair check
+        if random.random() < 0.03:
+            autorepair_check()
+        time.sleep(0.5)
+
+def antimalware_scan():
+    result = random.choice(["clean","suspicious","clean"])
+    telemetry_queue.put({"evt":"antimalware","result":result,"t":time.time()})
+    if result == "suspicious":
+        telemetry_queue.put({"evt":"antimalware_remediate","action":"isolate_process","t":time.time()})
+
+def autorepair_check():
+    with state_lock:
+        s = vehicle
+        if s.health < 50:
+            telemetry_queue.put({"evt":"autorepair_attempt","type":"soft_reset","t":time.time()})
+            s.health += random.uniform(1.0,6.0)
+        if s.health < 20:
+            telemetry_queue.put({"evt":"autorepair_critical","action":"request_return_to_base","t":time.time()})
+            modes["mode"] = "MANUAL"
+            s.status = "NEEDS_REPAIR"
+
+# small dynamics integrator
+def sim_dynamics():
+    while True:
+        with state_lock:
+            s = vehicle
+            s.x += s.vx * SIM_DT
+            s.y += s.vy * SIM_DT
+            s.battery -= 0.002
+            if s.battery < 0:
+                s.battery = 0
+                s.status = "NO_POWER"
+            s.health = max(0.0, min(100.0, s.health))
+        time.sleep(SIM_DT)
+
+# --------------------
+# Flask UI
+# --------------------
+INDEX_HTML = """
+<!doctype html><html><head><title>Advanced Drone Sim</title></head>
+<body style="background:#081018;color:#e6eef6;font-family:monospace">
+<h2>Advanced Drone Simulation</h2>
+<div style="display:flex;gap:12px">
+  <div>
+    <img src="/camera/front" style="width:480px;height:320px;border-radius:8px;margin-bottom:6px"/>
+    <br/>
+    <img src="/camera/rear" style="width:480px;height:320px;border-radius:8px;margin-bottom:6px"/>
+    <br/>
+    <img src="/camera/side" style="width:480px;height:320px;border-radius:8px;margin-bottom:6px"/>
+  </div>
+  <div style="width:480px">
+    <div style="background:#07121a;padding:10px;border-radius:8px">
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <button onclick="setMode('MANUAL')">MANUAL</button>
+        <button onclick="setMode('AUTO_RALLY')">AUTO RALLY</button>
+        <button onclick="setMode('AUTO_RACE')">AUTO RACE</button>
+        <button onclick="setMode('FAST_RACE')">FAST RACE</button>
+        <button onclick="regen()">REGEN MAP</button>
+      </div>
+      <pre id="tele" style="height:360px;overflow:auto;background:#001219;padding:8px;border-radius:6px"></pre>
+    </div>
+  </div>
+</div>
+<script>
+function setMode(m){ fetch('/api/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:m})}).then(()=>{}); }
+function regen(){ fetch('/api/regenerate',{method:'POST'}).then(()=>{}); }
+function poll(){ fetch('/api/telemetry').then(r=>r.json()).then(j=>{ document.getElementById('tele').innerText = JSON.stringify(j, null, 2); }); }
+setInterval(poll, 600);
+</script>
+</body></html>
+"""
+
+@app.route('/')
+def index():
+    return render_template_string(INDEX_HTML)
+
+def mjpeg_stream(queue: Queue):
+    while True:
+        try:
+            frame = queue.get(timeout=2.0)
+        except Empty:
+            blank = np.zeros((10,10,3), dtype=np.uint8)
+            ret, jpeg = cv2.imencode('.jpg', blank)
+            frame = jpeg.tobytes()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+        time.sleep(0.02)
+
+@app.route('/camera/<name>')
+def camera(name):
+    if name not in camera_queues: return "Unknown", 404
+    return Response(mjpeg_stream(camera_queues[name]), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/api/mode', methods=['POST'])
+def api_mode():
+    data = request.get_json()
+    m = data.get('mode')
+    if m not in ("MANUAL","AUTO_RALLY","AUTO_RACE","FAST_RACE"):
+        return jsonify({"error":"unknown mode"}), 400
+    modes["mode"] = m
+    return jsonify({"mode":m})
+
+@app.route('/api/regenerate', methods=['POST'])
+def api_regen():
+    generate_map()
+    return jsonify({"ok":True})
+
+@app.route('/api/telemetry')
+def api_telemetry():
+    with state_lock:
+        s = Vehicle(**vars(vehicle))
+    events = []
+    try:
+        while True:
+            events.append(telemetry_queue.get_nowait())
+    except:
+        pass
+    return jsonify({"vehicle": vars(s), "events": events})
+
+# --------------------
+# Startup threads
+# --------------------
+def start_threads():
+    # camera producers
+    for name in camera_queues:
+        t = threading.Thread(target=camera_producer, args=(name,), daemon=True)
+        t.start()
+    # perception
+    t = threading.Thread(target=perception_loop, daemon=True); t.start()
+    # planner + control
+    t = threading.Thread(target=planner_loop, daemon=True); t.start()
+    t2 = threading.Thread(target=follow_path_control, daemon=True); t2.start()
+    # safety + telemetry + dynamics
+    t = threading.Thread(target=safety_loop, daemon=True); t.start()
+    t = threading.Thread(target=telemetry_loop, daemon=True); t.start()
+    t = threading.Thread(target=sim_dynamics, daemon=True); t.start()
+
+# --------------------
+# Entrypoint
+# --------------------
+if __name__ == '__main__':
+    print("Starting advanced drone simulation — open http://127.0.0.1:5000")
+    start_threads()
+    # start flask server (blocking)
+    app.run(host='0.0.0.0', port=5000, threaded=True)
+
+
+# advanced_drone.py  (very compact skeleton)
+import threading, time, math, random
+from flask import Flask, Response, render_template_string
+import cv2, numpy as np
+app = Flask(__name__)
+
+# State
+state = {"x":10.0,"y":10.0,"yaw":0.0,"vx":0.0,"vy":0.0,"speed":0.0,"battery":100.0,"health":100.0,"mode":"MANUAL"}
+
+# Simulated map
+MAP_W,MAP_H = 100,80
+grid = np.zeros((MAP_H,MAP_W),dtype=np.uint8)
+def regen(): 
+    global grid
+    grid = (np.random.rand(MAP_H,MAP_W) < 0.03).astype(np.uint8)
+regen()
+
+# Camera producer (MJPEG frames)
+def cam_thread(name):
+    while True:
+        img = np.zeros((240,320,3),dtype=np.uint8)
+        cv2.putText(img,f"{name} x={state['x']:.1f} y={state['y']:.1f}",(8,20),cv2.FONT_HERSHEY_SIMPLEX,0.5,(200,200,200),1)
+        # insert minimap
+        mini = (255 - (grid*200)).astype(np.uint8)
+        mini = cv2.resize(mini,(120,80))
+        img[10:90,200:320] = cv2.cvtColor(mini,cv2.COLOR_GRAY2BGR)
+        ret,buf = cv2.imencode('.jpg',img)
+        frames[name] = buf.tobytes()
+        time.sleep(0.06)
+
+frames={"front":b"","rear":b"","side":b""}
+for n in frames:
+    threading.Thread(target=cam_thread,args=(n,),daemon=True).start()
+
+@app.route("/camera/<name>")
+def camera(name):
+    def gen():
+        while True:
+            b = frames.get(name,b"")
+            yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n'+b+b'\r\n'
+            time.sleep(0.05)
+    return Response(gen(),mimetype='multipart/x-mixed-replace; boundary=frame')
+
+# tiny planner stub (A*/follow) and safety
+def sim_loop():
+    while True:
+        # simple dynamics
+        state["x"] += state["vx"]*0.1
+        state["y"] += state["vy"]*0.1
+        state["battery"] = max(0,state["battery"]-0.002)
+        # auto modes (VERY SIMPLE)
+        if state["mode"].startswith("AUTO"):
+            tx,ty = MAP_W-8, MAP_H-8
+            dx,dy = tx-state["x"], ty-state["y"]
+            heading = math.atan2(dy,dx)
+            state["yaw"] += 0.2*(heading-state["yaw"])
+            speed = 6.0 if state["mode"]=="AUTO_RACE" else 2.0
+            state["vx"], state["vy"] = speed*math.cos(state["yaw"]), speed*math.sin(state["yaw"])
+        time.sleep(0.08)
+
+threading.Thread(target=sim_loop,daemon=True).start()
+
+INDEX = "<html><body><h3>Python Drone Sim</h3><img src='/camera/front' /><img src='/camera/rear' /><img src='/camera/side' /></body></html>"
+@app.route('/')
+def idx(): return INDEX
+
+if __name__=="__main__":
+    app.run(port=5000)
+
+
+
+// App.jsx (high-level)
+import React, {useEffect, useRef, useState} from "react";
+
+export default function App(){
+  const [tele, setTele] = useState(null);
+  useEffect(()=>{
+    const ws = new WebSocket("ws://localhost:3000/ws");
+    ws.onmessage = e => setTele(JSON.parse(e.data));
+    return ()=>ws.close();
+  },[]);
+  return (
+    <div style={{display:"flex",gap:12,padding:12}}>
+      <div style={{width:420}}>
+        <h3>Advanced Drone — Cameras</h3>
+        <img src="/api/cam/front" style={{width:400}}/>
+        <img src="/api/cam/rear" style={{width:400}}/>
+        <img src="/api/cam/side" style={{width:400}}/>
+      </div>
+      <div style={{flex:1}}>
+        <h3>Map & Planner</h3>
+        <canvas id="map" width={800} height={500} style={{width:"100%",border:"1px solid #222"}}/>
+        <pre style={{height:200,overflow:"auto"}}>{JSON.stringify(tele,null,2)}</pre>
+      </div>
+    </div>
+  );
+}
+
+// minimal Node.js simulation server (express + ws)
+const express = require('express'), http = require('http'), WebSocket = require('ws');
+const app = express();
+app.use(express.json());
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server, path: "/ws" });
+
+let state = {x:10,y:10,yaw:0,mode:"MANUAL",battery:100,health:100};
+let map = Array.from({length:80}, ()=>Array.from({length:100}, ()=> Math.random()<0.03?1:0));
+
+app.get('/api/tele', (req,res)=> res.json({state, map}));
+app.post('/api/mode', (req,res)=> { state.mode = req.body.mode || state.mode; res.json({ok:true}); });
+
+wss.on('connection', ws=>{
+  let int = setInterval(()=> ws.send(JSON.stringify({state, t:Date.now()})), 200);
+  ws.on('close', ()=> clearInterval(int));
+});
+
+setInterval(()=>{
+  // simple auto behavior
+  if(state.mode.startsWith("AUTO")) {
+    const tx=98, ty=78; const dx=tx-state.x, dy=ty-state.y;
+    const heading=Math.atan2(dy,dx); state.yaw += 0.2*(heading-state.yaw);
+    const spd = state.mode==="FAST_RACE"?10: (state.mode==="AUTO_RACE"?6:2);
+    state.x += Math.cos(state.yaw)*spd*0.1; state.y += Math.sin(state.yaw)*spd*0.1;
+    state.battery = Math.max(0, state.battery-0.02);
+  }
+}, 100);
+
+server.listen(3000, ()=>console.log("node sim on 3000"));
+
+
+import SwiftUI
+
+struct ContentView: View {
+  @StateObject var vm = DroneViewModel()
+  var body: some View {
+    HStack {
+      VStack {
+        CameraView(image: vm.front)
+        CameraView(image: vm.rear)
+        CameraView(image: vm.side)
+      }.frame(width:360)
+      MapView(map: vm.map, path: vm.path).frame(minWidth:600)
+      ControlPanel(vm: vm).frame(width:320)
+    }
+  }
+}
+
+
+class MainActivity : AppCompatActivity() {
+  private lateinit var ws: WebSocket
+  override fun onCreate(s: Bundle?){ super.onCreate(s); setContentView(R.layout.activity_main)
+    // use okhttp ws to connect to ws://localhost:3000/ws and update UI on messages
+  }
