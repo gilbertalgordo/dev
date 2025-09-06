@@ -1,0 +1,187 @@
+// A collection of funny quotes
+const funnyQuotes = [
+  "I told my wife she was drawing her eyebrows too high. She looked surprised.",
+  "Why don't skeletons fight each other? They don't have the guts.",
+  "I'm on a seafood diet. I see food, and I eat it.",
+  "Why did the scarecrow win an award? Because he was outstanding in his field!",
+  "I used to be a baker, but I couldn't make enough dough.",
+  "What do you call a fake noodle? An impasta.",
+];
+
+// Function to get a random quote
+function getRandomQuote() {
+  const randomIndex = Math.floor(Math.random() * funnyQuotes.length);
+  return funnyQuotes[randomIndex];
+}
+
+// Example of how to use this with HTML
+// <button onclick="displayRandomQuote()">Get a Joke</button>
+// <p id="quoteDisplay"></p>
+
+function displayRandomQuote() {
+  const quoteDisplayElement = document.getElementById("quoteDisplay");
+  quoteDisplayElement.textContent = getRandomQuote();
+}
+
+
+
+// An array of meme image filenames.
+// Make sure these files are in a folder named 'memes'
+const memeImages = [
+  "meme1.jpg",
+  "meme2.png",
+  "meme3.gif",
+  "meme4.jpg",
+  "meme5.png",
+];
+
+// Function to get a random meme image path
+function getRandomMemePath() {
+  const randomIndex = Math.floor(Math.random() * memeImages.length);
+  return "memes/" + memeImages[randomIndex];
+}
+
+// Example of how to use this with HTML
+// <button onclick="displayRandomMeme()">Get a Meme</button>
+// <img id="memeDisplay" src="">
+
+function displayRandomMeme() {
+  const memeDisplayElement = document.getElementById("memeDisplay");
+  memeDisplayElement.src = getRandomMemePath();
+}
+
+
+
+// App.js - This is the main component of your React app
+
+import React, { useState, useEffect } from 'react';
+import axios from 'axios'; // You'll need to install axios: npm install axios
+import './App.css'; // Your CSS file for styling
+
+function App() {
+  const [joke, setJoke] = useState('');
+  const [meme, setMeme] = useState('');
+  const [video, setVideo] = useState('');
+
+  // This function fetches data from your back-end API
+  const fetchData = async (contentType) => {
+    try {
+      const response = await axios.get(`https://api.joke.com/api/${contentType}`);
+      if (contentType === 'quotes') {
+        setJoke(response.data.quote);
+      } else if (contentType === 'memes') {
+        setMeme(response.data.url);
+      } else if (contentType === 'videos') {
+        setVideo(response.data.url);
+      }
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    }
+  };
+
+  useEffect(() => {
+    // Fetch initial content when the app loads
+    fetchData('quotes');
+    fetchData('memes');
+    fetchData('videos');
+  }, []);
+
+  return (
+    <div className="app-container">
+      <header className="app-header">
+        <h1>Welcome to joke.com!</h1>
+        <p>Your daily dose of laughter.</p>
+      </header>
+      <main className="content-area">
+        <section className="quote-section">
+          <h2>Funny Quote</h2>
+          <p>{joke}</p>
+          <button onClick={() => fetchData('quotes')}>Get New Quote</button>
+        </section>
+
+        <section className="meme-section">
+          <h2>Funny Meme</h2>
+          {meme && <img src={meme} alt="Funny Meme" />}
+          <button onClick={() => fetchData('memes')}>Get New Meme</button>
+        </section>
+
+        <section className="video-section">
+          <h2>Trending Funny Video</h2>
+          {video && (
+            <div className="video-wrapper">
+              <iframe
+                title="Funny Video"
+                width="560"
+                height="315"
+                src={video}
+                frameBorder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              ></iframe>
+            </div>
+          )}
+          <button onClick={() => fetchData('videos')}>Get New Video</button>
+        </section>
+      </main>
+    </div>
+  );
+}
+
+export default App;
+
+
+
+// server.js - Your API back-end
+
+const express = require('express');
+const cors = require('cors'); // To allow requests from your front-end
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.use(cors());
+
+// A simple in-memory "database" of funny content
+const quotes = [
+  "Why did the scarecrow win an award? Because he was outstanding in his field!",
+  "I told my wife she was drawing her eyebrows too high. She looked surprised.",
+  "I'm on a seafood diet. I see food, and I eat it.",
+];
+
+// Note: In a real app, you would use a database and URLs for your memes and videos.
+// These are placeholders.
+const memes = [
+  "https://i.imgflip.com/6c0o3x.jpg",
+  "https://i.imgflip.com/5l3x5t.jpg",
+  "https://i.imgflip.com/4q6s0b.jpg",
+];
+
+const videos = [
+  "https://www.youtube.com/embed/dQw4w9WgXcQ", // Replace with real funny videos
+  "https://www.youtube.com/embed/l_BvjYn1-bM",
+  "https://www.youtube.com/embed/5-SgR8gD0nI",
+];
+
+// API endpoint to get a random quote
+app.get('/api/quotes', (req, res) => {
+  const randomQuote = quotes[Math.floor(Math.random() * quotes.length)];
+  res.json({ quote: randomQuote });
+});
+
+// API endpoint to get a random meme URL
+app.get('/api/memes', (req, res) => {
+  const randomMeme = memes[Math.floor(Math.random() * memes.length)];
+  res.json({ url: randomMeme });
+});
+
+// API endpoint to get a random video URL
+app.get('/api/videos', (req, res) => {
+  const randomVideo = videos[Math.floor(Math.random() * videos.length)];
+  res.json({ url: randomVideo });
+});
+
+app.listen(PORT, () => {
+  console.log(`Server is running on http://localhost:${PORT}`);
+});
+
+
+
