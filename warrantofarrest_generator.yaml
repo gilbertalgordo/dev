@@ -1,0 +1,292 @@
+{
+  "name": "warrant-proto-server",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "body-parser": "^1.20.2",
+    "jsonwebtoken": "^9.0.0",
+    "pdfkit": "^0.13.0",
+    "multer": "^1.4.5-lts.1",
+    "uuid": "^9.0.0",
+    "helmet": "^7.0.0"
+  }
+}
+
+
+const PDFDocument = require('pdfkit');
+const fs = require('fs');
+const path = require('path');
+
+function generateWarrantDraft(data, outPath) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({autoFirstPage:false});
+    const stream = fs.createWriteStream(outPath);
+    doc.pipe(stream);
+
+    // create 5-10 pages depending on data length
+    const pages = 6; // choose 5-10; can expand based on content
+    for (let p = 1; p <= pages; p++) {
+      doc.addPage();
+      doc.fontSize(14).text(`WARRANT DRAFT - PAGE ${p}`, {align: 'center'});
+      doc.moveDown();
+
+      if (p === 1) {
+        doc.fontSize(12).text(`Draft created by: ${data.createdBy || 'Unknown'}`);
+        doc.text(`Date Created: ${new Date().toISOString()}`);
+        doc.moveDown();
+        doc.font('Helvetica-Bold').text('Subject');
+        doc.font('Helvetica').text(`Name: ${data.name || '[NAME]'}`);
+        doc.text(`Address: ${data.address || '[ADDRESS]'}`);
+        doc.text(`Date/Time: ${data.datetime || '[DATE/TIME]'}`);
+        doc.moveDown();
+        doc.font('Helvetica-Bold').text('Case Summary');
+        doc.font('Helvetica').text(data.caseDetails || '[CASE DETAILS]');
+      } else {
+        // filler pages with structured placeholders
+        doc.font('Helvetica-Bold').text('Investigation Notes');
+        doc.moveDown();
+        doc.font('Helvetica').fontSize(11).text((data.caseDetails || '[CASE DETAILS]') + '\n\n' + 'Additional notes...'.repeat(10), {
+          align: 'justify',
+          height: 700
+        });
+      }
+
+      // footer with clear "DRAFT" watermark text
+      doc.fillColor('red').opacity(0.2).fontSize(60).text('DRAFT', 150, 300, {rotate: -45});
+      doc.fillColor('black').opacity(1);
+    }
+
+    doc.end();
+    stream.on('finish', () => resolve(outPath));
+    stream.on('error', reject);
+  });
+}
+
+module.exports = { generateWarrantDraft };
+
+
+const express = require('express');
+const bodyParser = require('body-parser');
+const jwt = require('jsonwebtoken');
+const helmet = require('helmet');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const { v4: uuidv4 } = require('uuid');
+const { generateWarrantDraft } = require('./pdfGenerator');
+
+const app = express();
+app.use(helmet());
+app.use(bodyParser.json({limit: '5mb'}));
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use('/files', express.static(path.join(__dirname, 'files')));
+
+const UPLOAD_DIR = path.join(__dirname, 'files');
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR);
+
+// DEMO secret - in prod use secure key management
+const JWT_SECRET = 'replace-with-secure-secret';
+
+// Simple user store (demo). In production use a DB + hashed passwords + 2FA.
+const USERS = {
+  officer1: { password: 'password', roles: ['drafters'] },
+  reviewer1: { password: 'password', roles: ['reviewers'] }
+};
+
+function authenticate(req, res, next) {
+  const auth = req.headers.authorization;
+  if (!auth) return res.status(401).json({error: 'missing auth'});
+  const token = auth.replace('Bearer ', '');
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    req.user = payload;
+    next();
+  } catch (e) {
+    return res.status(401).json({error: 'invalid token'});
+  }
+}
+
+function requireRole(role) {
+  return (req, res, next) => {
+    if (!req.user || !req.user.roles || !req.user.roles.includes(role)) {
+      return res.status(403).json({error: 'forbidden — role required: ' + role});
+    }
+    next();
+  }
+}
+
+// login (demo)
+app.post('/api/login', (req, res) => {
+  const { username, password } = req.body;
+  const user = USERS[username];
+  if (!user || user.password !== password) return res.status(401).json({error: 'invalid credentials'});
+  const token = jwt.sign({ username, roles: user.roles }, JWT_SECRET, { expiresIn: '2h' });
+  res.json({ token });
+});
+
+// generate draft (only 'drafters' role)
+app.post('/api/drafts', authenticate, requireRole('drafters'), async (req, res) => {
+  try {
+    // Basic input sanitation
+    const payload = {
+      name: String(req.body.name || '').slice(0, 300),
+      address: String(req.body.address || '').slice(0, 1000),
+      datetime: String(req.body.datetime || ''),
+      caseDetails: String(req.body.caseDetails || '').slice(0, 5000),
+      createdBy: req.user.username
+    };
+
+    const filename = `draft_${Date.now()}_${uuidv4()}.pdf`;
+    const outPath = path.join(UPLOAD_DIR, filename);
+    await generateWarrantDraft(payload, outPath);
+
+    // Append to simple audit log
+    const audit = `${new Date().toISOString()} | DRAFT_CREATED | user=${req.user.username} | file=${filename}\n`;
+    fs.appendFileSync(path.join(UPLOAD_DIR, 'audit.log'), audit);
+
+    res.json({ success:true, fileUrl: `/files/${filename}` });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'failed to generate draft' });
+  }
+});
+
+// setup multer for video uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+  filename: (req, file, cb) => cb(null, `video_${Date.now()}_${uuidv4()}.webm`)
+});
+const upload = multer({ storage });
+
+// Upload spot-recording (requires 'drafters' role)
+app.post('/api/upload-video', authenticate, requireRole('drafters'), upload.single('video'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'no file' });
+  const meta = {
+    file: req.file.filename,
+    user: req.user.username,
+    ip: req.ip,
+    timestamp: new Date().toISOString(),
+    declaredPurpose: req.body.purpose || ''
+  };
+  fs.appendFileSync(path.join(UPLOAD_DIR, 'audit.log'), JSON.stringify(meta) + '\n');
+  res.json({ success:true, fileUrl: `/files/${req.file.filename}`, meta });
+});
+
+const PORT = 4000;
+app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+
+
+{
+  "name": "warrant-proto-client",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "axios": "^1.4.0"
+  },
+  "scripts": {
+    "start": "react-scripts start"
+  }
+}
+
+
+import React, { useState, useRef } from 'react';
+import axios from 'axios';
+
+const API = 'http://localhost:4000/api';
+
+function App(){
+  const [token, setToken] = useState('');
+  const [username, setUsername] = useState('officer1');
+  const [password, setPassword] = useState('password');
+  const [form, setForm] = useState({name:'', address:'', datetime:'', caseDetails:''});
+  const [fileUrl, setFileUrl] = useState('');
+  const videoRef = useRef();
+  const mediaRecorderRef = useRef();
+  const [recording, setRecording] = useState(false);
+  const recordedChunksRef = useRef([]);
+
+  async function login(){
+    const res = await axios.post(`${API}/login`, { username, password });
+    setToken(res.data.token);
+    alert('Logged in (demo). Token set.');
+  }
+
+  async function generateDraft(){
+    const res = await axios.post(`${API}/drafts`, form, { headers: { Authorization: `Bearer ${token}` } });
+    setFileUrl(`http://localhost:4000${res.data.fileUrl}`);
+  }
+
+  // Webcam: request stream, start/stop, upload
+  async function startCamera(){
+    const stream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
+    videoRef.current.srcObject = stream;
+    videoRef.current.play();
+    recordedChunksRef.current = [];
+    const mr = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8,opus' });
+    mediaRecorderRef.current = mr;
+    mr.ondataavailable = e => { if (e.data.size > 0) recordedChunksRef.current.push(e.data); };
+    mr.onstop = () => console.log('recording stopped');
+  }
+
+  function startRecording(){
+    recordedChunksRef.current = [];
+    mediaRecorderRef.current.start(1000);
+    setRecording(true);
+  }
+
+  async function stopRecording(){
+    mediaRecorderRef.current.stop();
+    setRecording(false);
+    // assemble blob
+    const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+    const fd = new FormData();
+    fd.append('video', blob, 'spot.webm');
+    fd.append('purpose', 'spot report (consent recorded)');
+
+    const res = await axios.post(`${API}/upload-video`, fd, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' }
+    });
+    alert('Video uploaded: ' + res.data.fileUrl);
+  }
+
+  return (
+    <div style={{padding:20, fontFamily:'sans-serif'}}>
+      <h2>Warrant Draft Generator — Demo</h2>
+      <section style={{border:'1px solid #ddd', padding:10, marginBottom:10}}>
+        <h3>Login (demo)</h3>
+        <input value={username} onChange={e=>setUsername(e.target.value)} /><br/>
+        <input type="password" value={password} onChange={e=>setPassword(e.target.value)} /><br/>
+        <button onClick={login}>Login</button>
+      </section>
+
+      <section style={{border:'1px solid #ddd', padding:10, marginBottom:10}}>
+        <h3>Draft form</h3>
+        <input placeholder="Name" value={form.name} onChange={e=>setForm({...form, name:e.target.value})} /><br/>
+        <input placeholder="Address" value={form.address} onChange={e=>setForm({...form, address:e.target.value})} /><br/>
+        <input placeholder="Date/time" value={form.datetime} onChange={e=>setForm({...form, datetime:e.target.value})} /><br/>
+        <textarea placeholder="Case details" value={form.caseDetails} onChange={e=>setForm({...form, caseDetails:e.target.value})} rows={6} cols={60} /><br/>
+        <button onClick={generateDraft}>Generate Draft PDF</button>
+        {fileUrl && <div><a href={fileUrl} target="_blank" rel="noreferrer">Open generated draft</a></div>}
+      </section>
+
+      <section style={{border:'1px solid #ddd', padding:10}}>
+        <h3>Spot recording (consent required)</h3>
+        <video ref={videoRef} width="480" height="320" controls style={{background:'#000'}}></video><br/>
+        <button onClick={startCamera}>Start Camera</button>
+        <button onClick={startRecording} disabled={!mediaRecorderRef.current || recording}>Start Recording</button>
+        <button onClick={stopRecording} disabled={!recording}>Stop & Upload</button>
+        <p style={{color:'red'}}>This demo records to the server and logs the upload. In production, show consent screen and enforce legal review.</p>
+      </section>
+    </div>
+  );
+}
+
+export default App;
+
+
