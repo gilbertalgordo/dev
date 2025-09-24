@@ -1,870 +1,806 @@
-# save as qb_simulation.py
 """
-Abstract 'quantum battery' simulation + simple vehicle powerflow.
-This is a purely computational model for research/simulation.
-"""
+toy_quantum_battery.py
+Safe, educational simulator (non-actionable).
+- Computes E = m c^2 for a given mass (reference).
+- Simulates a toy quantum battery made of N two-level systems (qubits).
+- Charging model: global driving term that flips qubits (simple, pedagogical).
+- Computes stored energy and charging power vs time.
 
-import math
-import random
-import json
-from dataclasses import dataclass, asdict
-import time
+References (for learning, not implementation of real hardware):
+ - Mass-energy equivalence (E = m c^2) — general ref.
+ - Quantum battery research overview / materials perspective.
 
-@dataclass
-class QuantumBattery:
-    capacity_kwh: float        # nominal capacity
-    soc_kwh: float             # current stored energy (kWh)
-    max_charge_kw: float       # max charging power (kW)
-    max_discharge_kw: float    # max discharging power (kW)
-    roundtrip_efficiency: float # 0..1
-    leakage_kw: float          # passive loss (kW)
-    quantum_boost: float       # abstract factor (>=1) modeling hypothetical quantum speed gains
-    degradation_pct: float     # capacity loss fraction per 1000 cycles (toy)
-
-    def step(self, dt_hours: float, charge_power_kw: float, discharge_power_kw: float):
-        """
-        dt_hours: timestep in hours
-        charge_power_kw: requested charging power (kW)
-        discharge_power_kw: requested discharging power (kW)
-        """
-        # clamp to device limits
-        charge_power_kw = max(0.0, min(charge_power_kw, self.max_charge_kw * self.quantum_boost))
-        discharge_power_kw = max(0.0, min(discharge_power_kw, self.max_discharge_kw * self.quantum_boost))
-
-        net_in_kwh = 0.0
-
-        # charging
-        if charge_power_kw > 0:
-            charged = charge_power_kw * dt_hours * self.roundtrip_efficiency
-            # capacity headroom
-            headroom = max(0.0, self.capacity_kwh - self.soc_kwh)
-            charged = min(charged, headroom)
-            self.soc_kwh += charged
-            net_in_kwh += charged
-
-        # discharging
-        if discharge_power_kw > 0:
-            requested = discharge_power_kw * dt_hours / self.roundtrip_efficiency
-            available = max(0.0, self.soc_kwh)
-            taken = min(requested, available)
-            self.soc_kwh -= taken
-            net_in_kwh -= taken * self.roundtrip_efficiency
-
-        # leakage
-        leakage = self.leakage_kw * dt_hours
-        self.soc_kwh = max(0.0, self.soc_kwh - leakage)
-        net_in_kwh -= leakage
-
-        # simple degradation model (toy): each full kWh throughput contributes to tiny degradation
-        throughput = abs(net_in_kwh)
-        cycle_fraction = throughput / self.capacity_kwh if self.capacity_kwh>0 else 0.0
-        # degrade capacity slowly (very small)
-        self.capacity_kwh *= (1.0 - self.degradation_pct * cycle_fraction)
-
-        return {
-            "soc_kwh": self.soc_kwh,
-            "capacity_kwh": self.capacity_kwh,
-            "net_in_kwh": net_in_kwh,
-            "leakage_kwh": leakage
-        }
-
-@dataclass
-class Vehicle:
-    base_load_kw: float  # background consumption at idle/cruise (kW)
-    motor_power_kw: float # peak motor draw (kW)
-    drivetrain_efficiency: float # 0..1
-    aux_load_kw: float   # climate, electronics
-
-    def step(self, dt_hours: float, throttle: float):
-        """
-        throttle: 0..1, fraction of motor power requested
-        Returns power demand in kW
-        """
-        motor_draw = self.motor_power_kw * throttle / max(1e-6, self.drivetrain_efficiency)
-        total_kw = self.base_load_kw + motor_draw + self.aux_load_kw
-        return total_kw
-
-def run_simulation():
-    bat = QuantumBattery(
-        capacity_kwh=200.0,
-        soc_kwh=100.0,
-        max_charge_kw=250.0,
-        max_discharge_kw=500.0,
-        roundtrip_efficiency=0.95,
-        leakage_kw=0.05,
-        quantum_boost=1.0,   # set >1 for simulated 'quantum advantage'
-        degradation_pct=0.0001
-    )
-
-    veh = Vehicle(base_load_kw=2.5, motor_power_kw=300.0, drivetrain_efficiency=0.92, aux_load_kw=1.5)
-
-    dt = 1.0/60.0  # 1 minute timestep = 1/60 hour
-    sim_hours = 2.0
-    steps = int(sim_hours / dt)
-
-    log = []
-    for i in range(steps):
-        # simple drive cycle: accelerate first 10 minutes, cruise next 80, then rest
-        t = i * dt
-        if t < 0.1667:  # first 10 minutes
-            throttle = min(1.0, t / 0.1667)
-        elif t < 1.5:
-            throttle = 0.3  # cruise
-        else:
-            throttle = 0.0
-
-        demand_kw = veh.step(dt, throttle)
-        # battery supplies demand; if regenerative braking, we could set negative demand (omitted)
-        # if demand positive, request discharge; otherwise if negative request charge
-        if demand_kw > 0:
-            result = bat.step(dt, charge_power_kw=0.0, discharge_power_kw=demand_kw)
-        else:
-            result = bat.step(dt, charge_power_kw=-demand_kw, discharge_power_kw=0.0)
-
-        entry = {
-            "time_h": t,
-            "throttle": throttle,
-            "demand_kw": demand_kw,
-            **result
-        }
-        log.append(entry)
-
-    # write log
-    with open("sim_log.json", "w") as f:
-        json.dump(log, f, indent=2)
-    print("Simulation complete. Log written to sim_log.json")
-
-if __name__ == "__main__":
-    run_simulation()
-
-
-   # save as qb_api.py
-from flask import Flask, jsonify, request
-from qb_simulation import QuantumBattery
-import threading, time
-
-app = Flask(__name__)
-
-# single global simulator (toy)
-bat = QuantumBattery(
-    capacity_kwh=200.0,
-    soc_kwh=100.0,
-    max_charge_kw=250.0,
-    max_discharge_kw=500.0,
-    roundtrip_efficiency=0.95,
-    leakage_kw=0.05,
-    quantum_boost=1.0,
-    degradation_pct=0.0001
-)
-
-# background thread to tick the battery at fixed dt (software-only)
-lock = threading.Lock()
-_dt_hours = 1.0/3600.0  # 1 second timestep
-
-def tick_loop():
-    while True:
-        time.sleep(1.0)
-        with lock:
-            bat.step(_dt_hours, charge_power_kw=0.0, discharge_power_kw=0.0)
-
-t = threading.Thread(target=tick_loop, daemon=True)
-t.start()
-
-@app.route("/battery/status")
-def status():
-    with lock:
-        return jsonify({
-            "soc_kwh": bat.soc_kwh,
-            "capacity_kwh": bat.capacity_kwh,
-            "max_charge_kw": bat.max_charge_kw * bat.quantum_boost,
-            "max_discharge_kw": bat.max_discharge_kw * bat.quantum_boost,
-            "roundtrip_efficiency": bat.roundtrip_efficiency
-        })
-
-@app.route("/battery/control", methods=["POST"])
-def control():
-    payload = request.json or {}
-    c = payload.get("charge_kw", 0.0)
-    d = payload.get("discharge_kw", 0.0)
-    dt_h = payload.get("dt_h", 1.0/3600.0)
-    with lock:
-        res = bat.step(dt_h, charge_power_kw=c, discharge_power_kw=d)
-    return jsonify(res)
-
-if __name__ == "__main__":
-    app.run(port=5002)
-
-
-    // React component (BatteryDashboard.jsx)
-import React, {useEffect, useState} from "react";
-
-export default function BatteryDashboard(){
-  const [status, setStatus] = useState(null);
-
-  useEffect(()=> {
-    async function load(){
-      const r = await fetch("http://localhost:5002/battery/status");
-      setStatus(await r.json());
-    }
-    load();
-    const id = setInterval(load, 2000);
-    return ()=> clearInterval(id);
-  }, []);
-
-  if(!status) return <div>Loading...</div>;
-  return (
-    <div style={{fontFamily:"sans-serif",padding:20}}>
-      <h2>Abstract Quantum Battery (sim)</h2>
-      <div>State of Charge: {(status.soc_kwh/status.capacity_kwh*100).toFixed(2)}%</div>
-      <div>{status.soc_kwh.toFixed(2)} kWh / {status.capacity_kwh.toFixed(2)} kWh</div>
-      <div>Max discharge (sim): {status.max_discharge_kw.toFixed(1)} kW</div>
-      <div>Round trip eff: {(status.roundtrip_efficiency*100).toFixed(1)}%</div>
-    </div>
-  );
-}
-
-
-"""
-quantum_battery_fusion.py
-
-A conceptual, purely-software simulation of combining two battery modules:
- - "Einstein EM2" (modeled as high-energy-density classical-ish cell)
- - "Algordo Quantum Battery" (modeled with a quantum-coherence parameter that
-    speeds up charging via collective coupling)
-
-This file provides:
- - BatteryCell class (capacity, internal resistance, self_discharge, max_charge_power)
- - QuantumBattery subclass with `coherence_factor` that changes charge kinetics
- - fusion() to combine two cells into a HybridBattery
- - simulate_charge_discharge() to run simple time-stepped simulations
-
-Note: This is a simulation framework only. NOT instructions for building hardware.
+Run: python toy_quantum_battery.py
+Requires: numpy, scipy, matplotlib (for plotting; optional)
 """
 
-import math
 import numpy as np
-
-class BatteryCell:
-    def __init__(self,
-                 name="Cell",
-                 capacity_joules=1e6,        # stored energy in joules (J)
-                 voltage_nominal=3.7,        # nominal volts
-                 internal_resistance_ohm=0.05,
-                 self_discharge_rate_per_s=1e-7,
-                 max_charge_power_w=1e3,
-                 max_discharge_power_w=1e3):
-        self.name = name
-        self.capacity_j = capacity_joules
-        self.voltage = voltage_nominal
-        self.R_int = internal_resistance_ohm
-        self.self_discharge = self_discharge_rate_per_s
-        self.max_charge_power = max_charge_power_w
-        self.max_discharge_power = max_discharge_power_w
-        # state of charge in joules
-        self.energy = 0.0
-
-    @property
-    def soc(self):
-        return max(0.0, min(1.0, self.energy / self.capacity_j))
-
-    def step_self_discharge(self, dt):
-        # exponential decay approx
-        lost = self.energy * (1 - math.exp(-self.self_discharge * dt))
-        self.energy -= lost
-        return lost
-
-    def charge_step(self, power_w, dt):
-        # Clamp power to max_charge_power
-        power = min(power_w, self.max_charge_power)
-        # energy added = power * dt minus I^2R loss (simple approx)
-        added = power * dt
-        # approximate I through battery: I = P/V (voltage assumed constant for simplicity)
-        I = power / max(0.1, self.voltage)
-        ohmic_loss = (I**2) * self.R_int * dt
-        net = max(0.0, added - ohmic_loss)
-        prev = self.energy
-        self.energy = min(self.capacity_j, self.energy + net)
-        return self.energy - prev, ohmic_loss
-
-    def discharge_step(self, power_w, dt):
-        power = min(power_w, self.max_discharge_power)
-        demanded = power * dt
-        actual = min(self.energy, demanded)
-        # losses similarly
-        I = (power / max(0.1, self.voltage))
-        ohmic_loss = (I**2) * self.R_int * dt
-        net_removed = max(0.0, actual + ohmic_loss)
-        prev = self.energy
-        self.energy = max(0.0, self.energy - net_removed)
-        return prev - self.energy, ohmic_loss
-
-class QuantumBattery(BatteryCell):
-    def __init__(self, coherence_factor=1.0, **kwargs):
-        """
-        coherence_factor:
-            1.0 -> no quantum speedup (behaves like classical)
-            >1.0 -> collective/quantum charging speedup factor for charge rate
-            Typically small numbers like 1.5–10 used for exploration.
-        """
-        super().__init__(**kwargs)
-        self.coherence_factor = coherence_factor
-
-    def charge_step(self, power_w, dt):
-        """
-        Quantum battery speeds up the effective charge transfer.
-        We'll model that the available effective charge power scales with
-        coherence_factor^alpha (alpha tunable); here we use alpha=0.75 to
-        keep gains sub-linear for realism.
-        """
-        alpha = 0.75
-        effective_power = power_w * (self.coherence_factor ** alpha)
-        # but ohmic losses may increase with coherence if currents are higher;
-        # model internal resistance reducing slightly with coherence (heuristic)
-        old_R = self.R_int
-        self.R_int = max(0.0001, self.R_int / (1 + 0.1*(self.coherence_factor-1)))
-        added, ohmic = super(QuantumBattery, self).charge_step(effective_power, dt)
-        self.R_int = old_R
-        return added, ohmic
-
-def fusion(cell_a: BatteryCell, cell_b: BatteryCell, hybrid_name="Hybrid") -> BatteryCell:
-    """
-    Combine two BatteryCell-like objects into a simple hybrid cell model.
-    For safety and simplicity, fusion returns a new BatteryCell (or QuantumBattery)
-    whose parameters are computed heuristically:
-      - capacity = sum of capacities
-      - internal_resistance = parallel-equivalent approximation
-      - max_power = sum of max powers
-      - coherence_factor = weighted average if either is QuantumBattery
-    This is a conceptual "design fusion" not a physical blueprint.
-    """
-    cap = cell_a.capacity_j + cell_b.capacity_j
-    # parallel resistance heuristic: 1 / (1/Ra + 1/Rb)
-    R_a = max(1e-6, cell_a.R_int)
-    R_b = max(1e-6, cell_b.R_int)
-    R_hybrid = 1.0 / (1.0/R_a + 1.0/R_b)
-    max_charge = cell_a.max_charge_power + cell_b.max_charge_power
-    max_discharge = cell_a.max_discharge_power + cell_b.max_discharge_power
-    # coherence: weighted by energy capacity
-    coh_a = getattr(cell_a, "coherence_factor", 1.0)
-    coh_b = getattr(cell_b, "coherence_factor", 1.0)
-    coh = (coh_a * cell_a.capacity_j + coh_b * cell_b.capacity_j) / max(1.0, cap)
-    # pick a representative voltage (energy-weighted)
-    v = (cell_a.voltage * cell_a.capacity_j + cell_b.voltage * cell_b.capacity_j) / max(1.0, cap)
-
-    # If either had "quantum" behavior, return QuantumBattery to carry coherence
-    if isinstance(cell_a, QuantumBattery) or isinstance(cell_b, QuantumBattery) or coh != 1.0:
-        hybrid = QuantumBattery(
-            name=hybrid_name,
-            capacity_joules=cap,
-            voltage_nominal=v,
-            internal_resistance_ohm=R_hybrid,
-            self_discharge_rate_per_s=max(cell_a.self_discharge, cell_b.self_discharge),
-            max_charge_power_w=max_charge,
-            max_discharge_power_w=max_discharge,
-            coherence_factor=coh
-        )
-    else:
-        hybrid = BatteryCell(
-            name=hybrid_name,
-            capacity_joules=cap,
-            voltage_nominal=v,
-            internal_resistance_ohm=R_hybrid,
-            self_discharge_rate_per_s=max(cell_a.self_discharge, cell_b.self_discharge),
-            max_charge_power_w=max_charge,
-            max_discharge_power_w=max_discharge,
-        )
-    # start hybrid with combined energy (sum of components' energies)
-    hybrid.energy = cell_a.energy + cell_b.energy
-    return hybrid
-
-def simulate_charge(cell, charge_power_w, dt=0.1, t_total=600.0):
-    """
-    Simulate charging the cell with fixed power until full or time runs out.
-    Returns arrays: times, socs, energies, losses
-    """
-    steps = int(max(1, t_total / dt))
-    times = np.linspace(0, steps*dt, steps+1)
-    socs = []
-    energies = []
-    losses = []
-    for i in range(steps+1):
-        socs.append(cell.soc)
-        energies.append(cell.energy)
-        losses.append(0.0)
-        if cell.soc >= 0.9999:
-            break
-        added, ohmic = cell.charge_step(charge_power_w, dt)
-        sd = cell.step_self_discharge(dt)
-        losses[-1] = ohmic + sd
-    return times[:len(socs)], np.array(socs), np.array(energies), np.array(losses)
-
-def simulate_discharge(cell, discharge_power_w, dt=0.1, t_total=600.0):
-    steps = int(max(1, t_total / dt))
-    times = np.linspace(0, steps*dt, steps+1)
-    socs = []
-    energies = []
-    losses = []
-    for i in range(steps+1):
-        socs.append(cell.soc)
-        energies.append(cell.energy)
-        losses.append(0.0)
-        if cell.soc <= 0.0001:
-            break
-        removed, ohmic = cell.discharge_step(discharge_power_w, dt)
-        sd = cell.step_self_discharge(dt)
-        losses[-1] = ohmic + sd
-    return times[:len(socs)], np.array(socs), np.array(energies), np.array(losses)
-
-# Example quick usage as script
-if __name__ == "__main__":
-    # Conceptual "Einstein EM2" (modeled as high capacity classical cell)
-    em2 = BatteryCell(name="Einstein EM2",
-                      capacity_joules=5e6, voltage_nominal=4.0,
-                      internal_resistance_ohm=0.08,
-                      self_discharge_rate_per_s=5e-8,
-                      max_charge_power_w=5e3,
-                      max_discharge_power_w=5e3)
-    em2.energy = 0.0  # start empty
-
-    # "Algordo Quantum Battery" (smaller capacity but quantum speedup)
-    algordo = QuantumBattery(name="Algordo Quantum",
-                             capacity_joules=1e6, voltage_nominal=3.8,
-                             internal_resistance_ohm=0.02,
-                             self_discharge_rate_per_s=2e-7,
-                             max_charge_power_w=2e3,
-                             max_discharge_power_w=2e3,
-                             coherence_factor=4.0)
-    algordo.energy = 0.0
-
-    # Fuse them into a hybrid
-    hybrid = fusion(em2, algordo, hybrid_name="EM2-Algordo-Hybrid")
-    print("Hybrid:", hybrid.name, "Capacity (J):", hybrid.capacity_j,
-          "Coherence:", getattr(hybrid, "coherence_factor", 1.0),
-          "R_int:", hybrid.R_int)
-
-    # Simulate charging the hybrid at 6 kW
-    times, socs, energies, losses = simulate_charge(hybrid, charge_power_w=6000.0, dt=0.5, t_total=3600)
-    # Print final SOC and some stats
-    print("Final SOC:", socs[-1], "Energy (J):", energies[-1])
-    print("Total simulated time (s):", times[-1])
-
-
-    """
-hybrid_battery_vehicle_sim.py
-
-Safe simulation toolkit for conceptually combining:
- - "Einstein EM2" (conceptual high-energy classical module)
- - "Algordo Quantum" (conceptual quantum-assisted module)
-
-This code is strictly a software simulation / design exploration aid.
-NO hardware construction, wiring, manufacturing, or real-world assembly guidance
-is provided or implied.
-
-Install dependencies:
-    pip install numpy matplotlib
-
-Run:
-    python hybrid_battery_vehicle_sim.py
-"""
-
-import math
-import numpy as np
+from scipy.linalg import expm
 import matplotlib.pyplot as plt
 
-# --------------------------
-# Battery models (abstract)
-# --------------------------
-class BatteryCell:
-    def __init__(self,
-                 name="Cell",
-                 capacity_j=1e6,        # stored energy (J) - abstract
-                 nominal_voltage=3.7,   # used only for current approximations (abstract)
-                 internal_resistance_ohm=0.05,
-                 self_discharge_per_s=1e-7,
-                 max_charge_power_w=1e3,
-                 max_discharge_power_w=1e3,
-                 mass_kg=10.0,
-                 volume_m3=0.01,
-                 thermal_capacity_j_per_k=1e4,
-                 thermal_loss_w_per_k=10.0):
-        self.name = name
-        self.capacity_j = capacity_j
-        self.voltage = nominal_voltage
-        self.R_int = internal_resistance_ohm
-        self.self_discharge = self_discharge_per_s
-        self.max_charge_power = max_charge_power_w
-        self.max_discharge_power = max_discharge_power_w
-        self.energy = 0.0  # current stored energy (J)
-        self.mass = mass_kg
-        self.volume = volume_m3
-        # thermal state
-        self.temp_k = 293.15  # Kelvin
-        self.thermal_capacity = thermal_capacity_j_per_k
-        self.thermal_loss_coeff = thermal_loss_w_per_k
+# --- Part A: E = m c^2 calculator (for context) ---
+C = 299_792_458.0  # speed of light in m/s
 
-    @property
-    def soc(self):
-        return max(0.0, min(1.0, self.energy / max(1e-12, self.capacity_j)))
+def energy_from_mass(m_kg):
+    """Return energy in joules for mass m_kg using E = m c^2."""
+    return m_kg * (C ** 2)
 
-    def step_self_discharge(self, dt):
-        lost = self.energy * (1 - math.exp(-self.self_discharge * dt))
-        self.energy -= lost
-        return lost
+def joules_to_kwh(J):
+    return J / 3.6e6
 
-    def charge_step(self, power_w, dt):
-        """Charge dynamics (abstract). Returns (energy_added, loss_j, heat_generated_j)."""
-        power = min(power_w, self.max_charge_power)
-        added = power * dt
-        I = power / max(0.1, self.voltage)
-        ohmic_loss = (I**2) * self.R_int * dt
-        net = max(0.0, added - ohmic_loss)
-        prev = self.energy
-        self.energy = min(self.capacity_j, self.energy + net)
-        heat = ohmic_loss  # treat ohmic loss as heat
-        return self.energy - prev, ohmic_loss, heat
+# --- Part B: Toy quantum battery (N qubits) ---
+# We create a Hilbert space of dimension 2^N and simple Pauli matrices.
 
-    def discharge_step(self, power_w, dt):
-        power = min(power_w, self.max_discharge_power)
-        demanded = power * dt
-        actual = min(self.energy, demanded)
-        I = power / max(0.1, self.voltage)
-        ohmic_loss = (I**2) * self.R_int * dt
-        net_removed = max(0.0, actual + ohmic_loss)
-        prev = self.energy
-        self.energy = max(0.0, self.energy - net_removed)
-        heat = ohmic_loss
-        return prev - self.energy, ohmic_loss, heat
+# Pauli matrices (2x2)
+sigma_x = np.array([[0, 1], [1, 0]], dtype=complex)
+sigma_z = np.array([[1, 0], [0, -1]], dtype=complex)
+eye2 = np.eye(2, dtype=complex)
 
-    def thermal_step(self, heat_j, ambient_k, dt):
-        # heat_j added, passive cooling proportional to delta T
-        dT = heat_j / self.thermal_capacity - (self.temp_k - ambient_k) * (self.thermal_loss_coeff * dt) / self.thermal_capacity
-        self.temp_k += dT
-        return dT
+def kron_n(op_list):
+    """Kronecker product over a list of operators (left-to-right)."""
+    out = op_list[0]
+    for op in op_list[1:]:
+        out = np.kron(out, op)
+    return out
 
-class QuantumBattery(BatteryCell):
-    def __init__(self, coherence_factor=1.0, **kwargs):
-        super().__init__(**kwargs)
-        self.coherence_factor = coherence_factor
+def single_site_operator(N, site_index, op):
+    """Return operator that acts as `op` on site `site_index` (0-based) and identity elsewhere."""
+    ops = [eye2] * N
+    ops[site_index] = op
+    return kron_n(ops)
 
-    def charge_step(self, power_w, dt):
-        # Model: effective charging power scaled by coherence^(alpha), heuristic
-        alpha = 0.7
-        effective_power = min(power_w * (self.coherence_factor ** alpha), self.max_charge_power * (self.coherence_factor ** 0.3))
-        # Slightly alter internal resistance heuristically (note: abstract)
-        old_R = self.R_int
-        self.R_int = max(1e-6, self.R_int / (1.0 + 0.08 * (self.coherence_factor - 1.0)))
-        added, loss, heat = super(QuantumBattery, self).charge_step(effective_power, dt)
-        self.R_int = old_R
-        return added, loss, heat
+def total_sigma_z(N):
+    """Sum of sigma_z over all sites (battery Hamiltonian basis operator)."""
+    H0 = np.zeros((2**N, 2**N), dtype=complex)
+    for i in range(N):
+        H0 += single_site_operator(N, i, 0.5 * sigma_z)  # energy basis: +1/2, -1/2
+    return H0
 
-# --------------------------
-# Fusion function (non-actionable)
-# --------------------------
-def fusion(cell_a: BatteryCell, cell_b: BatteryCell, hybrid_name="Hybrid"):
+def collective_driving(N, g):
+    """Collective driving term - simple pedagogical charger coupling ~ g * sum sigma_x."""
+    Hc = np.zeros((2**N, 2**N), dtype=complex)
+    for i in range(N):
+        Hc += single_site_operator(N, i, 0.5 * sigma_x)
+    return g * Hc
+
+# Energy of battery (expectation of H_battery relative to ground)
+def stored_energy_rho(rho, H_battery):
+    """Compute stored energy = Tr[rho H_battery] relative to minimum."""
+    return np.real(np.trace(rho @ H_battery))
+
+# Time evolution (unitary) for closed-system toy model
+def unitary_time_evolution(H, t):
+    """Return U = exp(-i H t / hbar)"""
+    hbar = 1.054571817e-34
+    return expm(-1j * H * t / hbar)
+
+# Utilities to build initial states
+def ground_state_density(N):
+    """All qubits in |0> (ground) as density matrix."""
+    psi0 = np.zeros((2**N,), dtype=complex)
+    psi0[0] = 1.0
+    return np.outer(psi0, psi0.conj())
+
+def excited_state_density(N):
+    """All qubits in |1> (excited) as density matrix (for reference)."""
+    psi = np.zeros((2**N,), dtype=complex)
+    psi[-1] = 1.0
+    return np.outer(psi, psi.conj())
+
+# --- Example simulation ---
+def simulate_battery(N=3, g=1e-25, t_max=1e-32, steps=200):
     """
-    Heuristic fusion: produce a new abstract BatteryCell/QuantumBattery representing combined behavior.
-    This is a conceptual model only (no hardware instructions).
+    N: number of two-level systems (keep small; Hilbert space grows as 2^N)
+    g: coupling strength for driving Hamiltonian (very small in SI so that matrix exponentials behave)
+    t_max: max time (s)
+    steps: time resolution
     """
-    cap = cell_a.capacity_j + cell_b.capacity_j
-    # parallel resistance heuristic
-    Ra = max(1e-9, cell_a.R_int)
-    Rb = max(1e-9, cell_b.R_int)
-    R_hybrid = 1.0 / (1.0/Ra + 1.0/Rb)
-    max_charge = cell_a.max_charge_power + cell_b.max_charge_power
-    max_discharge = cell_a.max_discharge_power + cell_b.max_discharge_power
-    coh_a = getattr(cell_a, "coherence_factor", 1.0)
-    coh_b = getattr(cell_b, "coherence_factor", 1.0)
-    coh = (coh_a * cell_a.capacity_j + coh_b * cell_b.capacity_j) / max(1.0, cap)
-    mass = cell_a.mass + cell_b.mass
-    vol = cell_a.volume + cell_b.volume
-    temp = max(cell_a.temp_k, cell_b.temp_k)
-    thermal_cap = cell_a.thermal_capacity + cell_b.thermal_capacity
-    thermal_loss = max(cell_a.thermal_loss_coeff, cell_b.thermal_loss_coeff)
+    # Build Hamiltonians (simple toy)
+    H_battery = total_sigma_z(N)  # units: dimensionless here (pedagogical)
+    H_drive = collective_driving(N, g)
+    # Total Hamiltonian: H = H_battery + H_drive
+    H_total = H_battery + H_drive
 
-    if isinstance(cell_a, QuantumBattery) or isinstance(cell_b, QuantumBattery) or coh != 1.0:
-        hybrid = QuantumBattery(
-            name=hybrid_name,
-            capacity_j=cap,
-            nominal_voltage=(cell_a.voltage*cell_a.capacity_j + cell_b.voltage*cell_b.capacity_j)/max(1.0, cap),
-            internal_resistance_ohm=R_hybrid,
-            self_discharge_per_s=max(cell_a.self_discharge, cell_b.self_discharge),
-            max_charge_power_w=max_charge,
-            max_discharge_power_w=max_discharge,
-            mass_kg=mass,
-            volume_m3=vol,
-            thermal_capacity_j_per_k=thermal_cap,
-            thermal_loss_w_per_k=thermal_loss,
-            coherence_factor=coh
-        )
+    # initial state: all ground
+    rho0 = ground_state_density(N)
+
+    times = np.linspace(0, t_max, steps)
+    energies = np.zeros_like(times)
+
+    for idx, t in enumerate(times):
+        U = unitary_time_evolution(H_total, t)
+        rho_t = U @ rho0 @ U.conj().T
+        energies[idx] = stored_energy_rho(rho_t, H_battery)
+
+    # approximate power: dE/dt
+    power = np.gradient(energies, times)
+
+    return times, energies, power
+
+if __name__ == "__main__":
+    # Demo: E=mc^2 numbers
+    mass_grams = 1.0  # 1 gram example
+    mass_kg = mass_grams / 1000.0
+    E_joules = energy_from_mass(mass_kg)
+    print(f"Mass: {mass_grams} g = {mass_kg} kg -> E = {E_joules:.3e} J ~ {joules_to_kwh(E_joules):.3e} kWh")
+    print("Note: E = m c^2 gives total rest-energy; converting mass to usable 'power' requires real physical processes.")
+    print("This code is educational. It does not, and cannot, provide blueprints or real-device instructions.")
+
+    # Run toy quantum battery sim (keep N small)
+    N = 3
+    times, energies, power = simulate_battery(N=N, g=1e-25, t_max=1e-31, steps=400)
+
+    # Plot results (purely illustrative)
+    plt.figure(figsize=(8,4))
+    plt.subplot(1,2,1)
+    plt.plot(times, energies)
+    plt.xlabel("time (s)")
+    plt.ylabel("stored energy (arb. units)")
+    plt.title(f"Toy quantum battery: stored energy (N={N})")
+
+    plt.subplot(1,2,2)
+    plt.plot(times, power)
+    plt.xlabel("time (s)")
+    plt.ylabel("dE/dt (arb. units)")
+    plt.title("Instantaneous charging power")
+    plt.tight_layout()
+    plt.show()
+
+
+    """
+virtual_quantum_battery_vehicle_sim.py
+Safe, educational simulator (non-actionable).
+
+What it does (safe):
+ - Shows E = m c^2 as a reference number for a given mass.
+ - Implements a toy quantum-battery (small N qubits) as a purely computational
+   energy store (abstract units).
+ - Integrates that toy battery into an abstract vehicle/aircraft powertrain model:
+     - Computes required propulsion power from speed, drag, rolling resistance (vehicle),
+       and simple climb/cruise power (aircraft).
+     - Simulates battery charging/discharging as an energy accounting exercise.
+     - Produces plots: stored energy vs time, power vs time, and estimated range.
+ - Does NOT provide hardware specs, real-world fusion instructions, or experimental guidance.
+
+Requirements:
+ - numpy, scipy, matplotlib
+ Run: python virtual_quantum_battery_vehicle_sim.py
+"""
+
+import numpy as np
+from scipy.linalg import expm
+import matplotlib.pyplot as plt
+
+# ---------- PART A: Mass-energy reference ----------
+C = 299_792_458.0  # speed of light (m/s)
+
+def energy_from_mass_joules(m_kg):
+    """E = m c^2 in joules"""
+    return m_kg * C**2
+
+def joules_to_kwh(E_joules):
+    return E_joules / 3.6e6
+
+# ---------- PART B: Toy quantum battery (abstract) ----------
+# Keep N small (Hilbert space 2^N). This is a computational toy only.
+sigma_x = np.array([[0, 1], [1, 0]], dtype=complex)
+sigma_z = np.array([[1, 0], [0, -1]], dtype=complex)
+eye2 = np.eye(2, dtype=complex)
+
+def kron_n(op_list):
+    out = op_list[0]
+    for op in op_list[1:]:
+        out = np.kron(out, op)
+    return out
+
+def single_site_operator(N, site_index, op):
+    ops = [eye2] * N
+    ops[site_index] = op
+    return kron_n(ops)
+
+def total_sigma_z(N):
+    H0 = np.zeros((2**N, 2**N), dtype=complex)
+    for i in range(N):
+        H0 += single_site_operator(N, i, 0.5 * sigma_z)
+    return H0
+
+def collective_driving(N, g):
+    Hc = np.zeros((2**N, 2**N), dtype=complex)
+    for i in range(N):
+        Hc += single_site_operator(N, i, 0.5 * sigma_x)
+    return g * Hc
+
+def ground_state_density(N):
+    psi0 = np.zeros((2**N,), dtype=complex)
+    psi0[0] = 1.0
+    return np.outer(psi0, psi0.conj())
+
+def unitary_time_evolution(H, t):
+    hbar = 1.054571817e-34
+    return expm(-1j * H * t / hbar)
+
+def stored_energy_rho(rho, H_battery):
+    return np.real(np.trace(rho @ H_battery))
+
+def simulate_toy_battery(N=3, g=1e-25, t_max=1e-31, steps=200):
+    H_battery = total_sigma_z(N)
+    H_drive = collective_driving(N, g)
+    H_total = H_battery + H_drive
+    rho0 = ground_state_density(N)
+    times = np.linspace(0, t_max, steps)
+    energies = np.zeros_like(times)
+    for idx, t in enumerate(times):
+        U = unitary_time_evolution(H_total, t)
+        rho_t = U @ rho0 @ U.conj().T
+        energies[idx] = stored_energy_rho(rho_t, H_battery)
+    power = np.gradient(energies, times)
+    return times, energies, power, H_battery
+
+# ---------- PART C: Abstract Vehicle/Aircraft power model ----------
+# Note: this is an abstract model for simulation only. No hardware details.
+
+def vehicle_propulsion_power(speed_m_s, mass_kg, CdA=0.7, Crr=0.01, rho_air=1.225, grade=0.0):
+    """
+    Simple ground vehicle propulsion power estimate:
+    - aerodynamic drag: 0.5 * rho * CdA * v^3
+    - rolling resistance: Crr * mass * g * v
+    - grade climbing: mass * g * sin(theta) * v  (approx using grade ~ small angle)
+    Returns power in watts required at wheels (idealized).
+    """
+    g = 9.80665
+    drag = 0.5 * rho_air * CdA * (speed_m_s**3)
+    rolling = Crr * mass_kg * g * speed_m_s
+    climb = mass_kg * g * grade * speed_m_s
+    return drag + rolling + climb
+
+def aircraft_cruise_power(speed_m_s, mass_kg, wing_area=16.0, Cd=0.03, rho_air=1.225, L_over_D=15.0):
+    """
+    Very simple aircraft cruise power estimate (idealized, high-level):
+    - Power ≈ Weight * (speed / (L/D)) ignoring propulsive efficiency.
+    - This is a teaching-level estimate only.
+    """
+    g = 9.80665
+    weight = mass_kg * g
+    power = weight * (speed_m_s / L_over_D)
+    return power
+
+# ---------- PART D: Integrate toy battery into vehicle sim ----------
+def integrate_battery_with_vehicle(N_qubits=3, g=1e-25, t_max=60.0, dt=0.5,
+                                   vehicle_type='car', mass_kg=1500.0, speed_m_s=20.0):
+    """
+    t_max: sim time in seconds
+    dt: timestep
+    vehicle_type: 'car' or 'aircraft'
+    The toy battery provides abstract stored energy (arb. units). We'll scale the toy energies
+    to an arbitrary "energy budget unit" to perform consumption accounting.
+    """
+    # Simulate toy battery to get an energy envelope (in arbitrary units)
+    # For safety: we scale energies so they are small, then map to an abstract capacity.
+    times_q, energies_q, power_q, H_battery = simulate_toy_battery(N=N_qubits, g=g, t_max=1e-31, steps=50)
+    # Use the final stored energy as "abstract capacity unit" (avoid direct mapping to joules)
+    abstract_capacity_unit = max(1.0, float(np.max(energies_q) - np.min(energies_q)))
+    # Set initial stored energy (in abstract units). This is purely an internal simulation variable.
+    stored_energy = abstract_capacity_unit * 1.0  # start "full" in abstract units
+    time_series = np.arange(0, t_max + dt, dt)
+    stored_energy_history = []
+    consumption_power_history = []
+    for t in time_series:
+        if vehicle_type == 'car':
+            P_req = vehicle_propulsion_power(speed_m_s, mass_kg)
+        else:
+            P_req = aircraft_cruise_power(speed_m_s, mass_kg)
+        # Map physical watts to "abstract units per second" with a user-defined scale.
+        # IMPORTANT: This is purely a software scaling factor for simulation and **not** a real conversion.
+        scale_watts_to_abstract = abstract_capacity_unit / 1e6  # arbitrary mapping so numbers look reasonable
+        energy_draw_abstract = (P_req * dt) * scale_watts_to_abstract
+        stored_energy = max(0.0, stored_energy - energy_draw_abstract)
+        stored_energy_history.append(stored_energy)
+        consumption_power_history.append(P_req)
+    return time_series, np.array(stored_energy_history), np.array(consumption_power_history), abstract_capacity_unit
+
+# ---------- PART E: Demo run and plotting ----------
+if __name__ == "__main__":
+    print("SAFE SIM: toy quantum battery → virtual vehicle integration (no hardware guidance).")
+    # Show E=mc^2 for reference (do not use as 'how to convert' instruction)
+    mass_example = 0.001  # 1 gram
+    E_j = energy_from_mass_joules(mass_example)
+    print(f"Reference: mass = {mass_example} kg -> E = {E_j:.3e} J ({joules_to_kwh(E_j):.3e} kWh) (for reference only)")
+
+    # Run integrated sim for a car
+    times, stored_energy_hist, consumption_power_hist, capacity_unit = integrate_battery_with_vehicle(
+        N_qubits=3, g=1e-25, t_max=3600.0, dt=10.0, vehicle_type='car', mass_kg=1500.0, speed_m_s=20.0
+    )
+
+    # Estimate "time to depletion" in this abstract sim
+    depletion_idx = np.where(stored_energy_hist <= 0.0)[0]
+    if depletion_idx.size > 0:
+        t_deplete = times[depletion_idx[0]]
+        print(f"Abstract vehicle simulation result: battery depleted at t ≈ {t_deplete:.1f} s (abstract units).")
     else:
-        hybrid = BatteryCell(
-            name=hybrid_name,
-            capacity_j=cap,
-            nominal_voltage=(cell_a.voltage*cell_a.capacity_j + cell_b.voltage*cell_b.capacity_j)/max(1.0, cap),
-            internal_resistance_ohm=R_hybrid,
-            self_discharge_per_s=max(cell_a.self_discharge, cell_b.self_discharge),
-            max_charge_power_w=max_charge,
-            max_discharge_power_w=max_discharge,
-            mass_kg=mass,
-            volume_m3=vol,
-            thermal_capacity_j_per_k=thermal_cap,
-            thermal_loss_w_per_k=thermal_loss
-        )
+        print("Abstract vehicle simulation result: battery not depleted during sim horizon (abstract units).")
 
-    hybrid.energy = cell_a.energy + cell_b.energy
-    hybrid.temp_k = temp
-    return hybrid
+    # Plotting (purely illustrative)
+    plt.figure(figsize=(10,4))
+    plt.subplot(1,2,1)
+    plt.plot(times / 60.0, stored_energy_hist)
+    plt.xlabel("Time (min)")
+    plt.ylabel("Stored energy (abstract units)")
+    plt.title("Toy quantum battery (virtual) — stored energy vs time")
 
-# --------------------------
-# Vehicle models (simplified)
-# --------------------------
-class VehiclePlatform:
-    def __init__(self, name, mass_kg, drag_coefficient, frontal_area_m2, rolling_resistance_coeff, propulsive_efficiency):
-        self.name = name
-        self.mass = mass_kg
-        self.Cd = drag_coefficient
-        self.A = frontal_area_m2
-        self.Crr = rolling_resistance_coeff
-        self.eta = propulsive_efficiency  # drivetrain/propulsion efficiency (0..1)
+    plt.subplot(1,2,2)
+    plt.plot(times / 60.0, consumption_power_hist)
+    plt.xlabel("Time (min)")
+    plt.ylabel("Power required (W)")
+    plt.title("Vehicle propulsion power (idealized)")
 
-    def power_required_cruise(self, speed_m_s, air_density=1.225, g=9.81, gradient=0.0):
-        # aerodynamic drag
-        p_aero = 0.5 * air_density * self.Cd * self.A * speed_m_s**3
-        # rolling resistance force * speed
-        F_rr = self.Crr * self.mass * g * math.cos(math.atan(gradient))
-        p_rr = F_rr * speed_m_s
-        # climb power
-        p_climb = self.mass * g * speed_m_s * math.sin(math.atan(gradient))
-        total_mech = p_aero + p_rr + p_climb
-        # account for propulsive efficiency
-        return total_mech / max(1e-6, self.eta)
+    plt.tight_layout()
+    plt.show()
 
-class Car(VehiclePlatform):
-    def __init__(self, mass_kg=1500.0):
-        super().__init__("Car", mass_kg, drag_coefficient=0.28, frontal_area_m2=2.2, rolling_resistance_coeff=0.01, propulsive_efficiency=0.85)
+    print("\nNotes:")
+    print("- This is a *software-only* simulation. It DOES NOT provide hardware, fusion, or construction guidance.")
+    print("- If you want more: I can produce a Jupyter notebook version, QuTiP-compatible examples, or add")
+    print("  realistic battery-management controllers (BMS) and vehicle control logic (again, software-only).")
 
-class Aircraft(VehiclePlatform):
-    def __init__(self, mass_kg=5000.0):
-        # For aircraft, Cd*A as combined term, efficiency lower
-        super().__init__("Aircraft", mass_kg, drag_coefficient=0.03, frontal_area_m2=8.0, rolling_resistance_coeff=0.0, propulsive_efficiency=0.70)
 
-class Drone(VehiclePlatform):
-    def __init__(self, mass_kg=5.0):
-        super().__init__("Drone", mass_kg, drag_coefficient=1.0, frontal_area_m2=0.1, rolling_resistance_coeff=0.0, propulsive_efficiency=0.65)
-
-# --------------------------
-# Battery Management System (algorithmic only)
-# --------------------------
-class BMSController:
     """
-    Abstract BMS state machine and logic (non-actionable pseudocode implemented).
-    Tracks SOC, temperature, enforces charge/discharge limits, logs events.
+safe_vehicle_battery_sim.py
+Educational simulator (non-actionable).
+- Computes E = m c^2 for a given mass (reference).
+- Implements a toy quantum-battery (N qubits, closed-system unitary charging).
+- Uses the toy battery's stored-energy (in arbitrary units) as input to
+  an abstract vehicle/aircraft energy-budget model to compute range/endurance.
+- IMPORTANT: This is purely computational. No hardware designs, no fusion blueprints,
+  no real-world energy conversion instructions. Use for concept exploration only.
+
+Requires: numpy, scipy, matplotlib (optional)
+"""
+
+import numpy as np
+from scipy.linalg import expm
+import matplotlib.pyplot as plt
+
+# --- Constants / helpers ---
+C = 299_792_458.0  # m/s (for E = m c^2 reference only)
+
+def energy_from_mass_joules(m_kg: float) -> float:
+    """E = m c^2 in joules (reference calculation)."""
+    return m_kg * (C ** 2)
+
+def joules_to_kwh(J: float) -> float:
+    return J / 3.6e6
+
+# --- Toy quantum battery (pedagogical, small N) ---
+# Pauli matrices
+sigma_x = np.array([[0, 1], [1, 0]], dtype=complex)
+sigma_z = np.array([[1, 0], [0, -1]], dtype=complex)
+eye2 = np.eye(2, dtype=complex)
+
+def kron_n(ops):
+    out = ops[0]
+    for op in ops[1:]:
+        out = np.kron(out, op)
+    return out
+
+def single_site_op(N, site, op):
+    ops = [eye2] * N
+    ops[site] = op
+    return kron_n(ops)
+
+def battery_hamiltonian(N):
+    # pedagogical: local energy splitting 0.5*sigma_z per qubit
+    H = np.zeros((2**N, 2**N), dtype=complex)
+    for i in range(N):
+        H += 0.5 * single_site_op(N, i, sigma_z)
+    return H
+
+def charger_hamiltonian(N, g):
+    # pedagogical collective drive g * sum sigma_x
+    H = np.zeros((2**N, 2**N), dtype=complex)
+    for i in range(N):
+        H += 0.5 * single_site_op(N, i, sigma_x)
+    return g * H
+
+def ground_density(N):
+    psi = np.zeros((2**N,), dtype=complex)
+    psi[0] = 1.0
+    return np.outer(psi, psi.conj())
+
+def stored_energy(rho, H_batt):
+    return np.real(np.trace(rho @ H_batt))
+
+def unitary(H, t):
+    hbar = 1.054571817e-34
+    return expm(-1j * H * t / hbar)
+
+def simulate_toy_battery(N=3, g=1e-25, t_max=1e-31, steps=200):
+    H_b = battery_hamiltonian(N)
+    H_c = charger_hamiltonian(N, g)
+    H = H_b + H_c
+    rho0 = ground_density(N)
+
+    times = np.linspace(0, t_max, steps)
+    energies = np.zeros_like(times)
+    for idx, t in enumerate(times):
+        U = unitary(H, t)
+        rho_t = U @ rho0 @ U.conj().T
+        energies[idx] = stored_energy(rho_t, H_b)
+    power = np.gradient(energies, times, edge_order=2)
+    return times, energies, power
+
+# --- Abstract vehicle/aircraft energy-budget model (non-physical units) ---
+def vehicle_energy_budget(energy_store, vehicle_params):
     """
-    def __init__(self, cell: BatteryCell, soc_min=0.05, soc_max=0.98, temp_max_k=330.0, temp_min_k=263.15):
-        self.cell = cell
-        self.soc_min = soc_min
-        self.soc_max = soc_max
-        self.temp_max_k = temp_max_k
-        self.temp_min_k = temp_min_k
-        self.state = "IDLE"  # IDLE, CHARGING, DISCHARGING, FAULT
-        self.logs = []
-
-    def request_charge(self, power_w):
-        # software-level checks only
-        if self.state == "FAULT":
-            self.logs.append(("charge_rejected_fault", self.cell.soc, self.cell.temp_k))
-            return 0.0
-        if self.cell.soc >= self.soc_max:
-            self.logs.append(("charge_rejected_soc_high", self.cell.soc))
-            return 0.0
-        if self.cell.temp_k > self.temp_max_k:
-            self.logs.append(("charge_rejected_temp_high", self.cell.temp_k))
-            return 0.0
-        # clamp to safe power
-        allowed = min(power_w, self.cell.max_charge_power)
-        self.state = "CHARGING"
-        self.logs.append(("charge_started", allowed))
-        return allowed
-
-    def request_discharge(self, power_w):
-        if self.state == "FAULT":
-            self.logs.append(("discharge_rejected_fault", self.cell.soc, self.cell.temp_k))
-            return 0.0
-        if self.cell.soc <= self.soc_min:
-            self.logs.append(("discharge_rejected_soc_low", self.cell.soc))
-            return 0.0
-        if self.cell.temp_k > self.temp_max_k:
-            self.logs.append(("discharge_rejected_temp_high", self.cell.temp_k))
-            return 0.0
-        allowed = min(power_w, self.cell.max_discharge_power)
-        self.state = "DISCHARGING"
-        self.logs.append(("discharge_started", allowed))
-        return allowed
-
-    def evaluate(self):
-        # periodic health checks; set FAULT if critical
-        if self.cell.temp_k > self.temp_max_k + 10:
-            self.state = "FAULT"
-            self.logs.append(("fault_overtemp", self.cell.temp_k))
-
-    def idle(self):
-        if self.state not in ("FAULT",):
-            self.state = "IDLE"
-
-# --------------------------
-# Simple thermal-risk metric (probabilistic, abstract)
-# --------------------------
-def thermal_risk_metric(cell: BatteryCell):
+    energy_store: scalar stored energy from toy battery (arbitrary units).
+    vehicle_params: dict with keys:
+        - mass_kg (for reference only)
+        - cruise_power_per_unit (arb units per second) : abstract draw to maintain cruise
+        - payload_factor (dimensionless) : affects consumption abstractly
+    Returns:
+        dict with range_estimates and endurance_estimates (in seconds and arbitrary distance units)
+    NOTE: This is conceptual math only. It maps stored energy -> endurance and range
+    using abstract conversion factors; it is NOT an engineering spec.
     """
-    Abstract risk function: as temperature rises and SOC is high, risk increases.
-    Returns risk in [0,1] (abstract probability-of-event metric).
-    """
-    t = cell.temp_k
-    soc = cell.soc
-    # threshold shaping
-    T_safe = 310.0
-    slope = 0.05
-    risk_temp = 1.0 / (1.0 + math.exp(-(t - T_safe) * slope))
-    risk_soc = max(0.0, (soc - 0.8) / 0.2)  # ramps up above 80% SOC
-    combined = min(1.0, risk_temp * 0.7 + risk_soc * 0.4)
-    return combined
+    # abstract conversion: 1 energy unit -> X seconds of cruise at baseline power
+    conversion_seconds_per_energy_unit = vehicle_params.get("sec_per_unit", 1.0)
+    baseline_power = vehicle_params.get("cruise_power_per_unit", 1.0)  # arb units/sec
+    payload = vehicle_params.get("payload_factor", 1.0)
 
-# --------------------------
-# Simulation harness
-# --------------------------
-def simulate_vehicle_range(vehicle: VehiclePlatform, battery: BatteryCell, speed_m_s, distance_m, ambient_k=293.15, dt=1.0):
-    """
-    Simulate driving/flying a fixed distance at a constant speed and compute if battery can supply energy.
-    Returns dict with results and time-series arrays.
-    """
-    bms = BMSController(battery)
-    t = 0.0
-    traveled = 0.0
-    times = []
-    socs = []
-    temps = []
-    powers = []
-    thermal_risks = []
-    max_temp = battery.temp_k
+    usable_seconds = energy_store * conversion_seconds_per_energy_unit / (payload * baseline_power)
+    # abstract speed (units distance/sec) - user-chosen
+    speed = vehicle_params.get("cruise_speed_units_per_s", 1.0)
 
-    while traveled < distance_m and battery.soc > 0.0 and t < 1e6:
-        # compute required propulsion power
-        p_req = vehicle.power_required_cruise(speed_m_s)  # W
-        # ask BMS for allowed power
-        allowed = bms.request_discharge(p_req)
-        if allowed <= 0.0:
-            # cannot supply power -> abort
-            break
-        # discharge
-        energy_removed_j, loss_j, heat_j = battery.discharge_step(allowed, dt)
-        # thermal update
-        dT = battery.thermal_step(heat_j, ambient_k, dt)
-        max_temp = max(max_temp, battery.temp_k)
-        # update motion (distance)
-        traveled += speed_m_s * dt
-        t += dt
-        times.append(t)
-        socs.append(battery.soc)
-        temps.append(battery.temp_k)
-        powers.append(allowed)
-        thermal_risks.append(thermal_risk_metric(battery))
-        bms.evaluate()
-        if bms.state == "FAULT":
-            break
+    distance_units = usable_seconds * speed
 
-    success = (traveled >= distance_m)
     return {
-        "success": success,
-        "distance_traveled_m": traveled,
-        "time_s": t,
-        "final_soc": battery.soc,
-        "max_temp_k": max_temp,
-        "times": np.array(times),
-        "socs": np.array(socs),
-        "temps": np.array(temps),
-        "powers": np.array(powers),
-        "thermal_risks": np.array(thermal_risks),
-        "bms_logs": bms.logs
+        "usable_seconds": usable_seconds,
+        "distance_units": distance_units,
+        "cruise_speed": speed,
     }
 
-# --------------------------
-# Example scenarios (no hardware steps)
-# --------------------------
-def run_examples():
-    # Create conceptual modules
-    em2 = BatteryCell(name="Einstein EM2",
-                      capacity_j=9e7,  # ~25 kWh in joules (25 kWh ~ 9e7 J) - conceptual only
-                      nominal_voltage=400.0,
-                      internal_resistance_ohm=0.05,
-                      max_charge_power_w=30000.0,
-                      max_discharge_power_w=30000.0,
-                      mass_kg=350.0,
-                      volume_m3=0.25,
-                      thermal_capacity_j_per_k=4e5,
-                      thermal_loss_w_per_k=500.0)
-    em2.energy = 0.9 * em2.capacity_j
+# --- Example driver function to tie pieces together safely ---
+def demo_run():
+    print("=== SAFE DEMO: E=mc^2 reference, toy quantum battery, abstract vehicle budget ===")
+    # Part 1: E=mc^2 reference
+    mass_g = 1.0
+    mass_kg = mass_g / 1000.0
+    E_j = energy_from_mass_joules(mass_kg)
+    print(f"[REFERENCE] mass {mass_g} g -> E = {E_j:.3e} J (~{joules_to_kwh(E_j):.3e} kWh)")
+    print("NOTE: This is total rest energy; safe simulations only. No conversion instructions provided.\n")
 
-    algordo = QuantumBattery(name="Algordo Quantum",
-                             capacity_j=2.5e7,  # ~6.9 kWh
-                             nominal_voltage=350.0,
-                             internal_resistance_ohm=0.02,
-                             max_charge_power_w=15000.0,
-                             max_discharge_power_w=15000.0,
-                             mass_kg=90.0,
-                             volume_m3=0.08,
-                             thermal_capacity_j_per_k=1.2e5,
-                             thermal_loss_w_per_k=200.0,
-                             coherence_factor=4.0)
-    algordo.energy = 0.9 * algordo.capacity_j
+    # Part 2: simulate toy quantum battery (small N for speed)
+    N = 3
+    times, energies, power = simulate_toy_battery(N=N, g=1e-25, t_max=1e-31, steps=300)
+    # For integration to vehicle, get the max stored energy observed (arbitrary units)
+    energy_store_arbitrary = float(np.max(energies) - np.min(energies))
+    print(f"[TOY BATTERY] N={N}, toy stored-energy (arb units): {energy_store_arbitrary:.6e}")
 
-    hybrid = fusion(em2, algordo, hybrid_name="EM2-Algordo-Hybrid")
-    hybrid.energy = 0.9 * hybrid.capacity_j  # start at 90%
+    # Part 3: abstract vehicle budget
+    vehicle_params = {
+        "mass_kg": 1500.0,                # reference only
+        "cruise_power_per_unit": 1.0,     # arb units/sec (abstract)
+        "payload_factor": 1.0,
+        "sec_per_unit": 1e3,              # map 1 energy unit -> 1000 seconds at baseline power (arbitrary)
+        "cruise_speed_units_per_s": 0.02, # arbitrary distance units per second
+    }
+    budget = vehicle_energy_budget(energy_store_arbitrary, vehicle_params)
+    print(f"[ABSTRACT VEHICLE BUDGET] usable seconds (arb): {budget['usable_seconds']:.3e}")
+    print(f"[ABSTRACT VEHICLE BUDGET] distance (arb units): {budget['distance_units']:.3e} at cruise speed {budget['cruise_speed']:.3e}")
 
-    # Vehicles
-    car = Car(mass_kg=1800.0)
-    aircraft = Aircraft(mass_kg=6000.0)
-    drone = Drone(mass_kg=10.0)
-
-    # Scenario 1: Car, 120 km at 20 m/s (~72 km/h)
-    print("=== Car scenario (72 km/h, 120 km) ===")
-    dist_m = 120_000.0
-    speed = 20.0
-    res_car = simulate_vehicle_range(car, hybrid, speed, dist_m, ambient_k=293.15, dt=1.0)
-    print("Success:", res_car["success"], "Traveled (km):", res_car["distance_traveled_m"]/1000.0,
-          "Final SOC:", res_car["final_soc"], "Max temp (K):", res_car["max_temp_k"])
-
-    # Scenario 2: Aircraft short-hop: 300 km cruise at 200 m/s (~720 km/h)
-    print("\n=== Aircraft scenario (720 km/h, 300 km) ===")
-    dist_m = 300_000.0
-    speed = 200.0
-    # copy a fresh hybrid instance to avoid state carry-over
-    hybrid2 = fusion(em2, algordo, hybrid_name="EM2-Algordo-Hybrid-Air")
-    hybrid2.energy = 0.95 * hybrid2.capacity_j
-    res_ac = simulate_vehicle_range(aircraft, hybrid2, speed, dist_m, ambient_k=273.15, dt=1.0)
-    print("Success:", res_ac["success"], "Traveled (km):", res_ac["distance_traveled_m"]/1000.0,
-          "Final SOC:", res_ac["final_soc"], "Max temp (K):", res_ac["max_temp_k"])
-
-    # Scenario 3: Drone: 40 km range at 15 m/s (hover/climb ignored; simplistic)
-    print("\n=== Drone scenario (15 m/s, 40 km) ===")
-    dist_m = 40_000.0
-    speed = 15.0
-    hybrid3 = fusion(em2, algordo, hybrid_name="EM2-Algordo-Hybrid-Drone")
-    hybrid3.energy = 0.9 * hybrid3.capacity_j
-    res_dr = simulate_vehicle_range(drone, hybrid3, speed, dist_m, ambient_k=298.15, dt=1.0)
-    print("Success:", res_dr["success"], "Traveled (km):", res_dr["distance_traveled_m"]/1000.0,
-          "Final SOC:", res_dr["final_soc"], "Max temp (K):", res_dr["max_temp_k"])
-
-    # Plotting example: thermal risk over time for car scenario
-    plt.figure()
-    plt.plot(res_car["times"]/3600.0, res_car["thermal_risks"])
-    plt.xlabel("Time (hours)")
-    plt.ylabel("Thermal risk (abstract 0..1)")
-    plt.title("Car scenario: thermal risk over time (abstract metric)")
-    plt.grid(True)
+    # Plot toy battery stored energy vs time (for conceptual study only)
+    plt.figure(figsize=(7,3))
+    plt.plot(times, energies)
+    plt.xlabel("time (s) [toy]")
+    plt.ylabel("stored energy (arb units)")
+    plt.title("Toy quantum battery — stored energy (pedagogical)")
+    plt.tight_layout()
     plt.show()
 
 if __name__ == "__main__":
-    run_examples()
+    demo_run()
+
+
+    fastapi
+uvicorn[standard]
+numpy
+scipy
+matplotlib
+pandas
+sqlalchemy
+pydantic
+python-multipart
+
+
+# simulator.py
+import numpy as np
+from scipy.linalg import expm
+
+# --- Constants ---
+C = 299_792_458.0  # m/s
+HBAR = 1.054571817e-34
+
+# --- E = m c^2 ---
+def energy_from_mass_joules(m_kg: float) -> float:
+    """Compute E = m c^2 (reference calculation only)."""
+    return m_kg * (C ** 2)
+
+# --- Toy quantum battery (pedagogical only) ---
+sigma_x = np.array([[0,1],[1,0]], dtype=complex)
+sigma_z = np.array([[1,0],[0,-1]], dtype=complex)
+eye2 = np.eye(2, dtype=complex)
+
+def kron_n(ops):
+    out = ops[0]
+    for o in ops[1:]:
+        out = np.kron(out, o)
+    return out
+
+def single_site_op(N, site, op):
+    ops = [eye2] * N
+    ops[site] = op
+    return kron_n(ops)
+
+def battery_hamiltonian(N):
+    H = np.zeros((2**N, 2**N), dtype=complex)
+    for i in range(N):
+        H += 0.5 * single_site_op(N, i, sigma_z)
+    return H
+
+def charger_hamiltonian(N, g):
+    H = np.zeros((2**N, 2**N), dtype=complex)
+    for i in range(N):
+        H += 0.5 * single_site_op(N, i, sigma_x)
+    return g * H
+
+def ground_state_density(N):
+    psi = np.zeros((2**N,), dtype=complex)
+    psi[0] = 1.0
+    return np.outer(psi, psi.conj())
+
+def unitary(H, t):
+    return expm(-1j * H * t / HBAR)
+
+def stored_energy(rho, H_batt):
+    return float(np.real(np.trace(rho @ H_batt)))
+
+def simulate_toy_battery(N=3, g=1e-25, t_max=1e-31, steps=100):
+    """
+    Returns times (s), energies (arb. units), power (arb. units/s), and an 'abstract_capacity' scalar
+    This is a closed-system unitary evolution toy model for educational use only.
+    """
+    H_b = battery_hamiltonian(N)
+    H_c = charger_hamiltonian(N, g)
+    H = H_b + H_c
+    rho0 = ground_state_density(N)
+
+    times = np.linspace(0, t_max, steps)
+    energies = np.zeros_like(times)
+    for idx, t in enumerate(times):
+        U = unitary(H, t)
+        rho_t = U @ rho0 @ U.conj().T
+        energies[idx] = stored_energy(rho_t, H_b)
+    power = np.gradient(energies, times, edge_order=2)
+    abstract_capacity = float(np.max(energies) - np.min(energies))
+    return {
+        "times": times.tolist(),
+        "energies": energies.tolist(),
+        "power": power.tolist(),
+        "abstract_capacity": abstract_capacity
+    }
+
+# --- Abstract vehicle & aircraft models (conceptual only) ---
+def vehicle_propulsion_power(speed_m_s, mass_kg, CdA=0.7, Crr=0.01, rho_air=1.225, grade=0.0):
+    g = 9.80665
+    drag = 0.5 * rho_air * CdA * (speed_m_s**3)
+    rolling = Crr * mass_kg * g * speed_m_s
+    climb = mass_kg * g * grade * speed_m_s
+    return float(drag + rolling + climb)  # watts (idealized)
+
+def aircraft_cruise_power(speed_m_s, mass_kg, L_over_D=15.0):
+    g = 9.80665
+    weight = mass_kg * g
+    power = weight * (speed_m_s / L_over_D)
+    return float(power)
+
+def abstract_energy_budget_from_abstract_capacity(abstract_capacity, vehicle_type='car', vehicle_params=None):
+    """
+    Map the toy battery's abstract_capacity (arb units) into endurance/distance (abstract).
+    This mapping is intentionally arbitrary and software-only.
+    vehicle_params can set 'sec_per_unit' and 'speed_units_per_s'.
+    """
+    if vehicle_params is None:
+        vehicle_params = {}
+    sec_per_unit = float(vehicle_params.get("sec_per_unit", 1e3))
+    speed_units_per_s = float(vehicle_params.get("speed_units_per_s", 0.02))
+    usable_seconds = abstract_capacity * sec_per_unit
+    distance_units = usable_seconds * speed_units_per_s
+    return {
+        "usable_seconds": usable_seconds,
+        "distance_units": distance_units,
+        "speed_units_per_s": speed_units_per_s
+    }
+
+
+    # storage.py
+from sqlalchemy import create_engine, Table, Column, Integer, String, Float, MetaData, Text
+from sqlalchemy.sql import select
+import json
+import os
+
+DB_PATH = os.environ.get("SIM_DB_PATH", "sqlite:///simulations.db")
+engine = create_engine(DB_PATH, connect_args={"check_same_thread": False})
+metadata = MetaData()
+
+sim_table = Table(
+    "simulations", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("name", String(200)),
+    Column("payload", Text),    # JSON payload (params)
+    Column("result", Text),     # JSON result
+)
+
+metadata.create_all(engine)
+
+def store_simulation(name: str, payload: dict, result: dict):
+    payload_json = json.dumps(payload)
+    result_json = json.dumps(result)
+    with engine.connect() as conn:
+        res = conn.execute(sim_table.insert().values(name=name, payload=payload_json, result=result_json))
+        return int(res.inserted_primary_key[0])
+
+def get_simulation(sim_id: int):
+    with engine.connect() as conn:
+        row = conn.execute(select([sim_table]).where(sim_table.c.id == sim_id)).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "payload": json.loads(row["payload"]),
+            "result": json.loads(row["result"])
+        }
+
+
+        # main.py
+import os
+from fastapi import FastAPI, HTTPException, UploadFile, File
+from pydantic import BaseModel
+from simulator import (
+    energy_from_mass_joules,
+    simulate_toy_battery,
+    vehicle_propulsion_power,
+    aircraft_cruise_power,
+    abstract_energy_budget_from_abstract_capacity
+)
+from storage import store_simulation, get_simulation
+import matplotlib.pyplot as plt
+import pandas as pd
+import uuid
+
+app = FastAPI(title="Safe Quantum-Battery + Vehicle Simulator (software-only)")
+
+class SimRequest(BaseModel):
+    name: str = "run"
+    mass_kg: float = 0.001  # for E=mc^2 reference
+    N_qubits: int = 3
+    g: float = 1e-25
+    vehicle_type: str = "car"  # "car" or "aircraft"
+    vehicle_params: dict = {}  # optional mapping for abstract budget
+    sim_seconds: float = 3600.0
+    sim_dt: float = 10.0
+    speed_m_s: float = 20.0
+    vehicle_mass_kg: float = 1500.0
+
+@app.post("/simulate")
+def run_simulation(req: SimRequest):
+    # 1) E=mc^2 reference (numbers only)
+    E_j = energy_from_mass_joules(req.mass_kg)
+
+    # 2) Toy battery sim (pedagogical)
+    toy = simulate_toy_battery(N=req.N_qubits, g=req.g, t_max=1e-31, steps=200)
+
+    # 3) Abstract mapping: how many "abstract seconds" and "distance units" we can run
+    abstract_budget = abstract_energy_budget_from_abstract_capacity(
+        toy["abstract_capacity"],
+        vehicle_type=req.vehicle_type,
+        vehicle_params=req.vehicle_params
+    )
+
+    # 4) Simple physical-power estimate (idealized) for reporting:
+    if req.vehicle_type == "car":
+        P_w = vehicle_propulsion_power(req.speed_m_s, req.vehicle_mass_kg)
+    else:
+        P_w = aircraft_cruise_power(req.speed_m_s, req.vehicle_mass_kg)
+
+    result = {
+        "E_joules_reference": E_j,
+        "toy_battery": toy,
+        "abstract_budget": abstract_budget,
+        "estimated_propulsion_power_W": P_w
+    }
+
+    # 5) Store result and generate simple plot PNG (timeseries of toy energies)
+    sim_id = store_simulation(req.name, req.dict(), result)
+
+    # generate and save plot
+    try:
+        df = pd.DataFrame({"time": toy["times"], "energy": toy["energies"], "power": toy["power"]})
+        fig, ax = plt.subplots(figsize=(6,3))
+        ax.plot(df["time"], df["energy"], label="stored energy (arb)")
+        ax.set_xlabel("time (s) [toy]")
+        ax.set_ylabel("energy (arb)")
+        ax.set_title(f"Toy battery (N={req.N_qubits})")
+        ax.legend()
+        plot_name = f"plot_{sim_id}_{uuid.uuid4().hex[:8]}.png"
+        plots_dir = "plots"
+        os.makedirs(plots_dir, exist_ok=True)
+        plot_path = os.path.join(plots_dir, plot_name)
+        fig.tight_layout()
+        fig.savefig(plot_path)
+        plt.close(fig)
+        result["plot_path"] = plot_path
+    except Exception as e:
+        result["plot_error"] = str(e)
+
+    # Update stored result with plot path
+    store_simulation(f"{req.name}_backup", req.dict(), result)  # safe duplicate to keep plot info - simple approach
+
+    return {"sim_id": sim_id, "result": result}
+
+@app.get("/simulate/{sim_id}")
+def get_sim(sim_id: int):
+    rec = get_simulation(sim_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+    return rec
+
+
+    FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+ENV SIM_DB_PATH="sqlite:///simulations.db"
+EXPOSE 8000
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+
+version: "3.8"
+services:
+  sim:
+    build: .
+    container_name: sim_service
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./plots:/app/plots
+      - ./simulations.db:/app/simulations.db
+    environment:
+      - SIM_DB_PATH=sqlite:///simulations.db
+
+
+      python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+
+docker build -t safe-sim .
+docker run -p 8000:8000 -v $(pwd)/plots:/app/plots safe-sim
+
+
+{
+  "name": "test-run-1",
+  "mass_kg": 0.001,
+  "N_qubits": 3,
+  "g": 1e-25,
+  "vehicle_type": "car",
+  "vehicle_params": {"sec_per_unit":1000, "speed_units_per_s":0.02},
+  "speed_m_s": 20.0,
+  "vehicle_mass_kg": 1500.0
+}
+
 
 
     
