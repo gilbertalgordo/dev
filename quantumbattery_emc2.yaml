@@ -802,5 +802,456 @@ docker run -p 8000:8000 -v $(pwd)/plots:/app/plots safe-sim
 }
 
 
+fastapi
+uvicorn[standard]
+numpy
+scipy
+matplotlib
+pandas
+sqlalchemy
+pydantic
+celery[redis]
+redis
+python-dotenv
+
+
+# simulator_advanced.py
+"""
+Advanced toy quantum-battery simulator (safe, pedagogical).
+Supports:
+ - Closed-system unitary evolution (small N)
+ - Open-system Lindblad evolution (simple decoherence channels)
+ - Abstract mapping to vehicle/aircraft energy budgets (software-only)
+Notes:
+ - Keep N small (<=5 recommended) because state dimension = 2^N
+ - All energies from quantum simulator are treated as abstract units
+"""
+import numpy as np
+from scipy.linalg import expm
+from scipy.integrate import solve_ivp
+import math
+
+# physical constants (for reference-only computations)
+C = 299_792_458.0
+HBAR = 1.054571817e-34
+G = 9.80665
+
+# Pauli matrices
+sigma_x = np.array([[0,1],[1,0]], dtype=complex)
+sigma_y = np.array([[0,-1j],[1j,0]], dtype=complex)
+sigma_z = np.array([[1,0],[0,-1]], dtype=complex)
+eye2 = np.eye(2, dtype=complex)
+
+def kron_n(ops):
+    out = ops[0]
+    for o in ops[1:]:
+        out = np.kron(out, o)
+    return out
+
+def single_site_op(N, site, op):
+    ops = [eye2] * N
+    ops[site] = op
+    return kron_n(ops)
+
+# ---------- Hamiltonians (pedagogical) ----------
+def battery_hamiltonian(N, delta=1.0):
+    """Simple local splitting: sum_j delta/2 * sigma_z^j"""
+    H = np.zeros((2**N, 2**N), dtype=complex)
+    for j in range(N):
+        H += (delta/2.0) * single_site_op(N, j, sigma_z)
+    return H
+
+def charger_hamiltonian_collective(N, g=1.0):
+    """Collective transverse drive g * sum sigma_x^j (pedagogical)"""
+    H = np.zeros((2**N, 2**N), dtype=complex)
+    for j in range(N):
+        H += (g/2.0) * single_site_op(N, j, sigma_x)
+    return H
+
+def interaction_hamiltonian_swap(N, J=0.1):
+    """Pairwise XX-type coupling (toy): J * sum_{<i,j>} sigma_x^i sigma_x^j
+       (here we use nearest neighbours in a chain)."""
+    H = np.zeros((2**N, 2**N), dtype=complex)
+    for i in range(N-1):
+        H += J * (single_site_op(N, i, sigma_x) @ single_site_op(N, i+1, sigma_x))
+    return H
+
+# ---------- Unitary evolution (closed system) ----------
+def unitary_evolution(H, t):
+    """U = exp(-i H t / hbar)"""
+    return expm(-1j * H * t / HBAR)
+
+# ---------- Lindblad (open system) using vectorized density matrix integration ----------
+def lindblad_rhs(t, y_flat, H, collapse_operators):
+    """
+    y_flat: flattened density matrix (vectorized)
+    returns dy/dt flattened
+    Master equation: dρ/dt = -i[H,ρ]/ħ + sum_k (L_k ρ L_k^† - 0.5 {L_k^† L_k, ρ})
+    """
+    dim = H.shape[0]
+    rho = y_flat.reshape((dim, dim))
+    comm = -1j * (H @ rho - rho @ H) / HBAR
+    dissipator = np.zeros_like(rho)
+    for L in collapse_operators:
+        Lr = L @ rho @ L.conj().T
+        anti = -0.5 * (L.conj().T @ L @ rho + rho @ L.conj().T @ L)
+        dissipator += Lr + anti
+    drho = comm + dissipator
+    return drho.reshape(-1)
+
+def simulate_lindblad(H, rho0, collapse_operators, t_span=(0.0, 1e-30), t_steps=100):
+    dim = H.shape[0]
+    y0 = rho0.reshape(-1)
+    t_eval = np.linspace(t_span[0], t_span[1], t_steps)
+    sol = solve_ivp(fun=lambda t, y: lindblad_rhs(t, y, H, collapse_operators),
+                    t_span=t_span, y0=y0, t_eval=t_eval, method='RK45', atol=1e-9, rtol=1e-7)
+    rhos = sol.y.T.reshape((-1, dim, dim))
+    return t_eval, rhos
+
+# ---------- utility: initial states and observables ----------
+def ground_state_density(N):
+    psi = np.zeros((2**N,), dtype=complex)
+    psi[0] = 1.0
+    return np.outer(psi, psi.conj())
+
+def excited_state_density(N):
+    psi = np.zeros((2**N,), dtype=complex)
+    psi[-1] = 1.0
+    return np.outer(psi, psi.conj())
+
+def stored_energy_from_rho(rho, H_batt):
+    """Tr[ρ H_batt] as stored energy (abstract units)."""
+    return float(np.real(np.trace(rho @ H_batt)))
+
+# ---------- high-level simulate function (exposed to tasks) ----------
+def run_toy_battery_sim(N=3,
+                        delta=1.0,
+                        g=0.5,
+                        J=0.0,
+                        t_max=1e-31,
+                        steps=200,
+                        mode='unitary',
+                        collapse_rates=None):
+    """
+    mode: 'unitary' or 'lindblad'
+    collapse_rates: dict like {'amplitude': gamma_amp, 'dephasing': gamma_phi}
+    Returns times (list), energies list, power list, metadata
+    """
+    H_b = battery_hamiltonian(N, delta=delta)
+    H_c = charger_hamiltonian_collective(N, g=g)
+    H_int = interaction_hamiltonian_swap(N, J=J) if J != 0.0 else 0.0
+    H_total = H_b + H_c + (H_int if isinstance(H_int, np.ndarray) else 0.0)
+
+    rho0 = ground_state_density(N)
+    times = np.linspace(0.0, t_max, steps)
+
+    energies = []
+    powers = []
+
+    if mode == 'unitary':
+        # Evolve by unitary operator U(t)
+        previous_E = None
+        for t in times:
+            U = unitary_evolution(H_total, t)
+            rho_t = U @ rho0 @ U.conj().T
+            E = stored_energy_from_rho(rho_t, H_b)
+            energies.append(E)
+            if previous_E is None:
+                powers.append(0.0)
+            else:
+                dt = t - prev_t
+                powers.append((E - previous_E) / dt if dt > 0 else 0.0)
+            previous_E = E
+            prev_t = t
+    else:
+        # build collapse operators
+        collapse_ops = []
+        if collapse_rates:
+            for j in range(N):
+                if 'amplitude' in collapse_rates and collapse_rates['amplitude'] > 0.0:
+                    L_amp = math.sqrt(collapse_rates['amplitude']) * single_site_op(N, j, sigma_x + 1j*sigma_y) # lowering-like
+                    collapse_ops.append(L_amp)
+                if 'dephasing' in collapse_rates and collapse_rates['dephasing'] > 0.0:
+                    L_phi = math.sqrt(collapse_rates['dephasing']) * single_site_op(N, j, sigma_z)
+                    collapse_ops.append(L_phi)
+        t_eval, rhos = simulate_lindblad(H_total, rho0, collapse_ops, t_span=(0.0, t_max), t_steps=steps)
+        prev_E = None
+        for idx, rho in enumerate(rhos):
+            E = stored_energy_from_rho(rho, H_b)
+            energies.append(E)
+            if prev_E is None:
+                powers.append(0.0)
+            else:
+                dt = t_eval[idx] - t_eval[idx-1]
+                powers.append((E - prev_E) / dt if dt>0 else 0.0)
+            prev_E = E
+        times = t_eval
+
+    abstract_capacity = float(max(energies) - min(energies)) if energies else 0.0
+    meta = {
+        "N": N,
+        "delta": delta,
+        "g": g,
+        "J": J,
+        "mode": mode,
+        "collapse_rates": collapse_rates or {}
+    }
+    return {
+        "times": times.tolist(),
+        "energies": energies,
+        "powers": powers,
+        "abstract_capacity": abstract_capacity,
+        "meta": meta
+    }
+
+# ---------- abstract vehicle mapping ----------
+def abstract_map_to_vehicle(abstract_capacity,
+                            vehicle_spec=None):
+    """
+    Map abstract_capacity to endurance/distance using user-provided mapping.
+    vehicle_spec:
+      - sec_per_unit: seconds of cruise per abstract capacity unit
+      - speed_units_per_s: abstract distance units per second
+    Returns mapping dict.
+    """
+    if vehicle_spec is None:
+        vehicle_spec = {}
+    sec_per_unit = float(vehicle_spec.get("sec_per_unit", 1e3))
+    speed_units_per_s = float(vehicle_spec.get("speed_units_per_s", 0.02))
+    usable_seconds = abstract_capacity * sec_per_unit
+    distance_units = usable_seconds * speed_units_per_s
+    return {
+        "usable_seconds": usable_seconds,
+        "distance_units": distance_units,
+        "speed_units_per_s": speed_units_per_s
+    }
+
+# ---------- E = m c^2 helper ----------
+def energy_from_mass_joules(m_kg):
+    return m_kg * C**2
+
+
+    # tasks.py
+import os
+from celery import Celery
+from simulator_advanced import run_toy_battery_sim, abstract_map_to_vehicle, energy_from_mass_joules
+import matplotlib.pyplot as plt
+import json
+from storage import store_simulation, update_simulation_result
+
+CELERY_BROKER = os.environ.get("CELERY_BROKER_URL", "redis://redis:6379/0")
+CELERY_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://redis:6379/0")
+
+celery = Celery("sim_tasks", broker=CELERY_BROKER, backend=CELERY_BACKEND)
+
+PLOTS_DIR = os.environ.get("PLOTS_DIR", "plots")
+os.makedirs(PLOTS_DIR, exist_ok=True)
+
+@celery.task(bind=True)
+def run_simulation_task(self, sim_payload):
+    """
+    sim_payload: dict with keys:
+      - name, mass_kg, N, delta, g, J, mode, collapse_rates, vehicle_spec, sim_params
+    """
+    # 1) E=mc^2 reference
+    E_j = energy_from_mass_joules(sim_payload.get("mass_kg", 0.0))
+
+    # 2) run quantum toy sim
+    sim = run_toy_battery_sim(N=sim_payload.get("N",3),
+                              delta=sim_payload.get("delta",1.0),
+                              g=sim_payload.get("g",0.5),
+                              J=sim_payload.get("J",0.0),
+                              t_max=sim_payload.get("t_max",1e-31),
+                              steps=sim_payload.get("steps",200),
+                              mode=sim_payload.get("mode","unitary"),
+                              collapse_rates=sim_payload.get("collapse_rates", None))
+
+    # 3) map to vehicle abstractly
+    vmapping = abstract_map_to_vehicle(sim['abstract_capacity'], sim_payload.get("vehicle_spec", None))
+
+    # 4) store initial record
+    sim_record = {
+        "name": sim_payload.get("name","run"),
+        "payload": sim_payload,
+        "result": {
+            "E_j": E_j,
+            "sim": sim,
+            "vehicle_map": vmapping
+        }
+    }
+    sim_id = store_simulation(sim_record["name"], sim_payload, sim_record["result"])
+
+    # 5) produce plot
+    try:
+        times = sim["times"]
+        energies = sim["energies"]
+        fig, ax = plt.subplots(figsize=(6,3))
+        ax.plot(times, energies, label="stored energy (arb)")
+        ax.set_xlabel("time (s) [toy]")
+        ax.set_ylabel("energy (arb)")
+        ax.set_title(f"Toy battery N={sim_payload.get('N',3)} mode={sim_payload.get('mode')}")
+        ax.legend()
+        plot_path = os.path.join(PLOTS_DIR, f"sim_{sim_id}.png")
+        fig.tight_layout()
+        fig.savefig(plot_path)
+        plt.close(fig)
+        sim_record["result"]["plot_path"] = plot_path
+    except Exception as e:
+        sim_record["result"]["plot_error"] = str(e)
+
+    # 6) update DB record with full result
+    update_simulation_result(sim_id, sim_record["result"])
+    return {"sim_id": sim_id, "status": "completed"}
+
+
+
+    # storage.py
+from sqlalchemy import create_engine, Table, Column, Integer, String, Text, MetaData
+from sqlalchemy.sql import select, update
+import json
+import os
+
+DB_URL = os.environ.get("SIM_DB_URL", "sqlite:///simulations.db")
+engine = create_engine(DB_URL, connect_args={"check_same_thread": False})
+metadata = MetaData()
+
+sim_table = Table(
+    "simulations", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("name", String(200)),
+    Column("payload", Text),
+    Column("result", Text),
+)
+
+metadata.create_all(engine)
+
+def store_simulation(name, payload, result):
+    payload_json = json.dumps(payload)
+    result_json = json.dumps(result)
+    with engine.connect() as conn:
+        res = conn.execute(sim_table.insert().values(name=name, payload=payload_json, result=result_json))
+        return int(res.inserted_primary_key[0])
+
+def get_simulation(sim_id):
+    with engine.connect() as conn:
+        row = conn.execute(select([sim_table]).where(sim_table.c.id == sim_id)).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "payload": json.loads(row["payload"]),
+            "result": json.loads(row["result"])
+        }
+
+def update_simulation_result(sim_id, result):
+    result_json = json.dumps(result)
+    with engine.connect() as conn:
+        conn.execute(update(sim_table).where(sim_table.c.id==sim_id).values(result=result_json))
+    return True
+
+
+    # api_main.py
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from tasks import run_simulation_task, celery
+from storage import get_simulation
+import os
+
+app = FastAPI(title="Advanced Safe Quantum Battery Simulator API")
+
+class SimPayload(BaseModel):
+    name: str = "run"
+    mass_kg: float = 0.0
+    N: int = 3
+    delta: float = 1.0
+    g: float = 0.5
+    J: float = 0.0
+    mode: str = "unitary"  # 'unitary' or 'lindblad'
+    collapse_rates: dict = None
+    vehicle_spec: dict = None
+    t_max: float = 1e-31
+    steps: int = 200
+
+@app.post("/submit")
+def submit_sim(p: SimPayload):
+    payload = p.dict()
+    task = run_simulation_task.delay(payload)
+    return {"task_id": task.id, "status": "queued"}
+
+@app.get("/status/{task_id}")
+def get_status(task_id: str):
+    res = celery.AsyncResult(task_id)
+    return {"task_id": task_id, "state": res.state, "info": res.info}
+
+@app.get("/result/{sim_id}")
+def fetch_result(sim_id: int):
+    rec = get_simulation(sim_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Sim not found")
+    return rec
+
+
+    FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+ENV PYTHONUNBUFFERED=1
+EXPOSE 8000
+CMD ["uvicorn", "api_main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+
+version: "3.8"
+services:
+  redis:
+    image: "redis:7-alpine"
+    container_name: sim_redis
+    ports:
+      - "6379:6379"
+
+  web:
+    build: .
+    container_name: sim_web
+    depends_on:
+      - redis
+    ports:
+      - "8000:8000"
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - SIM_DB_URL=sqlite:///simulations.db
+      - PLOTS_DIR=/app/plots
+    volumes:
+      - ./plots:/app/plots
+      - ./simulations.db:/app/simulations.db
+
+  worker:
+    build: .
+    container_name: sim_worker
+    depends_on:
+      - redis
+    command: celery -A tasks.celery worker --loglevel=info
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - SIM_DB_URL=sqlite:///simulations.db
+      - PLOTS_DIR=/app/plots
+    volumes:
+      - ./plots:/app/plots
+      - ./simulations.db:/app/simulations.db
+
+
+      python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+
+CELERY_BROKER_URL=redis://localhost:6379/0 python -c "from tasks import celery; celery.worker_main(['worker','--loglevel=info'])"
+
+
+CELERY_BROKER_URL=redis://localhost:6379/0 uvicorn api_main:app --reload
+
+
 
     
