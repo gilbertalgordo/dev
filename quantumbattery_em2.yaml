@@ -1,0 +1,226 @@
+# save as qb_simulation.py
+"""
+Abstract 'quantum battery' simulation + simple vehicle powerflow.
+This is a purely computational model for research/simulation.
+"""
+
+import math
+import random
+import json
+from dataclasses import dataclass, asdict
+import time
+
+@dataclass
+class QuantumBattery:
+    capacity_kwh: float        # nominal capacity
+    soc_kwh: float             # current stored energy (kWh)
+    max_charge_kw: float       # max charging power (kW)
+    max_discharge_kw: float    # max discharging power (kW)
+    roundtrip_efficiency: float # 0..1
+    leakage_kw: float          # passive loss (kW)
+    quantum_boost: float       # abstract factor (>=1) modeling hypothetical quantum speed gains
+    degradation_pct: float     # capacity loss fraction per 1000 cycles (toy)
+
+    def step(self, dt_hours: float, charge_power_kw: float, discharge_power_kw: float):
+        """
+        dt_hours: timestep in hours
+        charge_power_kw: requested charging power (kW)
+        discharge_power_kw: requested discharging power (kW)
+        """
+        # clamp to device limits
+        charge_power_kw = max(0.0, min(charge_power_kw, self.max_charge_kw * self.quantum_boost))
+        discharge_power_kw = max(0.0, min(discharge_power_kw, self.max_discharge_kw * self.quantum_boost))
+
+        net_in_kwh = 0.0
+
+        # charging
+        if charge_power_kw > 0:
+            charged = charge_power_kw * dt_hours * self.roundtrip_efficiency
+            # capacity headroom
+            headroom = max(0.0, self.capacity_kwh - self.soc_kwh)
+            charged = min(charged, headroom)
+            self.soc_kwh += charged
+            net_in_kwh += charged
+
+        # discharging
+        if discharge_power_kw > 0:
+            requested = discharge_power_kw * dt_hours / self.roundtrip_efficiency
+            available = max(0.0, self.soc_kwh)
+            taken = min(requested, available)
+            self.soc_kwh -= taken
+            net_in_kwh -= taken * self.roundtrip_efficiency
+
+        # leakage
+        leakage = self.leakage_kw * dt_hours
+        self.soc_kwh = max(0.0, self.soc_kwh - leakage)
+        net_in_kwh -= leakage
+
+        # simple degradation model (toy): each full kWh throughput contributes to tiny degradation
+        throughput = abs(net_in_kwh)
+        cycle_fraction = throughput / self.capacity_kwh if self.capacity_kwh>0 else 0.0
+        # degrade capacity slowly (very small)
+        self.capacity_kwh *= (1.0 - self.degradation_pct * cycle_fraction)
+
+        return {
+            "soc_kwh": self.soc_kwh,
+            "capacity_kwh": self.capacity_kwh,
+            "net_in_kwh": net_in_kwh,
+            "leakage_kwh": leakage
+        }
+
+@dataclass
+class Vehicle:
+    base_load_kw: float  # background consumption at idle/cruise (kW)
+    motor_power_kw: float # peak motor draw (kW)
+    drivetrain_efficiency: float # 0..1
+    aux_load_kw: float   # climate, electronics
+
+    def step(self, dt_hours: float, throttle: float):
+        """
+        throttle: 0..1, fraction of motor power requested
+        Returns power demand in kW
+        """
+        motor_draw = self.motor_power_kw * throttle / max(1e-6, self.drivetrain_efficiency)
+        total_kw = self.base_load_kw + motor_draw + self.aux_load_kw
+        return total_kw
+
+def run_simulation():
+    bat = QuantumBattery(
+        capacity_kwh=200.0,
+        soc_kwh=100.0,
+        max_charge_kw=250.0,
+        max_discharge_kw=500.0,
+        roundtrip_efficiency=0.95,
+        leakage_kw=0.05,
+        quantum_boost=1.0,   # set >1 for simulated 'quantum advantage'
+        degradation_pct=0.0001
+    )
+
+    veh = Vehicle(base_load_kw=2.5, motor_power_kw=300.0, drivetrain_efficiency=0.92, aux_load_kw=1.5)
+
+    dt = 1.0/60.0  # 1 minute timestep = 1/60 hour
+    sim_hours = 2.0
+    steps = int(sim_hours / dt)
+
+    log = []
+    for i in range(steps):
+        # simple drive cycle: accelerate first 10 minutes, cruise next 80, then rest
+        t = i * dt
+        if t < 0.1667:  # first 10 minutes
+            throttle = min(1.0, t / 0.1667)
+        elif t < 1.5:
+            throttle = 0.3  # cruise
+        else:
+            throttle = 0.0
+
+        demand_kw = veh.step(dt, throttle)
+        # battery supplies demand; if regenerative braking, we could set negative demand (omitted)
+        # if demand positive, request discharge; otherwise if negative request charge
+        if demand_kw > 0:
+            result = bat.step(dt, charge_power_kw=0.0, discharge_power_kw=demand_kw)
+        else:
+            result = bat.step(dt, charge_power_kw=-demand_kw, discharge_power_kw=0.0)
+
+        entry = {
+            "time_h": t,
+            "throttle": throttle,
+            "demand_kw": demand_kw,
+            **result
+        }
+        log.append(entry)
+
+    # write log
+    with open("sim_log.json", "w") as f:
+        json.dump(log, f, indent=2)
+    print("Simulation complete. Log written to sim_log.json")
+
+if __name__ == "__main__":
+    run_simulation()
+
+
+   # save as qb_api.py
+from flask import Flask, jsonify, request
+from qb_simulation import QuantumBattery
+import threading, time
+
+app = Flask(__name__)
+
+# single global simulator (toy)
+bat = QuantumBattery(
+    capacity_kwh=200.0,
+    soc_kwh=100.0,
+    max_charge_kw=250.0,
+    max_discharge_kw=500.0,
+    roundtrip_efficiency=0.95,
+    leakage_kw=0.05,
+    quantum_boost=1.0,
+    degradation_pct=0.0001
+)
+
+# background thread to tick the battery at fixed dt (software-only)
+lock = threading.Lock()
+_dt_hours = 1.0/3600.0  # 1 second timestep
+
+def tick_loop():
+    while True:
+        time.sleep(1.0)
+        with lock:
+            bat.step(_dt_hours, charge_power_kw=0.0, discharge_power_kw=0.0)
+
+t = threading.Thread(target=tick_loop, daemon=True)
+t.start()
+
+@app.route("/battery/status")
+def status():
+    with lock:
+        return jsonify({
+            "soc_kwh": bat.soc_kwh,
+            "capacity_kwh": bat.capacity_kwh,
+            "max_charge_kw": bat.max_charge_kw * bat.quantum_boost,
+            "max_discharge_kw": bat.max_discharge_kw * bat.quantum_boost,
+            "roundtrip_efficiency": bat.roundtrip_efficiency
+        })
+
+@app.route("/battery/control", methods=["POST"])
+def control():
+    payload = request.json or {}
+    c = payload.get("charge_kw", 0.0)
+    d = payload.get("discharge_kw", 0.0)
+    dt_h = payload.get("dt_h", 1.0/3600.0)
+    with lock:
+        res = bat.step(dt_h, charge_power_kw=c, discharge_power_kw=d)
+    return jsonify(res)
+
+if __name__ == "__main__":
+    app.run(port=5002)
+
+
+    // React component (BatteryDashboard.jsx)
+import React, {useEffect, useState} from "react";
+
+export default function BatteryDashboard(){
+  const [status, setStatus] = useState(null);
+
+  useEffect(()=> {
+    async function load(){
+      const r = await fetch("http://localhost:5002/battery/status");
+      setStatus(await r.json());
+    }
+    load();
+    const id = setInterval(load, 2000);
+    return ()=> clearInterval(id);
+  }, []);
+
+  if(!status) return <div>Loading...</div>;
+  return (
+    <div style={{fontFamily:"sans-serif",padding:20}}>
+      <h2>Abstract Quantum Battery (sim)</h2>
+      <div>State of Charge: {(status.soc_kwh/status.capacity_kwh*100).toFixed(2)}%</div>
+      <div>{status.soc_kwh.toFixed(2)} kWh / {status.capacity_kwh.toFixed(2)} kWh</div>
+      <div>Max discharge (sim): {status.max_discharge_kw.toFixed(1)} kW</div>
+      <div>Round trip eff: {(status.roundtrip_efficiency*100).toFixed(1)}%</div>
+    </div>
+  );
+}
+
+
