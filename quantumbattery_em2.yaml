@@ -224,3 +224,647 @@ export default function BatteryDashboard(){
 }
 
 
+"""
+quantum_battery_fusion.py
+
+A conceptual, purely-software simulation of combining two battery modules:
+ - "Einstein EM2" (modeled as high-energy-density classical-ish cell)
+ - "Algordo Quantum Battery" (modeled with a quantum-coherence parameter that
+    speeds up charging via collective coupling)
+
+This file provides:
+ - BatteryCell class (capacity, internal resistance, self_discharge, max_charge_power)
+ - QuantumBattery subclass with `coherence_factor` that changes charge kinetics
+ - fusion() to combine two cells into a HybridBattery
+ - simulate_charge_discharge() to run simple time-stepped simulations
+
+Note: This is a simulation framework only. NOT instructions for building hardware.
+"""
+
+import math
+import numpy as np
+
+class BatteryCell:
+    def __init__(self,
+                 name="Cell",
+                 capacity_joules=1e6,        # stored energy in joules (J)
+                 voltage_nominal=3.7,        # nominal volts
+                 internal_resistance_ohm=0.05,
+                 self_discharge_rate_per_s=1e-7,
+                 max_charge_power_w=1e3,
+                 max_discharge_power_w=1e3):
+        self.name = name
+        self.capacity_j = capacity_joules
+        self.voltage = voltage_nominal
+        self.R_int = internal_resistance_ohm
+        self.self_discharge = self_discharge_rate_per_s
+        self.max_charge_power = max_charge_power_w
+        self.max_discharge_power = max_discharge_power_w
+        # state of charge in joules
+        self.energy = 0.0
+
+    @property
+    def soc(self):
+        return max(0.0, min(1.0, self.energy / self.capacity_j))
+
+    def step_self_discharge(self, dt):
+        # exponential decay approx
+        lost = self.energy * (1 - math.exp(-self.self_discharge * dt))
+        self.energy -= lost
+        return lost
+
+    def charge_step(self, power_w, dt):
+        # Clamp power to max_charge_power
+        power = min(power_w, self.max_charge_power)
+        # energy added = power * dt minus I^2R loss (simple approx)
+        added = power * dt
+        # approximate I through battery: I = P/V (voltage assumed constant for simplicity)
+        I = power / max(0.1, self.voltage)
+        ohmic_loss = (I**2) * self.R_int * dt
+        net = max(0.0, added - ohmic_loss)
+        prev = self.energy
+        self.energy = min(self.capacity_j, self.energy + net)
+        return self.energy - prev, ohmic_loss
+
+    def discharge_step(self, power_w, dt):
+        power = min(power_w, self.max_discharge_power)
+        demanded = power * dt
+        actual = min(self.energy, demanded)
+        # losses similarly
+        I = (power / max(0.1, self.voltage))
+        ohmic_loss = (I**2) * self.R_int * dt
+        net_removed = max(0.0, actual + ohmic_loss)
+        prev = self.energy
+        self.energy = max(0.0, self.energy - net_removed)
+        return prev - self.energy, ohmic_loss
+
+class QuantumBattery(BatteryCell):
+    def __init__(self, coherence_factor=1.0, **kwargs):
+        """
+        coherence_factor:
+            1.0 -> no quantum speedup (behaves like classical)
+            >1.0 -> collective/quantum charging speedup factor for charge rate
+            Typically small numbers like 1.5–10 used for exploration.
+        """
+        super().__init__(**kwargs)
+        self.coherence_factor = coherence_factor
+
+    def charge_step(self, power_w, dt):
+        """
+        Quantum battery speeds up the effective charge transfer.
+        We'll model that the available effective charge power scales with
+        coherence_factor^alpha (alpha tunable); here we use alpha=0.75 to
+        keep gains sub-linear for realism.
+        """
+        alpha = 0.75
+        effective_power = power_w * (self.coherence_factor ** alpha)
+        # but ohmic losses may increase with coherence if currents are higher;
+        # model internal resistance reducing slightly with coherence (heuristic)
+        old_R = self.R_int
+        self.R_int = max(0.0001, self.R_int / (1 + 0.1*(self.coherence_factor-1)))
+        added, ohmic = super(QuantumBattery, self).charge_step(effective_power, dt)
+        self.R_int = old_R
+        return added, ohmic
+
+def fusion(cell_a: BatteryCell, cell_b: BatteryCell, hybrid_name="Hybrid") -> BatteryCell:
+    """
+    Combine two BatteryCell-like objects into a simple hybrid cell model.
+    For safety and simplicity, fusion returns a new BatteryCell (or QuantumBattery)
+    whose parameters are computed heuristically:
+      - capacity = sum of capacities
+      - internal_resistance = parallel-equivalent approximation
+      - max_power = sum of max powers
+      - coherence_factor = weighted average if either is QuantumBattery
+    This is a conceptual "design fusion" not a physical blueprint.
+    """
+    cap = cell_a.capacity_j + cell_b.capacity_j
+    # parallel resistance heuristic: 1 / (1/Ra + 1/Rb)
+    R_a = max(1e-6, cell_a.R_int)
+    R_b = max(1e-6, cell_b.R_int)
+    R_hybrid = 1.0 / (1.0/R_a + 1.0/R_b)
+    max_charge = cell_a.max_charge_power + cell_b.max_charge_power
+    max_discharge = cell_a.max_discharge_power + cell_b.max_discharge_power
+    # coherence: weighted by energy capacity
+    coh_a = getattr(cell_a, "coherence_factor", 1.0)
+    coh_b = getattr(cell_b, "coherence_factor", 1.0)
+    coh = (coh_a * cell_a.capacity_j + coh_b * cell_b.capacity_j) / max(1.0, cap)
+    # pick a representative voltage (energy-weighted)
+    v = (cell_a.voltage * cell_a.capacity_j + cell_b.voltage * cell_b.capacity_j) / max(1.0, cap)
+
+    # If either had "quantum" behavior, return QuantumBattery to carry coherence
+    if isinstance(cell_a, QuantumBattery) or isinstance(cell_b, QuantumBattery) or coh != 1.0:
+        hybrid = QuantumBattery(
+            name=hybrid_name,
+            capacity_joules=cap,
+            voltage_nominal=v,
+            internal_resistance_ohm=R_hybrid,
+            self_discharge_rate_per_s=max(cell_a.self_discharge, cell_b.self_discharge),
+            max_charge_power_w=max_charge,
+            max_discharge_power_w=max_discharge,
+            coherence_factor=coh
+        )
+    else:
+        hybrid = BatteryCell(
+            name=hybrid_name,
+            capacity_joules=cap,
+            voltage_nominal=v,
+            internal_resistance_ohm=R_hybrid,
+            self_discharge_rate_per_s=max(cell_a.self_discharge, cell_b.self_discharge),
+            max_charge_power_w=max_charge,
+            max_discharge_power_w=max_discharge,
+        )
+    # start hybrid with combined energy (sum of components' energies)
+    hybrid.energy = cell_a.energy + cell_b.energy
+    return hybrid
+
+def simulate_charge(cell, charge_power_w, dt=0.1, t_total=600.0):
+    """
+    Simulate charging the cell with fixed power until full or time runs out.
+    Returns arrays: times, socs, energies, losses
+    """
+    steps = int(max(1, t_total / dt))
+    times = np.linspace(0, steps*dt, steps+1)
+    socs = []
+    energies = []
+    losses = []
+    for i in range(steps+1):
+        socs.append(cell.soc)
+        energies.append(cell.energy)
+        losses.append(0.0)
+        if cell.soc >= 0.9999:
+            break
+        added, ohmic = cell.charge_step(charge_power_w, dt)
+        sd = cell.step_self_discharge(dt)
+        losses[-1] = ohmic + sd
+    return times[:len(socs)], np.array(socs), np.array(energies), np.array(losses)
+
+def simulate_discharge(cell, discharge_power_w, dt=0.1, t_total=600.0):
+    steps = int(max(1, t_total / dt))
+    times = np.linspace(0, steps*dt, steps+1)
+    socs = []
+    energies = []
+    losses = []
+    for i in range(steps+1):
+        socs.append(cell.soc)
+        energies.append(cell.energy)
+        losses.append(0.0)
+        if cell.soc <= 0.0001:
+            break
+        removed, ohmic = cell.discharge_step(discharge_power_w, dt)
+        sd = cell.step_self_discharge(dt)
+        losses[-1] = ohmic + sd
+    return times[:len(socs)], np.array(socs), np.array(energies), np.array(losses)
+
+# Example quick usage as script
+if __name__ == "__main__":
+    # Conceptual "Einstein EM2" (modeled as high capacity classical cell)
+    em2 = BatteryCell(name="Einstein EM2",
+                      capacity_joules=5e6, voltage_nominal=4.0,
+                      internal_resistance_ohm=0.08,
+                      self_discharge_rate_per_s=5e-8,
+                      max_charge_power_w=5e3,
+                      max_discharge_power_w=5e3)
+    em2.energy = 0.0  # start empty
+
+    # "Algordo Quantum Battery" (smaller capacity but quantum speedup)
+    algordo = QuantumBattery(name="Algordo Quantum",
+                             capacity_joules=1e6, voltage_nominal=3.8,
+                             internal_resistance_ohm=0.02,
+                             self_discharge_rate_per_s=2e-7,
+                             max_charge_power_w=2e3,
+                             max_discharge_power_w=2e3,
+                             coherence_factor=4.0)
+    algordo.energy = 0.0
+
+    # Fuse them into a hybrid
+    hybrid = fusion(em2, algordo, hybrid_name="EM2-Algordo-Hybrid")
+    print("Hybrid:", hybrid.name, "Capacity (J):", hybrid.capacity_j,
+          "Coherence:", getattr(hybrid, "coherence_factor", 1.0),
+          "R_int:", hybrid.R_int)
+
+    # Simulate charging the hybrid at 6 kW
+    times, socs, energies, losses = simulate_charge(hybrid, charge_power_w=6000.0, dt=0.5, t_total=3600)
+    # Print final SOC and some stats
+    print("Final SOC:", socs[-1], "Energy (J):", energies[-1])
+    print("Total simulated time (s):", times[-1])
+
+
+    """
+hybrid_battery_vehicle_sim.py
+
+Safe simulation toolkit for conceptually combining:
+ - "Einstein EM2" (conceptual high-energy classical module)
+ - "Algordo Quantum" (conceptual quantum-assisted module)
+
+This code is strictly a software simulation / design exploration aid.
+NO hardware construction, wiring, manufacturing, or real-world assembly guidance
+is provided or implied.
+
+Install dependencies:
+    pip install numpy matplotlib
+
+Run:
+    python hybrid_battery_vehicle_sim.py
+"""
+
+import math
+import numpy as np
+import matplotlib.pyplot as plt
+
+# --------------------------
+# Battery models (abstract)
+# --------------------------
+class BatteryCell:
+    def __init__(self,
+                 name="Cell",
+                 capacity_j=1e6,        # stored energy (J) - abstract
+                 nominal_voltage=3.7,   # used only for current approximations (abstract)
+                 internal_resistance_ohm=0.05,
+                 self_discharge_per_s=1e-7,
+                 max_charge_power_w=1e3,
+                 max_discharge_power_w=1e3,
+                 mass_kg=10.0,
+                 volume_m3=0.01,
+                 thermal_capacity_j_per_k=1e4,
+                 thermal_loss_w_per_k=10.0):
+        self.name = name
+        self.capacity_j = capacity_j
+        self.voltage = nominal_voltage
+        self.R_int = internal_resistance_ohm
+        self.self_discharge = self_discharge_per_s
+        self.max_charge_power = max_charge_power_w
+        self.max_discharge_power = max_discharge_power_w
+        self.energy = 0.0  # current stored energy (J)
+        self.mass = mass_kg
+        self.volume = volume_m3
+        # thermal state
+        self.temp_k = 293.15  # Kelvin
+        self.thermal_capacity = thermal_capacity_j_per_k
+        self.thermal_loss_coeff = thermal_loss_w_per_k
+
+    @property
+    def soc(self):
+        return max(0.0, min(1.0, self.energy / max(1e-12, self.capacity_j)))
+
+    def step_self_discharge(self, dt):
+        lost = self.energy * (1 - math.exp(-self.self_discharge * dt))
+        self.energy -= lost
+        return lost
+
+    def charge_step(self, power_w, dt):
+        """Charge dynamics (abstract). Returns (energy_added, loss_j, heat_generated_j)."""
+        power = min(power_w, self.max_charge_power)
+        added = power * dt
+        I = power / max(0.1, self.voltage)
+        ohmic_loss = (I**2) * self.R_int * dt
+        net = max(0.0, added - ohmic_loss)
+        prev = self.energy
+        self.energy = min(self.capacity_j, self.energy + net)
+        heat = ohmic_loss  # treat ohmic loss as heat
+        return self.energy - prev, ohmic_loss, heat
+
+    def discharge_step(self, power_w, dt):
+        power = min(power_w, self.max_discharge_power)
+        demanded = power * dt
+        actual = min(self.energy, demanded)
+        I = power / max(0.1, self.voltage)
+        ohmic_loss = (I**2) * self.R_int * dt
+        net_removed = max(0.0, actual + ohmic_loss)
+        prev = self.energy
+        self.energy = max(0.0, self.energy - net_removed)
+        heat = ohmic_loss
+        return prev - self.energy, ohmic_loss, heat
+
+    def thermal_step(self, heat_j, ambient_k, dt):
+        # heat_j added, passive cooling proportional to delta T
+        dT = heat_j / self.thermal_capacity - (self.temp_k - ambient_k) * (self.thermal_loss_coeff * dt) / self.thermal_capacity
+        self.temp_k += dT
+        return dT
+
+class QuantumBattery(BatteryCell):
+    def __init__(self, coherence_factor=1.0, **kwargs):
+        super().__init__(**kwargs)
+        self.coherence_factor = coherence_factor
+
+    def charge_step(self, power_w, dt):
+        # Model: effective charging power scaled by coherence^(alpha), heuristic
+        alpha = 0.7
+        effective_power = min(power_w * (self.coherence_factor ** alpha), self.max_charge_power * (self.coherence_factor ** 0.3))
+        # Slightly alter internal resistance heuristically (note: abstract)
+        old_R = self.R_int
+        self.R_int = max(1e-6, self.R_int / (1.0 + 0.08 * (self.coherence_factor - 1.0)))
+        added, loss, heat = super(QuantumBattery, self).charge_step(effective_power, dt)
+        self.R_int = old_R
+        return added, loss, heat
+
+# --------------------------
+# Fusion function (non-actionable)
+# --------------------------
+def fusion(cell_a: BatteryCell, cell_b: BatteryCell, hybrid_name="Hybrid"):
+    """
+    Heuristic fusion: produce a new abstract BatteryCell/QuantumBattery representing combined behavior.
+    This is a conceptual model only (no hardware instructions).
+    """
+    cap = cell_a.capacity_j + cell_b.capacity_j
+    # parallel resistance heuristic
+    Ra = max(1e-9, cell_a.R_int)
+    Rb = max(1e-9, cell_b.R_int)
+    R_hybrid = 1.0 / (1.0/Ra + 1.0/Rb)
+    max_charge = cell_a.max_charge_power + cell_b.max_charge_power
+    max_discharge = cell_a.max_discharge_power + cell_b.max_discharge_power
+    coh_a = getattr(cell_a, "coherence_factor", 1.0)
+    coh_b = getattr(cell_b, "coherence_factor", 1.0)
+    coh = (coh_a * cell_a.capacity_j + coh_b * cell_b.capacity_j) / max(1.0, cap)
+    mass = cell_a.mass + cell_b.mass
+    vol = cell_a.volume + cell_b.volume
+    temp = max(cell_a.temp_k, cell_b.temp_k)
+    thermal_cap = cell_a.thermal_capacity + cell_b.thermal_capacity
+    thermal_loss = max(cell_a.thermal_loss_coeff, cell_b.thermal_loss_coeff)
+
+    if isinstance(cell_a, QuantumBattery) or isinstance(cell_b, QuantumBattery) or coh != 1.0:
+        hybrid = QuantumBattery(
+            name=hybrid_name,
+            capacity_j=cap,
+            nominal_voltage=(cell_a.voltage*cell_a.capacity_j + cell_b.voltage*cell_b.capacity_j)/max(1.0, cap),
+            internal_resistance_ohm=R_hybrid,
+            self_discharge_per_s=max(cell_a.self_discharge, cell_b.self_discharge),
+            max_charge_power_w=max_charge,
+            max_discharge_power_w=max_discharge,
+            mass_kg=mass,
+            volume_m3=vol,
+            thermal_capacity_j_per_k=thermal_cap,
+            thermal_loss_w_per_k=thermal_loss,
+            coherence_factor=coh
+        )
+    else:
+        hybrid = BatteryCell(
+            name=hybrid_name,
+            capacity_j=cap,
+            nominal_voltage=(cell_a.voltage*cell_a.capacity_j + cell_b.voltage*cell_b.capacity_j)/max(1.0, cap),
+            internal_resistance_ohm=R_hybrid,
+            self_discharge_per_s=max(cell_a.self_discharge, cell_b.self_discharge),
+            max_charge_power_w=max_charge,
+            max_discharge_power_w=max_discharge,
+            mass_kg=mass,
+            volume_m3=vol,
+            thermal_capacity_j_per_k=thermal_cap,
+            thermal_loss_w_per_k=thermal_loss
+        )
+
+    hybrid.energy = cell_a.energy + cell_b.energy
+    hybrid.temp_k = temp
+    return hybrid
+
+# --------------------------
+# Vehicle models (simplified)
+# --------------------------
+class VehiclePlatform:
+    def __init__(self, name, mass_kg, drag_coefficient, frontal_area_m2, rolling_resistance_coeff, propulsive_efficiency):
+        self.name = name
+        self.mass = mass_kg
+        self.Cd = drag_coefficient
+        self.A = frontal_area_m2
+        self.Crr = rolling_resistance_coeff
+        self.eta = propulsive_efficiency  # drivetrain/propulsion efficiency (0..1)
+
+    def power_required_cruise(self, speed_m_s, air_density=1.225, g=9.81, gradient=0.0):
+        # aerodynamic drag
+        p_aero = 0.5 * air_density * self.Cd * self.A * speed_m_s**3
+        # rolling resistance force * speed
+        F_rr = self.Crr * self.mass * g * math.cos(math.atan(gradient))
+        p_rr = F_rr * speed_m_s
+        # climb power
+        p_climb = self.mass * g * speed_m_s * math.sin(math.atan(gradient))
+        total_mech = p_aero + p_rr + p_climb
+        # account for propulsive efficiency
+        return total_mech / max(1e-6, self.eta)
+
+class Car(VehiclePlatform):
+    def __init__(self, mass_kg=1500.0):
+        super().__init__("Car", mass_kg, drag_coefficient=0.28, frontal_area_m2=2.2, rolling_resistance_coeff=0.01, propulsive_efficiency=0.85)
+
+class Aircraft(VehiclePlatform):
+    def __init__(self, mass_kg=5000.0):
+        # For aircraft, Cd*A as combined term, efficiency lower
+        super().__init__("Aircraft", mass_kg, drag_coefficient=0.03, frontal_area_m2=8.0, rolling_resistance_coeff=0.0, propulsive_efficiency=0.70)
+
+class Drone(VehiclePlatform):
+    def __init__(self, mass_kg=5.0):
+        super().__init__("Drone", mass_kg, drag_coefficient=1.0, frontal_area_m2=0.1, rolling_resistance_coeff=0.0, propulsive_efficiency=0.65)
+
+# --------------------------
+# Battery Management System (algorithmic only)
+# --------------------------
+class BMSController:
+    """
+    Abstract BMS state machine and logic (non-actionable pseudocode implemented).
+    Tracks SOC, temperature, enforces charge/discharge limits, logs events.
+    """
+    def __init__(self, cell: BatteryCell, soc_min=0.05, soc_max=0.98, temp_max_k=330.0, temp_min_k=263.15):
+        self.cell = cell
+        self.soc_min = soc_min
+        self.soc_max = soc_max
+        self.temp_max_k = temp_max_k
+        self.temp_min_k = temp_min_k
+        self.state = "IDLE"  # IDLE, CHARGING, DISCHARGING, FAULT
+        self.logs = []
+
+    def request_charge(self, power_w):
+        # software-level checks only
+        if self.state == "FAULT":
+            self.logs.append(("charge_rejected_fault", self.cell.soc, self.cell.temp_k))
+            return 0.0
+        if self.cell.soc >= self.soc_max:
+            self.logs.append(("charge_rejected_soc_high", self.cell.soc))
+            return 0.0
+        if self.cell.temp_k > self.temp_max_k:
+            self.logs.append(("charge_rejected_temp_high", self.cell.temp_k))
+            return 0.0
+        # clamp to safe power
+        allowed = min(power_w, self.cell.max_charge_power)
+        self.state = "CHARGING"
+        self.logs.append(("charge_started", allowed))
+        return allowed
+
+    def request_discharge(self, power_w):
+        if self.state == "FAULT":
+            self.logs.append(("discharge_rejected_fault", self.cell.soc, self.cell.temp_k))
+            return 0.0
+        if self.cell.soc <= self.soc_min:
+            self.logs.append(("discharge_rejected_soc_low", self.cell.soc))
+            return 0.0
+        if self.cell.temp_k > self.temp_max_k:
+            self.logs.append(("discharge_rejected_temp_high", self.cell.temp_k))
+            return 0.0
+        allowed = min(power_w, self.cell.max_discharge_power)
+        self.state = "DISCHARGING"
+        self.logs.append(("discharge_started", allowed))
+        return allowed
+
+    def evaluate(self):
+        # periodic health checks; set FAULT if critical
+        if self.cell.temp_k > self.temp_max_k + 10:
+            self.state = "FAULT"
+            self.logs.append(("fault_overtemp", self.cell.temp_k))
+
+    def idle(self):
+        if self.state not in ("FAULT",):
+            self.state = "IDLE"
+
+# --------------------------
+# Simple thermal-risk metric (probabilistic, abstract)
+# --------------------------
+def thermal_risk_metric(cell: BatteryCell):
+    """
+    Abstract risk function: as temperature rises and SOC is high, risk increases.
+    Returns risk in [0,1] (abstract probability-of-event metric).
+    """
+    t = cell.temp_k
+    soc = cell.soc
+    # threshold shaping
+    T_safe = 310.0
+    slope = 0.05
+    risk_temp = 1.0 / (1.0 + math.exp(-(t - T_safe) * slope))
+    risk_soc = max(0.0, (soc - 0.8) / 0.2)  # ramps up above 80% SOC
+    combined = min(1.0, risk_temp * 0.7 + risk_soc * 0.4)
+    return combined
+
+# --------------------------
+# Simulation harness
+# --------------------------
+def simulate_vehicle_range(vehicle: VehiclePlatform, battery: BatteryCell, speed_m_s, distance_m, ambient_k=293.15, dt=1.0):
+    """
+    Simulate driving/flying a fixed distance at a constant speed and compute if battery can supply energy.
+    Returns dict with results and time-series arrays.
+    """
+    bms = BMSController(battery)
+    t = 0.0
+    traveled = 0.0
+    times = []
+    socs = []
+    temps = []
+    powers = []
+    thermal_risks = []
+    max_temp = battery.temp_k
+
+    while traveled < distance_m and battery.soc > 0.0 and t < 1e6:
+        # compute required propulsion power
+        p_req = vehicle.power_required_cruise(speed_m_s)  # W
+        # ask BMS for allowed power
+        allowed = bms.request_discharge(p_req)
+        if allowed <= 0.0:
+            # cannot supply power -> abort
+            break
+        # discharge
+        energy_removed_j, loss_j, heat_j = battery.discharge_step(allowed, dt)
+        # thermal update
+        dT = battery.thermal_step(heat_j, ambient_k, dt)
+        max_temp = max(max_temp, battery.temp_k)
+        # update motion (distance)
+        traveled += speed_m_s * dt
+        t += dt
+        times.append(t)
+        socs.append(battery.soc)
+        temps.append(battery.temp_k)
+        powers.append(allowed)
+        thermal_risks.append(thermal_risk_metric(battery))
+        bms.evaluate()
+        if bms.state == "FAULT":
+            break
+
+    success = (traveled >= distance_m)
+    return {
+        "success": success,
+        "distance_traveled_m": traveled,
+        "time_s": t,
+        "final_soc": battery.soc,
+        "max_temp_k": max_temp,
+        "times": np.array(times),
+        "socs": np.array(socs),
+        "temps": np.array(temps),
+        "powers": np.array(powers),
+        "thermal_risks": np.array(thermal_risks),
+        "bms_logs": bms.logs
+    }
+
+# --------------------------
+# Example scenarios (no hardware steps)
+# --------------------------
+def run_examples():
+    # Create conceptual modules
+    em2 = BatteryCell(name="Einstein EM2",
+                      capacity_j=9e7,  # ~25 kWh in joules (25 kWh ~ 9e7 J) - conceptual only
+                      nominal_voltage=400.0,
+                      internal_resistance_ohm=0.05,
+                      max_charge_power_w=30000.0,
+                      max_discharge_power_w=30000.0,
+                      mass_kg=350.0,
+                      volume_m3=0.25,
+                      thermal_capacity_j_per_k=4e5,
+                      thermal_loss_w_per_k=500.0)
+    em2.energy = 0.9 * em2.capacity_j
+
+    algordo = QuantumBattery(name="Algordo Quantum",
+                             capacity_j=2.5e7,  # ~6.9 kWh
+                             nominal_voltage=350.0,
+                             internal_resistance_ohm=0.02,
+                             max_charge_power_w=15000.0,
+                             max_discharge_power_w=15000.0,
+                             mass_kg=90.0,
+                             volume_m3=0.08,
+                             thermal_capacity_j_per_k=1.2e5,
+                             thermal_loss_w_per_k=200.0,
+                             coherence_factor=4.0)
+    algordo.energy = 0.9 * algordo.capacity_j
+
+    hybrid = fusion(em2, algordo, hybrid_name="EM2-Algordo-Hybrid")
+    hybrid.energy = 0.9 * hybrid.capacity_j  # start at 90%
+
+    # Vehicles
+    car = Car(mass_kg=1800.0)
+    aircraft = Aircraft(mass_kg=6000.0)
+    drone = Drone(mass_kg=10.0)
+
+    # Scenario 1: Car, 120 km at 20 m/s (~72 km/h)
+    print("=== Car scenario (72 km/h, 120 km) ===")
+    dist_m = 120_000.0
+    speed = 20.0
+    res_car = simulate_vehicle_range(car, hybrid, speed, dist_m, ambient_k=293.15, dt=1.0)
+    print("Success:", res_car["success"], "Traveled (km):", res_car["distance_traveled_m"]/1000.0,
+          "Final SOC:", res_car["final_soc"], "Max temp (K):", res_car["max_temp_k"])
+
+    # Scenario 2: Aircraft short-hop: 300 km cruise at 200 m/s (~720 km/h)
+    print("\n=== Aircraft scenario (720 km/h, 300 km) ===")
+    dist_m = 300_000.0
+    speed = 200.0
+    # copy a fresh hybrid instance to avoid state carry-over
+    hybrid2 = fusion(em2, algordo, hybrid_name="EM2-Algordo-Hybrid-Air")
+    hybrid2.energy = 0.95 * hybrid2.capacity_j
+    res_ac = simulate_vehicle_range(aircraft, hybrid2, speed, dist_m, ambient_k=273.15, dt=1.0)
+    print("Success:", res_ac["success"], "Traveled (km):", res_ac["distance_traveled_m"]/1000.0,
+          "Final SOC:", res_ac["final_soc"], "Max temp (K):", res_ac["max_temp_k"])
+
+    # Scenario 3: Drone: 40 km range at 15 m/s (hover/climb ignored; simplistic)
+    print("\n=== Drone scenario (15 m/s, 40 km) ===")
+    dist_m = 40_000.0
+    speed = 15.0
+    hybrid3 = fusion(em2, algordo, hybrid_name="EM2-Algordo-Hybrid-Drone")
+    hybrid3.energy = 0.9 * hybrid3.capacity_j
+    res_dr = simulate_vehicle_range(drone, hybrid3, speed, dist_m, ambient_k=298.15, dt=1.0)
+    print("Success:", res_dr["success"], "Traveled (km):", res_dr["distance_traveled_m"]/1000.0,
+          "Final SOC:", res_dr["final_soc"], "Max temp (K):", res_dr["max_temp_k"])
+
+    # Plotting example: thermal risk over time for car scenario
+    plt.figure()
+    plt.plot(res_car["times"]/3600.0, res_car["thermal_risks"])
+    plt.xlabel("Time (hours)")
+    plt.ylabel("Thermal risk (abstract 0..1)")
+    plt.title("Car scenario: thermal risk over time (abstract metric)")
+    plt.grid(True)
+    plt.show()
+
+if __name__ == "__main__":
+    run_examples()
+
+
+    
