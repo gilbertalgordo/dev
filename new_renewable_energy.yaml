@@ -1,0 +1,484 @@
+# Constants for a hypothetical heavy-duty system
+MAX_GRID_IMPORT_MW = 10.0  # Maximum power we are allowed to import from the utility grid
+MIN_BATTERY_SoC = 0.20     # Don't let the battery drop below 20%
+MAX_BATTERY_SoC = 0.95     # Don't charge the battery above 95%
+BATTERY_CAPACITY_MWh = 50.0 # Total installed battery capacity
+
+def calculate_dispatch(predicted_load_MW, predicted_solar_MW, battery_SoC, current_battery_charge_MW):
+    """
+    Determines the required power action based on predictions and current state.
+
+    :param predicted_load_MW: Forecasted power demand (MW)
+    :param predicted_solar_MW: Forecasted solar generation (MW)
+    :param battery_SoC: Current Battery State of Charge (0.0 to 1.0)
+    :param current_battery_charge_MW: Current battery charging/discharging rate (-ve is discharge, +ve is charge)
+    :return: A dictionary of recommended actions
+    """
+    net_demand = predicted_load_MW - predicted_solar_MW
+    battery_charge_target_MW = 0.0
+    grid_import_export_MW = 0.0
+
+    # 1. Handle Battery State Limits
+    if battery_SoC <= MIN_BATTERY_SoC and net_demand > 0:
+        # Emergency: Battery is too low, we must rely on the grid or curtail load (not shown)
+        print("ALERT: Battery is near depletion. Prioritizing grid import.")
+        battery_charge_target_MW = 0.0
+    elif battery_SoC >= MAX_BATTERY_SoC and net_demand < 0:
+        # Battery is full, excess renewable must be exported or curtailed
+        print("WARNING: Battery is full. Curtailing solar or exporting to grid.")
+        battery_charge_target_MW = 0.0
+
+    # 2. Main Dispatch Logic
+    if net_demand > 0:
+        # We need more power
+        if battery_SoC > MIN_BATTERY_SoC:
+            # Try to cover the deficit by discharging the battery
+            battery_discharge_rate = min(net_demand, abs(current_battery_charge_MW)) # Use the max discharge rate
+            net_demand -= battery_discharge_rate
+            battery_charge_target_MW = -battery_discharge_rate
+
+        # If there's still a deficit, import from the grid
+        if net_demand > 0:
+            grid_import_export_MW = min(net_demand, MAX_GRID_IMPORT_MW)
+            print(f"ACTION: Import {grid_import_export_MW:.2f} MW from Grid.")
+            
+    elif net_demand < 0:
+        # We have excess power (Solar > Load)
+        if battery_SoC < MAX_BATTERY_SoC:
+            # Try to charge the battery with the excess power
+            battery_charge_target_MW = min(abs(net_demand), abs(current_battery_charge_MW)) # Use max charge rate
+            net_demand += battery_charge_target_MW # Reduce the excess
+            
+        # If there's still excess, export it (negative value)
+        if net_demand < 0:
+            grid_import_export_MW = net_demand # Export to grid (negative value)
+            print(f"ACTION: Export {-grid_import_export_MW:.2f} MW to Grid.")
+
+    return {
+        "Grid_Action_MW": round(grid_import_export_MW, 2),
+        "Battery_Charge_Target_MW": round(battery_charge_target_MW, 2),
+        "Solar_Curtailment_MW": 0.0 if battery_SoC < MAX_BATTERY_SoC else abs(net_demand) # A simplification
+    }
+
+# --- Simulation Example ---
+# Scenario: High Load, Low Solar, Battery at 50%
+current_load = 15.0  # MW
+current_solar = 5.0  # MW
+battery_soc = 0.50
+max_battery_rate = 10.0 # MW max charge/discharge
+
+dispatch_plan = calculate_dispatch(current_load, current_solar, battery_soc, max_battery_rate)
+print("\n--- Dispatch Plan Results ---")
+print(f"Net Deficit (Load - Solar): {current_load - current_solar} MW")
+print(f"Grid Action: {dispatch_plan['Grid_Action_MW']} MW (Positive is import)")
+print(f"Battery Target: {dispatch_plan['Battery_Charge_Target_MW']} MW (Negative is discharge)")
+
+
+import time
+import json
+
+def report_status(component_id, status_code, message, severity="INFO"):
+    """
+    Formats a system status or fault report.
+    
+    :param component_id: e.g., 'INV-003', 'HV-SWGR-1', 'PV-ARRAY-B'
+    :param status_code: A numerical or short string code (e.g., 401, 'OVER_VOLT', 'ONLINE')
+    :param message: A human-readable description
+    :param severity: 'CRITICAL', 'WARNING', 'INFO'
+    """
+    timestamp = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())
+    report = {
+        "timestamp_UTC": timestamp,
+        "component": component_id,
+        "status_code": status_code,
+        "severity": severity,
+        "message": message
+    }
+    
+    # In a real system, this would be sent over a secure industrial protocol
+    # (e.g., Modbus TCP, DNP3, or MQTT) to the SCADA server.
+    print(f"\n[STATUS REPORT] {json.dumps(report, indent=4)}")
+
+# --- Fault Example ---
+report_status(
+    component_id="INV-003-BESS",
+    status_code="451-OVF",
+    message="Over-frequency trip detected. Inverter shut down for 15 seconds.",
+    severity="CRITICAL"
+)
+
+# --- Health Example ---
+report_status(
+    component_id="PV-ARRAY-A",
+    status_code="200-OK",
+    message="Nominal output. All strings online.",
+    severity="INFO"
+)
+
+
+
+import numpy as np
+import time
+
+class QuantumBattery:
+    """
+    Simulates a highly efficient, high-C-rate Quantum Battery Energy Storage System (Q-BESS).
+    Key Advanced Feature: Near-instantaneous response (low latency in real_power_output).
+    """
+    def __init__(self, capacity_MWh, max_charge_rate_MW, max_discharge_rate_MW, initial_SoC=0.5):
+        self.capacity_MWh = capacity_MWh
+        self.max_charge_rate_MW = max_charge_rate_MW
+        self.max_discharge_rate_MW = max_discharge_rate_MW
+        self._state_of_charge_kwh = initial_SoC * capacity_MWh * 1000.0
+        self.instantaneous_efficiency = 0.999 # Near-perfect efficiency
+
+    def get_SoC(self):
+        """Returns the State of Charge (0.0 to 1.0)."""
+        return self._state_of_charge_kwh / (self.capacity_MWh * 1000.0)
+
+    def dispatch_power(self, target_power_MW, time_step_hours=0.0001):
+        """
+        Attempts to charge (positive target) or discharge (negative target) power.
+        The time_step_hours is very small (sub-second) for high-frequency control.
+        """
+        target_power_MW = np.clip(target_power_MW, 
+                                 -self.max_discharge_rate_MW, 
+                                  self.max_charge_rate_MW)
+
+        if self.get_SoC() <= 0.05 and target_power_MW < 0: # Low SoC lockout
+            target_power_MW = 0.0
+        if self.get_SoC() >= 0.98 and target_power_MW > 0: # High SoC lockout
+            target_power_MW = 0.0
+            
+        # Actual energy transfer
+        energy_transfer_MWh = target_power_MW * time_step_hours
+        
+        if energy_transfer_MWh > 0: # Charging
+            energy_kwh = energy_transfer_MWh * 1000.0 * self.instantaneous_efficiency
+            self._state_of_charge_kwh += energy_kwh
+        elif energy_transfer_MWh < 0: # Discharging
+            energy_kwh = energy_transfer_MWh * 1000.0 / self.instantaneous_efficiency
+            self._state_of_charge_kwh += energy_kwh
+
+        # Keep SoC within bounds (perfectly handled by quantum chemistry)
+        self._state_of_charge_kwh = np.clip(self._state_of_charge_kwh, 
+                                            0, self.capacity_MWh * 1000.0)
+
+        return target_power_MW # Actual output is near-instantaneous target
+
+
+
+
+class MEMSController:
+    """
+    The central intelligence for Energy Management and Power Dispatch.
+    """
+    def __init__(self, q_battery, grid_limit_MW):
+        self.q_battery = q_battery
+        self.grid_limit_MW = grid_limit_MW
+        self.grid_tie_status = "ONLINE"
+        self.generator_status = "ONLINE"
+        self.frequency_Hz = 60.0
+
+    def get_ml_forecast(self):
+        """
+        A placeholder for a sophisticated Machine Learning model that predicts:
+        1. Future Renewable Generation (e.g., wind/solar output)
+        2. Future Load Demand
+        (In reality, this involves complex time-series ML models: LSTMs, Transformers, etc.)
+        """
+        # Simulate a 1-hour lookahead forecast
+        forecast = {
+            "predicted_load_MW": 50.0,
+            "predicted_generation_MW": 70.0,
+            "forecast_confidence": 0.95
+        }
+        return forecast
+
+    def execute_high_frequency_control(self, current_load_MW, current_generation_MW):
+        """
+        Executes real-time, sub-second (high-frequency) power balancing and frequency control.
+        """
+        net_power_mismatch = current_load_MW - current_generation_MW
+        
+        # 1. Primary Control (Frequency Regulation via Q-BESS)
+        # Quantum Battery handles the instantaneous power mismatch
+        
+        # Determine the power the battery *needs* to dispatch for balance
+        target_battery_power = net_power_mismatch 
+        
+        # Check against battery limits
+        if target_battery_power > self.q_battery.max_charge_rate_MW:
+            target_battery_power = self.q_battery.max_charge_rate_MW
+        elif target_battery_power < -self.q_battery.max_discharge_rate_MW:
+            target_battery_power = -self.q_battery.max_discharge_rate_MW
+
+        # Check against SoC limits - Q-BESS has faster trip/lockout
+        if self.q_battery.get_SoC() <= 0.1 and target_battery_power < 0:
+             target_battery_power = 0.0
+        elif self.q_battery.get_SoC() >= 0.95 and target_battery_power > 0:
+             target_battery_power = 0.0
+
+        actual_battery_dispatch = self.q_battery.dispatch_power(target_battery_power)
+        
+        # Recalculate mismatch after Q-BESS action
+        remaining_mismatch = net_power_mismatch - (-actual_battery_dispatch) # Battery discharge reduces mismatch
+
+        # 2. Secondary Control (Grid or Generator Curtailment)
+        grid_action_MW = 0.0
+        generator_curtailment_MW = 0.0
+
+        if remaining_mismatch > 0:
+            # Still deficit: Import from grid (within limits)
+            grid_action_MW = min(remaining_mismatch, self.grid_limit_MW)
+        elif remaining_mismatch < 0:
+            # Still surplus: Export to grid or curtail generation
+            
+            # Prioritize export up to grid limit (negative value = export)
+            grid_action_MW = max(remaining_mismatch, -self.grid_limit_MW) 
+            
+            # If still surplus after max export, curtail the renewable generator
+            if remaining_mismatch - grid_action_MW < 0:
+                generator_curtailment_MW = abs(remaining_mismatch - grid_action_MW)
+
+        # Update frequency based on final balance (Simplified droop model)
+        total_balance = remaining_mismatch - grid_action_MW
+        self.frequency_Hz += total_balance * 0.001 # Small adjustment based on remaining error
+
+        return {
+            "Q_BESS_Dispatch_MW": actual_battery_dispatch,
+            "Grid_Action_MW": grid_action_MW, # Positive import, Negative export
+            "Generator_Curtailment_MW": generator_curtailment_MW,
+            "System_Frequency_Hz": self.frequency_Hz
+        }
+
+
+
+# --- SYSTEM INITIALIZATION ---
+# Quantum Battery: 50 MWh, Max 25 MW charge/discharge (High C-rate = 0.5C)
+qbess = QuantumBattery(capacity_MWh=50.0, max_charge_rate_MW=25.0, max_discharge_rate_MW=25.0, initial_SoC=0.6)
+# MEMS Controller with a 10 MW import/export limit to the main utility grid
+mems = MEMSController(qbess, grid_limit_MW=10.0)
+
+print("--- NEXT-GEN DISTRIBUTION SYSTEM STARTUP ---")
+print(f"Initial Q-BESS SoC: {qbess.get_SoC() * 100:.2f}%")
+
+# --- SIMULATED HIGH-FREQUENCY CONTROL LOOP (100ms interval) ---
+TIME_STEP = 0.1 # Seconds (0.0001 hours)
+time_h = TIME_STEP / 3600.0
+
+# Scenario 1: Sudden Load Spike (Need Power)
+print("\n--- SCENARIO 1: SUDDEN LOAD SPIKE (Power Deficit) ---")
+current_load = 80.0 # MW
+current_generation = 60.0 # MW (New advanced generators)
+
+for i in range(5): # 5 time steps (0.5 seconds of simulation)
+    results = mems.execute_high_frequency_control(current_load, current_generation)
+    
+    # Update for the next step (e.g., load gradually increases)
+    current_load += 0.5 
+
+    print(f"Step {i+1} | Mismatch: {current_load-current_generation:.2f} MW")
+    print(f"  -> Q-BESS Action: {-results['Q_BESS_Dispatch_MW']:.2f} MW (Discharge)")
+    print(f"  -> Grid Action: {results['Grid_Action_MW']:.2f} MW (Import)")
+    print(f"  -> New SoC: {qbess.get_SoC() * 100:.2f}%")
+
+# Scenario 2: Sudden Renewable Surge (Surplus Power)
+print("\n--- SCENARIO 2: SUDDEN RENEWABLE SURGE (Power Surplus) ---")
+current_load = 40.0 # MW
+current_generation = 75.0 # MW
+
+for i in range(5):
+    results = mems.execute_high_frequency_control(current_load, current_generation)
+    
+    print(f"Step {i+1} | Mismatch: {current_load-current_generation:.2f} MW")
+    print(f"  -> Q-BESS Action: {results['Q_BESS_Dispatch_MW']:.2f} MW (Charge)")
+    print(f"  -> Grid Action: {results['Grid_Action_MW']:.2f} MW (Export: {-results['Grid_Action_MW']:.2f})")
+    print(f"  -> Curtailment: {results['Generator_Curtailment_MW']:.2f} MW")
+    print(f"  -> New SoC: {qbess.get_SoC() * 100:.2f}%")
+
+
+
+import numpy as np
+import time
+
+class QuantumBattery:
+    """Simulates a highly efficient Q-BESS with near-instantaneous response."""
+    def __init__(self, capacity_MWh, max_charge_rate_MW, max_discharge_rate_MW, initial_SoC=0.5):
+        self.capacity_MWh = capacity_MWh
+        self.max_charge_rate_MW = max_charge_rate_MW
+        self.max_discharge_rate_MW = max_discharge_rate_MW
+        self._state_of_charge_kwh = initial_SoC * capacity_MWh * 1000.0
+        self.instantaneous_efficiency = 0.999 
+
+    def get_SoC(self):
+        return self._state_of_charge_kwh / (self.capacity_MWh * 1000.0)
+
+    def dispatch_power(self, target_power_MW, time_step_hours=0.0001):
+        """Simulates power dispatch and SoC change."""
+        target_power_MW = np.clip(target_power_MW, 
+                                 -self.max_discharge_rate_MW, 
+                                  self.max_charge_rate_MW)
+        # ... (SoC and efficiency logic from previous response)
+        
+        # Simplified: Update SoC for demonstration
+        energy_transfer_MWh = target_power_MW * time_step_hours
+        self._state_of_charge_kwh += energy_transfer_MWh * 1000.0
+        
+        return target_power_MW
+
+class MEMSController:
+    """The central intelligence for Energy Management and Power Dispatch."""
+    def __init__(self, q_battery, grid_limit_MW):
+        self.q_battery = q_battery
+        self.grid_limit_MW = grid_limit_MW
+        self.system_status = {} # Stores real-time operational data
+        
+    def execute_high_frequency_control(self, current_load_MW, current_generation_MW):
+        """Executes real-time power balancing and frequency control."""
+        net_power_mismatch = current_load_MW - current_generation_MW
+        
+        # Primary Control: Q-BESS handles instantaneous mismatch
+        target_battery_power = -net_power_mismatch # Charge if surplus, Discharge if deficit
+        actual_battery_dispatch = self.q_battery.dispatch_power(target_battery_power)
+        
+        # Secondary Control: Grid Tie (Simplified)
+        remaining_mismatch = net_power_mismatch - (-actual_battery_dispatch)
+        grid_action_MW = np.clip(remaining_mismatch, -self.grid_limit_MW, self.grid_limit_MW) 
+
+        self.system_status.update({
+            "Q_BESS_Dispatch_MW": actual_battery_dispatch,
+            "Grid_Action_MW": grid_action_MW,
+            "Q_BESS_SoC": self.q_battery.get_SoC()
+        })
+        return self.system_status
+
+
+
+import json
+import requests # Used for simulated secure communication
+
+class SystemFirmwareManager:
+    """
+    Manages versioning, configuration, and secure update checks.
+    In a real system, this communicates with a secure server (OTA - Over The Air).
+    """
+    def __init__(self, device_id, component_list):
+        self.device_id = device_id
+        # Define current running versions
+        self.component_versions = {comp: "V1.0.0-STABLE" for comp in component_list}
+        self.system_config_hash = "ABCDEF123456" # Unique identifier for current settings
+        self.update_server_url = "https://secure-mems-updates.net/api/v1"
+
+    def get_system_status_report(self):
+        """Generates a detailed report of current software state."""
+        report = {
+            "device_id": self.device_id,
+            "timestamp": time.strftime('%Y-%m-%d %H:%M:%S UTC'),
+            "system_version_map": self.component_versions,
+            "config_hash": self.system_config_hash,
+            "health_check": "PASS" 
+        }
+        return report
+
+    def check_for_update(self, current_status_report):
+        """
+        Simulates securely querying the server for a new update file.
+        This must be done with encrypted, authenticated communication (e.g., HTTPS, signed requests).
+        """
+        print(f"\n[FIRMWARE] Checking update server: {self.update_server_url}")
+        
+        # Simulated server response (replace with actual secure API call)
+        try:
+            # response = requests.post(f"{self.update_server_url}/check", json=current_status_report, timeout=5)
+            # update_data = response.json()
+            
+            # --- MOCK SERVER RESPONSE ---
+            if "V1.1.0-BETA" not in self.component_versions.values():
+                 update_data = {
+                    "available": True,
+                    "target_version": "V1.1.0-BETA",
+                    "components_to_update": ["MEMS_CORE", "Q_BESS_DRIVER"],
+                    "required_SoC": 0.85, # Require high SoC for safe update
+                    "download_link": "secure-link-v1.1.0.signed" # Link to a cryptographically signed file
+                }
+            else:
+                 update_data = {"available": False}
+            # --- END MOCK ---
+            
+            if update_data.get("available"):
+                print(f"[UPDATE FOUND] Target Version: {update_data['target_version']}")
+                return update_data
+            else:
+                print("[FIRMWARE] No updates found.")
+                return None
+        except Exception as e:
+            print(f"[ERROR] Failed to connect to update server: {e}")
+            return None
+
+    def attempt_safe_update(self, update_details, current_SoC):
+        """
+        The core of the auto-update logic: safety checks before downloading/installing.
+        """
+        required_SoC = update_details.get("required_SoC", 0.0)
+
+        if current_SoC < required_SoC:
+            print(f"**UPDATE BLOCKED**: Q-BESS SoC ({current_SoC:.2f}) is below the required minimum ({required_SoC:.2f}). Waiting.")
+            return False
+
+        if any(v.endswith("-BETA") for v in self.component_versions.values()):
+            print("**UPDATE BLOCKED**: Currently running a BETA version. Require manual override to proceed.")
+            return False
+            
+        print(f"**SAFETY CHECK PASSED**: Downloading and verifying signature for {update_details['target_version']}...")
+        # In a real system, a full download, cryptographic signature verification,
+        # and non-volatile memory write would occur here, followed by a **reboot**.
+
+        # Simulate update success
+        for comp in update_details["components_to_update"]:
+            self.component_versions[comp] = update_details["target_version"]
+        
+        print(f"**UPDATE SUCCESSFUL**: System now running {update_details['target_version']}.")
+        return True
+
+
+
+# --- SYSTEM SETUP ---
+qbess = QuantumBattery(capacity_MWh=50.0, max_charge_rate_MW=25.0, max_discharge_rate_MW=25.0, initial_SoC=0.6)
+mems = MEMSController(qbess, grid_limit_MW=10.0)
+firmware_manager = SystemFirmwareManager(
+    device_id="MEMS-HD-747", 
+    component_list=["MEMS_CORE", "Q_BESS_DRIVER", "GENERATOR_COMM"]
+)
+
+UPDATE_CHECK_INTERVAL = 10 # Dispatch cycles
+
+print("--- INITIAL SYSTEM STATE ---")
+print(json.dumps(firmware_manager.get_system_status_report(), indent=2))
+
+# --- SIMULATED DISPATCH AND UPDATE LOOP ---
+for cycle in range(25):
+    # 1. Simulate changing grid conditions
+    load_MW = 55.0 + 5 * np.sin(cycle / 5.0) # Varies between 50 and 60 MW
+    gen_MW = 70.0 + 10 * np.cos(cycle / 8.0) # Varies between 60 and 80 MW
+
+    # 2. Execute High-Frequency Dispatch
+    mems_output = mems.execute_high_frequency_control(load_MW, gen_MW)
+    
+    # 3. Periodically Check for Auto-Update
+    if (cycle + 1) % UPDATE_CHECK_INTERVAL == 0:
+        print(f"\n======== CYCLE {cycle + 1}: UPDATE CHECK POINT ========")
+        status_report = firmware_manager.get_system_status_report()
+        update_info = firmware_manager.check_for_update(status_report)
+        
+        if update_info:
+            # Attempt update, checking SoC safety
+            current_soc = mems_output['Q_BESS_SoC']
+            firmware_manager.attempt_safe_update(update_info, current_soc)
+
+    print(f"\n[Cycle {cycle + 1:02d}] Load: {load_MW:.2f}MW | Gen: {gen_MW:.2f}MW | Net Mismatch: {load_MW - gen_MW:.2f}MW")
+    print(f"  > Q-BESS (SoC {mems_output['Q_BESS_SoC']*100:.1f}%) Dispatch: {-mems_output['Q_BESS_Dispatch_MW']:.2f} MW")
+    print(f"  > Grid Action: {mems_output['Grid_Action_MW']:.2f} MW (Pos=Import)")
+
+
+
