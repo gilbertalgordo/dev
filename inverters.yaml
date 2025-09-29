@@ -1,0 +1,421 @@
+// --- PID Controller Header (e.g., PIDController.h) ---
+
+class PIDController {
+private:
+    float Kp, Ki, Kd;       // Gains
+    float integral_sum;     // Accumulation of error over time
+    float prev_error;       // Error from the previous cycle
+    float output_limit;     // Max/Min PWM duty cycle or control signal
+    float target_voltage;   // The desired output voltage (e.g., 220.0 V)
+
+public:
+    PIDController(float p, float i, float d, float limit, float target)
+        : Kp(p), Ki(i), Kd(d), output_limit(limit), target_voltage(target),
+          integral_sum(0.0f), prev_error(0.0f) {}
+
+    // Core calculation function
+    float calculate(float measured_voltage, float dt) { // dt is time difference (sampling period)
+        // 1. Calculate the Error
+        float error = target_voltage - measured_voltage;
+
+        // 2. Proportional Term (P)
+        float proportional = Kp * error;
+
+        // 3. Integral Term (I)
+        integral_sum += error * dt;
+        float integral = Ki * integral_sum;
+
+        // 4. Derivative Term (D)
+        float derivative = Kd * ((error - prev_error) / dt);
+
+        // 5. Calculate Control Output (e.g., PWM Duty Cycle)
+        float output = proportional + integral + derivative;
+
+        // 6. Anti-Windup (Limit the Integral Sum)
+        if (output > output_limit) {
+            integral_sum -= (output - output_limit) / Ki; // Reduce integral part to prevent overshoot
+            output = output_limit;
+        } else if (output < -output_limit) {
+            integral_sum -= (output + output_limit) / Ki; // Same for negative limit
+            output = -output_limit;
+        }
+
+        // 7. Update for Next Cycle
+        prev_error = error;
+
+        return output; // Returns a value used to adjust PWM or switching frequency
+    }
+
+    // ... other methods like reset() ...
+};
+
+// [attachment_0](attachment)
+
+
+
+// --- Main Control Loop (e.g., main.cpp) ---
+
+// Define possible operating states
+enum InverterState {
+    STANDBY,        // Waiting for input power or command
+    GRID_MODE,      // Running from AC utility (Charging battery, monitoring)
+    INVERTING_MODE, // Running from Battery/DC (Utility power failed)
+    FAULT_MODE,     // Critical error (Overload, Over-temperature, Short-circuit)
+    BYPASS_MODE     // Directly passing AC line through (if available and working)
+};
+
+InverterState currentState = STANDBY;
+// ... PIDController instantiation ...
+// ... Sensor reading functions (read_AC_voltage, read_battery_voltage, etc.) ...
+
+void state_transition_logic() {
+    float line_V = read_AC_voltage();
+    bool fault_condition = check_for_faults();
+    bool line_stable = (line_V > 180.0f && line_V < 250.0f); // 'Autovolt' window
+
+    if (fault_condition) {
+        currentState = FAULT_MODE;
+        // turn_off_inverter_hardware();
+        return;
+    }
+
+    switch (currentState) {
+        case STANDBY:
+            if (line_stable) {
+                currentState = GRID_MODE;
+            } else if (read_command_switch() == ON) {
+                // Force turn-on if line is bad (cold start)
+                currentState = INVERTING_MODE;
+            }
+            break;
+
+        case GRID_MODE:
+            // Line power is good. Keep charger active.
+            if (!line_stable) {
+                // Seamless transfer to battery
+                currentState = INVERTING_MODE;
+                // start_inverter_stage();
+            }
+            // Optional: If load is too high, switch to BYPASS_MODE
+            // if (read_load_current() > MAX_GRID_CURRENT) currentState = BYPASS_MODE;
+            break;
+
+        case INVERTING_MODE:
+            // Running on battery power (DC to AC)
+            if (line_stable && check_line_stability_time() > 5.0f) { // Wait 5 seconds for stability
+                // Seamless transfer back to utility
+                // sync_output_with_grid();
+                currentState = GRID_MODE;
+            } else if (read_battery_voltage() < LOW_VOLTAGE_CUTOFF) {
+                // Must shut down to save battery
+                currentState = FAULT_MODE;
+            }
+            break;
+
+        case FAULT_MODE:
+            // Wait for manual reset or fault clearing sequence
+            if (check_reset_button()) {
+                currentState = STANDBY;
+            }
+            break;
+
+        // ... other states ...
+    }
+}
+
+// Main Inverter Loop
+void main_loop() {
+    // 1. Sample Sensor Data
+    float measured_V = read_output_voltage();
+    float dt = get_sample_time();
+
+    // 2. Perform State Transitions
+    state_transition_logic();
+
+    // 3. Execute Control based on State
+    switch (currentState) {
+        case GRID_MODE:
+            // Adjust charger current (e.g., using a separate charge-PID)
+            // Monitor line voltage
+            break;
+
+        case INVERTING_MODE:
+            // Run the main PID loop to control the output voltage
+            float control_signal = pid_controller.calculate(measured_V, dt);
+            // set_PWM_duty_cycle(control_signal);
+            break;
+
+        case FAULT_MODE:
+            // Log error, display warning, keep all relays open
+            break;
+
+        // ...
+    }
+}
+
+
+
+// --- Fault Management Header (Faults.h) ---
+
+#define MAX_TEMP_FET 90.0f // Max safe temperature (Celsius)
+#define MAX_OUTPUT_CURRENT 150.0f // Max RMS current (Amps)
+
+enum FaultCode {
+    NO_FAULT = 0,
+    OVER_CURRENT_S,   // Short-circuit (Instantaneous trip)
+    OVER_CURRENT_L,   // Overload (Sustained high current)
+    OVER_TEMP_FET,    // Power stage overheating
+    OVER_TEMP_AMBIENT,// Enclosure too hot
+    DC_BUS_OVER_V,    // DC link voltage too high
+    DC_BUS_UNDER_V,   // DC link voltage too low
+    BATT_LOW_V,       // Battery critically low
+    COMMUNICATION_ERR // DSP/Microcontroller link failed
+};
+
+FaultCode system_fault = NO_FAULT;
+
+// This function runs on every high-speed PWM cycle interrupt
+void check_critical_faults() {
+    // 1. Instantaneous Overcurrent Check (Hardware-level trip, often handled by a comparator)
+    if (read_peak_current() > (1.5f * MAX_OUTPUT_CURRENT)) {
+        // Immediately shut down PWM to prevent component destruction
+        disable_all_pwm_outputs();
+        system_fault = OVER_CURRENT_S;
+    }
+
+    // 2. Over-Temperature Check
+    if (read_fet_temperature() > MAX_TEMP_FET) {
+        system_fault = OVER_TEMP_FET;
+    }
+
+    // 3. DC Bus Voltage Check
+    float dc_bus_v = read_dc_bus_voltage();
+    if (dc_bus_v > 850.0f) { // Example for a 400V nominal system
+        system_fault = DC_BUS_OVER_V;
+    } else if (dc_bus_v < 600.0f) {
+        system_fault = DC_BUS_UNDER_V;
+    }
+
+    if (system_fault != NO_FAULT) {
+        // Log the event and initiate fault mode sequence
+        log_fault_event(system_fault);
+        // Transition to FAULT_MODE in the main FSM
+        set_fsm_state(FAULT_MODE);
+    }
+}
+
+
+
+// --- V/F Control Logic (VFD.cpp) ---
+
+// V/F parameters
+#define BASE_VOLTAGE 400.0f    // Nominal RMS output voltage
+#define BASE_FREQUENCY 60.0f   // Nominal output frequency (Hz)
+#define V_F_RATIO (BASE_VOLTAGE / BASE_FREQUENCY) // Slope
+
+// Dynamic control parameters
+float current_output_freq = 60.0f; // Target frequency (Hz)
+float target_rms_voltage = BASE_VOLTAGE;
+
+// Runs periodically to calculate the required voltage amplitude
+void update_vf_control() {
+    // The Autovolt function: The V/F slope remains constant for typical loads.
+    // If the load is inductive (motor), we often adjust V and F together.
+    
+    // 1. Calculate the required fundamental voltage based on target frequency
+    float required_fundamental_V = current_output_freq * V_F_RATIO;
+    
+    // 2. Apply Low Frequency Boost (Compensation for stator resistance drop at low speeds)
+    float boost_voltage = 0.0f;
+    if (current_output_freq < 10.0f) {
+        boost_voltage = 5.0f + (10.0f - current_output_freq) * 0.5f; // Example boost profile
+    }
+    
+    // 3. Set the new voltage target (used by the inner-loop PID)
+    target_rms_voltage = required_fundamental_V + boost_voltage;
+
+    // 4. Limit the voltage output (cannot exceed the DC link voltage)
+    if (target_rms_voltage > BASE_VOLTAGE * 1.05f) {
+        target_rms_voltage = BASE_VOLTAGE * 1.05f;
+    }
+    
+    // 5. Update the Sine Wave Generation parameters
+    // The sine table lookup must be scaled by the calculated voltage amplitude
+    set_pwm_amplitude_scale(target_rms_voltage); 
+    set_pwm_frequency(current_output_freq);
+    
+    // *In a true vector-control heavy-duty system, this V/F would be replaced
+    // by a much more complex Field-Oriented Control (FOC) algorithm.*
+}
+
+
+
+// --- Power Management and De-rating ---
+
+float current_derating_factor = 1.0f; // 1.0 = Full power
+
+void apply_thermal_derating() {
+    float fet_temp = read_fet_temperature();
+    
+    if (fet_temp > (MAX_TEMP_FET - 5.0f) && fet_temp <= MAX_TEMP_FET) {
+        // Linear reduction from 85C to 90C
+        current_derating_factor = 1.0f - ((fet_temp - (MAX_TEMP_FET - 5.0f)) / 5.0f);
+        if (current_derating_factor < 0.5f) {
+            current_derating_factor = 0.5f; // Minimum allowed output is 50%
+        }
+        log_warning("Thermal Derating Active. Output reduced.");
+    } else if (fet_temp < (MAX_TEMP_FET - 10.0f)) {
+        // Temperature recovered
+        current_derating_factor = 1.0f;
+    }
+    
+    // This factor must be applied to the current limit of the inner current control loop
+    update_current_limit(MAX_OUTPUT_CURRENT * current_derating_factor);
+}
+
+
+void perform_soft_start() {
+    // Prevents large inrush currents when starting the inverter bridge
+    
+    float ramp_rate = 0.1f; // Volts per millisecond
+    float current_V_target = 0.0f;
+    
+    while (current_V_target < BASE_VOLTAGE) {
+        // Increment the output voltage target slowly
+        current_V_target += ramp_rate * read_time_elapsed(); 
+        
+        // This is the output of the soft-start ramp, which feeds into the PID/V/F amplitude setter
+        set_pwm_amplitude_scale(current_V_target);
+        delay_ms(1); 
+    }
+    
+    log_info("Soft start complete. Full voltage reached.");
+}
+
+
+
+// --- MPPT Control Module (MPPT_PV.cpp) ---
+
+#define MPPT_STEP_SIZE 0.5f // Step change in V_ref (Volts)
+float V_ref_mppt = 400.0f;  // Current optimal DC voltage reference
+
+// Global variables for P&O
+float P_prev = 0.0f; // Power from the previous cycle
+float V_prev = 0.0f; // Voltage from the previous cycle
+
+void mppt_pv_tracker() {
+    float V_array = read_pv_array_voltage();
+    float I_array = read_pv_array_current();
+    float P_current = V_array * I_array;
+    
+    // Check if the current power is higher than the previous one
+    if (P_current > P_prev) {
+        // If P increased, we are moving in the right direction. Keep the step.
+        if (V_array > V_prev) {
+            V_ref_mppt += MPPT_STEP_SIZE; // Increase V_ref (Keep the perturbation)
+        } else {
+            V_ref_mppt -= MPPT_STEP_SIZE; // Decrease V_ref
+        }
+    } else {
+        // If P decreased, we stepped too far or in the wrong direction. Reverse the step.
+        if (V_array > V_prev) {
+            V_ref_mppt -= MPPT_STEP_SIZE; // Decrease V_ref (Reverse the perturbation)
+        } else {
+            V_ref_mppt += MPPT_STEP_SIZE; // Increase V_ref
+        }
+    }
+
+    // Update for the next cycle
+    P_prev = P_current;
+    V_prev = V_array;
+    
+    // The resulting V_ref_mppt becomes the setpoint for the DC-side controller (e.g., a Boost Converter PID)
+    // set_dc_link_reference(V_ref_mppt); 
+}
+
+
+
+// --- Synchronization and Transformation (GridSync.cpp) ---
+
+float grid_angle_theta = 0.0f; // The synchronization angle (0 to 2*PI)
+float grid_frequency = 60.0f;  // Estimated grid frequency
+
+// Fast-running function, often in an interrupt (Fsw)
+void run_pll_and_transformations() {
+    float V_grid_a, V_grid_b, V_grid_c; // Measured grid voltages
+    read_grid_voltages(&V_grid_a, &V_grid_b, &V_grid_c);
+
+    // 1. Clarke Transformation (abc -> alpha/beta)
+    float V_alpha = V_grid_a;
+    float V_beta = (1.0f/sqrt(3.0f)) * V_grid_b - (1.0f/sqrt(3.0f)) * V_grid_c;
+    
+    // 2. PLL: Tracks the grid frequency and phase, generating 'grid_angle_theta'
+    // (A PID loop runs internally within the PLL to minimize V_q error)
+    // grid_angle_theta = pll_algorithm(V_alpha, V_beta);
+    
+    // 3. Park Transformation (alpha/beta -> d/q)
+    // d-axis is aligned with the grid voltage, representing ACTIVE power.
+    // q-axis is 90 degrees out of phase, representing REACTIVE power.
+    float cos_t = cos(grid_angle_theta);
+    float sin_t = sin(grid_angle_theta);
+
+    V_d = V_alpha * cos_t + V_beta * sin_t; // DC Voltage Equivalent
+    V_q = V_beta * cos_t - V_alpha * sin_t; // Zero in perfect alignment
+}
+
+
+
+// --- Inner Current Loop (InverterControl.cpp) ---
+
+// Current PID controllers (running on DC quantities)
+PIDController pid_id(Kp_I, Ki_I, Kd_I); // d-axis (Active Current/Power)
+PIDController pid_iq(Kp_I, Ki_I, Kd_I); // q-axis (Reactive Current/VARs)
+
+void inner_current_loop(float I_d_ref, float I_q_ref) {
+    float I_d_meas, I_q_meas; // Measured currents transformed to d/q frame
+
+    // 1. Decoupling Terms: Accounts for system inductance/back-EMF effects
+    float L = 0.005f; // System inductance (H)
+    float omega = 2.0f * PI * grid_frequency;
+    
+    float v_d_decoupling = omega * L * I_q_meas;
+    float v_q_decoupling = omega * L * I_d_meas;
+
+    // 2. PID Control: Calculate required voltage compensation
+    float V_d_comp = pid_id.calculate(I_d_meas, I_d_ref);
+    float V_q_comp = pid_iq.calculate(I_q_meas, I_q_ref);
+
+    // 3. Total Voltage Reference in d/q frame
+    float V_d_ref = V_d_comp + V_d_decoupling + V_d_feedforward; // Feedforward from PLL V_d
+    float V_q_ref = V_q_comp - V_q_decoupling + V_q_feedforward; // Feedforward from PLL V_q
+
+    // 4. Inverse Park/Clarke and PWM Generation
+    // Convert V_d_ref and V_q_ref back to abc PWM duty cycles for the inverter bridges
+    // generate_pwm_signals(V_d_ref, V_q_ref, grid_angle_theta);
+}
+
+
+
+// --- Outer Power Loop (PowerControl.cpp) ---
+
+PIDController pid_dc_bus(Kp_V, Ki_V, Kd_V); // Controls DC link voltage
+
+void outer_power_loop() {
+    // 1. Power Reference (Active Power)
+    // The desired ACTIVE current (I_d_ref) is determined by the DC bus voltage error.
+    // If DC bus voltage (V_dc_meas) is too high (MPPT is generating more power than we're injecting), 
+    // the PID will increase I_d_ref to inject more current into the AC grid.
+    float V_dc_meas = read_dc_bus_voltage();
+    float V_dc_target = 750.0f; // Target DC link voltage
+
+    // I_d_ref is the main output of the DC Bus PID
+    float I_d_ref = pid_dc_bus.calculate(V_dc_meas, V_dc_target);
+    
+    // 2. Reactive Power Reference
+    // For unity power factor (P.F.), I_q_ref must be zero.
+    // For grid support, it can be set to a non-zero value.
+    float I_q_ref = 0.0f; // Target P.F. = 1.0
+
+    // 3. Command the Inner Loop
+    inner_current_loop(I_d_ref, I_q_ref);
+}
