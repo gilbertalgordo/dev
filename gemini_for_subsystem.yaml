@@ -1,0 +1,319 @@
+import requests
+import json
+import time
+
+# --- Configuration and Environment Variables ---
+# NOTE: Replace '' with your actual Gemini API Key
+API_KEY = "" 
+MODEL_NAME = "gemini-2.5-flash-preview-05-20"
+API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={API_KEY}"
+
+# --- Simulated Input Data ---
+# In a real application, this data would come from sensors, PLCs, or an IoT gateway.
+SIMULATED_SUBSYSTEM_DATA = {
+    "timestamp": int(time.time()),
+    "generator_id": "G-A382",
+    "subsystem_status": {
+        "Coolant_Temperature_C": 98.5,  # High, usually 80-90C
+        "Vibration_Level_mm_s": 1.5,
+        "Power_Output_MW": 12.5,
+        "Rotor_Speed_RPM": 3600,
+        "Oil_Pressure_PSI": 45.0,
+        "Grid_Frequency_Hz": 60.01
+    },
+    "historical_context": "Previous hour coolant temp averaged 85C."
+}
+
+# --- System Instruction for the AI Persona ---
+# This defines the role of the AI as a proactive automation engineer.
+SYSTEM_INSTRUCTION = (
+    "You are a critical Power Generation Automation Engineer AI. "
+    "Your task is to analyze the provided subsystem status data. "
+    "Identify any anomalies, diagnose the likely root cause, and suggest a single, specific automation action (a control command) to stabilize the system. "
+    "Respond ONLY with a JSON object containing 'diagnosis', 'anomaly_detected' (boolean), and 'suggested_action' (control command string)."
+)
+
+def call_gemini_api(data):
+    """
+    Calls the Gemini API to analyze subsystem data with exponential backoff.
+    """
+    
+    # Format the user query (input data) clearly for the model
+    user_query = (
+        "Analyze the following power generation subsystem data. "
+        "The system is currently running. Data: "
+        f"{json.dumps(data, indent=2)}"
+    )
+
+    # Define the required output structure (JSON Schema for automation)
+    response_schema = {
+        "type": "OBJECT",
+        "properties": {
+            "anomaly_detected": {"type": "BOOLEAN", "description": "True if an abnormality requiring action is found."},
+            "diagnosis": {"type": "STRING", "description": "A concise explanation of the anomaly and likely root cause."},
+            "suggested_action": {"type": "STRING", "description": "A specific, actionable control command (e.g., 'Increase coolant pump speed by 10%', 'Check sensor calibration')."}
+        }
+    }
+
+    payload = {
+        "contents": [{"parts": [{"text": user_query}]}],
+        "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": response_schema
+        }
+    }
+
+    # Implement exponential backoff for robustness
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(
+                API_URL,
+                headers={'Content-Type': 'application/json'},
+                data=json.dumps(payload)
+            )
+            response.raise_for_status() # Raises an HTTPError for bad responses (4xx or 5xx)
+            
+            # Extract JSON text from the response
+            result = response.json()
+            json_text = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text')
+            
+            if json_text:
+                return json.loads(json_text)
+            
+            print("API response received but no JSON text found.")
+            return None
+
+        except requests.exceptions.RequestException as e:
+            print(f"Attempt {attempt + 1}/{max_retries} failed: {e}")
+            if attempt < max_retries - 1:
+                # Wait using exponential backoff (1s, 2s, 4s, 8s, ...)
+                wait_time = 2 ** attempt
+                time.sleep(wait_time)
+            else:
+                print("Max retries reached. Failing the API call.")
+                return None
+        except json.JSONDecodeError:
+            print(f"Attempt {attempt + 1}/{max_retries}: Failed to decode JSON from model response.")
+            return None
+
+def main():
+    """Main function to run the analysis."""
+    print("--- Power Generation Subsystem Analysis AI ---")
+    print(f"Current System Data:\n{json.dumps(SIMULATED_SUBSYSTEM_DATA['subsystem_status'], indent=4)}")
+    print("\nSending data to Gemini Automation Engineer AI for analysis...")
+
+    analysis_result = call_gemini_api(SIMULATED_SUBSYSTEM_DATA)
+
+    if analysis_result:
+        print("\n--- AI Analysis and Automation Recommendation ---")
+        
+        anomaly = analysis_result.get('anomaly_detected')
+        diagnosis = analysis_result.get('diagnosis')
+        action = analysis_result.get('suggested_action')
+
+        print(f"Anomaly Detected: {anomaly}")
+        print(f"Diagnosis: {diagnosis}")
+        print(f"Suggested Action (Automation Command): {action}")
+
+        # In a real scenario, the 'suggested_action' would be sent
+        # to a control system (e.g., via MQTT, SCADA, or a local API).
+        if anomaly:
+            print("\n[AUTOMATION MODE]: Control command sent to SCADA system.")
+        else:
+            print("\n[MONITORING MODE]: System appears nominal. No action taken.")
+    else:
+        print("\nFailed to get a valid analysis result from the AI.")
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+import requests
+import json
+import time
+import os
+import signal
+from datetime import datetime
+
+# --- 1. Configuration and Environment Variables ---
+# NOTE: Replace '' with your actual Gemini API Key
+API_KEY = os.environ.get("GEMINI_API_KEY", "") 
+MODEL_NAME = "gemini-2.5-flash-preview-05-20"
+API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={API_KEY}"
+POLLING_INTERVAL_SECONDS = 30 # Frequency of analysis cycle
+
+# --- 2. Enhanced Simulated Input Data with Multiple Subsystems ---
+def get_simulated_sensor_data(cycle):
+    """Generates complex, simulated sensor data reflecting multiple subsystems and a gradual fault."""
+    
+    # Introduce a fault after a few cycles (simulating bearing wear/overload)
+    vibration_base = 1.0
+    vibration_fault_factor = 1.0 + (cycle / 100) * 0.5 
+    
+    # Simulate high current indicating mechanical stress
+    current_base = 85.0
+    current_fault_factor = 1.0 + (cycle / 80) * 0.4 
+    
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "unit_name": "HydroGen-Unit-7B",
+        "operational_mode": "PeakLoad",
+        "Subsystem_Generator": {
+            "Power_Output_MW": 15.2,
+            "Rotor_Speed_RPM": 3600,
+            "Vibration_X_mm_s": round(vibration_base * vibration_fault_factor, 2), # Degrading metric
+            "Stator_Temp_C": 105.5
+        },
+        "Subsystem_Cooling": {
+            "Coolant_In_C": 82.0,
+            "Coolant_Out_C": 91.5,
+            "Pump_Flow_L_s": 50.0,
+            "Radiator_Pressure_PSI": 35.0
+        },
+        "Subsystem_Transformer": {
+            "Oil_Temp_C": 75.1,
+            "Phase_A_Current_A": round(current_base * current_fault_factor, 2), # Degrading metric
+            "Tap_Changer_Pos": 5
+        },
+        "Previous_Analysis_Summary": "Unit ran nominal for the last 24 hours. No alerts."
+    }
+
+# --- 3. Advanced System Instruction for Predictive Analysis ---
+SYSTEM_INSTRUCTION = (
+    "You are a Level 3 Predictive Maintenance and Automation Agent specializing in Power Generation. "
+    "Your analysis MUST be multi-stage: "
+    "1. **Detection**: State the most immediate anomaly and the highest risk subsystem. "
+    "2. **Prediction**: Predict the component failure or operational state the system is trending towards based on current and historical data. "
+    "3. **Recommendation**: Provide a specific, structured control command for immediate mitigation or a maintenance scheduling recommendation for prevention. "
+    "Respond ONLY with a valid JSON object."
+)
+
+# --- 4. Define Structured Output Schema (Mandatory for Automation) ---
+RESPONSE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "analysis_time": {"type": "STRING", "description": "ISO timestamp of when the analysis was generated."},
+        "anomaly_score": {"type": "NUMBER", "description": "A calculated score from 0.0 (safe) to 10.0 (critical)."},
+        "highest_risk_subsystem": {"type": "STRING", "description": "The subsystem requiring the most urgent attention."},
+        "diagnosis_prediction": {"type": "STRING", "description": "The predicted root cause and failure mode."},
+        "automation_action": {
+            "type": "OBJECT",
+            "properties": {
+                "action_type": {"type": "STRING", "enum": ["MITIGATION", "MAINTENANCE_SCHEDULE", "SHUTDOWN"]},
+                "command": {"type": "STRING", "description": "The specific command string (e.g., 'ReduceLoad(5MW)', 'ScheduleVibrationCheck(72h)')."},
+                "priority": {"type": "STRING", "enum": ["HIGH", "MEDIUM", "LOW"]}
+            }
+        }
+    }
+}
+
+# --- 5. Gemini API Call with Robustness ---
+def call_gemini_api(data):
+    """Sends complex data to Gemini for structured, multi-stage analysis."""
+    user_query = f"Perform advanced predictive analysis on this current operational snapshot:\n{json.dumps(data, indent=2)}"
+
+    payload = {
+        "contents": [{"parts": [{"text": user_query}]}],
+        "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": RESPONSE_SCHEMA
+        }
+    }
+
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(API_URL, headers={'Content-Type': 'application/json'}, data=json.dumps(payload))
+            response.raise_for_status()
+            
+            # Extract JSON text from the response
+            result = response.json()
+            json_text = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text')
+            
+            if json_text:
+                return json.loads(json_text)
+            
+            print(f"[{datetime.now().isoformat()}] INFO: API response received but no structured JSON text found.")
+            return None
+
+        except requests.exceptions.RequestException as e:
+            print(f"[{datetime.now().isoformat()}] ERROR: API Call attempt {attempt + 1} failed (Network/HTTP Error): {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt) # Exponential backoff
+            else:
+                return None
+        except json.JSONDecodeError:
+            print(f"[{datetime.now().isoformat()}] ERROR: Model returned unparseable JSON.")
+            return None
+
+# --- 6. The Core Background Service Loop ---
+STOP_FLAG = False
+
+def signal_handler(signum, frame):
+    """Graceful shutdown handler for cross-OS compatibility."""
+    global STOP_FLAG
+    print(f"\n[{datetime.now().isoformat()}] INFO: Received signal {signum}. Shutting down gracefully...")
+    STOP_FLAG = True
+
+def run_service_loop():
+    """The main loop simulating the cross-OS background service."""
+    global STOP_FLAG
+    cycle_count = 0
+    
+    # Set up signal handlers for graceful shutdown (Unix-like systems)
+    if os.name != 'nt': # Not Windows
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+
+    print(f"[{datetime.now().isoformat()}] SERVICE STARTED: Predictive Maintenance Agent")
+    print(f"Polling Interval: {POLLING_INTERVAL_SECONDS} seconds. Running with model: {MODEL_NAME}")
+    print("-" * 50)
+
+    while not STOP_FLAG:
+        cycle_count += 1
+        current_data = get_simulated_sensor_data(cycle_count)
+        
+        print(f"[{datetime.now().isoformat()}] CYCLE {cycle_count}: Analyzing data from {current_data['unit_name']}...")
+        
+        analysis_result = call_gemini_api(current_data)
+        
+        if analysis_result:
+            action = analysis_result['automation_action']
+            score = analysis_result['anomaly_score']
+
+            print(f"  > Risk Score: {score:.1f}/10.0 | Subsystem: {analysis_result['highest_risk_subsystem']}")
+            print(f"  > Diagnosis: {analysis_result['diagnosis_prediction']}")
+            print(f"  > Action Type: {action['action_type']} ({action['priority']})")
+            print(f"  > COMMAND: {action['command']}")
+            
+            # --- Automation Logic (The "Addon" Activity) ---
+            if score >= 7.0 and action['priority'] == "HIGH":
+                print(f"  *** CRITICAL ALERT: Executing Mitigation Command: {action['command']}")
+                # In a real system, this is where you interface with Modbus/SCADA/IoT
+            elif action['action_type'] == "MAINTENANCE_SCHEDULE":
+                print(f"  --- Scheduled Maintenance Recommendation: {action['command']}")
+            
+        else:
+            print(f"[{datetime.now().isoformat()}] WARNING: Analysis failed for cycle {cycle_count}. Skipping automation step.")
+            
+        print("-" * 50)
+
+        # Pause until the next polling interval
+        time.sleep(POLLING_INTERVAL_SECONDS)
+
+if __name__ == "__main__":
+    # Ensure API Key is set in a real environment
+    if not API_KEY:
+        print("FATAL ERROR: GEMINI_API_KEY environment variable is not set.")
+        print("Please set the environment variable or update the placeholder in the script.")
+    else:
+        # Note: For production use on Windows/Linux/macOS, this loop would be 
+        # integrated into a service manager (like systemd, NSSM, or launchd) 
+        # to ensure true background persistence and OS-level control.
+        run_service_loop()
+
