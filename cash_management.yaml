@@ -1,0 +1,162 @@
+import numpy as np
+import pandas as pd
+from pypfopt.efficient_frontier import EfficientFrontier
+from pypfopt import risk_models
+from pypfopt import expected_returns
+
+# --- 1. Hypothetical Stock Data (Replace with real data from a financial API) ---
+# df = pd.read_csv("stock_prices.csv", parse_dates=True, index_col="Date")
+data = {
+    'STOCK_A': [100, 102, 105, 103, 107],
+    'STOCK_B': [50, 51, 53, 52, 55],
+    'STOCK_C': [200, 198, 203, 205, 201]
+}
+df = pd.DataFrame(data)
+
+# --- 2. Calculate Expected Returns and Risk Model (Covariance) ---
+# The expected returns (mu) and risk matrix (S) are the inputs for optimization
+mu = expected_returns.mean_historical_return(df)
+S = risk_models.sample_cov(df)
+
+# --- 3. Perform Portfolio Optimization (Max Sharpe) ---
+# Max_Sharpe is a common 'multiplier' or optimization goal
+ef = EfficientFrontier(mu, S)
+raw_weights = ef.max_sharpe()
+# Clean the weights to be a dict of ticker: weight, rounded to 2 decimal places
+cleaned_weights = ef.clean_weights()
+
+print("Optimized Weights (Max Sharpe Ratio):")
+print(cleaned_weights)
+ef.portfolio_performance(verbose=True)
+
+# Output: Prints the expected annual return, volatility, and Sharpe ratio
+
+
+
+def calculate_money_multiplier(reserve_ratio_percent: float) -> float:
+    """Calculates the theoretical money multiplier based on a reserve ratio."""
+    if not 0 < reserve_ratio_percent <= 100:
+        raise ValueError("Reserve ratio must be between 0 and 100 percent.")
+    
+    reserve_ratio = reserve_ratio_percent / 100
+    money_multiplier = 1 / reserve_ratio
+    return money_multiplier
+
+# Example: If the central bank's required reserve ratio is 10%
+reserve_ratio = 10 
+multiplier = calculate_money_multiplier(reserve_ratio)
+
+print(f"Reserve Ratio: {reserve_ratio}%")
+print(f"Money Multiplier: {multiplier:.2f}") 
+# Output: Money Multiplier: 10.00
+
+
+
+import hashlib
+
+def calculate_sha256(filepath: str) -> str:
+    """Calculates the SHA-256 hash of a file."""
+    try:
+        # Use 'rb' (read binary) mode
+        with open(filepath, 'rb') as f:
+            # Create a SHA-256 hash object
+            hasher = hashlib.sha256()
+            
+            # Read and update hash string in blocks to handle large files
+            while chunk := f.read(4096):
+                hasher.update(chunk)
+            
+            return hasher.hexdigest()
+    except FileNotFoundError:
+        return "File not found."
+
+# IMPORTANT: You would need a file to test this.
+# Example usage with a placeholder file path
+# file_path_to_check = "/path/to/your/financial_data.csv"
+# file_hash = calculate_sha256(file_path_to_check)
+# print(f"File Hash: {file_hash}")
+
+
+
+import pandas as pd
+from pypfopt.efficient_frontier import EfficientFrontier
+from pypfopt import risk_models
+from pypfopt import expected_returns
+
+# --- 1. Sample Asset Price Data (Replace with your actual data) ---
+# In a real application, you would fetch this from an API like Yahoo Finance.
+data = {
+    'Date': pd.to_datetime(['2023-01-01', '2023-01-02', '2023-01-03', '2023-01-04', '2023-01-05']),
+    'AAPL': [150.0, 151.5, 153.0, 151.0, 155.0],
+    'MSFT': [250.0, 252.0, 255.0, 251.0, 258.0],
+    'GOOG': [100.0, 100.5, 102.0, 101.5, 103.0]
+}
+df = pd.DataFrame(data).set_index('Date')
+
+# --- 2. Calculate Inputs: Expected Returns (mu) and Covariance (S) ---
+# Use mean historical returns as the prediction of future returns
+mu = expected_returns.mean_historical_return(df)
+
+# Use the Ledoit-Wolf shrinkage model for a robust covariance estimate
+S = risk_models.CovarianceShrinkage(df).ledoit_wolf()
+
+# --- 3. Run Optimization for Maximum Sharpe Ratio ---
+# A common metric for portfolio performance ("Cash Multiplier" concept)
+ef = EfficientFrontier(mu, S)
+weights = ef.max_sharpe() 
+cleaned_weights = ef.clean_weights()
+
+print("--- Optimized Portfolio Weights (Max Sharpe Ratio) ---")
+print(cleaned_weights)
+
+# --- 4. Display Performance ---
+perf = ef.portfolio_performance(verbose=True)
+print(f"\nExpected Annual Return: {perf[0]*100:.2f}%")
+print(f"Annual Volatility: {perf[1]*100:.2f}%")
+print(f"Sharpe Ratio: {perf[2]:.2f}")
+
+
+
+import numpy as np
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+from sklearn.model_selection import train_test_split
+
+# --- 1. Generate Dummy Financial Data for Training ---
+# Features (X): Lagged returns (e.g., returns from the last 5 days)
+# Target (y): Next day's return
+np.random.seed(42)
+days = 100
+returns = np.random.randn(days) * 0.01  # Daily returns (mean 0, std 1%)
+
+# Create lagged features
+X = np.array([returns[i-5:i] for i in range(5, days)])
+y = returns[5:].reshape(-1, 1)
+
+# Split data
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# --- 2. Build the Neural Network Model ---
+model = Sequential([
+    # Input layer with 5 features (5 lagged days)
+    Dense(units=32, activation='relu', input_shape=(X.shape[1],)), 
+    # Hidden layer
+    Dense(units=16, activation='relu'), 
+    # Output layer with 1 unit (the predicted return)
+    Dense(units=1, activation='linear')
+])
+
+# --- 3. Compile and Train the Model ---
+model.compile(optimizer='adam', loss='mse') # Using Mean Squared Error loss
+print("\n--- Training Neural Network ---")
+model.fit(X_train, y_train, epochs=10, batch_size=32, verbose=0)
+
+# --- 4. Evaluate and Predict ---
+loss = model.evaluate(X_test, y_test, verbose=0)
+print(f"Test Loss (MSE): {loss:.6f}")
+
+# Predict the next 5 days' returns based on the latest input
+latest_input = X_test[-1].reshape(1, -1)
+predicted_return = model.predict(latest_input, verbose=0)[0][0]
+
+print(f"Predicted next day return: {predicted_return*100:.4f}%")
