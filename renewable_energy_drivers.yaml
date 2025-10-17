@@ -1,0 +1,185 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Define the efficiency constants and maximum capacities
+SOLAR_CAPACITY_KW = 100.0  # Max capacity of the solar farm in kW
+WIND_CAPACITY_KW = 150.0   # Max capacity of the wind farm in kW
+SOLAR_EFFICIENCY = 0.18    # Conversion efficiency (unitless)
+WIND_CUBE_FACTOR = 0.5 * 1.225 * 0.59 # P = 0.5 * rho * A * Cp * v^3 (simplified constant)
+
+# Function to calculate solar power output
+def calculate_solar_power(irradiance):
+    """
+    Calculates power output from solar panels (in kW).
+    Driver: Solar Irradiance (W/m^2).
+    """
+    # Simple model: Power = Irradiance * Efficiency * Panel Area (simplified)
+    # We normalize to capacity, assuming irradiance is 0-1000 W/m^2
+    max_irradiance = 1000.0
+    power_kw = (irradiance / max_irradiance) * SOLAR_CAPACITY_KW
+    # Ensure power doesn't exceed capacity
+    return np.clip(power_kw, 0, SOLAR_CAPACITY_KW)
+
+# Function to calculate wind power output
+def calculate_wind_power(wind_speed_mps):
+    """
+    Calculates power output from a wind turbine (in kW).
+    Driver: Wind Speed (m/s).
+    """
+    # Simple cubic model: Power is proportional to wind speed cubed (P ∝ v^3)
+    # Cut-in speed (min speed for power) and Cut-out speed (max speed for safety)
+    cut_in_speed = 3.0  # m/s
+    rated_speed = 12.0  # m/s (speed where it reaches max capacity)
+    
+    if wind_speed_mps < cut_in_speed:
+        return 0.0
+    elif wind_speed_mps >= rated_speed:
+        return WIND_CAPACITY_KW
+    else:
+        # P = P_rated * ((v^3 - v_cutin^3) / (v_rated^3 - v_cutin^3)) - Simplified
+        # For simplicity, we'll use a straight cubic relation normalized to rated speed
+        power_kw = WIND_CAPACITY_KW * (wind_speed_mps / rated_speed)**3
+        return np.clip(power_kw, 0, WIND_CAPACITY_KW)
+
+# --- Simulation Data ---
+# Create a time series data for one day (hourly)
+hours = np.arange(24)
+# Simulated "drivers" data:
+# Irradiance (W/m^2): peaks at noon (hour 12)
+irradiance_data = np.interp(hours, [0, 6, 12, 18, 24], [0, 100, 900, 150, 0])
+# Wind Speed (m/s): peaks later in the day
+wind_speed_data = np.interp(hours, [0, 8, 16, 24], [5, 3, 15, 8])
+
+# Calculate Outputs
+solar_output = [calculate_solar_power(irr) for irr in irradiance_data]
+wind_output = [calculate_wind_power(ws) for ws in wind_speed_data]
+total_output = np.array(solar_output) + np.array(wind_output)
+
+# --- Visualization ---
+df = pd.DataFrame({
+    'Hour': hours,
+    'Irradiance (W/m^2)': irradiance_data,
+    'Wind Speed (m/s)': wind_speed_data,
+    'Solar Power (kW)': solar_output,
+    'Wind Power (kW)': wind_output,
+    'Total Power (kW)': total_output
+})
+
+print(df)
+
+plt.figure(figsize=(10, 6))
+plt.plot(df['Hour'], df['Solar Power (kW)'], label='Solar Power', marker='o')
+plt.plot(df['Hour'], df['Wind Power (kW)'], label='Wind Power', marker='x')
+plt.plot(df['Hour'], df['Total Power (kW)'], label='Total Power', linestyle='--', color='k')
+plt.title('Simulated Renewable Energy Output Over 24 Hours')
+plt.xlabel('Hour of Day')
+plt.ylabel('Power Output (kW)')
+plt.grid(True)
+plt.legend()
+plt.xticks(hours)
+plt.show()
+
+
+
+import pandas as pd
+import numpy as np
+
+# --- Configuration Constants ---
+REQUIRED_LOAD_KW = 100.0        # The constant load demand of the microgrid
+GAS_GEN_COST_PER_KW = 0.15      # Cost to run the gas generator
+SOLAR_CAPACITY_KW = 120.0       # Max power from solar farm
+MAX_SECURE_TEMP_C = 75.0        # Max safe operating temp (Security Check)
+
+# --- Dispatch Functions ---
+
+def security_check(sensor_data):
+    """
+    Simulates a basic security/safety check.
+    In a real system, this would be an IDS/Antimalware check.
+    Here, it checks for anomalous temperature readings.
+    """
+    if sensor_data['Generator_Temp_C'] > MAX_SECURE_TEMP_C:
+        print(f"⚠️ SECURITY ALERT: Generator temperature ({sensor_data['Generator_Temp_C']}°C) is ANOMALOUS. DISPATCH HALTED.")
+        return False
+    if sensor_data['Network_Packets'] > 5000:
+        print(f"⚠️ CYBER ALERT: High network activity ({sensor_data['Network_Packets']}). Proceed with caution.")
+    return True
+
+def calculate_solar_output(irradiance_w_m2):
+    """Calculates solar power output based on irradiance."""
+    # Simplified model: Power = Irradiance / 1000 * Capacity
+    max_irradiance = 1000.0
+    return np.clip((irradiance_w_m2 / max_irradiance) * SOLAR_CAPACITY_KW, 0, SOLAR_CAPACITY_KW)
+
+def dispatch_energy(irradiance, temp, network_packets):
+    """
+    Determines power station output based on renewable availability and security status.
+    """
+    # 1. Gather Inputs
+    solar_output = calculate_solar_output(irradiance)
+    sensor_data = {
+        'Generator_Temp_C': temp,
+        'Network_Packets': network_packets
+    }
+
+    print(f"\n--- DISPATCH CYCLE ---")
+    print(f"Load Demand: {REQUIRED_LOAD_KW:.2f} kW")
+    print(f"Solar Availability: {solar_output:.2f} kW")
+
+    # 2. Perform Security Check
+    if not security_check(sensor_data):
+        # Emergency Shutdown/Limit Power if security fails
+        return solar_output, 0.0, "SECURE_FAIL"
+
+    # 3. Calculate Required Deficit
+    deficit_kw = REQUIRED_LOAD_KW - solar_output
+
+    # 4. Dispatch Gas Generator if Deficit Exists
+    if deficit_kw > 0:
+        gas_gen_output = deficit_kw
+        total_cost = gas_gen_output * GAS_GEN_COST_PER_KW
+        status = f"GAS_DISPATCHED (Cost: ${total_cost:.2f})"
+    else:
+        gas_gen_output = 0.0
+        status = "SOLAR_ONLY (Load Met)"
+        
+    # 5. Handle Surplus (Export/Battery Charge - simple status update here)
+    if deficit_kw < 0:
+        status = f"SOLAR_SURPLUS ({(solar_output - REQUIRED_LOAD_KW):.2f} kW Available)"
+    
+    return solar_output, gas_gen_output, status
+
+# --- Simulation Run ---
+
+# Scenario 1: Sunny Day, Normal Operation
+s1_solar, s1_gas, s1_status = dispatch_energy(
+    irradiance=850, # High sunlight
+    temp=65.0,      # Normal temperature
+    network_packets=1200 # Normal activity
+)
+print(f"RESULT 1: Solar={s1_solar:.2f} kW, Gas={s1_gas:.2f} kW, Status: {s1_status}")
+
+# Scenario 2: Cloudy Day, Gas Required
+s2_solar, s2_gas, s2_status = dispatch_energy(
+    irradiance=200, # Low sunlight
+    temp=70.0,      # Normal temperature
+    network_packets=800  # Normal activity
+)
+print(f"RESULT 2: Solar={s2_solar:.2f} kW, Gas={s2_gas:.2f} kW, Status: {s2_status}")
+
+# Scenario 3: High Temperature Anomaly (Simulating Malware/Fault)
+s3_solar, s3_gas, s3_status = dispatch_energy(
+    irradiance=500, # Medium sunlight
+    temp=80.0,      # High/Anomalous temperature
+    network_packets=1500 # Normal activity
+)
+print(f"RESULT 3: Solar={s3_solar:.2f} kW, Gas={s3_gas:.2f} kW, Status: {s3_status}")
+
+# Scenario 4: Extreme Sunlight (Surplus)
+s4_solar, s4_gas, s4_status = dispatch_energy(
+    irradiance=1200, # High sunlight (will cap at capacity)
+    temp=60.0,      # Normal temperature
+    network_packets=1000 # Normal activity
+)
+print(f"RESULT 4: Solar={s4_solar:.2f} kW, Gas={s4_gas:.2f} kW, Status: {s4_status}")
