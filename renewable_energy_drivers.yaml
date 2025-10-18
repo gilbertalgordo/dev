@@ -183,3 +183,130 @@ s4_solar, s4_gas, s4_status = dispatch_energy(
     network_packets=1000 # Normal activity
 )
 print(f"RESULT 4: Solar={s4_solar:.2f} kW, Gas={s4_gas:.2f} kW, Status: {s4_status}")
+
+
+
+import numpy as np
+import pandas as pd
+import time
+
+# --- System Parameters (The "Drivers" for Optimization) ---
+REQUIRED_LOAD_MW = 150.0   # Total energy demand of the grid
+GAS_GEN_COST_PER_MW = 150.0 # High cost to run the gas power station ($/MWh)
+WIND_CAPACITY_MW = 100.0   # Max power from wind farm
+SOLAR_CAPACITY_MW = 80.0    # Max power from solar farm
+RENEWABLE_COST = 0.0       # Renewable energy is considered "free" to dispatch (already built)
+
+# --- Cyber & Safety Thresholds ---
+ANOMALY_THRESHOLD_TEMP_C = 85.0 # Max safe operating temperature for Gas Turbine
+ANOMALY_THRESHOLD_CYBER_RATE = 5000 # Max safe control packet rate (e.g., Modbus/DNP3 packets/sec)
+
+
+
+def check_ics_security(sensor_data):
+    """
+    Simulates a centralized security system's check on control and safety metrics.
+    A failure here overrides the economic dispatch decision.
+    """
+    gas_temp = sensor_data.get('Turbine_Temp_C', 0)
+    packet_rate = sensor_data.get('Control_Packet_Rate', 0)
+    
+    # 1. Physical Safety Check (Thermal Anomaly)
+    if gas_temp > ANOMALY_THRESHOLD_TEMP_C:
+        print(f"🚨 ALERT: Turbine Temperature Anomaly ({gas_temp:.1f}°C). Gas generation MUST be minimal.")
+        return False, "THERMAL_SHUTDOWN"
+        
+    # 2. Cyber Behavior Check (Network Anomaly)
+    if packet_rate > ANOMALY_THRESHOLD_CYBER_RATE:
+        print(f"⚠️ CYBER ALERT: Excessive Control Packet Rate ({packet_rate}). Potential Malicious Control Signal Flood.")
+        # In a real scenario, this would trigger an isolation, but here, we halt dispatch.
+        return False, "CYBER_ANOMALY"
+        
+    return True, "SYSTEM_SECURE"
+
+
+
+def optimal_dispatch_cycle(wind_power, solar_power, sensor_data):
+    """
+    The main driver function that decides which generators to run.
+    It prioritizes cost-effectiveness but is overridden by security status.
+    """
+    
+    # --- Step 1: Security and Safety Validation ---
+    is_secure, security_reason = check_ics_security(sensor_data)
+    
+    if not is_secure:
+        # If the system is compromised or unsafe, stop the gas generator immediately
+        # and limit renewable output to prevent grid instability.
+        return (solar_power, wind_power, 0.0, "SECURE_FAIL - EMERGENCY LIMIT")
+
+    # --- Step 2: Renewable Dispatch (Always Priority 1) ---
+    available_renewable = np.clip(wind_power, 0, WIND_CAPACITY_MW) + \
+                          np.clip(solar_power, 0, SOLAR_CAPACITY_MW)
+    
+    # --- Step 3: Load Calculation and Deficit ---
+    load_deficit = REQUIRED_LOAD_MW - available_renewable
+    
+    # --- Step 4: Gas Power Station Dispatch (Priority 2) ---
+    
+    if load_deficit > 0:
+        # Dispatch the gas generator only to cover the deficit
+        gas_gen_output = load_deficit
+        total_cost = gas_gen_output * GAS_GEN_COST_PER_MW
+        status = f"GAS_DISPATCHED (Cost: ${total_cost:.2f}/hr)"
+    else:
+        # Renewable energy meets or exceeds the load
+        gas_gen_output = 0.0
+        if load_deficit < 0:
+            status = f"RENEWABLE_SURPLUS ({-load_deficit:.2f} MW Available)"
+        else:
+            status = "LOAD_MET_EXACTLY"
+
+    return (solar_power, wind_power, gas_gen_output, status)
+
+
+
+# --- RUN THE SIMULATION ---
+
+print(f"SYSTEM LOAD DEMAND: {REQUIRED_LOAD_MW} MW")
+
+# Scenario A: Normal Operation (Sunny and Windy)
+# Expected: Renewables cover load, Gas = 0.
+output_A = optimal_dispatch_cycle(
+    wind_power=90.0,
+    solar_power=80.0,
+    sensor_data={'Turbine_Temp_C': 70.0, 'Control_Packet_Rate': 1500}
+)
+print("\n--- Scenario A: Normal, Surplus ---")
+print(f"Dispatch (S/W/G): {output_A[0]:.1f} / {output_A[1]:.1f} / {output_A[2]:.1f} MW. Status: {output_A[3]}")
+
+# Scenario B: Low Renewables (Cloudy and Calm)
+# Expected: Gas generator runs to cover the deficit.
+output_B = optimal_dispatch_cycle(
+    wind_power=20.0,
+    solar_power=10.0,
+    sensor_data={'Turbine_Temp_C': 75.0, 'Control_Packet_Rate': 1000}
+)
+print("\n--- Scenario B: Low Renewables, Gas Required ---")
+print(f"Dispatch (S/W/G): {output_B[0]:.1f} / {output_B[1]:.1f} / {output_B[2]:.1f} MW. Status: {output_B[3]}")
+
+# Scenario C: Cyber Anomaly Detected
+# Expected: Security check fails, Gas is forced to 0. Load shed may occur (implicit in this model).
+output_C = optimal_dispatch_cycle(
+    wind_power=90.0,
+    solar_power=80.0,
+    sensor_data={'Turbine_Temp_C': 70.0, 'Control_Packet_Rate': 6500} # HIGH PACKET RATE
+)
+print("\n--- Scenario C: High Cyber Activity (Malware/DDoS on Control Network) ---")
+print(f"Dispatch (S/W/G): {output_C[0]:.1f} / {output_C[1]:.1f} / {output_C[2]:.1f} MW. Status: {output_C[3]}")
+
+# Scenario D: Physical Safety Failure
+# Expected: Security check fails, Gas is forced to 0, regardless of the need.
+output_D = optimal_dispatch_cycle(
+    wind_power=20.0,
+    solar_power=10.0,
+    sensor_data={'Turbine_Temp_C': 95.0, 'Control_Packet_Rate': 1000} # HIGH TEMP
+)
+print("\n--- Scenario D: Turbine Safety Failure (Overheating) ---")
+print(f"Dispatch (S/W/G): {output_D[0]:.1f} / {output_D[1]:.1f} / {output_D[2]:.1f} MW. Status: {output_D[3]}")
+
