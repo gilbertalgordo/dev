@@ -1,0 +1,103 @@
+import speech_recognition as sr
+import requests # For API calls to LLM and TTS
+import json
+
+# --- 1. Configuration (Replace with your actual keys and 3D model specific info) ---
+OPENAI_API_KEY = "YOUR_OPENAI_KEY"
+ELEVENLABS_API_KEY = "YOUR_ELEVENLABS_KEY"
+FEMALE_VOICE_ID = "YOUR_FEMALE_VOICE_ID" # E.g., from ElevenLabs
+VRM_AVATAR_ENDPOINT = "http://localhost:3000/api/avatar-action" # Placeholder for your 3D application API
+
+def listen_for_command():
+    """Listens for user's voice command and returns transcribed text."""
+    r = sr.Recognizer()
+    with sr.Microphone() as source:
+        print("Listening...")
+        r.adjust_for_ambient_noise(source)
+        try:
+            audio = r.listen(source, timeout=5)
+            text = r.recognize_google(audio) # Or use a local/cloud API like Whisper
+            print(f"User: {text}")
+            return text
+        except sr.WaitTimeoutError:
+            print("No speech detected.")
+            return ""
+        except sr.UnknownValueError:
+            print("Could not understand audio.")
+            return "ERROR: Could not understand"
+        except sr.RequestError as e:
+            print(f"Could not request results; {e}")
+            return "ERROR: API failed"
+
+def get_llm_response(prompt):
+    """Sends the user's text to an LLM (e.g., GPT-4o) and gets a text response."""
+    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": "gpt-4o",
+        "messages": [
+            {"role": "system", "content": "You are a friendly and helpful female 3D AI assistant. Keep responses concise."},
+            {"role": "user", "content": prompt}
+        ]
+    }
+    
+    try:
+        response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
+        response.raise_for_status()
+        return response.json()['choices'][0]['message']['content']
+    except requests.exceptions.RequestException as e:
+        print(f"LLM API Error: {e}")
+        return "I'm sorry, I am experiencing a connection issue."
+
+def generate_voice_and_lip_sync(text):
+    """Generates the audio and (optionally) lip-sync data."""
+    # This is highly dependent on the TTS service. ElevenLabs and Azure can provide
+    # the audio and sometimes viseme/lip-sync data.
+    
+    tts_url = f"https://api.elevenlabs.io/v1/text-to-speech/{FEMALE_VOICE_ID}"
+    headers = {"xi-api-key": ELEVENLABS_API_KEY, "Content-Type": "application/json"}
+    payload = {"text": text, "model_id": "eleven_multilingual_v2"} 
+    # Add optional headers/payload for viseme/lip-sync data if the service supports it.
+
+    # In a real application, you'd save the audio file and extract the lip-sync data.
+    # For simplicity here, we'll just return a success message.
+    print(f"Generating voice for: '{text}'...")
+    return True
+
+def animate_avatar(text, audio_path=None, lip_sync_data=None):
+    """Sends command/data to the 3D rendering application to animate the character."""
+    # This is a placeholder for an API call to your Unity/Three.js/etc. frontend.
+    data = {
+        "action": "speak",
+        "text_to_display": text,
+        "audio_file": audio_path, 
+        "lip_sync": lip_sync_data
+    }
+    try:
+        response = requests.post(VRM_AVATAR_ENDPOINT, json=data)
+        response.raise_for_status()
+        print("Avatar animation triggered successfully.")
+    except requests.exceptions.RequestException as e:
+        print(f"3D Avatar API Error: {e}")
+
+# --- Main Interaction Loop ---
+def main_assistant_loop():
+    while True:
+        user_prompt = listen_for_command()
+        if user_prompt.startswith("ERROR"):
+            continue
+        if "goodbye" in user_prompt.lower():
+            animate_avatar("Goodbye!") 
+            break
+        if user_prompt:
+            ai_response_text = get_llm_response(user_prompt)
+            print(f"Assistant: {ai_response_text}")
+            
+            # 1. Generate the voice and lip-sync data for the response
+            success = generate_voice_and_lip_sync(ai_response_text)
+            
+            # 2. Play the voice and animate the 3D character
+            if success:
+                 # In a full app, you'd pass the actual audio file path and lip-sync data
+                 animate_avatar(ai_response_text, audio_path="/tmp/response.mp3", lip_sync_data={"visemes": []}) 
+
+# main_assistant_loop() # Uncomment to run the loop
