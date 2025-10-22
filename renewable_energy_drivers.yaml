@@ -310,3 +310,144 @@ output_D = optimal_dispatch_cycle(
 print("\n--- Scenario D: Turbine Safety Failure (Overheating) ---")
 print(f"Dispatch (S/W/G): {output_D[0]:.1f} / {output_D[1]:.1f} / {output_D[2]:.1f} MW. Status: {output_D[3]}")
 
+
+
+import time
+import random
+import numpy as np
+
+# --- SYSTEM CONSTANTS & THRESHOLDS ---
+MAX_WIND_SPEED_MPS = 25.0  # Wind speed at which the turbine must feather (cut-out)
+PITCH_MAX_ANGLE = 90.0     # Max blade pitch angle (feathered/safe position)
+PITCH_MIN_ANGLE = 0.0      # Min blade pitch angle (full power/optimal position)
+ANOMALY_THRESHOLD_PITCH_RATE = 10.0 # Degrees per second - Max safe rate of change
+
+# --- Configuration for Controlled Update ---
+FIRMWARE_VERSION = "WTC_v2.1.5"
+LAST_UPDATE_CHECK_TIMESTAMP = time.time()
+UPDATE_CHECK_INTERVAL_HOURS = 24 * 7 # Check for updates only once a week
+
+def turbine_pitch_driver(wind_speed, current_pitch_angle):
+    """
+    Simulates the core logic for the wind turbine blade pitch actuator driver.
+    Its primary 'driver' is the current wind speed.
+    """
+    
+    target_pitch = current_pitch_angle # Default: hold position
+
+    # Logic 1: High Wind Safety (Heavy-Duty Driver)
+    if wind_speed >= MAX_WIND_SPEED_MPS:
+        # Move blades to feathered position (full safety stop)
+        target_pitch = PITCH_MAX_ANGLE
+        command = "FEATHERED_SHUTDOWN"
+    # Logic 2: Optimal Power Tracking (Heavy-Duty Driver)
+    elif wind_speed > 10.0:
+        # Simplistic: adjust pitch to shed power and maintain target RPM
+        # Target angle increases with wind speed above threshold
+        target_pitch = min(PITCH_MAX_ANGLE, (wind_speed - 10.0) * 4)
+        command = "REGULATE_POWER"
+    else:
+        # Optimal position for low/medium wind is usually near 0 degrees
+        target_pitch = PITCH_MIN_ANGLE
+        command = "MAX_CAPTURE"
+
+    # Limit the rate of change for physical safety
+    pitch_change = target_pitch - current_pitch_angle
+    max_rate_change = 0.5 # Degrees per simulation cycle (e.g., 0.5 deg/sec)
+    
+    if abs(pitch_change) > max_rate_change:
+        pitch_change = np.sign(pitch_change) * max_rate_change
+        
+    new_pitch_angle = current_pitch_angle + pitch_change
+    
+    return np.clip(new_pitch_angle, PITCH_MIN_ANGLE, PITCH_MAX_ANGLE), command
+
+
+
+def check_anomaly_and_cyber_threats(pitch_commanded, pitch_actual, pitch_rate_of_change):
+    """
+    Simulates a basic Industrial Security Monitoring System (IDS/Antimalware Proxy).
+    It checks for unexpected or malicious changes to critical physical parameters.
+    """
+    
+    # Check 1: Malicious Command/Setpoint Check
+    if abs(pitch_commanded - pitch_actual) > 30.0 and pitch_commanded < PITCH_MAX_ANGLE:
+        # If the commanded pitch is drastically different from the actual, and
+        # it's NOT a safety shutdown, it could be a malicious attempt to override control.
+        print("🚨 CYBER WARNING: Large, non-safety pitch deviation detected. Control system integrity check initiated.")
+        return False
+
+    # Check 2: Unsafe Rate of Change (Often triggered by rapid, unauthorized commands)
+    if pitch_rate_of_change > ANOMALY_THRESHOLD_PITCH_RATE:
+        print(f"⚠️ SAFETY/CYBER ALERT: Pitch angle changing too fast ({pitch_rate_of_change:.1f} deg/s). Emergency stop!")
+        return False
+        
+    return True
+
+def controlled_auto_update_check():
+    """
+    Simulates a highly controlled, non-real-time automated update check typical of ICS.
+    This replaces a general 'antimalware auto update' with a safe, scheduled check.
+    """
+    global LAST_UPDATE_CHECK_TIMESTAMP, FIRMWARE_VERSION
+    current_time = time.time()
+    
+    if (current_time - LAST_UPDATE_CHECK_TIMESTAMP) > (UPDATE_CHECK_INTERVAL_HOURS * 3600):
+        print("\n⚙️ SYSTEM CHECK: Starting weekly controlled update and integrity validation...")
+        
+        # In a real system, this would involve connecting to a CERTIFIED server
+        # and checking the cryptographic signature of the new firmware/driver.
+        new_version_available = random.choice([True, False])
+        
+        if new_version_available:
+            new_version = "WTC_v2.1.6"
+            print(f"✅ UPDATE FOUND: New certified version {new_version} detected.")
+            print("🚫 UPDATE SCHEDULED: Downloading to secure staging area. **Installation requires operator approval and system shutdown.**")
+            # FIRMWARE_VERSION = new_version # Do NOT auto-install!
+        else:
+            print(f"✅ SYSTEM OK: Current version {FIRMWARE_VERSION} is latest. Integrity verified.")
+            
+        LAST_UPDATE_CHECK_TIMESTAMP = current_time # Reset timer
+    # The check is often *skipped* during high-demand or critical operating periods.
+
+
+
+# --- SIMULATION START ---
+current_pitch = PITCH_MIN_ANGLE
+sim_time_seconds = 0
+wind_profile = [8, 12, 22, 15, 5, 26, 11] # Sample wind speeds (m/s)
+
+print(f"--- Wind Turbine Control System Initialized ({FIRMWARE_VERSION}) ---")
+
+for i, wind in enumerate(wind_profile):
+    sim_time_seconds += 1
+    
+    # 1. RUN CORE DRIVER LOGIC
+    new_pitch, command = turbine_pitch_driver(wind, current_pitch)
+    pitch_rate_of_change = abs(new_pitch - current_pitch)
+    
+    # 2. RUN SECURITY/ANOMALY CHECK
+    is_safe = check_anomaly_and_cyber_threats(new_pitch, current_pitch, pitch_rate_of_change)
+
+    # 3. APPLY COMMAND ONLY IF SAFE
+    if is_safe:
+        current_pitch = new_pitch
+    else:
+        # If not safe, always revert to the safest state
+        current_pitch = PITCH_MAX_ANGLE 
+        command = "SAFETY_OVERRIDE"
+
+    # 4. RUN CONTROLLED AUTO-UPDATE CHECK (Non-Real-Time)
+    if sim_time_seconds % 5 == 0:
+        # Simulate the time passing far enough for a check (conceptually)
+        controlled_auto_update_check() 
+        
+    # --- REPORT STATUS ---
+    print(f"\n[T={sim_time_seconds}s] Wind: {wind:.1f} m/s | New Pitch: {current_pitch:.1f}° | Command: {command}")
+    
+    # Simulating the emergency stop in the high wind scenario
+    if wind >= MAX_WIND_SPEED_MPS:
+        print("🛑 SYSTEM SHUTDOWN INITIATED DUE TO HIGH WIND.")
+        break
+    
+    time.sleep(0.01) # Simulate time passing
