@@ -401,3 +401,248 @@ void updatePowerBankMode() {
   }
   lastButtonState = reading;
 }
+
+
+
+// --- Configuration Constants & Pin Definitions ---
+const int SOLAR_CHARGE_RELAY_PIN = 9;    // Controls solar charge connection
+const int LOAD_OUTPUT_RELAY_PIN = 10;    // Controls 12/24V load power
+const int V_SELECT_RELAY_PIN = 8;        // Relay for 12V/24V configuration switch (if applicable)
+const int VOLTAGE_SENSE_PIN = A0;        // Single analog input for high-range voltage sensing (e.g., up to 30V)
+const int PBM_SWITCH_PIN = 2;            // Digital input for Power Bank Mode toggle button
+
+// Initial System Parameters (Can be updated via Serial)
+// NOTE: Use a high-precision voltage divider on A0 to read 0-30V safely.
+float SCALING_FACTOR = 0.0292;           // Example: (30V / 1024 ADC) for a 30V max divider
+
+// Default 12V Thresholds
+float BATT_MAX_12V = 14.2;        
+float BATT_LOW_CUTOFF_12V = 11.5; 
+float PBM_RESERVE_12V = 12.2;     
+
+// Default 24V Thresholds
+float BATT_MAX_24V = 28.4;        
+float BATT_LOW_CUTOFF_24V = 23.0; 
+float PBM_RESERVE_24V = 24.4;     
+
+// --- Global Variables ---
+float currentBatteryVoltage = 0.0;
+int systemVoltage = 0; // 0=Unknown, 12=12V, 24=24V
+bool powerBankModeActive = false;
+unsigned long lastStatusTime = 0;
+unsigned long autoUpdateTimer = 0;
+const int AUTO_UPDATE_INTERVAL = 5000; // Check for Serial updates every 5 seconds
+
+// --- Function Prototypes ---
+float readBatteryVoltage();
+void autoDetectVoltage(float voltage);
+void manageCharging(float voltage);
+void manageLoad(float voltage);
+void updatePowerBankMode();
+void checkSerialUpdates();
+
+void setup() {
+  Serial.begin(9600);
+  Serial.println("System Initializing...");
+  pinMode(SOLAR_CHARGE_RELAY_PIN, OUTPUT);
+  pinMode(LOAD_OUTPUT_RELAY_PIN, OUTPUT);
+  pinMode(V_SELECT_RELAY_PIN, OUTPUT);
+  pinMode(PBM_SWITCH_PIN, INPUT_PULLUP);
+
+  // Initial state: Load off, Charge off
+  digitalWrite(LOAD_OUTPUT_RELAY_PIN, LOW);
+  digitalWrite(SOLAR_CHARGE_RELAY_PIN, LOW);
+}
+
+void loop() {
+  // 1. Core measurement
+  currentBatteryVoltage = readBatteryVoltage();
+  
+  // 2. Automated System Configuration
+  autoDetectVoltage(currentBatteryVoltage);
+
+  // 3. Update Power Bank Mode status
+  updatePowerBankMode();
+
+  // 4. Manage Charging and Load based on detected voltage
+  if (systemVoltage > 0) {
+    manageCharging(currentBatteryVoltage);
+    manageLoad(currentBatteryVoltage);
+  } else {
+    // Wait for voltage detection
+    digitalWrite(LOAD_OUTPUT_RELAY_PIN, LOW);
+  }
+
+  // 5. Automation Auto Update Check (Serial for parameter updates)
+  if (millis() - autoUpdateTimer >= AUTO_UPDATE_INTERVAL) {
+    checkSerialUpdates();
+    autoUpdateTimer = millis();
+  }
+
+  // 6. Display Status (Debug/Monitoring)
+  if (millis() - lastStatusTime >= 2000) {
+    Serial.print("V: "); Serial.print(currentBatteryVoltage, 2); 
+    Serial.print("V | Sys: "); Serial.print(systemVoltage); 
+    Serial.print("V | PBM: "); Serial.print(powerBankModeActive ? "ON" : "OFF");
+    Serial.print(" | Load: "); Serial.println(digitalRead(LOAD_OUTPUT_RELAY_PIN) ? "ON" : "OFF");
+    lastStatusTime = millis();
+  }
+
+  delay(100); 
+}
+
+// --------------------------------------------------------------------------------
+// --- AUTOMATION & MAINTAINER FUNCTIONS ---
+// --------------------------------------------------------------------------------
+
+/**
+ * @brief Reads the voltage from a single analog pin and applies the scaling factor.
+ * ASSUMES A HIGH-RANGE VOLTAGE DIVIDER (e.g., 0-30V) IS USED ON A0.
+ */
+float readBatteryVoltage() {
+  int rawADC = analogRead(VOLTAGE_SENSE_PIN);
+  return rawADC * SCALING_FACTOR; 
+}
+
+/**
+ * @brief Automatically detects and sets the system voltage (12V or 24V).
+ * This replaces the manual `setSystemVoltage` function.
+ */
+void autoDetectVoltage(float voltage) {
+  // Simple check based on idle voltage (e.g., if > 18V, it's a 24V system)
+  if (voltage > 18.0) { 
+    if (systemVoltage != 24) {
+      systemVoltage = 24;
+      // If V_SELECT_RELAY_PIN is used to switch the battery bank configuration 
+      // (e.g., from parallel to series), control it here.
+      digitalWrite(V_SELECT_RELAY_PIN, HIGH); 
+      Serial.println("AUTO: Switched to 24V System.");
+    }
+  } else if (voltage > 9.0 && voltage < 16.0) { // Check within 12V range
+    if (systemVoltage != 12) {
+      systemVoltage = 12;
+      digitalWrite(V_SELECT_RELAY_PIN, LOW); 
+      Serial.println("AUTO: Switched to 12V System.");
+    }
+  } else {
+    // System voltage is unknown or outside standard range (e.g., too low/high)
+    systemVoltage = 0; 
+  }
+}
+
+/**
+ * @brief Manages the load output using the Power Bank Mode and the auto-detected voltage.
+ */
+void manageLoad(float voltage) {
+  float ultimate_cutoff, pbm_reserve;
+
+  if (systemVoltage == 12) {
+    ultimate_cutoff = BATT_LOW_CUTOFF_12V;
+    pbm_reserve = PBM_RESERVE_12V;
+  } else { // 24V
+    ultimate_cutoff = BATT_LOW_CUTOFF_24V;
+    pbm_reserve = PBM_RESERVE_24V;
+  }
+
+  // **Advanced Power Bank Mode Logic:** Determine the active cutoff
+  float effective_cutoff = powerBankModeActive ? pbm_reserve : ultimate_cutoff;
+  
+  // A. Check for low voltage cutoff
+  if (voltage < effective_cutoff) {
+    digitalWrite(LOAD_OUTPUT_RELAY_PIN, LOW); // Disconnect load
+    // Hysteresis: Store the ultimate cutoff for reconnection logic
+  } 
+  
+  // B. Hysteresis: Reconnect the load only when voltage rises significantly 
+  // (Always use the ultimate cutoff + buffer for safe reconnection)
+  float reconnect_voltage = ultimate_cutoff + 1.0; 
+  
+  if (digitalRead(LOAD_OUTPUT_RELAY_PIN) == LOW && voltage > reconnect_voltage) {
+    digitalWrite(LOAD_OUTPUT_RELAY_PIN, HIGH); // Reconnect load
+  }
+}
+
+/**
+ * @brief Manages charging based on auto-detected voltage and BATT_MAX.
+ */
+void manageCharging(float voltage) {
+  float BATT_MAX;
+  
+  BATT_MAX = (systemVoltage == 12) ? BATT_MAX_12V : BATT_MAX_24V;
+
+  if (voltage < BATT_MAX) {
+    digitalWrite(SOLAR_CHARGE_RELAY_PIN, HIGH); // Connect solar
+  } else {
+    digitalWrite(SOLAR_CHARGE_RELAY_PIN, LOW);  // Disconnect solar
+  }
+}
+
+/**
+ * @brief Toggles the Power Bank Mode based on the button state (same logic as before).
+ */
+void updatePowerBankMode() {
+  // (Same debounced button logic as previous iteration)
+  static unsigned long lastDebounceTime = 0;
+  static int lastButtonState = HIGH;
+  int reading = digitalRead(PBM_SWITCH_PIN);
+
+  if (reading != lastButtonState) {
+    lastDebounceTime = millis();
+  }
+
+  if ((millis() - lastDebounceTime) > 50) { 
+    if (reading != lastButtonState) {
+      if (reading == LOW) { 
+        powerBankModeActive = !powerBankModeActive;
+        Serial.print("PBM Toggled: ");
+        Serial.println(powerBankModeActive ? "ACTIVE (Higher Cutoff)" : "INACTIVE (Ultimate Cutoff)");
+      }
+    }
+  }
+  lastButtonState = reading;
+}
+
+// --------------------------------------------------------------------------------
+// --- AUTOMATION AUTO UPDATE (Serial Parameter Change) ---
+// --------------------------------------------------------------------------------
+
+/**
+ * @brief Checks the Serial Monitor for new configuration commands.
+ * Format: [PARAMETER]=[VALUE] (e.g., B12MAX=14.4)
+ */
+void checkSerialUpdates() {
+  while (Serial.available()) {
+    String command = Serial.readStringUntil('\n');
+    command.trim(); // Remove whitespace
+
+    if (command.length() > 0) {
+      int equalsIndex = command.indexOf('=');
+
+      if (equalsIndex > 0) {
+        String param = command.substring(0, equalsIndex);
+        String valueStr = command.substring(equalsIndex + 1);
+        float value = valueStr.toFloat();
+
+        if (value > 0) {
+          if (param == "B12MAX") BATT_MAX_12V = value;
+          else if (param == "B12CUT") BATT_LOW_CUTOFF_12V = value;
+          else if (param == "P12RES") PBM_RESERVE_12V = value;
+          else if (param == "B24MAX") BATT_MAX_24V = value;
+          else if (param == "B24CUT") BATT_LOW_CUTOFF_24V = value;
+          else if (param == "P24RES") PBM_RESERVE_24V = value;
+          else if (param == "SCALE") SCALING_FACTOR = value;
+          else {
+            Serial.print("Unknown command: ");
+            Serial.println(param);
+            continue;
+          }
+
+          Serial.print("Updated Parameter ");
+          Serial.print(param);
+          Serial.print(" to: ");
+          Serial.println(value, 2);
+        }
+      }
+    }
+  }
+}
