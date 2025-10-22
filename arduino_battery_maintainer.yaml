@@ -1,0 +1,403 @@
+// --- Configuration Constants ---
+// Pin Definitions
+const int SOLAR_CHARGE_RELAY_PIN = 9;   // Controls connection from solar to battery
+const int LOAD_OUTPUT_RELAY_PIN = 10;   // Controls power to the 12/24V load
+const int VOLTAGE_SENSE_PIN_12V = A0;   // Analog input for 12V battery monitoring
+const int VOLTAGE_SENSE_PIN_24V = A1;   // Analog input for 24V battery monitoring (or a scaled measurement)
+const int V_SELECT_RELAY_PIN = 8;       // Relay to switch battery configuration (Series/Parallel for 12V/24V)
+
+// System Parameters (Adjust based on battery chemistry, e.g., LiFePO4 or Lead-Acid)
+const float BATT_MAX_12V = 14.2;        // Max charging voltage for a 12V system
+const float BATT_FLOAT_12V = 13.5;      // Float voltage for a 12V system
+const float BATT_LOW_CUTOFF_12V = 11.5; // Load disconnect voltage for 12V (to prevent deep discharge)
+
+const float BATT_MAX_24V = 28.4;        // Max charging voltage for a 24V system
+const float BATT_LOW_CUTOFF_24V = 23.0; // Load disconnect voltage for 24V
+
+// Power Bank Mode (PBM) settings
+const int PBM_SWITCH_PIN = 2;           // Digital input for Power Bank Mode toggle button
+bool powerBankModeActive = false;
+const float PBM_RESERVE_PERCENT = 30.0; // Reserve 30% of capacity for Power Bank Mode
+// For simplicity, we'll use voltage thresholds for PBM reserve
+const float PBM_RESERVE_12V = 12.0;     // E.g., Don't use battery below 12.0V in PBM (Higher than LOW_CUTOFF)
+
+// --- Global Variables ---
+float currentBatteryVoltage = 0.0;
+int systemVoltage = 12; // Start with 12V
+unsigned long lastStatusTime = 0;
+
+// --- Function Prototypes ---
+void setSystemVoltage(int voltage);
+float readBatteryVoltage(int system_v);
+void manageCharging(float voltage, int system_v);
+void manageLoad(float voltage, int system_v);
+void updatePowerBankMode();
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(SOLAR_CHARGE_RELAY_PIN, OUTPUT);
+  pinMode(LOAD_OUTPUT_RELAY_PIN, OUTPUT);
+  pinMode(V_SELECT_RELAY_PIN, OUTPUT);
+  pinMode(PBM_SWITCH_PIN, INPUT_PULLUP); // Use a button connected to GND
+
+  // Initial state: 12V, load off, charging on (if voltage is low)
+  setSystemVoltage(12);
+  digitalWrite(LOAD_OUTPUT_RELAY_PIN, LOW); // Load off initially (HIGH for NO relay)
+}
+
+void loop() {
+  // 1. Check for system voltage change (Optional: based on user input or detection)
+  // For this example, we'll keep it at a fixed 12V until a mechanism is implemented.
+  // In a real system, a user switch or auto-detection would change 'systemVoltage'
+
+  // 2. Read current battery voltage
+  currentBatteryVoltage = readBatteryVoltage(systemVoltage);
+
+  // 3. Update Power Bank Mode status
+  updatePowerBankMode();
+
+  // 4. Manage Charging
+  manageCharging(currentBatteryVoltage, systemVoltage);
+
+  // 5. Manage Load Output
+  manageLoad(currentBatteryVoltage, systemVoltage);
+
+  // 6. Display Status (Debug/Monitoring)
+  if (millis() - lastStatusTime >= 2000) {
+    Serial.print("System: "); Serial.print(systemVoltage); Serial.println("V");
+    Serial.print("Voltage: "); Serial.print(currentBatteryVoltage, 2); Serial.println("V");
+    Serial.print("PBM Active: "); Serial.println(powerBankModeActive ? "YES" : "NO");
+    Serial.print("Load: "); Serial.println(digitalRead(LOAD_OUTPUT_RELAY_PIN) == HIGH ? "ON" : "OFF");
+    Serial.println("---");
+    lastStatusTime = millis();
+  }
+
+  delay(500); // Main loop delay
+}
+
+// --------------------------------------------------------------------------------
+// --- Core Functions ---
+// --------------------------------------------------------------------------------
+
+/**
+ * @brief Sets the system voltage (12V or 24V) by controlling the voltage select relay.
+ * @param voltage The desired system voltage (12 or 24).
+ */
+void setSystemVoltage(int voltage) {
+  if (voltage == 24) {
+    digitalWrite(V_SELECT_RELAY_PIN, HIGH); // Assuming HIGH sets the batteries in Series (24V)
+    systemVoltage = 24;
+  } else { // Default to 12V
+    digitalWrite(V_SELECT_RELAY_PIN, LOW);  // Assuming LOW sets the batteries in Parallel (12V)
+    systemVoltage = 12;
+  }
+}
+
+/**
+ * @brief Reads and converts the analog input to actual battery voltage.
+ * NOTE: Requires proper voltage divider/sensor scaling.
+ */
+float readBatteryVoltage(int system_v) {
+  int rawADC;
+  float voltage;
+
+  if (system_v == 12) {
+    rawADC = analogRead(VOLTAGE_SENSE_PIN_12V);
+    // Convert ADC to voltage (e.g., for a 1:5 divider: (5.0 / 1024.0) * 5 * rawADC)
+    // REPLACE 0.0146 with your actual scaling factor (V_REF / ADC_RESOLUTION * DIVIDER_RATIO)
+    voltage = rawADC * 0.0146; 
+  } else { // 24V system
+    rawADC = analogRead(VOLTAGE_SENSE_PIN_24V);
+    // REPLACE 0.0292 with your actual scaling factor for 24V measurement
+    voltage = rawADC * 0.0292; 
+  }
+
+  return voltage;
+}
+
+/**
+ * @brief Implements PWM (Pulse Width Modulation) or simple ON/OFF charging logic.
+ */
+void manageCharging(float voltage, int system_v) {
+  float BATT_MAX, BATT_FLOAT;
+
+  if (system_v == 12) {
+    BATT_MAX = BATT_MAX_12V;
+    BATT_FLOAT = BATT_FLOAT_12V;
+  } else {
+    BATT_MAX = BATT_MAX_24V;
+    BATT_FLOAT = BATT_FLOAT_24V;
+  }
+
+  // --- MPPT/PWM logic would go here ---
+  // Simple ON/OFF logic:
+  if (voltage < BATT_MAX) {
+    // Bulk/Absorption charge mode: Full power
+    digitalWrite(SOLAR_CHARGE_RELAY_PIN, HIGH);
+  } else if (voltage >= BATT_MAX && voltage < (BATT_MAX + 0.1)) {
+    // Transition to Float or use PWM to maintain voltage (optional)
+    // For simplicity, cut off charge when full
+    digitalWrite(SOLAR_CHARGE_RELAY_PIN, LOW);
+  } else {
+    // Above max voltage (shouldn't happen if cut off properly)
+    digitalWrite(SOLAR_CHARGE_RELAY_PIN, LOW);
+  }
+}
+
+/**
+ * @brief Manages the load output based on voltage and Power Bank Mode.
+ */
+void manageLoad(float voltage, int system_v) {
+  float CUTOFF_VOLTAGE, PBM_RESERVE_VOLTAGE;
+
+  if (system_v == 12) {
+    CUTOFF_VOLTAGE = BATT_LOW_CUTOFF_12V;
+    PBM_RESERVE_VOLTAGE = PBM_RESERVE_12V;
+  } else {
+    CUTOFF_VOLTAGE = BATT_LOW_CUTOFF_24V;
+    // PBM_RESERVE_24V would be set here (e.g., 24.0V)
+    PBM_RESERVE_VOLTAGE = 24.0; // Placeholder for 24V PBM
+  }
+
+  // Determine the effective cutoff based on PBM status
+  float effective_cutoff = powerBankModeActive ? PBM_RESERVE_VOLTAGE : CUTOFF_VOLTAGE;
+
+  if (voltage > effective_cutoff) {
+    // Battery is healthy, connect the load
+    digitalWrite(LOAD_OUTPUT_RELAY_PIN, HIGH); // Assuming HIGH turns on the load
+  } else {
+    // Battery is too low, disconnect the load to protect the battery
+    digitalWrite(LOAD_OUTPUT_RELAY_PIN, LOW);
+    // Optional: Log an alert
+    if (powerBankModeActive) {
+      Serial.println("ALERT: PBM reserve reached. Load disconnected.");
+    } else {
+      Serial.println("ALERT: Low voltage cutoff reached. Load disconnected.");
+    }
+  }
+
+  // Hysteresis: Reconnect the load only when voltage rises significantly (e.g., 1V above cutoff)
+  if (digitalRead(LOAD_OUTPUT_RELAY_PIN) == LOW && voltage > (effective_cutoff + 1.0)) {
+    digitalWrite(LOAD_OUTPUT_RELAY_PIN, HIGH);
+  }
+}
+
+/**
+ * @brief Toggles the Power Bank Mode based on a button press.
+ * In PBM, the system is actively maintained for a critical load (the power bank load).
+ * It sets a higher low-voltage cutoff to keep more power in reserve.
+ */
+void updatePowerBankMode() {
+  // Simple debounced button read (a more robust method is recommended for production)
+  static unsigned long lastDebounceTime = 0;
+  static int lastButtonState = HIGH;
+  int reading = digitalRead(PBM_SWITCH_PIN);
+
+  if (reading != lastButtonState) {
+    lastDebounceTime = millis();
+  }
+
+  if ((millis() - lastDebounceTime) > 50) { // Debounce time (50ms)
+    if (reading != powerBankModeActive) {
+      if (reading == LOW) { // Button pressed (Active LOW)
+        powerBankModeActive = !powerBankModeActive;
+        Serial.print("Power Bank Mode Toggled: ");
+        Serial.println(powerBankModeActive ? "ACTIVE" : "INACTIVE");
+      }
+    }
+  }
+
+  lastButtonState = reading;
+}
+
+
+
+// --- Configuration Constants ---
+// Pin Definitions
+const int SOLAR_CHARGE_RELAY_PIN = 9;   // Controls connection from solar to battery
+const int LOAD_OUTPUT_RELAY_PIN = 10;   // Controls power to the 12/24V load
+const int VOLTAGE_SENSE_PIN_12V = A0;   // Analog input for 12V battery monitoring
+const int VOLTAGE_SENSE_PIN_24V = A1;   // Analog input for 24V battery monitoring (or a scaled measurement)
+const int V_SELECT_RELAY_PIN = 8;       // Relay to switch battery configuration (Series/Parallel for 12V/24V)
+
+// System Parameters (Adjust based on battery chemistry, e.g., LiFePO4 or Lead-Acid)
+// 12V System Thresholds
+const float BATT_MAX_12V = 14.2;        // Max charging voltage
+const float BATT_FLOAT_12V = 13.5;      // Float voltage
+const float BATT_LOW_CUTOFF_12V = 11.5; // Ultimate Load Disconnect (to protect battery)
+
+// 24V System Thresholds
+const float BATT_MAX_24V = 28.4;        // Max charging voltage
+const float BATT_LOW_CUTOFF_24V = 23.0; // Ultimate Load Disconnect
+
+// Advanced Power Bank Mode (PBM) settings
+const int PBM_SWITCH_PIN = 2;           // Digital input for Power Bank Mode toggle button
+bool powerBankModeActive = false;
+// PBM Reserve Voltage (A higher voltage than the ultimate cutoff, reserving capacity)
+const float PBM_RESERVE_12V = 12.2;     
+const float PBM_RESERVE_24V = 24.4;     
+
+// --- Global Variables ---
+float currentBatteryVoltage = 0.0;
+int systemVoltage = 12; // Start with 12V
+unsigned long lastStatusTime = 0;
+
+// --- Function Prototypes ---
+void setSystemVoltage(int voltage);
+float readBatteryVoltage(int system_v);
+void manageCharging(float voltage, int system_v);
+void manageLoad(float voltage, int system_v);
+void updatePowerBankMode();
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(SOLAR_CHARGE_RELAY_PIN, OUTPUT);
+  pinMode(LOAD_OUTPUT_RELAY_PIN, OUTPUT);
+  pinMode(V_SELECT_RELAY_PIN, OUTPUT);
+  pinMode(PBM_SWITCH_PIN, INPUT_PULLUP); // Use a button connected to GND
+
+  // Initial state: 12V, load off
+  setSystemVoltage(12);
+  digitalWrite(LOAD_OUTPUT_RELAY_PIN, LOW); // Load off initially (assuming NO relay setup)
+}
+
+void loop() {
+  // 1. Read current battery voltage
+  currentBatteryVoltage = readBatteryVoltage(systemVoltage);
+
+  // 2. Update Power Bank Mode status (toggled by user button)
+  updatePowerBankMode();
+
+  // 3. Manage Charging (Connect/Disconnect Solar Input)
+  manageCharging(currentBatteryVoltage, systemVoltage);
+
+  // 4. Manage Load Output (Connect/Disconnect Load)
+  manageLoad(currentBatteryVoltage, systemVoltage);
+
+  // 5. Display Status (Debug/Monitoring)
+  if (millis() - lastStatusTime >= 2000) {
+    Serial.print("System: "); Serial.print(systemVoltage); Serial.println("V");
+    Serial.print("Voltage: "); Serial.print(currentBatteryVoltage, 2); Serial.println("V");
+    Serial.print("PBM Active: "); Serial.println(powerBankModeActive ? "YES" : "NO");
+    Serial.print("Load: "); Serial.println(digitalRead(LOAD_OUTPUT_RELAY_PIN) == HIGH ? "ON" : "OFF");
+    Serial.println("---");
+    lastStatusTime = millis();
+  }
+
+  delay(500); // Main loop delay
+}
+
+// --------------------------------------------------------------------------------
+// --- Core Functions ---
+// --------------------------------------------------------------------------------
+
+/**
+ * @brief Sets the system voltage (12V or 24V) by controlling the voltage select relay.
+ */
+void setSystemVoltage(int voltage) {
+  if (voltage == 24) {
+    digitalWrite(V_SELECT_RELAY_PIN, HIGH); // Series configuration (24V)
+    systemVoltage = 24;
+  } else { // Default to 12V
+    digitalWrite(V_SELECT_RELAY_PIN, LOW);  // Parallel configuration (12V)
+    systemVoltage = 12;
+  }
+}
+
+/**
+ * @brief Reads and converts the analog input to actual battery voltage.
+ * NOTE: The scaling factor (0.0146, 0.0292) MUST be calibrated for your hardware.
+ */
+float readBatteryVoltage(int system_v) {
+  int rawADC;
+  float voltage;
+  float scaling_factor;
+
+  if (system_v == 12) {
+    rawADC = analogRead(VOLTAGE_SENSE_PIN_12V);
+    scaling_factor = 0.0146; // Example: 15V Max -> (15V / 1024 ADC)
+  } else { // 24V system
+    rawADC = analogRead(VOLTAGE_SENSE_PIN_24V);
+    scaling_factor = 0.0292; // Example: 30V Max -> (30V / 1024 ADC)
+  }
+
+  voltage = rawADC * scaling_factor; 
+  return voltage;
+}
+
+/**
+ * @brief Simple ON/OFF charging logic (MPPT/PWM requires more advanced code).
+ */
+void manageCharging(float voltage, int system_v) {
+  float BATT_MAX;
+  
+  BATT_MAX = (system_v == 12) ? BATT_MAX_12V : BATT_MAX_24V;
+
+  if (voltage < BATT_MAX) {
+    // Bulk/Absorption charge mode: Connect solar
+    digitalWrite(SOLAR_CHARGE_RELAY_PIN, HIGH);
+  } else {
+    // Battery full, cut off charge (Float logic would be more complex)
+    digitalWrite(SOLAR_CHARGE_RELAY_PIN, LOW);
+  }
+}
+
+/**
+ * @brief Manages the load output using the Power Bank Mode logic.
+ */
+void manageLoad(float voltage, int system_v) {
+  float ultimate_cutoff, pbm_reserve;
+
+  if (system_v == 12) {
+    ultimate_cutoff = BATT_LOW_CUTOFF_12V;
+    pbm_reserve = PBM_RESERVE_12V;
+  } else {
+    ultimate_cutoff = BATT_LOW_CUTOFF_24V;
+    pbm_reserve = PBM_RESERVE_24V;
+  }
+
+  // The effective cutoff voltage is set by PBM state
+  float effective_cutoff = powerBankModeActive ? pbm_reserve : ultimate_cutoff;
+  
+  // A. Check for low voltage cutoff
+  if (voltage < effective_cutoff) {
+    // Battery too low, disconnect the load
+    digitalWrite(LOAD_OUTPUT_RELAY_PIN, LOW); 
+    Serial.print("Load disconnected. Cutoff: "); Serial.print(effective_cutoff); Serial.println("V");
+  } 
+  
+  // B. Hysteresis: Reconnect the load only when voltage rises significantly (e.g., 1.0V above the ultimate cutoff)
+  float reconnect_voltage = ultimate_cutoff + 1.0; 
+  
+  if (digitalRead(LOAD_OUTPUT_RELAY_PIN) == LOW && voltage > reconnect_voltage) {
+    // Battery recovered, reconnect the load
+    digitalWrite(LOAD_OUTPUT_RELAY_PIN, HIGH);
+    Serial.print("Load reconnected. Voltage: "); Serial.print(voltage); Serial.println("V");
+  }
+  // C. Load remains ON in all other high-voltage scenarios
+}
+
+/**
+ * @brief Toggles the Power Bank Mode based on a button press (using simple debouncing).
+ * When active, it switches the load cutoff to the higher PBM_RESERVE voltage.
+ */
+void updatePowerBankMode() {
+  static unsigned long lastDebounceTime = 0;
+  static int lastButtonState = HIGH;
+  int reading = digitalRead(PBM_SWITCH_PIN);
+
+  if (reading != lastButtonState) {
+    lastDebounceTime = millis();
+  }
+
+  if ((millis() - lastDebounceTime) > 50) { // Debounce time (50ms)
+    if (reading != lastButtonState) {
+      if (reading == LOW) { // Button pressed (Active LOW)
+        powerBankModeActive = !powerBankModeActive;
+        Serial.print("Power Bank Mode Toggled: ");
+        Serial.println(powerBankModeActive ? "ACTIVE" : "INACTIVE");
+      }
+    }
+  }
+  lastButtonState = reading;
+}
