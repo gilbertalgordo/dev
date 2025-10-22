@@ -199,3 +199,457 @@ class DayCapVpnService : VpnService() {
         return cal.get(java.util.Calendar.DAY_OF_YEAR)
     }
 }
+
+
+
+// Minimal Kotlin snippet showing how to read data usage and notify when threshold passed.
+// Add proper permissions and lifecycle handling in a full app.
+
+import android.app.*
+import android.content.Context
+import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.net.TrafficStats
+import android.net.ConnectivityManager.NetworkCallback
+import android.os.Build
+import android.os.Bundle
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+import android.app.PendingIntent
+import android.content.SharedPreferences
+import android.net.Network
+import android.os.Handler
+import android.os.Looper
+import android.telephony.SubscriptionManager
+import android.app.AlertDialog
+import android.util.Log
+import java.util.*
+import android.app.usage.NetworkStats
+import android.app.usage.NetworkStatsManager
+import android.telephony.TelephonyManager
+
+class MainActivity : AppCompatActivity() {
+    private val TAG = "DataMonitor"
+    private lateinit var networkStatsManager: NetworkStatsManager
+    private val DAILY_LIMIT_BYTES = 1L * 1024 * 1024 * 1024 // 1 GiB
+    private val prefsName = "daycap_prefs"
+    private val channelId = "daycap_alerts"
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        createNotificationChannel()
+        networkStatsManager = getSystemService(NetworkStatsManager::class.java)
+        // Start periodic checker
+        val handler = Handler(Looper.getMainLooper())
+        val checker = object : Runnable {
+            override fun run() {
+                try {
+                    val used = getMobileDataUsageToday()
+                    if (used >= DAILY_LIMIT_BYTES) {
+                        notifyUser("Daily cap reached", "You've used ${humanReadable(used)} today. Data may be blocked.")
+                        // Here you can start your VPN-based blocking service if you implemented one.
+                    } else {
+                        // update notification or UI
+                        Log.i(TAG, "Used: ${humanReadable(used)}")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error reading data usage: ${e.message}")
+                }
+                handler.postDelayed(this, 60_000) // check each minute
+            }
+        }
+        handler.post(checker)
+    }
+
+    private fun getMobileDataUsageToday(): Long {
+        // Requires permission PACKAGE_USAGE_STATS for some OEMs, and depends on API level.
+        // This function returns an approximation using NetworkStatsManager.
+        val cal = Calendar.getInstance()
+        cal.set(Calendar.HOUR_OF_DAY, 0)
+        cal.set(Calendar.MINUTE, 0)
+        cal.set(Calendar.SECOND, 0)
+        cal.set(Calendar.MILLISECOND, 0)
+        val start = cal.timeInMillis
+        val end = System.currentTimeMillis()
+
+        val tm = getSystemService(TELEPHONY_SERVICE) as TelephonyManager
+        val subId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+            val sm = getSystemService(SubscriptionManager::class.java)
+            val list = sm.activeSubscriptionInfoList
+            if (list != null && list.isNotEmpty()) list[0].subscriptionId else -1
+        } else -1
+
+        var total: Long = 0
+        val bucket = NetworkStats.Bucket()
+        val uid = android.os.Process.myUid()
+
+        // Mobile data
+        val mobileStats = networkStatsManager.querySummary(ConnectivityManager.TYPE_MOBILE, null, start, end)
+        // Iterate buckets:
+        while (mobileStats.hasNextBucket()) {
+            mobileStats.getNextBucket(bucket)
+            total += bucket.rxBytes + bucket.txBytes
+        }
+        mobileStats.close()
+        return total
+    }
+
+    private fun notifyUser(title: String, text: String) {
+        val nm = getSystemService(NotificationManager::class.java)
+        val notif = Notification.Builder(this, channelId)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .build()
+        nm.notify(1001, notif)
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val nm = getSystemService(NotificationManager::class.java)
+            val chan = NotificationChannel(channelId, "DayCap Alerts", NotificationManager.IMPORTANCE_HIGH)
+            nm.createNotificationChannel(chan)
+        }
+    }
+
+    private fun humanReadable(bytes: Long): String {
+        val kb = 1024.0
+        val mb = kb * 1024.0
+        val gb = mb * 1024.0
+        val d = bytes.toDouble()
+        return when {
+            d >= gb -> String.format("%.2f GB", d / gb)
+            d >= mb -> String.format("%.2f MB", d / mb)
+            d >= kb -> String.format("%.2f KB", d / kb)
+            else -> "$bytes B"
+        }
+    }
+}
+
+
+# pip install selenium
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.options import Options
+import time
+
+# Settings - replace with your values
+USERNAME = "your_username"
+PASSWORD = "your_password"
+CARRIER_LOGIN_URL = "https://example-carrier.com/login"
+BUNDLE_PAGE_URL = "https://example-carrier.com/bundles/daily-1gb"
+
+opts = Options()
+opts.add_argument("--headless=new")  # or remove for debugging visually
+driver = webdriver.Chrome(options=opts)
+
+try:
+    driver.get(CARRIER_LOGIN_URL)
+    time.sleep(1)
+    # Example: fill login form - adapt selectors
+    driver.find_element(By.ID, "username").send_keys(USERNAME)
+    driver.find_element(By.ID, "password").send_keys(PASSWORD)
+    driver.find_element(By.ID, "loginButton").click()
+
+    time.sleep(3)  # wait for login to complete
+    # Navigate to bundle page
+    driver.get(BUNDLE_PAGE_URL)
+    time.sleep(2)
+    # Click buy button - adapt selector
+    buy_btn = driver.find_element(By.XPATH, "//button[contains(text(),'Buy')]")
+    buy_btn.click()
+    time.sleep(2)
+    # Confirm purchase if needed
+    confirm_btn = driver.find_element(By.XPATH, "//button[contains(text(),'Confirm')]")
+    confirm_btn.click()
+    time.sleep(3)
+    print("Bundle purchase attempted. Check your account for confirmation.")
+finally:
+    driver.quit()
+
+
+    # pip install mitmproxy pillow htmlmin
+from mitmproxy import http
+from PIL import Image
+from io import BytesIO
+import htmlmin
+
+MAX_IMAGE_WIDTH = 800  # scale down big images
+JPEG_QUALITY = 60      # reduce image quality
+
+def response(flow: http.HTTPFlow) -> None:
+    # Only handle images and HTML to reduce data
+    ct = flow.response.headers.get("content-type", "")
+    if "image/" in ct:
+        try:
+            data = flow.response.content
+            img = Image.open(BytesIO(data))
+            # resize if too big
+            if img.width > MAX_IMAGE_WIDTH:
+                ratio = MAX_IMAGE_WIDTH / float(img.width)
+                new_h = int(img.height * ratio)
+                img = img.resize((MAX_IMAGE_WIDTH, new_h), Image.LANCZOS)
+            out = BytesIO()
+            # Save as JPEG to compress (beware transparency)
+            if img.mode in ("RGBA", "LA"):
+                bg = Image.new("RGB", img.size, (255,255,255))
+                bg.paste(img, mask=img.split()[3])
+                img = bg
+            img.save(out, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+            flow.response.content = out.getvalue()
+            flow.response.headers["content-length"] = str(len(flow.response.content))
+            flow.response.headers["content-type"] = "image/jpeg"
+        except Exception as e:
+            print("Image compress error:", e)
+    elif "text/html" in ct:
+        try:
+            html = flow.response.content.decode(flow.response.charset or "utf-8", errors="ignore")
+            minified = htmlmin.minify(html, remove_comments=True, reduce_empty_attributes=True)
+            flow.response.content = minified.encode("utf-8")
+            flow.response.headers["content-length"] = str(len(flow.response.content))
+        except Exception as e:
+            print("HTML minify error:", e)
+
+
+            mitmproxy -s compressor.py --mode regular --listen-port 8080
+
+
+            package com.yourorg.daycap
+
+import android.app.*
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.app.usage.NetworkStats
+import android.app.usage.NetworkStatsManager
+import android.os.*
+import android.provider.Settings
+import android.util.Log
+import androidx.appcompat.app.AppCompatActivity
+import kotlinx.coroutines.*
+import fi.iki.elonen.NanoHTTPD // include NanoHTTPD for local REST (add dependency)
+import java.util.*
+
+class MainActivity : AppCompatActivity() {
+    private val TAG = "DayCapMain"
+    private val DAILY_LIMIT_BYTES = 1L * 1024 * 1024 * 1024 // 1 GiB
+    private lateinit var networkStatsManager: NetworkStatsManager
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var lastResetDay = -1
+    private var usedBytesToday: Long = 0
+    private var server: LocalCommandServer? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main) // implement basic UI
+        networkStatsManager = getSystemService(NetworkStatsManager::class.java)
+        lastResetDay = currentDayOfYear()
+        usedBytesToday = loadUsage()
+        startMonitoring()
+        startLocalServer() // enables local commands e.g. /activate-bundle
+    }
+
+    override fun onDestroy() {
+        scope.cancel()
+        server?.stop()
+        super.onDestroy()
+    }
+
+    private fun startMonitoring() {
+        scope.launch {
+            while (isActive) {
+                try {
+                    checkAndUpdateUsage()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Monitor error: ${e.message}")
+                }
+                delay(30_000) // check every 30s
+            }
+        }
+    }
+
+    private suspend fun checkAndUpdateUsage() {
+        val nowDay = currentDayOfYear()
+        if (nowDay != lastResetDay) {
+            usedBytesToday = 0
+            lastResetDay = nowDay
+            saveUsage(usedBytesToday)
+            notifyUser("Daily usage reset. 0 / 1 GB used.")
+            // If previously blocked, ensure we restore network or keep policy
+            stopBlockingIfNeeded()
+        }
+
+        val used = queryMobileBytesSinceStartOfDay()
+        usedBytesToday = used
+        saveUsage(usedBytesToday)
+
+        if (usedBytesToday >= DAILY_LIMIT_BYTES) {
+            // trigger block
+            notifyUser("Daily cap reached: ${humanReadable(usedBytesToday)}. Blocking network.")
+            startBlocking()
+        } else {
+            // optionally update UI notification
+            notifySmall("Usage: ${humanReadable(usedBytesToday)} / 1 GB")
+        }
+    }
+
+    private fun queryMobileBytesSinceStartOfDay(): Long {
+        val cal = Calendar.getInstance()
+        cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0)
+        cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
+        val start = cal.timeInMillis
+        val end = System.currentTimeMillis()
+
+        val bucket = NetworkStats.Bucket()
+        var total = 0L
+        // querySummary requires NETWORK_TYPE constant; for mobile use ConnectivityManager.TYPE_MOBILE
+        val summary = networkStatsManager.querySummary(ConnectivityManager.TYPE_MOBILE, null, start, end)
+        while (summary.hasNextBucket()) {
+            summary.getNextBucket(bucket)
+            total += bucket.rxBytes + bucket.txBytes
+        }
+        summary.close()
+        return total
+    }
+
+    // persistence
+    private fun saveUsage(v: Long) {
+        val p = getSharedPreferences("daycap", Context.MODE_PRIVATE)
+        p.edit().putLong("usedBytesToday", v).apply()
+        p.edit().putInt("lastResetDay", lastResetDay).apply()
+    }
+
+    private fun loadUsage(): Long {
+        val p = getSharedPreferences("daycap", Context.MODE_PRIVATE)
+        lastResetDay = p.getInt("lastResetDay", currentDayOfYear())
+        return p.getLong("usedBytesToday", 0L)
+    }
+
+    // notifications
+    private fun notifyUser(text: String) { /* implement notification channel */ }
+    private fun notifySmall(text: String) { /* low-priority update */ }
+
+    private fun humanReadable(bytes: Long): String { /* same as earlier humanReadable */ }
+
+    private fun currentDayOfYear(): Int {
+        val cal = Calendar.getInstance()
+        return cal.get(Calendar.DAY_OF_YEAR)
+    }
+
+    // Start/stop blocking by starting the VPN service which will drop packets when cap reached
+    private fun startBlocking() {
+        val intent = Intent(this, DayCapVpnService::class.java)
+        intent.putExtra("mode","block")
+        startForegroundService(intent)
+    }
+
+    private fun stopBlockingIfNeeded() {
+        val intent = Intent(this, DayCapVpnService::class.java)
+        stopService(intent)
+    }
+
+    // Local REST server to accept commands from localhost (e.g., desktop script telling device to
+    // temporarily un-block while a purchase completes). Only accepts from loopback.
+    private fun startLocalServer() {
+        server = LocalCommandServer(8080, this)
+        server?.start()
+    }
+}
+
+// Simple embedded NanoHTTPD server for local commands
+class LocalCommandServer(port: Int, val ctx: MainActivity) : NanoHTTPD(port) {
+    override fun serve(session: IHTTPSession?): Response {
+        val uri = session?.uri ?: "/"
+        return when (uri) {
+            "/status" -> newFixedLengthResponse(Response.Status.OK, "application/json", """{"used":${ctx.usedBytesToday}}""")
+            "/allow-temporary" -> {
+                // temporarily stop blocking for short time (e.g. while automation buys bundle)
+                ctx.stopBlockingIfNeeded()
+                newFixedLengthResponse("OK")
+            }
+            "/reblock" -> {
+                ctx.startBlocking()
+                newFixedLengthResponse("OK")
+            }
+            else -> newFixedLengthResponse("Unknown")
+        }
+    }
+}
+
+
+# pip install selenium requests
+import time, requests
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.options import Options
+
+# Config - fill with your values
+LOCAL_DEVICE_HOST = "http://192.168.0.101:8080"  # Android device on same LAN running LocalCommandServer
+CARRIER_LOGIN_URL = "https://carrier.example.com/login"
+BUNDLE_PAGE_URL = "https://carrier.example.com/bundles/daily-1gb"
+USERNAME = "you@example.com"
+PASSWORD = "yourpassword"
+
+def allow_device_temporary(device_host):
+    requests.get(f"{device_host}/allow-temporary", timeout=5)
+
+def reblock_device(device_host):
+    requests.get(f"{device_host}/reblock", timeout=5)
+
+def buy_bundle_with_selenium():
+    opts = Options()
+    opts.add_argument("--headless=new")
+    driver = webdriver.Chrome(options=opts)
+    try:
+        driver.get(CARRIER_LOGIN_URL)
+        time.sleep(2)
+        # Adapt selectors below to the carrier site
+        driver.find_element(By.ID, "email").send_keys(USERNAME)
+        driver.find_element(By.ID, "pwd").send_keys(PASSWORD)
+        driver.find_element(By.ID, "loginBtn").click()
+        time.sleep(3)
+        # navigate to bundle and buy
+        driver.get(BUNDLE_PAGE_URL)
+        time.sleep(2)
+        buy = driver.find_element(By.XPATH, "//button[contains(., 'Buy') or contains(., 'Activate')]")
+        buy.click()
+        time.sleep(2)
+        # handle any confirmation popups:
+        confirm = driver.find_elements(By.XPATH, "//button[contains(., 'Confirm') or contains(., 'OK')]")
+        if confirm:
+            confirm[0].click()
+        time.sleep(3)
+        # Optionally check for success by looking for confirmation element/text
+        success = "success" in driver.page_source.lower() or "activated" in driver.page_source.lower()
+        return success
+    except Exception as e:
+        print("Selenium error:", e)
+        return False
+    finally:
+        driver.quit()
+
+# main loop
+if __name__ == "__main__":
+    while True:
+        try:
+            r = requests.get(f"{LOCAL_DEVICE_HOST}/status", timeout=5)
+            used = int(r.json().get("used", 0))
+            if used >= 1 * 1024 * 1024 * 1024:
+                print("Device reached cap — attempting auto-activation")
+                allow_device_temporary(LOCAL_DEVICE_HOST)
+                ok = buy_bundle_with_selenium()
+                if ok:
+                    print("Bundle purchase succeeded.")
+                else:
+                    print("Bundle purchase failed — check browser or manual steps.")
+                # re-block the device after a short grace period
+                time.sleep(10)
+                reblock_device(LOCAL_DEVICE_HOST)
+        except Exception as e:
+            print("Poll error:", e)
+        time.sleep(60)
