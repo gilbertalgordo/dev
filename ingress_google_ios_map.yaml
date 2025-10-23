@@ -1,0 +1,326 @@
+[
+  {
+    "elementType": "geometry",
+    "stylers": [
+      {
+        "color": "#121212"
+      }
+    ]
+  },
+  {
+    "elementType": "labels.text.fill",
+    "stylers": [
+      {
+        "color": "#e0e0e0"
+      }
+    ]
+  },
+  {
+    "featureType": "poi",
+    "stylers": [
+      {
+        "visibility": "off"
+      }
+    ]
+  },
+  {
+    "featureType": "road",
+    "elementType": "geometry.fill",
+    "stylers": [
+      {
+        "color": "#303030"
+      }
+    ]
+  },
+  {
+    "featureType": "water",
+    "stylers": [
+      {
+        "color": "#0a192f" // Dark blue for water
+      }
+    ]
+  }
+]
+
+
+
+// Define the portal's data
+LatLng portalLocation = new LatLng(34.0522, -118.2437); // e.g., Los Angeles City Hall
+String faction = "ENLIGHTENED";
+
+// Determine the custom icon/color based on faction
+int iconResource = (faction.equals("ENLIGHTENED")) ? R.drawable.ic_enlightened_portal : R.drawable.ic_resistance_portal;
+float markerHue = (faction.equals("ENLIGHTENED")) ? BitmapDescriptorFactory.HUE_GREEN : BitmapDescriptorFactory.HUE_BLUE;
+
+// Add a custom marker to the map
+googleMap.addMarker(new MarkerOptions()
+    .position(portalLocation)
+    .title("L.A. City Hall Portal")
+    .icon(BitmapDescriptorFactory.fromResource(iconResource)) // Or use a custom Bitmap for a glow effect
+    .alpha(0.8f) // Make it slightly translucent
+);
+
+// Advanced: Add a "Control Field" effect (Polygon)
+PolygonOptions fieldOptions = new PolygonOptions()
+    .add(portalA_LatLng, portalB_LatLng, portalC_LatLng)
+    .fillColor(Color.argb(50, 0, 255, 0)) // Semi-transparent green
+    .strokeColor(Color.argb(100, 0, 255, 0))
+    .strokeWidth(5);
+
+googleMap.addPolygon(fieldOptions);
+
+
+
+import MapKit
+
+// 1. Define a custom object for the Portal data
+class Portal: NSObject, MKAnnotation {
+    var coordinate: CLLocationCoordinate2D
+    var title: String?
+    var faction: String
+    
+    init(coordinate: CLLocationCoordinate2D, title: String, faction: String) {
+        self.coordinate = coordinate
+        self.title = title
+        self.faction = faction
+        super.init()
+    }
+}
+
+// 2. Add the Portal (Annotation) and Link (Overlay) to the map
+func addIngressFeatures(mapView: MKMapView) {
+    let portalA_Coord = CLLocationCoordinate2D(latitude: 34.0522, longitude: -118.2437)
+    let portalB_Coord = CLLocationCoordinate2D(latitude: 34.0500, longitude: -118.2400)
+
+    let portalA = Portal(coordinate: portalA_Coord, title: "Portal A", faction: "RESISTANCE")
+    let portalB = Portal(coordinate: portalB_Coord, title: "Portal B", faction: "RESISTANCE")
+
+    mapView.addAnnotation(portalA)
+    mapView.addAnnotation(portalB)
+
+    // Add a Link (Polyline) between them
+    let linkCoordinates = [portalA_Coord, portalB_Coord]
+    let linkPolyline = MKPolyline(coordinates: linkCoordinates, count: linkCoordinates.count)
+    mapView.addOverlay(linkPolyline)
+}
+
+// 3. Implement the delegate methods for custom rendering
+func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
+    guard let portal = annotation as? Portal else { return nil }
+    
+    let identifier = "PortalMarker"
+    var view: MKMarkerAnnotationView
+    
+    if let dequeuedView = mapView.dequeueReusableAnnotationView(withIdentifier: identifier) as? MKMarkerAnnotationView {
+        view = dequeuedView
+    } else {
+        view = MKMarkerAnnotationView(annotation: portal, reuseIdentifier: identifier)
+    }
+    
+    // Customize the marker appearance
+    view.markerTintColor = (portal.faction == "RESISTANCE") ? .blue : .green
+    view.glyphText = "⚡️" // Use an emoji or a custom image
+    
+    return view
+}
+
+func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+    if let link = overlay as? MKPolyline {
+        let renderer = MKPolylineRenderer(polyline: link)
+        renderer.strokeColor = .blue // Link color
+        renderer.lineWidth = 4
+        return renderer
+    }
+    // Renderer for MKPolygon (Control Field) would be similar
+    return MKOverlayRenderer(overlay: overlay)
+}
+
+
+
+# Pseudocode for Player Interaction Logic
+
+PLAYER_LAT = 34.0510
+PLAYER_LON = -118.2415
+PORTAL_LAT = 34.0522
+PORTAL_LON = -118.2437
+INTERACTION_RANGE_METERS = 40.0 # ~40 meters in Ingress
+
+# Function to calculate distance (using Haversine formula for accuracy)
+def calculate_distance(lat1, lon1, lat2, lon2):
+    # ... (Actual Haversine calculation code)
+    return distance_in_meters
+
+distance = calculate_distance(PLAYER_LAT, PLAYER_LON, PORTAL_LAT, PORTAL_LON)
+
+if distance <= INTERACTION_RANGE_METERS:
+    print("Agent is within range! Allowing HACK or DEPLOY actions.")
+    # **ADVANCED:** Trigger a network call to the game server to perform the action
+else:
+    print("Agent is too far from the Portal.")
+
+
+
+// Example of a minimal, dark map style (JSON)
+[
+  { "featureType": "all", "elementType": "labels.text.fill", "stylers": [{ "color": "#808080" }] },
+  { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#1f1f1f" }] },
+  { "featureType": "water", "elementType": "geometry.fill", "stylers": [{ "color": "#0a192f" }] },
+  { "featureType": "landscape", "elementType": "geometry.fill", "stylers": [{ "color": "#121212" }] },
+  { "featureType": "poi", "stylers": [{ "visibility": "off" }] } // Hide points of interest
+]
+
+
+
+import GoogleMaps
+
+// ... inside your ViewController where GMSMapView is set up
+
+let mapStyleJson = """... [insert JSON above] ..."""
+
+do {
+    // 1. Load the JSON string into a GMSMapStyle object
+    guard let style = try GMSMapStyle(jsonString: mapStyleJson) else {
+        NSLog("Unable to load map style.")
+        return
+    }
+    // 2. Apply the style to the map view
+    mapView.mapStyle = style
+} catch {
+    NSLog("One or more styling map options failed to load: \(error)")
+}
+
+
+
+
+// Custom Tile Layer to show the XM Field density
+class XMTileOverlay: GMSTileLayer {
+    override func tileFor(x: UInt, y: UInt, zoom: UInt) -> GMSTile {
+        // Advanced Logic: 
+        // 1. Calculate the Lat/Lng bounds of the requested tile (x, y, zoom).
+        // 2. Make an authenticated API request to the backend for the XM data within those bounds.
+        // 3. Render the XM data into a transparent PNG image in memory (e.g., using CoreGraphics).
+        // 4. Return the image data as a GMSTile.
+        
+        // Simplified: return a placeholder XM image
+        let xmImage = UIImage(named: "xm_tile_texture") ?? UIImage()
+        return GMSTile(image: xmImage)
+        
+        // If data isn't ready or tile is empty
+        // return GMSTile(data: nil) 
+    }
+    
+    // Ingress-like feature: Override the opacity for a low-glow effect
+    override var opacity: Float {
+        get { return 0.5 } 
+        set { /* ignore, keep it at 0.5 */ }
+    }
+}
+
+// In your map setup:
+let xmLayer = XMTileOverlay()
+xmLayer.zIndex = 0 // Ensure it's rendered below Portals/Links
+mapView.add(xmLayer)
+
+
+
+
+import MapKit
+
+// Advanced Feature: Update the map with a batch of new/deleted game objects
+func updateIngressMapData(mapView: MKMapView, newEntities: [GameEntity], deletedIDs: Set<String>) {
+
+    // Remove deleted entities first
+    let overlaysToRemove = mapView.overlays.filter { overlay in
+        // Assume all overlays are MKPolylines or MKPolygons
+        // and have a way to access their unique ID metadata (e.g., via a custom subclass)
+        return deletedIDs.contains((overlay as? CustomIngressOverlay)?.entityID ?? "")
+    }
+    mapView.removeOverlays(overlaysToRemove)
+
+    let annotationsToRemove = mapView.annotations.filter { annotation in
+        // Assume custom Portal Annotation has an ID
+        return deletedIDs.contains((annotation as? PortalAnnotation)?.entityID ?? "")
+    }
+    mapView.removeAnnotations(annotationsToRemove)
+
+    // Add/Update new entities
+    for entity in newEntities {
+        switch entity.type {
+        case .portal:
+            // Check if the annotation already exists to prevent flickering
+            let existingPortal = mapView.annotations.first { ($0 as? PortalAnnotation)?.entityID == entity.id }
+            if existingPortal == nil {
+                let portal = PortalAnnotation(entity: entity)
+                mapView.addAnnotation(portal)
+            }
+            
+        case .link:
+            // Check if link already exists before adding a new MKPolyline
+            let link = MKPolyline(coordinates: entity.coordinates, count: entity.coordinates.count)
+            // Advanced: use a custom subclass of MKPolyline to store entity.id
+            mapView.addOverlay(link) 
+            
+        case .field:
+            let field = MKPolygon(coordinates: entity.coordinates, count: entity.coordinates.count)
+            mapView.addOverlay(field)
+        }
+    }
+}
+
+// Essential Delegate method for rendering the Link/Field colors and glow
+func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+    // Determine faction color (e.g., #00FFFF for Resistance, #00FF00 for Enlightened)
+    let factionColor: UIColor = .blue.withAlphaComponent(0.8) 
+    
+    if let polyline = overlay as? MKPolyline {
+        let renderer = MKPolylineRenderer(polyline: polyline)
+        renderer.strokeColor = factionColor
+        renderer.lineWidth = 6
+        // Advanced: Use a stroke pattern or gradient for a glowing effect
+        return renderer
+    } else if let polygon = overlay as? MKPolygon {
+        let renderer = MKPolygonRenderer(polygon: polygon)
+        renderer.fillColor = factionColor.withAlphaComponent(0.3) // Semi-transparent fill
+        renderer.strokeColor = factionColor
+        renderer.lineWidth = 2
+        return renderer
+    }
+    return MKOverlayRenderer(overlay: overlay)
+}
+
+
+
+// Function for accurate distance check (Haversine formula)
+function getHaversineDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371000; // Radius of Earth in meters
+    // ... actual Haversine calculation ...
+    // returns distance in meters
+}
+
+// Player's current location from GPS
+const playerLocation = { lat: 34.0510, lon: -118.2415 };
+const portalLocations = [
+    { id: 'P001', lat: 34.0522, lon: -118.2437, range: 40 }, // Portal 1
+    // ... more portals
+];
+
+function checkIngressInteractions(playerLoc, portals) {
+    const activeInteractions = [];
+    for (const portal of portals) {
+        const distance = getHaversineDistance(
+            playerLoc.lat, playerLoc.lon, 
+            portal.lat, portal.lon
+        );
+
+        if (distance <= portal.range) {
+            // **Binds the feature:** Tells the UI to show the "Hack" or "Deploy" buttons
+            activeInteractions.push({ 
+                portalId: portal.id, 
+                action: "INTERACTABLE",
+                distance: distance.toFixed(1) 
+            });
+            // **ADVANCED:** Trigger UI/Audio feedback (e.g., scanner noise)
+        }
+    }
+    return activeInteractions;
+}
