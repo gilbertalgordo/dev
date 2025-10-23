@@ -1,0 +1,362 @@
+#!/usr/bin/env python3
+"""
+daily_quota_manager.py
+Legal: quota enforcement on YOUR router/hotspot.
+Requires: iptables with quota module, run as root.
+Installs a quota chain that allows DAILY_QUOTA_BYTES then drops further traffic.
+Run once at boot / then daily (cron) to reset.
+"""
+
+import subprocess
+import sys
+import shlex
+from datetime import datetime
+
+# CONFIG — change to suit your router
+LAN_IF = "br-lan"           # interface for clients (or physical interface like wlan0)
+FORWARD_CHAIN = "FORWARD"   # main chain to attach to
+QUOTA_CHAIN = "DAILY_QUOTA"
+DAILY_QUOTA_BYTES = 1073741824  # 1 GB (bytes)
+LOG_DROP = False            # set True to log drops (can be noisy)
+
+def run(cmd):
+    print(f"+ {cmd}")
+    subprocess.check_call(shlex.split(cmd))
+
+def chain_exists(chain):
+    try:
+        subprocess.check_call(["iptables", "-L", chain], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+def clear_chain(chain):
+    # flush & delete if exists
+    if chain_exists(chain):
+        run(f"iptables -F {chain}")
+        run(f"iptables -X {chain}")
+
+def install_chain():
+    # Create chain and attach to FORWARD for traffic from LAN_IF to WAN
+    if chain_exists(QUOTA_CHAIN):
+        print("Chain exists, will recreate to reset quota.")
+        clear_chain(QUOTA_CHAIN)
+
+    run(f"iptables -N {QUOTA_CHAIN}")
+    # Match packets coming from LAN interface (adjust if needed)
+    # First rule: allow up to DAILY_QUOTA_BYTES (this uses the quota match)
+    run(f"iptables -A {QUOTA_CHAIN} -m quota --quota {DAILY_QUOTA_BYTES} -j RETURN")
+    # After quota exhausted, either DROP or mark for captive portal
+    if LOG_DROP:
+        run(f"iptables -A {QUOTA_CHAIN} -j LOG --log-prefix \"DAILY_QUOTA_DROP: \" --log-level 4")
+    run(f"iptables -A {QUOTA_CHAIN} -j DROP")
+
+    # Insert jump from FORWARD chain (if not already present)
+    # We target packets coming from LAN_IF; adjust -i/-o depending on NAT topology
+    # We add rule to FORWARD: traffic from LAN_IF should pass through QUOTA_CHAIN
+    run(f"iptables -I {FORWARD_CHAIN} 1 -i {LAN_IF} -j {QUOTA_CHAIN}")
+
+def reset_quota():
+    # To reset, delete and re-create chain (quota counter resets when chain recreated)
+    print(f"Resetting quota at {datetime.now().isoformat()}")
+    # Remove jump from FORWARD if present, then delete chain
+    # We attempt to remove the specific rule; if fails, we continue
+    try:
+        run(f"iptables -D {FORWARD_CHAIN} -i {LAN_IF} -j {QUOTA_CHAIN}")
+    except subprocess.CalledProcessError:
+        pass
+    clear_chain(QUOTA_CHAIN)
+    install_chain()
+
+def status():
+    print("Current iptables rules (QUOTA chain):")
+    subprocess.check_call(["iptables", "-L", QUOTA_CHAIN, "-nv"], stderr=subprocess.DEVNULL)
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: daily_quota_manager.py [install|reset|status]")
+        sys.exit(2)
+    cmd = sys.argv[1]
+    if cmd == "install":
+        install_chain()
+    elif cmd == "reset":
+        reset_quota()
+    elif cmd == "status":
+        status()
+    else:
+        print("Unknown command")
+        sys.exit(2)
+
+if __name__ == "__main__":
+    main()
+
+
+   # Reset quota at 00:00 every day (server timezone)
+0 0 * * * /usr/bin/python3 /usr/local/bin/daily_quota_manager.py reset >> /var/log/daily_quota.log 2>&1
+
+
+@reboot /usr/bin/python3 /usr/local/bin/daily_quota_manager.py install
+
+
+#!/usr/bin/env python3
+"""
+multi_sim_orchestrator.py
+
+Purpose:
+- Monitor data usage on the active WAN interface (e.g., ppp0, wwan0)
+- When usage >= DAILY_QUOTA_BYTES, switch to the next SIM/slot/modem
+- Reset daily counters at midnight (local timezone)
+- Works with router HTTP APIs (placeholder) or direct modem AT control (pyserial)
+
+Legal: This automates using SIMs you own. Do NOT use to bypass carrier billing.
+
+Dependencies:
+    pip3 install pyserial requests
+
+Configuration:
+- Edit SLOTS with your hardware-specific instructions.
+- Implement router_switch_to_slot() or modem_switch_to_slot() to match your devices.
+"""
+
+import os
+import time
+import json
+import logging
+from datetime import datetime, timedelta
+import threading
+import requests  # for router HTTP APIs (if available)
+import serial    # for AT control (pyserial)
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
+
+# === CONFIG ===
+DAILY_QUOTA_BYTES = 1073741824  # 1 GiB
+MONITOR_INTERVAL = 10           # seconds between checks
+WAN_IF = "wwan0"                # interface used for current connection (adjust)
+STATE_FILE = "/var/run/multi_sim_state.json"
+# Define your slots. Each slot is either a router-profile (API) or modem (serial)
+# For router API, set type='router' and provide 'profile' name; for modem set type='modem' and provide 'tty'.
+SLOTS = [
+    {"id": "slot1", "type": "modem", "tty": "/dev/ttyUSB0"},
+    {"id": "slot2", "type": "modem", "tty": "/dev/ttyUSB1"},
+    # {"id": "slot3", "type": "router", "profile": "SIM_PROFILE_3", "api_base": "http://192.168.1.1/api", "api_key": "admin:pass"},
+]
+
+# Router API example placeholders (customize to actual router)
+ROUTER_API_TIMEOUT = 5
+
+# If your modem needs a PPP dial or specific AT sequence, fill the template below in modem_switch_to_slot.
+# === END CONFIG ===
+
+class State:
+    def __init__(self, path):
+        self.path = path
+        self.lock = threading.Lock()
+        self.data = {"current_slot_idx": 0, "last_reset_date": None, "usage_start_bytes": 0}
+        self._load()
+
+    def _load(self):
+        try:
+            with open(self.path, "r") as f:
+                self.data.update(json.load(f))
+                logging.info("Loaded state from %s", self.path)
+        except Exception:
+            logging.info("No existing state file; starting fresh")
+
+    def save(self):
+        with self.lock:
+            tmp = self.path + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(self.data, f)
+            os.replace(tmp, self.path)
+
+    def set_slot(self, idx):
+        with self.lock:
+            self.data["current_slot_idx"] = idx
+            self.save()
+
+    def set_usage_start(self, bytes_val):
+        with self.lock:
+            self.data["usage_start_bytes"] = bytes_val
+            self.save()
+
+    def set_reset_date(self, date_str):
+        with self.lock:
+            self.data["last_reset_date"] = date_str
+            self.save()
+
+    def get(self, key):
+        with self.lock:
+            return self.data.get(key)
+
+state = State(STATE_FILE)
+
+# ---------------------------
+# Utility: read interface rx+tx bytes
+# ---------------------------
+def iface_bytes_total(ifname):
+    """Return total bytes transferred across interface (rx + tx)."""
+    try:
+        with open(f"/sys/class/net/{ifname}/statistics/rx_bytes", "r") as f:
+            rx = int(f.read().strip())
+        with open(f"/sys/class/net/{ifname}/statistics/tx_bytes", "r") as f:
+            tx = int(f.read().strip())
+        return rx + tx
+    except Exception as e:
+        logging.error("Could not read interface stats for %s: %s", ifname, e)
+        return None
+
+# ---------------------------
+# Hardware control (must adapt to your devices)
+# ---------------------------
+def router_switch_to_slot(slot):
+    """
+    Placeholder: implement router API call to switch active SIM/profile.
+    Example: POST /api/set_profile with JSON {"profile":"SIM_PROFILE_3"}
+    """
+    api_base = slot.get("api_base")
+    profile = slot.get("profile")
+    api_key = slot.get("api_key")  # if needed
+    if not api_base or not profile:
+        raise RuntimeError("Router slot missing api_base/profile")
+    logging.info("Switching router to profile %s via %s", profile, api_base)
+    # Example (customize to your router's API):
+    try:
+        resp = requests.post(f"{api_base}/set_profile", json={"profile": profile}, timeout=ROUTER_API_TIMEOUT, auth=None)
+        resp.raise_for_status()
+        logging.info("Router switched to profile %s (status %s)", profile, resp.status_code)
+    except Exception as e:
+        logging.error("Router API switch failed: %s", e)
+        raise
+
+def modem_switch_to_slot(slot):
+    """
+    Example AT-based approach to restart modem or change SIM. Many multi-USIM adaptors require specific commands.
+    Here we show a safe, generic flow: reset the modem power via USB hub or send AT commands to bring down data and re-init.
+    You MUST adapt to your modem's command set.
+    """
+    tty = slot.get("tty")
+    if not tty:
+        raise RuntimeError("Modem slot missing tty")
+    logging.info("Attempting modem control on %s", tty)
+    try:
+        ser = serial.Serial(tty, baudrate=115200, timeout=2)
+        # Hangup data (if PPP) - send +++ or ATH for some serial modems
+        # Example: send AT+CFUN=1,1 to reboot modem (use with caution)
+        ser.write(b"AT+CFUN=1,1\r")
+        time.sleep(1)
+        # Read and flush
+        _ = ser.read(1024)
+        ser.close()
+        logging.info("Sent reboot to modem %s; give it 20 seconds to re-register", tty)
+        time.sleep(20)  # allow modem to restart and register on network
+    except Exception as e:
+        logging.error("Modem control failed on %s: %s", tty, e)
+        raise
+
+def switch_to_slot(idx):
+    """Switch active connection to the slot index provided."""
+    slot = SLOTS[idx]
+    logging.info("Switching to slot %s (%s)", slot["id"], slot["type"])
+    if slot["type"] == "router":
+        router_switch_to_slot(slot)
+    elif slot["type"] == "modem":
+        modem_switch_to_slot(slot)
+    else:
+        raise RuntimeError("Unknown slot type: " + str(slot["type"]))
+    # After switching, wait a short time for the interface to appear / reconnect
+    logging.info("Waiting for connection to settle...")
+    time.sleep(15)
+    # Update state
+    state.set_slot(idx)
+    cur_total = iface_bytes_total(WAN_IF)
+    if cur_total is not None:
+        state.set_usage_start(cur_total)
+    logging.info("Switched to slot %s; baseline bytes = %s", slot["id"], cur_total)
+
+# ---------------------------
+# Rotation logic
+# ---------------------------
+def get_current_usage():
+    total = iface_bytes_total(WAN_IF)
+    if total is None:
+        return 0
+    baseline = state.get("usage_start_bytes") or 0
+    usage = max(0, total - baseline)
+    return usage
+
+def rotate_slot():
+    current_idx = int(state.get("current_slot_idx") or 0)
+    next_idx = (current_idx + 1) % len(SLOTS)
+    logging.info("Rotating from slot %d to %d", current_idx, next_idx)
+    try:
+        switch_to_slot(next_idx)
+    except Exception as e:
+        logging.error("Failed to switch to slot %d: %s", next_idx, e)
+        # try advancing to the next slot (avoid lock on broken slot)
+        fallback_idx = (next_idx + 1) % len(SLOTS)
+        logging.info("Attempting fallback switch to %d", fallback_idx)
+        try:
+            switch_to_slot(fallback_idx)
+        except Exception as e2:
+            logging.critical("Fallback also failed: %s", e2)
+            # Do not loop infinitely; administrator intervention required.
+
+# ---------------------------
+# Daily reset
+# ---------------------------
+def check_and_reset_daily():
+    """Reset the daily counters at midnight local time."""
+    last_reset = state.get("last_reset_date")
+    today = datetime.now().strftime("%Y-%m-%d")
+    if last_reset != today:
+        logging.info("Performing daily reset (last=%s, today=%s)", last_reset, today)
+        # Reset baseline usage for the current interface
+        cur_total = iface_bytes_total(WAN_IF)
+        if cur_total is None:
+            cur_total = 0
+        state.set_usage_start(cur_total)
+        state.set_reset_date(today)
+        # Optional: force re-connect on reset to ensure fresh session
+        cur_idx = int(state.get("current_slot_idx") or 0)
+        try:
+            logging.info("Re-init current slot %d to refresh session", cur_idx)
+            switch_to_slot(cur_idx)
+        except Exception as e:
+            logging.error("Error re-initializing slot on reset: %s", e)
+
+# ---------------------------
+# Main loop
+# ---------------------------
+def main_loop():
+    logging.info("Starting multi-SIM orchestrator")
+    # Ensure baseline set
+    if state.get("usage_start_bytes") == 0:
+        b = iface_bytes_total(WAN_IF) or 0
+        state.set_usage_start(b)
+    while True:
+        try:
+            check_and_reset_daily()
+            usage = get_current_usage()
+            logging.info("Current daily usage on %s = %d bytes (quota %d)", WAN_IF, usage, DAILY_QUOTA_BYTES)
+            if usage >= DAILY_QUOTA_BYTES:
+                logging.info("Quota reached: rotating SIM")
+                rotate_slot()
+            time.sleep(MONITOR_INTERVAL)
+        except KeyboardInterrupt:
+            logging.info("Exiting on user request")
+            break
+        except Exception as e:
+            logging.exception("Loop error: %s", e)
+            time.sleep(10)
+
+if __name__ == "__main__":
+    # Startup: ensure a slot is active
+    try:
+        idx = int(state.get("current_slot_idx") or 0)
+        logging.info("Ensuring slot %d is active", idx)
+        switch_to_slot(idx)
+    except Exception as e:
+        logging.error("Startup switch failed: %s", e)
+    main_loop()
+
