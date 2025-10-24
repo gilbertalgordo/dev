@@ -172,3 +172,137 @@ if __name__ == "__main__":
     # # Secret Key: ******************************
     # # Project Contact: *************************
     # The final build artifact is ready for deployment.
+
+
+
+# --- VARIABLES ---
+variable "project_id" { default = "your-vip-dev-project-id" }
+variable "region"     { default = "us-central1" }
+
+# --- 1. VIP Mode Perimeter (VPC Service Controls) ---
+# NOTE: VPC Service Controls are typically managed at the Organization level, 
+# but we define the target project here for deployment context.
+
+# --- 2. Website Scanner & Antispy Gateway (Cloud Armor + Load Balancer) ---
+
+# 2a. Create the Cloud Armor Security Policy (The "Link-Free Scanner")
+# This policy acts as a Web Application Firewall (WAF) protecting the service 24/7.
+resource "google_compute_security_policy" "antispy_waf" {
+  project = var.project_id
+  name    = "antispy-developer-waf"
+  description = "WAF policy with OWASP rules for 24/7 link-free service protection"
+  
+  # Default action: Deny all if no other rule is matched (Highest security)
+  default_rule {
+    action  = "deny(404)"
+    priority = 2147483647
+    match {
+      versioned_expr = "SRC_IPS_V1"
+      config {
+        src_ip_ranges = ["*"]
+      }
+    }
+  }
+}
+
+# 2b. Add an advanced WAF rule (e.g., OWASP SQL Injection protection)
+resource "google_compute_security_policy_rule" "sqli_rule" {
+  project        = var.project_id
+  security_policy = google_compute_security_policy.antispy_waf.name
+  description     = "Block common SQL Injection attempts (OWASP Core Ruleset)"
+  priority        = 100
+  action          = "deny(403)"
+  
+  # Cloud Armor's pre-configured WAF ruleset for SQL Injection
+  match {
+    versioned_expr = "SRC_IPS_V1"
+    config {
+      src_ip_ranges = ["*"]
+    }
+    # This rule blocks requests that match the SQLi threat profile
+    expr {
+      expression = "evaluatePreconfiguredExpr('sqli-canary')"
+    }
+  }
+}
+
+# 2c. Create a simple backend service (representing the developer's app)
+resource "google_compute_backend_service" "app_backend" {
+  project = var.project_id
+  name    = "developer-app-backend"
+  port_name = "http"
+  protocol  = "HTTP"
+  timeout_sec = 10
+  
+  # Attach the Cloud Armor policy to the backend service
+  security_policy = google_compute_security_policy.antispy_waf.id 
+}
+
+# NOTE: A Load Balancer, URL map, and Frontend must be defined separately 
+# and linked to the 'app_backend' to complete the deployment.
+
+
+
+import os
+import datetime
+from google.cloud import securitycenter_v1 as securitycenter
+
+# --- Configuration ---
+# Your organization ID (SCC generally works at the org level)
+ORG_ID = os.environ.get("ORGANIZATION_ID", "123456789012") 
+# Source ID for Security Health Analytics or other specific scanner
+SOURCE_ID = os.environ.get("SOURCE_ID", "-") # Use '-' to list findings from all sources
+
+def monitor_scc_findings(organization_id: str, source_id: str) -> None:
+    """
+    Checks Cloud SCC for new HIGH_ or MEDIUM_ severity findings 
+    in the last 24 hours. (Our 24/7 detection service).
+    """
+    scc_client = securitycenter.SecurityCenterClient()
+    
+    # Define the resource path for all sources in the organization
+    parent_path = f"organizations/{organization_id}/sources/{source_id}/locations/global"
+    
+    # Calculate the time filter: Look for findings created in the last 24 hours
+    yesterday = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=1)).isoformat("T")
+    
+    # SCC Filter: High/Medium severity findings created since yesterday
+    # We filter out vulnerabilities found by the Web Security Scanner (WSS) 
+    # and configuration issues (Security Health Analytics).
+    filter_expr = (
+        f'severity="HIGH" OR severity="MEDIUM" AND '
+        f'eventTime > "{yesterday}"'
+    )
+
+    print(f"Scanning SCC for new findings on {parent_path} with filter: {filter_expr}")
+
+    # List the findings
+    request = securitycenter.ListFindingsRequest(
+        parent=parent_path,
+        filter=filter_expr,
+        page_size=10 # Limit to top 10 for quick alerts
+    )
+
+    # The result is an iterable object
+    response_iterator = scc_client.list_findings(request=request)
+
+    findings_count = 0
+    for finding_result in response_iterator:
+        finding = finding_result.finding
+        findings_count += 1
+
+        print("\n--- NEW SECURITY ALERT (Antispy Trigger) ---")
+        print(f"  Name: {finding.display_name}")
+        print(f"  Source: {finding.parent_source.split('/')[-1]}")
+        print(f"  Severity: {finding.severity}")
+        print(f"  Resource: {finding.resource_name}")
+        print(f"  Time: {finding.event_time.isoformat()}")
+
+        # TODO: Implement a notification (e.g., Pub/Sub, Slack, PagerDuty) 
+        # for immediate security team action.
+
+    if findings_count == 0:
+        print("\n[SUCCESS] No new HIGH/MEDIUM security findings detected in the last 24 hours.")
+
+if __name__ == "__main__":
+    monitor_scc_findings(ORG_ID, SOURCE_ID)
