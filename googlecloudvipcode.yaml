@@ -1,0 +1,174 @@
+# --- 1. Define the Access Policy (Prerequisite: Must be run at Organization level) ---
+resource "google_access_context_manager_access_policy" "policy" {
+  parent = "organizations/${var.org_id}"
+  title  = "SecureDevAccessPolicy"
+}
+
+# --- 2. Define the Developer 'VIP Mode' Access Level ---
+# Only members of the 'developer_vip_group' can access the perimeter.
+resource "google_access_context_manager_access_level" "dev_vip_access" {
+  parent = "accessPolicies/${google_access_context_manager_access_policy.policy.name}"
+  name   = "organizations/${var.org_id}/accessPolicies/${google_access_context_manager_access_policy.policy.name}/accessLevels/DeveloperVIPLevel"
+  title  = "DeveloperVIPLevel"
+
+  basic {
+    combining_function = "AND"
+    conditions {
+      # Restrict access to a specific corporate group for the 'VIP' developers
+      members = [
+        "group:${var.developer_vip_group_email}"
+      ]
+      # OPTIONAL: Restrict access to requests originating from the corporate IP range
+      # ip_subnetworks = [
+      #   "203.0.113.0/24" 
+      # ]
+    }
+  }
+}
+
+# --- 3. Define the Service Perimeter (The 'VIP' Firewall) ---
+resource "google_access_context_manager_service_perimeter" "dev_vip_perimeter" {
+  parent = "accessPolicies/${google_access_context_manager_access_policy.policy.name}"
+  name   = "organizations/${var.org_id}/accessPolicies/${google_access_context_manager_access_policy.policy.name}/servicePerimeters/DevVIPPerimeter"
+  title  = "DevVIPPerimeter"
+
+  status {
+    # The 'VIP' developer project is protected inside this perimeter
+    restricted_services = [
+      "storage.googleapis.com", 
+      "bigquery.googleapis.com",
+      "compute.googleapis.com"
+    ]
+    # Restrict all access to the perimeter *except* for those explicitly allowed
+    resources = [
+      "projects/${var.developer_vip_project_number}"
+    ]
+
+    # Ingress Rule: Allow access *into* the perimeter
+    ingress_policies {
+      ingress_from {
+        # Only allow principals that meet the 'DeveloperVIPLevel' Access Context
+        identity_type = "ANY_IDENTITY"
+      }
+      ingress_to {
+        # Only allow access to the services protected by this perimeter
+        operations {
+          service_name = "*"
+          method_selectors {
+            method = "*"
+          }
+        }
+        resources = [
+            "projects/${var.developer_vip_project_number}"
+        ]
+      }
+    }
+  }
+}
+
+# --- 4. Private API Access for Developers (Antispy Networking) ---
+# This configuration forces developers inside the VIP VPC to use the Restricted VIP 
+# for accessing Google APIs, preventing traffic from leaving Google's network.
+resource "google_compute_router" "router" {
+  name    = "nat-router"
+  network = var.developer_vip_vpc_name
+  project = var.developer_vip_project_id
+  region  = var.region
+}
+
+resource "google_compute_router_nat" "nat" {
+  name                               = "nat-config"
+  router                             = google_compute_router.router.name
+  region                             = google_compute_router.router.region
+  project                            = var.developer_vip_project_id
+  source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
+  nat_ip_allocate_option             = "AUTO_ONLY"
+  log_config {
+    enable = true
+    filter = "ERRORS_ONLY"
+  }
+  # Enable Private Google Access to route Google API traffic privately
+  enable_endpoint_independent_mapping = true 
+}
+
+# NOTE: The DNS configuration for the Restricted VIP (restricted.googleapis.com)
+# must be managed separately, typically via Cloud DNS private zones.
+
+
+
+import google.cloud.dlp_v2 as dlp
+
+# --- Configuration ---
+PROJECT_ID = "YOUR_DEVELOPER_VIP_PROJECT_ID"
+# Example of highly sensitive data you want to prevent from leaking
+TEXT_TO_REDACT = """
+# Developer: John Doe 
+# Secret Key: AKIAIOSFODNN7EXAMPLE_AWS_KEY
+# Project Contact: john.doe@examplecorp.com
+The final build artifact is ready for deployment.
+"""
+
+def redact_sensitive_data(project_id: str, text_to_deidentify: str) -> str:
+    """
+    Scans input text for sensitive info (PII, API Keys) and redacts it.
+    This acts as the 'Antispy' gate before data leaves the VIP perimeter.
+    """
+    dlp_client = dlp.DlpServiceClient()
+    parent = f"projects/{project_id}/locations/global"
+
+    # 1. Define what info types (infotypes) to look for
+    # We are looking for common PII and Credentials (API Keys)
+    info_types = [
+        {"name": "EMAIL_ADDRESS"},
+        {"name": "CREDIT_CARD_NUMBER"},
+        {"name": "US_SOCIAL_SECURITY_NUMBER"},
+        {"name": "AUTH_TOKEN"},
+    ]
+
+    # 2. Define the action: Mask with a '*' character
+    masking_config = dlp.DeidentifyConfig(
+        info_type_transformations=dlp.DeidentifyConfig.InfoTypeTransformation(
+            transformations=[
+                dlp.DeidentifyConfig.InfoTypeTransformation.InfoTypeTransformations.InfoTypeTransformation(
+                    info_types=info_types,
+                    primitive_transformation=dlp.PrimitiveTransformation(
+                        character_mask_config=dlp.CharacterMaskConfig(
+                            masking_character="*",
+                            # Leave the first 0 characters unmasked (mask everything)
+                            number_to_mask=0, 
+                            reverse_order=False
+                        )
+                    ),
+                )
+            ]
+        )
+    )
+
+    # 3. Create the request
+    item_to_deidentify = dlp.ContentItem(value=text_to_deidentify)
+
+    response = dlp_client.deidentify_content(
+        request={
+            "parent": parent,
+            "deidentify_config": masking_config,
+            "item": item_to_deidentify,
+        }
+    )
+
+    # The result is the clean, de-identified text
+    return response.item.value
+
+if __name__ == "__main__":
+    print("--- Original Sensitive Data ---")
+    print(TEXT_TO_REDACT)
+    
+    redacted_text = redact_sensitive_data(PROJECT_ID, TEXT_TO_REDACT)
+
+    print("\n--- Redacted (Antispy Processed) Data ---")
+    print(redacted_text)
+    
+    # Expected output:
+    # # Developer: John Doe 
+    # # Secret Key: ******************************
+    # # Project Contact: *************************
+    # The final build artifact is ready for deployment.
