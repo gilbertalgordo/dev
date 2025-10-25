@@ -1,0 +1,404 @@
+python -m venv venv && source venv/bin/activate
+pip install fastapi uvicorn websockets python-multipart pydantic aiofiles transformers torch soundfile
+# Optional for offline speech-to-text:
+pip install vosk
+# OR for using OpenAI Whisper via openai (if you have API access)
+pip install openai
+
+
+# server.py
+import asyncio
+import base64
+import json
+import os
+import uuid
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
+import soundfile as sf
+import numpy as np
+from transformers import pipeline
+
+# Optional: VOSK speech-to-text
+USE_VOSK = True
+VOSK_MODEL_PATH = "models/vosk-model-small-en-us-0.15"
+
+if USE_VOSK:
+    try:
+        from vosk import Model, KaldiRecognizer
+        vosk_model = Model(VOSK_MODEL_PATH)
+    except Exception as e:
+        print("VOSK model not loaded:", e)
+        vosk_model = None
+else:
+    vosk_model = None
+
+# Transformers pipelines (text analysis)
+sentiment = pipeline("sentiment-analysis")
+summarizer = pipeline("summarization")
+# You can also add NER or keyphrase extraction with a different model.
+
+app = FastAPI()
+
+class ConnectionManager:
+    def __init__(self):
+        self.active: dict[str, WebSocket] = {}
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        cid = str(uuid.uuid4())
+        self.active[cid] = websocket
+        return cid
+
+    def disconnect(self, cid: str):
+        self.active.pop(cid, None)
+
+    async def broadcast(self, message: dict):
+        to_remove = []
+        for cid, ws in list(self.active.items()):
+            try:
+                await ws.send_text(json.dumps(message))
+            except Exception:
+                to_remove.append(cid)
+        for cid in to_remove:
+            self.disconnect(cid)
+
+manager = ConnectionManager()
+
+# helper: write wav bytes to file and run VOSK
+def transcribe_wav_bytes(wav_bytes: bytes) -> str:
+    # save temp
+    fname = f"tmp_{uuid.uuid4().hex}.wav"
+    with open(fname, "wb") as f:
+        f.write(wav_bytes)
+    text = ""
+    try:
+        data, samplerate = sf.read(fname, dtype='int16')
+        # if VOSK available:
+        if vosk_model is not None:
+            rec = KaldiRecognizer(vosk_model, samplerate)
+            # VOSK expects raw bytes
+            with open(fname, "rb") as fh:
+                while True:
+                    chunk = fh.read(4000)
+                    if not chunk:
+                        break
+                    rec.AcceptWaveform(chunk)
+            res = rec.FinalResult()
+            j = json.loads(res)
+            text = j.get("text", "")
+        else:
+            text = "[No STT model available on server]"
+    except Exception as e:
+        text = f"[Transcription error: {e}]"
+    finally:
+        try:
+            os.remove(fname)
+        except:
+            pass
+    return text
+
+def analyze_text(text: str) -> dict:
+    if not text.strip():
+        return {"summary": "", "sentiment": None}
+    # sentiment (transformers)
+    try:
+        s = sentiment(text[:1000])  # limit length
+    except Exception as e:
+        s = [{"label": "UNKNOWN", "score": 0.0}]
+    # summarization (if long)
+    try:
+        summary = summarizer(text, max_length=60, min_length=5, do_sample=False)[0]["summary_text"]
+    except Exception:
+        summary = text if len(text) < 200 else text[:200] + "..."
+    return {"summary": summary, "sentiment": s}
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    cid = await manager.connect(websocket)
+    print("Client connected:", cid)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            try:
+                msg = json.loads(data)
+            except Exception:
+                continue
+            mtype = msg.get("type")
+            if mtype == "audio_chunk":
+                # expected: base64 wav bytes
+                b64 = msg.get("data")
+                source = msg.get("source", "mic")
+                consent = msg.get("consent", False)
+                if not consent:
+                    # require consent
+                    await websocket.send_text(json.dumps({"type":"error", "message":"consent required for processing audio"}))
+                    continue
+                wav_bytes = base64.b64decode(b64)
+                # Transcribe (blocking — offload if needed)
+                loop = asyncio.get_event_loop()
+                text = await loop.run_in_executor(None, transcribe_wav_bytes, wav_bytes)
+                analysis = analyze_text(text)
+                out = {
+                    "type": "transcription_result",
+                    "source": source,
+                    "text": text,
+                    "analysis": analysis
+                }
+                await manager.broadcast(out)
+
+            elif mtype == "text":
+                # typed text sent from client
+                text = msg.get("text","")
+                consent = msg.get("consent", False)
+                if not consent:
+                    await websocket.send_text(json.dumps({"type":"error", "message":"consent required for processing text"}))
+                    continue
+                analysis = analyze_text(text)
+                out = {
+                    "type":"text_analysis",
+                    "text": text,
+                    "analysis": analysis
+                }
+                await manager.broadcast(out)
+
+            elif mtype == "eeg":
+                # EEG/BCI data from vendor SDK: expect pre-processed telemetry (not raw brain decoding)
+                consent = msg.get("consent", False)
+                if not consent:
+                    await websocket.send_text(json.dumps({"type":"error", "message":"consent required for processing EEG"}))
+                    continue
+                telemetry = msg.get("telemetry", {})
+                # simple pass-through; you could add anomaly detection, band power analysis, etc.
+                out = {
+                    "type":"eeg_telemetry",
+                    "telemetry": telemetry
+                }
+                await manager.broadcast(out)
+            else:
+                await websocket.send_text(json.dumps({"type":"error", "message":"unknown message type"}))
+    except WebSocketDisconnect:
+        manager.disconnect(cid)
+        print("Disconnected", cid)
+
+
+        <!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Realtime Consent-based Analyzer</title>
+</head>
+<body>
+  <h2>Realtime Analyzer — Consent required</h2>
+  <label><input id="consent" type="checkbox"> I consent to local audio and text processing</label><br/>
+  <button id="start">Start Microphone</button>
+  <button id="stop">Stop Microphone</button>
+  <textarea id="typed" placeholder="Type message here"></textarea>
+  <button id="sendText">Send Text</button>
+
+  <div id="log"></div>
+
+<script>
+const log = (s) => {
+  const d = document.createElement('div'); d.textContent = s; document.getElementById('log').prepend(d);
+}
+const ws = new WebSocket("ws://localhost:8000/ws");
+ws.onopen = () => log("WebSocket open");
+ws.onmessage = (ev) => {
+  try {
+    const m = JSON.parse(ev.data);
+    log("RECEIVED: " + JSON.stringify(m));
+  } catch (e) {
+    log("raw: " + ev.data);
+  }
+}
+ws.onclose = () => log("WebSocket closed");
+
+let mediaRecorder = null;
+let audioChunks = [];
+
+document.getElementById('start').onclick = async () => {
+  if (!document.getElementById('consent').checked) { alert("Please give consent."); return; }
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  mediaRecorder = new MediaRecorder(stream);
+  mediaRecorder.addEventListener("dataavailable", event => {
+    if (event.data && event.data.size > 0) {
+      // send chunk as wav via base64
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = reader.result.split(',')[1];
+        const msg = {
+          type: "audio_chunk",
+          data: base64,
+          source: "browser_mic_1",
+          consent: true
+        };
+        ws.send(JSON.stringify(msg));
+        log("Sent audio chunk");
+      };
+      reader.readAsDataURL(event.data); // dataURL includes WAV/OGG header depending on browser
+    }
+  });
+  mediaRecorder.start(1000); // small timeslice (ms)
+  log("Recorder started");
+};
+
+document.getElementById('stop').onclick = () => {
+  if (mediaRecorder) {
+    mediaRecorder.stop();
+    mediaRecorder = null;
+    log("Recorder stopped");
+  }
+};
+
+document.getElementById('sendText').onclick = () => {
+  const text = document.getElementById('typed').value;
+  if (!text) return;
+  if (!document.getElementById('consent').checked) { alert("Please give consent."); return; }
+  const msg = { type: "text", text, consent: true };
+  ws.send(JSON.stringify(msg));
+  log("Sent text: " + text);
+};
+</script>
+</body>
+</html>
+
+
+{ "type":"eeg", "consent": true, "telemetry": {"alpha":0.12, "beta":0.05, "attention":0.78} }
+
+
+uvicorn server:app --host 0.0.0.0 --port 8000 --reload
+
+
+# Ethical Personal Mind & Device Analyzer (Local use)
+# Requires consented EEG/BCI data, microphone, and text input.
+# Do NOT use this for intercepting others' data.
+
+import asyncio, json, base64, uuid
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from transformers import pipeline
+
+app = FastAPI()
+
+sentiment = pipeline("sentiment-analysis")
+summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+
+class ClientHub:
+    def __init__(self):
+        self.clients = {}
+    async def connect(self, ws: WebSocket):
+        await ws.accept()
+        cid = str(uuid.uuid4())
+        self.clients[cid] = ws
+        return cid
+    def disconnect(self, cid): self.clients.pop(cid, None)
+    async def send_all(self, msg: dict):
+        for ws in list(self.clients.values()):
+            await ws.send_text(json.dumps(msg))
+
+hub = ClientHub()
+
+async def analyze_text(text: str):
+    s = sentiment(text[:512])
+    summary = summarizer(text, max_length=60, min_length=5, do_sample=False)[0]['summary_text']
+    quick = "Positive" if s[0]['label'] == 'POSITIVE' else "Negative" if s[0]['label']=='NEGATIVE' else "Neutral"
+    manifest = {
+        "summary": summary,
+        "sentiment": s[0],
+        "quick_response_manifest": f"Quick: {quick} tone detected. Suggest calm reply."
+    }
+    return manifest
+
+@app.websocket("/stream")
+async def stream(ws: WebSocket):
+    cid = await hub.connect(ws)
+    try:
+        while True:
+            raw = await ws.receive_text()
+            data = json.loads(raw)
+            dtype = data.get("type")
+            consent = data.get("consent", False)
+            if not consent:
+                await ws.send_text(json.dumps({"error": "Consent required"}))
+                continue
+
+            if dtype == "text":
+                result = await analyze_text(data["text"])
+                await hub.send_all({
+                    "type": "text_analysis",
+                    "input": data["text"],
+                    "result": result
+                })
+
+            elif dtype == "sound_transcription":
+                # Received from client-side speech-to-text
+                text = data.get("transcribed_text","")
+                result = await analyze_text(text)
+                await hub.send_all({
+                    "type": "audio_analysis",
+                    "input": text,
+                    "result": result
+                })
+
+            elif dtype == "eeg":
+                telemetry = data.get("telemetry", {})
+                focus = telemetry.get("attention",0)
+                calm = telemetry.get("relaxation",0)
+                state = "Focused" if focus>0.7 else "Relaxed" if calm>0.7 else "Neutral"
+                manifest = f"Quick: EEG indicates {state} mental state."
+                await hub.send_all({
+                    "type": "eeg_update",
+                    "telemetry": telemetry,
+                    "quick_response_manifest": manifest
+                })
+    except WebSocketDisconnect:
+        hub.disconnect(cid)
+
+
+        <!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Mind & Device Analyzer</title></head>
+<body>
+<h2>Personal Analyzer (Consent Required)</h2>
+<label><input id="consent" type="checkbox"> I consent to processing my data</label><br>
+<textarea id="typed" rows="4" cols="50" placeholder="Type something..."></textarea><br>
+<button id="sendText">Analyze Text</button>
+<button id="startMic">Start Microphone</button>
+<pre id="output"></pre>
+
+<script>
+const ws = new WebSocket("ws://localhost:8000/stream");
+const out = document.getElementById('output');
+const consentBox = document.getElementById('consent');
+const log = t => out.textContent = t + "\n" + out.textContent;
+
+ws.onmessage = ev => {
+  const msg = JSON.parse(ev.data);
+  log(JSON.stringify(msg, null, 2));
+};
+
+document.getElementById('sendText').onclick = () => {
+  if (!consentBox.checked) return alert("Please give consent");
+  const text = document.getElementById('typed').value;
+  ws.send(JSON.stringify({type:"text", text, consent:true}));
+};
+
+let recorder;
+document.getElementById('startMic').onclick = async ()=>{
+  if (!consentBox.checked) return alert("Consent required");
+  const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+  const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+  recognition.continuous = true;
+  recognition.onresult = e=>{
+    const transcript = e.results[e.resultIndex][0].transcript;
+    ws.send(JSON.stringify({type:"sound_transcription", transcribed_text:transcript, consent:true}));
+  };
+  recognition.start();
+};
+</script>
+</body>
+</html>
+
+
+pip install fastapi uvicorn transformers torch
+uvicorn server:app --reload
