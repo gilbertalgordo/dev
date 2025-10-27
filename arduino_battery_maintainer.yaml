@@ -646,3 +646,293 @@ void checkSerialUpdates() {
     }
   }
 }
+
+
+
+// --- Configuration Constants & Pin Definitions ---
+const int PWM_CHARGE_PIN = 9;            // PWM Output Pin for charge control (connects to MOSFET/Buck Converter gate)
+const int LOAD_OUTPUT_RELAY_PIN = 10;    // Controls 12/24V load power
+const int V_SELECT_RELAY_PIN = 8;        // Relay for 12V/24V configuration switch (if applicable)
+const int VOLTAGE_SENSE_PIN = A0;        // Analog Input for high-range voltage sensing (V_BAT)
+const int CURRENT_SENSE_PIN = A1;        // Analog Input for current shunt sensor (I_CHARGE)
+const int PBM_SWITCH_PIN = 2;            // Digital input for Power Bank Mode toggle button
+
+// Initial System Parameters (Can be updated via Serial)
+float V_SCALE_FACTOR = 0.0292;           // Voltage Scaling (e.g., 30V max)
+float I_SCALE_FACTOR = 0.005;            // Current Scaling (Amps per ADC unit)
+
+// Default 12V Thresholds
+float BATT_MAX_12V = 14.4;               // Constant Voltage (CV) target
+float BATT_LOW_CUTOFF_12V = 11.5;        // Ultimate Load Disconnect
+float PBM_RESERVE_12V = 12.2;            // Advanced Power Bank Reserve
+float FAST_CHARGE_CURRENT_12V = 5.0;     // Constant Current (CC) target (Amps)
+
+// Default 24V Thresholds
+float BATT_MAX_24V = 28.8;        
+float BATT_LOW_CUTOFF_24V = 23.0; 
+float PBM_RESERVE_24V = 24.4;     
+float FAST_CHARGE_CURRENT_24V = 5.0;
+
+// --- Global Variables ---
+float currentBatteryVoltage = 0.0;
+float currentChargeCurrent = 0.0;
+int systemVoltage = 0; // 0=Unknown, 12=12V, 24=24V
+bool powerBankModeActive = false;
+unsigned long lastStatusTime = 0;
+unsigned long autoUpdateTimer = 0;
+const int AUTO_UPDATE_INTERVAL = 5000; // Check for Serial updates every 5 seconds
+
+// --- Function Prototypes ---
+float readBatteryVoltage();
+float readChargeCurrent();
+void autoDetectVoltage(float voltage);
+void fastChargeCC_CV(float voltage, float current);
+void manageLoad(float voltage);
+void updatePowerBankMode();
+void checkSerialUpdates();
+
+void setup() {
+  Serial.begin(9600);
+  Serial.println("System Initializing...");
+  pinMode(PWM_CHARGE_PIN, OUTPUT);
+  pinMode(LOAD_OUTPUT_RELAY_PIN, OUTPUT);
+  pinMode(V_SELECT_RELAY_PIN, OUTPUT);
+  pinMode(PBM_SWITCH_PIN, INPUT_PULLUP);
+
+  // Initial state: Load off, Charge PWM to 0 (off)
+  digitalWrite(LOAD_OUTPUT_RELAY_PIN, LOW);
+  analogWrite(PWM_CHARGE_PIN, 0); 
+}
+
+void loop() {
+  // 1. Core measurements
+  currentBatteryVoltage = readBatteryVoltage();
+  currentChargeCurrent = readChargeCurrent();
+  
+  // 2. Automated System Configuration
+  autoDetectVoltage(currentBatteryVoltage);
+
+  // 3. Update Power Bank Mode status
+  updatePowerBankMode();
+
+  // 4. Manage Charging (CC-CV Logic) and Load
+  if (systemVoltage > 0) {
+    fastChargeCC_CV(currentBatteryVoltage, currentChargeCurrent);
+    manageLoad(currentBatteryVoltage);
+  } else {
+    // System Unidentified: Keep charging and load off
+    analogWrite(PWM_CHARGE_PIN, 0); 
+    digitalWrite(LOAD_OUTPUT_RELAY_PIN, LOW);
+  }
+
+  // 5. Automation Auto Update Check (Serial for parameter updates)
+  if (millis() - autoUpdateTimer >= AUTO_UPDATE_INTERVAL) {
+    checkSerialUpdates();
+    autoUpdateTimer = millis();
+  }
+
+  // 6. Display Status (Debug/Monitoring)
+  if (millis() - lastStatusTime >= 2000) {
+    Serial.print("V: "); Serial.print(currentBatteryVoltage, 2); 
+    Serial.print("V | I_CHG: "); Serial.print(currentChargeCurrent, 2); 
+    Serial.print("A | Sys: "); Serial.print(systemVoltage); 
+    Serial.print("V | PBM: "); Serial.print(powerBankModeActive ? "ON" : "OFF");
+    Serial.println();
+    lastStatusTime = millis();
+  }
+
+  delay(100); 
+}
+
+// --------------------------------------------------------------------------------
+// --- AUTOMATION & FAST CHARGING FUNCTIONS ---
+// --------------------------------------------------------------------------------
+
+/**
+ * @brief Reads the voltage from the analog pin and applies the scaling factor.
+ */
+float readBatteryVoltage() {
+  int rawADC = analogRead(VOLTAGE_SENSE_PIN);
+  return rawADC * V_SCALE_FACTOR; 
+}
+
+/**
+ * @brief Reads the current from the shunt/sensor and applies the scaling factor.
+ */
+float readChargeCurrent() {
+  int rawADC = analogRead(CURRENT_SENSE_PIN);
+  // NOTE: This assumes a simple unidirectional current sensor. 
+  // For bi-directional current, use a sensor like INA219.
+  return rawADC * I_SCALE_FACTOR; 
+}
+
+/**
+ * @brief Implements the Fast Charging Constant Current (CC) and Constant Voltage (CV) logic.
+ * Requires a DC-DC converter controlled by PWM_CHARGE_PIN.
+ */
+void fastChargeCC_CV(float voltage, float current) {
+  float BATT_MAX, FAST_CHARGE_CURRENT;
+  static int pwmDutyCycle = 0; // 0-255 for Arduino PWM
+
+  if (systemVoltage == 12) {
+    BATT_MAX = BATT_MAX_12V;
+    FAST_CHARGE_CURRENT = FAST_CHARGE_CURRENT_12V;
+  } else { // 24V
+    BATT_MAX = BATT_MAX_24V;
+    FAST_CHARGE_CURRENT = FAST_CHARGE_CURRENT_24V;
+  }
+
+  // 1. Constant Current (CC) Phase
+  if (voltage < BATT_MAX) {
+    // CC Control: Adjust PWM to maintain target current
+    if (current < FAST_CHARGE_CURRENT) {
+      pwmDutyCycle = min(255, pwmDutyCycle + 1); // Increase power
+      // NOTE: A proper PID controller should replace this simple incremental logic.
+    } else if (current > FAST_CHARGE_CURRENT) {
+      pwmDutyCycle = max(0, pwmDutyCycle - 1);   // Decrease power
+    }
+    Serial.println("MODE: CC");
+
+  // 2. Constant Voltage (CV) Phase
+  } else { // (voltage >= BATT_MAX)
+    // CV Control: Adjust PWM to maintain target voltage
+    if (voltage > BATT_MAX) {
+      pwmDutyCycle = max(0, pwmDutyCycle - 1); // Decrease power to maintain V_MAX
+    } else if (voltage < BATT_MAX - 0.1) {
+      pwmDutyCycle = min(255, pwmDutyCycle + 1); // Increase slightly if voltage dips
+    }
+
+    // 3. Termination/Float (CV Phase Check)
+    if (current < (FAST_CHARGE_CURRENT * 0.1)) { // Termination: Charge current drops to 10% of CC rate
+      pwmDutyCycle = 0; // Stop charging
+      Serial.println("MODE: FLOAT/TERMINATED");
+    } else {
+      Serial.println("MODE: CV");
+    }
+  }
+
+  analogWrite(PWM_CHARGE_PIN, pwmDutyCycle);
+}
+
+// --------------------------------------------------------------------------------
+// --- AUTOMATION AUTO UPDATE (Serial Parameter Change) ---
+// --------------------------------------------------------------------------------
+
+/**
+ * @brief Automatically detects and sets the system voltage (12V or 24V).
+ */
+void autoDetectVoltage(float voltage) {
+  // Check based on idle voltage (e.g., > 18V for 24V system)
+  if (voltage > 18.0) { 
+    if (systemVoltage != 24) {
+      systemVoltage = 24;
+      digitalWrite(V_SELECT_RELAY_PIN, HIGH); // Configure for 24V
+      Serial.println("AUTO: Switched to 24V System.");
+    }
+  } else if (voltage > 9.0 && voltage < 16.0) { // Check within 12V range
+    if (systemVoltage != 12) {
+      systemVoltage = 12;
+      digitalWrite(V_SELECT_RELAY_PIN, LOW); // Configure for 12V
+      Serial.println("AUTO: Switched to 12V System.");
+    }
+  } else {
+    systemVoltage = 0; 
+  }
+}
+
+/**
+ * @brief Manages the load output using the Power Bank Mode and the auto-detected voltage.
+ */
+void manageLoad(float voltage) {
+  float ultimate_cutoff, pbm_reserve;
+
+  if (systemVoltage == 12) {
+    ultimate_cutoff = BATT_LOW_CUTOFF_12V;
+    pbm_reserve = PBM_RESERVE_12V;
+  } else { // 24V
+    ultimate_cutoff = BATT_LOW_CUTOFF_24V;
+    pbm_reserve = PBM_RESERVE_24V;
+  }
+
+  // Effective cutoff is set by PBM state
+  float effective_cutoff = powerBankModeActive ? pbm_reserve : ultimate_cutoff;
+  
+  if (voltage < effective_cutoff) {
+    digitalWrite(LOAD_OUTPUT_RELAY_PIN, LOW); // Disconnect load
+  } 
+  
+  // Hysteresis: Reconnect the load only when voltage rises significantly 
+  if (digitalRead(LOAD_OUTPUT_RELAY_PIN) == LOW && voltage > (ultimate_cutoff + 1.0)) {
+    digitalWrite(LOAD_OUTPUT_RELAY_PIN, HIGH); // Reconnect load
+  }
+}
+
+/**
+ * @brief Toggles the Power Bank Mode based on the button state.
+ */
+void updatePowerBankMode() {
+  // (Debounced button logic)
+  static unsigned long lastDebounceTime = 0;
+  static int lastButtonState = HIGH;
+  int reading = digitalRead(PBM_SWITCH_PIN);
+
+  if (reading != lastButtonState) {
+    lastDebounceTime = millis();
+  }
+
+  if ((millis() - lastDebounceTime) > 50) { 
+    if (reading != lastButtonState) {
+      if (reading == LOW) { 
+        powerBankModeActive = !powerBankModeActive;
+        Serial.print("PBM Toggled: ");
+        Serial.println(powerBankModeActive ? "ACTIVE (Higher Cutoff)" : "INACTIVE (Ultimate Cutoff)");
+      }
+    }
+  }
+  lastButtonState = reading;
+}
+
+
+/**
+ * @brief Checks the Serial Monitor for new configuration commands (automation auto update).
+ * Format: [PARAMETER]=[VALUE] (e.g., P24RES=25.0)
+ */
+void checkSerialUpdates() {
+  while (Serial.available()) {
+    String command = Serial.readStringUntil('\n');
+    command.trim(); 
+
+    if (command.length() > 0) {
+      int equalsIndex = command.indexOf('=');
+
+      if (equalsIndex > 0) {
+        String param = command.substring(0, equalsIndex);
+        String valueStr = command.substring(equalsIndex + 1);
+        float value = valueStr.toFloat();
+
+        if (value > 0) {
+          if (param == "B12MAX") BATT_MAX_12V = value;
+          else if (param == "B12CUT") BATT_LOW_CUTOFF_12V = value;
+          else if (param == "P12RES") PBM_RESERVE_12V = value;
+          else if (param == "C12FAST") FAST_CHARGE_CURRENT_12V = value;
+          else if (param == "B24MAX") BATT_MAX_24V = value;
+          else if (param == "B24CUT") BATT_LOW_CUTOFF_24V = value;
+          else if (param == "P24RES") PBM_RESERVE_24V = value;
+          else if (param == "C24FAST") FAST_CHARGE_CURRENT_24V = value;
+          else if (param == "VSCALE") V_SCALE_FACTOR = value;
+          else if (param == "ISCALE") I_SCALE_FACTOR = value;
+          else {
+            Serial.print("Unknown command: ");
+            Serial.println(param);
+            continue;
+          }
+
+          Serial.print("Updated Parameter ");
+          Serial.print(param);
+          Serial.print(" to: ");
+          Serial.println(value, 4); // Use 4 decimals for scales
+        }
+      }
+    }
+  }
+}
