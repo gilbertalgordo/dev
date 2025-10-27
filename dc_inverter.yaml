@@ -1,0 +1,253 @@
+// Pseudocode for the main control loop on a high-speed MCU/DSP
+
+#define V_REF 220.0  // Target AC RMS Voltage
+#define F_REF 50.0   // Target AC Frequency in Hz
+
+void main() {
+    // 1. Hardware Initialization (Timers, ADC, PWM Modules)
+    initialize_peripherals();
+    
+    // 2. Main Control Loop
+    while (1) {
+        // Read raw input and output values
+        float v_in_dc = read_adc(DC_INPUT_PIN);
+        float v_out_ac = read_adc(AC_OUTPUT_SENSE_PIN);
+        float i_out = read_adc(AC_CURRENT_SENSE_PIN);
+        
+        // 3. Input Voltage Management
+        check_input_voltage(v_in_dc); // Includes soft-shutdown logic
+        
+        // 4. Protection Checks
+        if (check_faults(v_in_dc, v_out_ac, i_out, temperature)) {
+            handle_fault(); // Immediate PWM disable and alarm trigger
+            continue;
+        }
+        
+        // 5. Digital PID Controller for Output Voltage
+        float error = V_REF - calculate_rms(v_out_ac);
+        float pid_output = calculate_pid(error); 
+        
+        // 6. PWM Duty Cycle Adjustment
+        // The pid_output is used to scale the sine wave reference for SPWM generation
+        update_pwm_modulation_index(pid_output); 
+        
+        // 7. Intelligent Fan Control
+        update_fan_speed(temperature);
+        
+        // Delay/yield based on control loop frequency (e.g., 20 kHz)
+        wait_for_next_control_cycle(); 
+    }
+}
+
+
+
+// --- System Configuration and Constants ---
+#define GRID_FREQUENCY_HZ 50.0  // 60.0 for US/Canada
+#define PWM_FREQUENCY_KHZ 20.0  // High-frequency switching for sine wave quality
+#define V_OUT_REF_RMS   220.0   // Target AC RMS Voltage
+#define OVERLOAD_PERCENT_HD 150 // Heavy-Duty Short-Term Overload (150% for 5s)
+
+// --- Battery Management for 24/7 Minimum Input ---
+#define BATTERY_NOMINAL_V 24.0
+#define V_IN_LOW_ALARM    22.0  // Pre-warning for low input
+#define V_IN_CRITICAL_SHUTDOWN 20.5 // Hard shutdown to protect battery (minimum input)
+
+// --- PID Coefficients (Tuning is application-specific) ---
+const float KP_VOLTAGE = 0.5;
+const float KI_VOLTAGE = 0.01;
+const float KD_VOLTAGE = 0.001;
+// ... (Similar coefficients for inner current loop)
+
+// --- Lookup Table for Sine Wave Generation ---
+const int SINE_TABLE_SIZE = 512;
+uint16_t sine_table[SINE_TABLE_SIZE]; // Pre-calculated sine values
+
+
+
+// Timer Interrupt Service Routine (ISR) @ 20kHz
+void PWM_ISR() {
+    static int sine_index = 0;
+    
+    // 1. Measure AC Output
+    float v_out_instantaneous = read_ADC(V_OUT_SENSE);
+    
+    // 2. Voltage PID Controller
+    // The error is the difference between the desired sine wave point and the actual.
+    float target_sine_val = sine_table[sine_index];
+    float error = target_sine_val - v_out_instantaneous;
+    
+    // The PID adjusts the Modulation Index (how "tall" the sine wave is)
+    // The output is the corrected duty cycle value.
+    float duty_cycle_correction = calculate_PID_V(error, KP_VOLTAGE, KI_VOLTAGE, KD_VOLTAGE);
+
+    // 3. Update PWM Output
+    // This value is written directly to the PWM register to control the H-bridge MOSFETs/IGBTs.
+    set_PWM_duty_cycle(duty_cycle_correction); 
+    
+    // 4. Advance Index for Next Cycle
+    // This phase-locked loop (PLL) logic keeps the output frequency precise (50/60 Hz).
+    sine_index = (sine_index + 1) % SINE_TABLE_SIZE; 
+}
+
+
+
+void Medium_Freq_Loop() {
+    // 1. Calculate and Verify Steady Output
+    float v_out_rms = calculate_true_RMS(v_out_instantaneous_history);
+    
+    if (v_out_rms < (V_OUT_REF_RMS * 0.90) || v_out_rms > (V_OUT_REF_RMS * 1.10)) {
+        log_warning("AC Output deviation detected: %f V", v_out_rms);
+    }
+
+    // 2. Intelligent Fan Control (for 24/7 Heavy Duty)
+    float heatsink_temp = read_thermistor(HEATSINK_SENSOR);
+    
+    if (heatsink_temp > 50.0) {
+        set_fan_speed(HIGH_SPEED); // Proactive cooling for 24/7 usage
+    } else if (heatsink_temp > 35.0) {
+        set_fan_speed(LOW_SPEED); // Quiet and power efficient
+    } else {
+        set_fan_speed(OFF);
+    }
+}
+
+
+
+void Low_Freq_Loop() {
+    float v_in_dc = read_ADC(DC_INPUT_SENSE);
+    float i_out_peak = get_peak_current();
+
+    // --- A. Minimum Input and 24/7 Battery Protection ---
+    if (v_in_dc < V_IN_LOW_ALARM) {
+        trigger_audio_alarm("Low Input Voltage");
+        // Reduce max allowed output power to conserve remaining input energy
+        limit_power_output(50); 
+    }
+    
+    if (v_in_dc < V_IN_CRITICAL_SHUTDOWN) {
+        // Essential for 24/7 battery health (protects from deep discharge)
+        initiate_soft_shutdown(FAULT_LOW_BATTERY);
+    }
+
+    // --- B. Heavy-Duty Overload Management ---
+    if (i_out_peak > (I_RATED * OVERLOAD_PERCENT_HD)) {
+        // Start a short-term overload timer (e.g., 5 seconds)
+        start_overload_timer();
+    } 
+    
+    if (overload_timer_expired() && (i_out_peak > I_RATED)) {
+        // Hard fault trip if overload persists past the heavy-duty window
+        initiate_soft_shutdown(FAULT_OVERLOAD);
+    }
+    
+    // C. Communication/Logging (e.g., to a display or remote monitoring)
+    update_lcd_display(v_out_rms, i_out_peak, v_in_dc);
+}
+
+// --- Main Program Execution ---
+void main() {
+    initialize_peripherals();
+    load_sine_table();
+    
+    // Start High-Frequency ISR
+    start_timer_interrupt(PWM_ISR, 1/PWM_FREQUENCY_KHZ);
+    
+    // Main thread loops at a slower pace
+    while (1) {
+        Medium_Freq_Loop();
+        delay_ms(100);
+        Low_Freq_Loop();
+        delay_ms(900); // 1-second total cycle for Low-Freq Loop
+    }
+}
+
+
+
+// --- System Configuration for 100 MW Output ---
+#define RATED_POWER_MW          100.0
+#define GRID_VOLTAGE_V_L_L      13800.0 // Assuming medium voltage AC output
+#define GRID_FREQUENCY_HZ       60.0    // Or 50.0 Hz
+#define PWM_FREQUENCY_KHZ       2.0     // Lower PWM frequency for high-power IGBTs
+#define V_IN_DC_BUS_REF         800.0   // Reference DC bus voltage
+
+// --- Energy Storage System (ESS) Management (Minimum Input) ---
+#define BESS_MIN_SOC_PERCENT    10.0 // Minimum State of Charge
+#define DC_BUS_LOW_SHUTDOWN_V   750.0 
+
+
+
+// Executed at least 10 kHz
+void ThreePhase_Vector_Control_ISR() {
+    // 1. Grid Synchronization (PLL)
+    // Converts instantaneous A-B-C grid voltages to a rotating Q-D frame
+    float theta_grid = run_SRF_PLL(V_GRID_ABC); // Find the exact grid angle (phase)
+
+    // 2. Current Control (Inner Loop)
+    float I_d_actual = measure_current_D(); // Direct axis current (Active Power)
+    float I_q_actual = measure_current_Q(); // Quadrature axis current (Reactive Power)
+
+    // Calculate errors based on user/SCADA setpoints (e.g., 100 MW and 0 MVAR)
+    float error_I_d = I_D_REFERENCE - I_d_actual;
+    float error_I_q = I_Q_REFERENCE - I_q_actual; // I_Q_REFERENCE controls VARs
+
+    // 3. Current PID Regulation
+    float V_d_control = calculate_PID_Current_D(error_I_d);
+    float V_q_control = calculate_PID_Current_Q(error_I_q);
+
+    // 4. Inverse Clark/Park Transformation & PWM Generation
+    // Convert control voltages back to ABC for PWM (Space Vector Modulation)
+    set_SVM_duty_cycles(V_d_control, V_q_control, theta_grid);
+}
+
+
+
+void Medium_Freq_Loop() {
+    float V_dc_bus = read_DC_Bus_Voltage();
+    float BESS_SOC = read_BESS_StateOfCharge();
+    
+    // 1. DC Bus Voltage Control (Outer Loop for Minimum Input)
+    // Ensures the DC bus is stable (crucial buffer between BESS and Inverter)
+    float error_V_dc = V_IN_DC_BUS_REF - V_dc_bus;
+    // The DC voltage error output becomes the Active Power (I_D) Reference!
+    // If DC bus voltage drops (minimum input), this PID demands more power from the BESS.
+    I_D_REFERENCE = calculate_PID_DC_Voltage(error_V_dc); 
+    
+    // 2. Intelligent Battery Management (Minimum Input/24-7)
+    if (BESS_SOC < BESS_MIN_SOC_PERCENT) {
+        // Enforce a reduction in power drawn to protect the battery
+        SCADA_command("POWER_RAMP_DOWN", RATED_POWER_MW * 0.1); 
+        log_critical("BESS low SOC. Ramping down power to 10%% capacity.");
+    }
+
+    // 3. Grid Code Compliance (Reactive Power)
+    // Adjusts reactive power based on utility requirements (e.g., maintain 0.95 power factor)
+    I_Q_REFERENCE = calculate_Reactive_Power_Setpoint(power_factor_target); 
+}
+
+
+
+
+void Low_Freq_Loop_24_7() {
+    // 1. Critical High-Speed Protection (for 100 MW heavy-duty)
+    if (read_instantaneous_overcurrent() > I_LIMIT_HARD) {
+        // Use FPGA for nanosecond-level protection trip (hardware crowbar/fast switch)
+        disable_all_PWM_gates_FPGA(); 
+        log_fatal("Hard Fault: Severe Overcurrent/Short Circuit.");
+    }
+    
+    // 2. Over-Temperature Management (24/7 Redundancy)
+    if (check_temperature_IGBT_Bank_A() > TEMP_CRITICAL_C) {
+        // Log fault, and if configured, attempt to isolate Bank A and run on redundancy.
+        isolate_power_bank("Bank_A");
+        if (check_redundancy_available()) {
+            switch_to_redundant_bank("Bank_B");
+        } else {
+            initiate_controlled_shutdown(FAULT_OVERTEMP);
+        }
+    }
+
+    // 3. Communication to SCADA/Utility Grid Operator
+    transmit_system_status(RATED_POWER_MW, V_out_rms, I_out_MVAR);
+    check_SCADA_commands(); // Receive power setpoints for the next interval
+}
+
