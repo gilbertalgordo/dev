@@ -1,0 +1,438 @@
+-- Employees table (simplified)
+CREATE TABLE employees (
+  id SERIAL PRIMARY KEY,
+  employee_number TEXT UNIQUE NOT NULL,
+  full_name TEXT NOT NULL,
+  role TEXT NOT NULL,
+  department TEXT,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Perks / exemptions definitions (what types of benefits exist)
+CREATE TABLE perk_definitions (
+  id SERIAL PRIMARY KEY,
+  code TEXT UNIQUE NOT NULL,            -- e.g. GOV_TAX_EXEMPT_2025
+  title TEXT NOT NULL,
+  description TEXT,
+  legal_reference TEXT,                 -- law/regulation reference
+  valid_from DATE,
+  valid_to DATE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Assigned perks to employees (authorization records)
+CREATE TABLE employee_perks (
+  id SERIAL PRIMARY KEY,
+  employee_id INTEGER NOT NULL REFERENCES employees(id),
+  perk_id INTEGER NOT NULL REFERENCES perk_definitions(id),
+  assigned_by TEXT NOT NULL,            -- admin user id
+  assigned_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  approved_by TEXT,                     -- approving authority
+  approved_at TIMESTAMP WITH TIME ZONE,
+  approval_notes TEXT,
+  policy_reference TEXT,                -- link or doc id for justification
+  status TEXT NOT NULL DEFAULT 'PENDING', -- PENDING / APPROVED / REJECTED / EXPIRED
+  expires_at TIMESTAMP WITH TIME ZONE,
+  audit_reason TEXT,
+  UNIQUE(employee_id, perk_id)
+);
+
+-- Audit log (every change)
+CREATE TABLE audit_logs (
+  id SERIAL PRIMARY KEY,
+  actor TEXT NOT NULL,
+  action TEXT NOT NULL,
+  target_table TEXT,
+  target_id INTEGER,
+  before JSONB,
+  after JSONB,
+  timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  ip_address TEXT
+);
+
+
+# requirements: flask, flask_sqlalchemy, sqlalchemy, psycopg2-binary
+from flask import Flask, request, jsonify, abort
+from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime, timedelta
+import os
+import json
+
+app = Flask(__name__)
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'postgresql://user:pass@localhost/hrdb')
+db = SQLAlchemy(app)
+
+class Employee(db.Model):
+    __tablename__ = 'employees'
+    id = db.Column(db.Integer, primary_key=True)
+    employee_number = db.Column(db.String, unique=True, nullable=False)
+    full_name = db.Column(db.String, nullable=False)
+
+class PerkDefinition(db.Model):
+    __tablename__ = 'perk_definitions'
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String, unique=True, nullable=False)
+    title = db.Column(db.String, nullable=False)
+    legal_reference = db.Column(db.String)
+
+class EmployeePerk(db.Model):
+    __tablename__ = 'employee_perks'
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    perk_id = db.Column(db.Integer, db.ForeignKey('perk_definitions.id'), nullable=False)
+    assigned_by = db.Column(db.String, nullable=False)
+    assigned_at = db.Column(db.DateTime, default=datetime.utcnow)
+    approved_by = db.Column(db.String)
+    approved_at = db.Column(db.DateTime)
+    status = db.Column(db.String, default='PENDING')  # PENDING / APPROVED / REJECTED
+    policy_reference = db.Column(db.String)
+    expires_at = db.Column(db.DateTime)
+
+class AuditLog(db.Model):
+    __tablename__ = 'audit_logs'
+    id = db.Column(db.Integer, primary_key=True)
+    actor = db.Column(db.String, nullable=False)
+    action = db.Column(db.String, nullable=False)
+    target_table = db.Column(db.String)
+    target_id = db.Column(db.Integer)
+    before = db.Column(db.JSON)
+    after = db.Column(db.JSON)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    ip_address = db.Column(db.String)
+
+def log_audit(actor, action, target_table, target_id, before, after, ip):
+    entry = AuditLog(actor=actor, action=action, target_table=target_table,
+                     target_id=target_id, before=before, after=after, ip_address=ip)
+    db.session.add(entry)
+    db.session.commit()
+
+# Endpoint: request assignment (creates PENDING assignment)
+@app.route('/api/perks/request', methods=['POST'])
+def request_perk():
+    data = request.json
+    actor = request.headers.get('X-User-Id') or 'unknown'
+    emp_id = data.get('employee_id')
+    perk_code = data.get('perk_code')
+    policy_ref = data.get('policy_reference')
+
+    if not (emp_id and perk_code and policy_ref):
+        return jsonify({'error': 'employee_id, perk_code, policy_reference required'}), 400
+
+    employee = Employee.query.get(emp_id)
+    perk = PerkDefinition.query.filter_by(code=perk_code).first()
+    if not employee or not perk:
+        return jsonify({'error': 'invalid employee or perk code'}), 404
+
+    # Create pending assignment
+    ep = EmployeePerk(employee_id=emp_id, perk_id=perk.id,
+                      assigned_by=actor, policy_reference=policy_ref,
+                      status='PENDING', expires_at=datetime.utcnow() + timedelta(days=365))
+    db.session.add(ep)
+    db.session.commit()
+
+    log_audit(actor, 'REQUEST_PERK', 'employee_perks', ep.id, None, {
+        'employee_id': emp_id, 'perk_id': perk.id, 'status': 'PENDING', 'policy_reference': policy_ref
+    }, request.remote_addr)
+
+    return jsonify({'message': 'perk request created', 'id': ep.id}), 201
+
+# Endpoint: approve or reject (must be privileged user)
+@app.route('/api/perks/approve', methods=['POST'])
+def approve_perk():
+    data = request.json
+    actor = request.headers.get('X-User-Id') or 'unknown'
+    is_authority = request.headers.get('X-User-Role') == 'APPROVER'  # enforce real auth in prod
+    if not is_authority:
+        return jsonify({'error': 'insufficient privileges'}), 403
+
+    ep_id = data.get('employee_perk_id')
+    decision = data.get('decision')  # 'APPROVE' or 'REJECT'
+    notes = data.get('notes', '')
+
+    ep = EmployeePerk.query.get(ep_id)
+    if not ep:
+        return jsonify({'error': 'employee_perk not found'}), 404
+
+    before = {
+        'status': ep.status, 'approved_by': ep.approved_by, 'approved_at': str(ep.approved_at)
+    }
+
+    if decision == 'APPROVE':
+        ep.status = 'APPROVED'
+        ep.approved_by = actor
+        ep.approved_at = datetime.utcnow()
+    else:
+        ep.status = 'REJECTED'
+        ep.approved_by = actor
+        ep.approved_at = datetime.utcnow()
+
+    db.session.commit()
+
+    after = {
+        'status': ep.status, 'approved_by': ep.approved_by, 'approved_at': str(ep.approved_at)
+    }
+    log_audit(actor, 'DECIDE_PERK', 'employee_perks', ep.id, before, after, request.remote_addr)
+
+    return jsonify({'message': 'decision recorded', 'status': ep.status}), 200
+
+# Example protected check used by payroll engine:
+def is_perk_active_for_employee(employee_id, perk_code):
+    # used by payroll computations; MUST be called server-side
+    perk = PerkDefinition.query.filter_by(code=perk_code).first()
+    if not perk:
+        return False
+    ep = (EmployeePerk.query
+          .filter_by(employee_id=employee_id, perk_id=perk.id, status='APPROVED')
+          .filter(EmployeePerk.expires_at > datetime.utcnow())
+          .first())
+    return ep is not None
+
+# Example payroll usage (pseudo)
+@app.route('/api/payroll/compute/<int:employee_id>', methods=['GET'])
+def compute_payroll(employee_id):
+    # ... fetch base salary, allowances, etc
+    result = {'gross_salary': 100000}
+    # If legal tax exemption exists, apply per policy
+    if is_perk_active_for_employee(employee_id, 'GOV_TAX_EXEMPT_2025'):
+        # IMPORTANT: only apply when payroll rules & legal check passed
+        result['tax_status'] = 'EXEMPT'
+        result['tax_amount'] = 0
+    else:
+        result['tax_status'] = 'STANDARD'
+        result['tax_amount'] = 20000
+    return jsonify(result)
+
+
+    -- employees
+CREATE TABLE employees (
+  id SERIAL PRIMARY KEY,
+  employee_number TEXT UNIQUE NOT NULL,
+  full_name TEXT NOT NULL,
+  role TEXT NOT NULL, -- e.g. 'GOV_EMPLOYEE','PUBLIC_OFFICER','MILITARY','CIVILIAN'
+  department TEXT,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- definitions for perks / exemptions
+CREATE TABLE perk_definitions (
+  id SERIAL PRIMARY KEY,
+  code TEXT UNIQUE NOT NULL,          -- e.g. PERK_TAX_EXEMPT_ALLOWANCE
+  title TEXT NOT NULL,
+  description TEXT,
+  legal_reference TEXT,               -- statute/regulation reference
+  eligible_roles TEXT[],              -- array of roles that may be eligible
+  scope TEXT NOT NULL DEFAULT 'INDIVIDUAL', -- INDIVIDUAL | DEPARTMENT | SERVICEWIDE
+  valid_from DATE,
+  valid_to DATE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- assigned perks (authorization records)
+CREATE TABLE employee_perks (
+  id SERIAL PRIMARY KEY,
+  employee_id INTEGER NOT NULL REFERENCES employees(id),
+  perk_id INTEGER NOT NULL REFERENCES perk_definitions(id),
+  assigned_by TEXT NOT NULL,
+  assigned_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  approved_by TEXT,
+  approved_at TIMESTAMP WITH TIME ZONE,
+  status TEXT NOT NULL DEFAULT 'PENDING', -- PENDING / APPROVED / REJECTED / REVOKED / EXPIRED
+  policy_doc_uri TEXT,                   -- link to approval memo or scanned doc
+  expires_at TIMESTAMP WITH TIME ZONE,
+  audit_reason TEXT,
+  UNIQUE (employee_id, perk_id)
+);
+
+-- RBAC: users & roles (system operators)
+CREATE TABLE system_users (
+  id SERIAL PRIMARY KEY,
+  username TEXT UNIQUE NOT NULL,
+  display_name TEXT,
+  roles TEXT[] NOT NULL, -- e.g. ['HR_ASSIST','APPROVER','PAYROLL']
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- audit trail
+CREATE TABLE audit_logs (
+  id BIGSERIAL PRIMARY KEY,
+  actor TEXT NOT NULL,
+  action TEXT NOT NULL,
+  target_table TEXT,
+  target_id INTEGER,
+  before JSONB,
+  after JSONB,
+  timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  ip_address TEXT
+);
+
+
+# requirements: flask, flask_sqlalchemy, sqlalchemy, psycopg2-binary
+from flask import Flask, request, jsonify
+from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime, timedelta
+import os
+
+app = Flask(__name__)
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'postgresql://user:pass@localhost/hrdb')
+db = SQLAlchemy(app)
+
+# --- Models (simplified) ---
+class Employee(db.Model):
+    __tablename__ = 'employees'
+    id = db.Column(db.Integer, primary_key=True)
+    employee_number = db.Column(db.String, unique=True, nullable=False)
+    full_name = db.Column(db.String, nullable=False)
+    role = db.Column(db.String, nullable=False)  # 'GOV_EMPLOYEE','PUBLIC_OFFICER','MILITARY','CIVILIAN'
+
+class PerkDefinition(db.Model):
+    __tablename__ = 'perk_definitions'
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String, unique=True, nullable=False)
+    title = db.Column(db.String, nullable=False)
+    description = db.Column(db.String)
+    legal_reference = db.Column(db.String)
+    eligible_roles = db.Column(db.ARRAY(db.String))  # list of roles
+    scope = db.Column(db.String, default='INDIVIDUAL')  # INDIVIDUAL, DEPARTMENT, SERVICEWIDE
+    valid_from = db.Column(db.Date)
+    valid_to = db.Column(db.Date)
+
+class EmployeePerk(db.Model):
+    __tablename__ = 'employee_perks'
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    perk_id = db.Column(db.Integer, db.ForeignKey('perk_definitions.id'), nullable=False)
+    assigned_by = db.Column(db.String, nullable=False)
+    assigned_at = db.Column(db.DateTime, default=datetime.utcnow)
+    approved_by = db.Column(db.String)
+    approved_at = db.Column(db.DateTime)
+    status = db.Column(db.String, default='PENDING')  # PENDING / APPROVED / REJECTED / REVOKED / EXPIRED
+    policy_doc_uri = db.Column(db.String)
+    expires_at = db.Column(db.DateTime)
+
+class SystemUser(db.Model):
+    __tablename__ = 'system_users'
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String, unique=True, nullable=False)
+    display_name = db.Column(db.String)
+    roles = db.Column(db.ARRAY(db.String), nullable=False)  # e.g. ['HR','APPROVER','PAYROLL']
+
+class AuditLog(db.Model):
+    __tablename__ = 'audit_logs'
+    id = db.Column(db.BigInteger, primary_key=True)
+    actor = db.Column(db.String, nullable=False)
+    action = db.Column(db.String, nullable=False)
+    target_table = db.Column(db.String)
+    target_id = db.Column(db.Integer)
+    before = db.Column(db.JSON)
+    after = db.Column(db.JSON)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    ip_address = db.Column(db.String)
+
+# --- Helpers ---
+def current_user():
+    # Placeholder — replace with real auth (JWT / OAuth)
+    username = request.headers.get('X-User') or 'system'
+    user = SystemUser.query.filter_by(username=username).first()
+    return user
+
+def log_audit(actor, action, target_table, target_id, before, after):
+    al = AuditLog(actor=actor, action=action, target_table=target_table, target_id=target_id,
+                  before=before, after=after, ip_address=request.remote_addr)
+    db.session.add(al)
+    db.session.commit()
+
+def has_role(user, needed):
+    return user and needed in (user.roles or [])
+
+# --- Endpoints ---
+@app.route('/perks/request', methods=['POST'])
+def request_perk():
+    user = current_user()
+    data = request.json or {}
+    emp_id = data.get('employee_id')
+    perk_code = data.get('perk_code')
+    policy_doc_uri = data.get('policy_doc_uri')
+
+    if not all([emp_id, perk_code, policy_doc_uri]):
+        return jsonify({'error': 'employee_id, perk_code, policy_doc_uri required'}), 400
+
+    emp = Employee.query.get(emp_id)
+    perk = PerkDefinition.query.filter_by(code=perk_code).first()
+    if not emp or not perk:
+        return jsonify({'error': 'invalid employee or perk'}), 404
+
+    # Check role eligibility
+    if perk.eligible_roles and emp.role not in perk.eligible_roles:
+        return jsonify({'error': 'employee role not eligible for this perk'}), 403
+
+    # Create pending assignment
+    expires_at = datetime.utcnow() + timedelta(days=365)  # default 1 year, adjust per policy
+    ep = EmployeePerk(employee_id=emp.id, perk_id=perk.id, assigned_by=user.username if user else 'unknown',
+                      policy_doc_uri=policy_doc_uri, status='PENDING', expires_at=expires_at)
+    db.session.add(ep)
+    db.session.commit()
+
+    log_audit(user.username if user else 'system', 'REQUEST_PERK', 'employee_perks', ep.id, None, {
+        'employee_id': emp.id, 'perk_id': perk.id, 'status': 'PENDING', 'policy_doc_uri': policy_doc_uri
+    })
+    return jsonify({'message': 'request created', 'id': ep.id}), 201
+
+@app.route('/perks/decide', methods=['POST'])
+def decide_perk():
+    user = current_user()
+    if not has_role(user, 'APPROVER'):
+        return jsonify({'error': 'insufficient privileges'}), 403
+
+    data = request.json or {}
+    ep_id = data.get('employee_perk_id')
+    decision = data.get('decision')  # 'APPROVE' | 'REJECT'
+    notes = data.get('notes')
+
+    ep = EmployeePerk.query.get(ep_id)
+    if not ep:
+        return jsonify({'error': 'not found'}), 404
+
+    before = {'status': ep.status, 'approved_by': ep.approved_by, 'approved_at': ep.approved_at}
+    if decision == 'APPROVE':
+        ep.status = 'APPROVED'
+        ep.approved_by = user.username
+        ep.approved_at = datetime.utcnow()
+    else:
+        ep.status = 'REJECTED'
+        ep.approved_by = user.username
+        ep.approved_at = datetime.utcnow()
+    db.session.commit()
+    after = {'status': ep.status, 'approved_by': ep.approved_by, 'approved_at': str(ep.approved_at)}
+    log_audit(user.username, 'DECIDE_PERK', 'employee_perks', ep.id, before, after)
+
+    return jsonify({'message': 'decision recorded', 'status': ep.status}), 200
+
+# Payroll check (server-side) - used by payroll engine
+def is_perk_active_for_payroll(employee_id, perk_code):
+    perk = PerkDefinition.query.filter_by(code=perk_code).first()
+    if not perk:
+        return False
+    now = datetime.utcnow()
+    ep = (EmployeePerk.query
+          .filter_by(employee_id=employee_id, perk_id=perk.id, status='APPROVED')
+          .filter(EmployeePerk.expires_at > now)
+          .first())
+    return ep is not None
+
+# Example endpoint for payroll compute (simplified)
+@app.route('/payroll/compute/<int:employee_id>', methods=['GET'])
+def compute_payroll(employee_id):
+    # Real payroll would fetch salary, allowances, and compute taxes using configured rules
+    base_salary = 100000
+    payroll = {'employee_id': employee_id, 'gross': base_salary}
+    # Example: apply a legal exemption perk code defined in system
+    if is_perk_active_for_payroll(employee_id, 'PERK_TAX_EXEMPT_ALLOWANCE'):
+        payroll['tax_status'] = 'EXEMPT'
+        payroll['tax_amount'] = 0
+        payroll['notes'] = 'Tax exemption applied per authorized perk record.'
+    else:
+        payroll['tax_status'] = 'STANDARD'
+        payroll['tax_amount'] = 20000
+    return jsonify(payroll)
