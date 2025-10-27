@@ -1,0 +1,487 @@
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, setDoc, collection, query, limit, onSnapshot, serverTimestamp, addDoc, getDocs, orderBy } from 'firebase/firestore';
+import { RefreshCcw, Mic, Send, Zap, MessageSquare, AlertTriangle, Loader, BarChart3 } from 'lucide-react';
+
+// --- Global Environment Variables (Provided by Canvas) ---
+// These variables are automatically injected and ensure connectivity to Firebase.
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+const API_KEY = ""; // Canvas will provide the API key for the Gemini API call
+const GEMINI_MODEL = "gemini-2.5-flash-preview-09-2025";
+const API_BASE_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+
+// --- Firebase Initialization and Instances ---
+let db = null;
+let auth = null;
+
+if (Object.keys(firebaseConfig).length > 0) {
+    const app = initializeApp(firebaseConfig);
+    db = getFirestore(app);
+    auth = getAuth(app);
+}
+
+// --- Utility Functions ---
+
+/**
+ * Retries the API call using exponential backoff to handle rate limits.
+ */
+async function fetchWithRetry(url, options, maxRetries = 5) {
+    for (let i = 0; i < maxRetries; i++) {
+        try {
+            const response = await fetch(url, options);
+            if (response.status !== 429) { 
+                return response;
+            }
+            console.warn(`Rate limit hit. Retrying in ${2 ** i} seconds...`);
+        } catch (error) {
+            console.error("Fetch error, retrying:", error);
+        }
+        await new Promise(resolve => setTimeout(resolve, (2 ** i) * 1000));
+    }
+    throw new Error('API call failed after multiple retries.');
+}
+
+/**
+ * Simulates logging a radio transmission to the Firestore log collection (Public data).
+ */
+const logTransmission = async (dbInstance, userId, talkgroupId, message) => {
+    if (!dbInstance) return;
+
+    try {
+        const logsCollectionRef = collection(dbInstance, 'artifacts', appId, 'public', 'data', 'scanner_logs');
+        await addDoc(logsCollectionRef, {
+            talkgroupId: talkgroupId,
+            message: message,
+            userId: userId.substring(0, 8), // Truncate ID for display cleanliness
+            timestamp: serverTimestamp(),
+        });
+    } catch (e) {
+        console.error("Error logging transmission:", e);
+    }
+};
+
+/**
+ * AI-powered analysis of the script using the Gemini API.
+ */
+const analyzePitchPerformance = async (script) => {
+    const systemPrompt = `You are an AI-powered voice performance analyst for professional two-way radio communication. 
+        Your task is to analyze the user's transmission script (text) and provide a professional, quantifiable score (1-5, where 5 is excellent) for the following communication metrics:
+        1. Clarity: How unambiguous and direct the message is.
+        2. Confidence: How authoritative and assured the implied tone is.
+        3. Appropriate Pitch/Tone: How suitable the emotional delivery is for a high-stakes radio environment (e.g., serious, urgent, calm).
+        
+        Provide a brief, professional recommendation on how to improve the 'pitch performance' in a real-world scenario. Your response MUST be in the requested JSON format.`;
+    
+    const userQuery = `Analyze the following radio transmission script for professional pitch performance: "${script}"`;
+
+    const payload = {
+        contents: [{ parts: [{ text: userQuery }] }],
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: "OBJECT",
+                properties: {
+                    "clarity_score": { "type": "NUMBER", "description": "Score from 1.0 to 5.0 for clarity." },
+                    "confidence_score": { "type": "NUMBER", "description": "Score from 1.0 to 5.0 for confidence." },
+                    "pitch_tone_rating": { "type": "NUMBER", "description": "Score from 1.0 to 5.0 for appropriateness of pitch/tone." },
+                    "analysis_summary": { "type": "STRING", "description": "A brief, professional summary of the findings." },
+                    "improvement_tip": { "type": "STRING", "description": "A single, actionable tip for improving vocal delivery." }
+                },
+                "required": ["clarity_score", "confidence_score", "pitch_tone_rating", "analysis_summary", "improvement_tip"]
+            }
+        }
+    };
+    
+    const options = {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    };
+
+    const response = await fetchWithRetry(`${API_BASE_URL}?key=${API_KEY}`, options);
+    const result = await response.json();
+    
+    if (result.candidates?.[0]?.content?.parts?.[0]?.text) {
+        const jsonText = result.candidates[0].content.parts[0].text;
+        return JSON.parse(jsonText);
+    } else {
+        throw new Error("Failed to retrieve structured analysis from AI.");
+    }
+};
+
+// --- React Components ---
+
+/**
+ * Displays the real-time, global scanner feed from Firestore.
+ */
+const ScannerDisplay = ({ logs, currentTalkgroup }) => {
+    const feedRef = useRef(null);
+
+    // Auto-scroll to the bottom when logs update
+    useEffect(() => {
+        if (feedRef.current) {
+            // Check if user is near the bottom before scrolling automatically
+            const { scrollTop, scrollHeight, clientHeight } = feedRef.current;
+            if (scrollHeight - (scrollTop + clientHeight) < 50) {
+                 feedRef.current.scrollTop = feedRef.current.scrollHeight;
+            }
+        }
+    }, [logs]);
+
+    const statusText = logs.length > 0 ? "TRAFFIC ACTIVE" : "SCANNING IDLE";
+    const statusColor = logs.length > 0 ? "text-green-400" : "text-yellow-400";
+    
+    return (
+        <div className="mb-6 p-4 rounded-xl bg-gray-900 border-2 border-red-600 shadow-xl w-full">
+            <div className="flex justify-between text-xs font-mono text-white mb-2 pb-2 border-b border-gray-700">
+                <span className="flex items-center font-bold">
+                    <Zap className="w-4 h-4 mr-1 text-red-500" />
+                    LISTENING: <span className="text-red-300 font-extrabold ml-1">{currentTalkgroup.name}</span>
+                </span>
+                <span className={`font-bold ${statusColor}`}>{statusText}</span>
+            </div>
+            <div ref={feedRef} className="text-sm text-gray-200 h-52 overflow-y-auto scrollbar-thin scrollbar-thumb-red-500 scrollbar-track-gray-800">
+                {logs.length === 0 ? (
+                    <p className="text-xs text-gray-500 text-center pt-14">Waiting for live transmissions on the network...</p>
+                ) : (
+                    logs.map((log, index) => (
+                        <p key={log.id || index} className={`mb-1 transition-opacity duration-300 ${log.talkgroupId === currentTalkgroup.id ? 'opacity-100 font-semibold' : 'opacity-50'}`}>
+                            <span className="text-red-400 font-mono">[{log.time}]</span>
+                            <span className="text-green-300 ml-2 font-bold">{log.userId}:</span>
+                            <span className="ml-1">{log.message}</span>
+                        </p>
+                    ))
+                )}
+            </div>
+        </div>
+    );
+};
+
+/**
+ * Displays the AI-generated pitch analysis report.
+ */
+const PitchReport = ({ data, isLoading, error }) => {
+    if (isLoading) {
+        return (
+            <div className="flex flex-col items-center justify-center h-48 text-red-400 font-semibold bg-gray-900 rounded-xl">
+                <Loader className="w-8 h-8 animate-spin mb-3" />
+                <p>Analyzing script performance with Gemini...</p>
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="text-center text-red-300 p-4 border border-red-500 rounded-xl bg-gray-900">
+                <AlertTriangle className="w-6 h-6 mx-auto mb-3" />
+                <p className="font-bold text-lg">Analysis Error</p>
+                <p className="text-sm mt-1">{error}</p>
+            </div>
+        );
+    }
+
+    if (!data) {
+        return (
+            <div className="text-sm text-gray-300 text-center py-6 bg-gray-900 rounded-xl border border-gray-700">
+                <p className="font-bold text-lg mb-1">AI Pitch Performance Report</p>
+                <p className="text-xs text-gray-400">Enter a professional radio script, press PTT, and the AI will provide a structured analysis of your communication delivery.</p>
+            </div>
+        );
+    }
+
+    const totalScore = (data.clarity_score + data.confidence_score + data.pitch_tone_rating) / 3;
+
+    return (
+        <div className="space-y-4 p-4 bg-gray-900 rounded-xl border border-gray-700 shadow-lg">
+            <div className="flex justify-between items-end border-b border-red-600 pb-2">
+                <p className="text-lg font-bold text-white">OVERALL RATING</p>
+                <p className="text-5xl font-extrabold text-red-400">{totalScore.toFixed(1)}<span className="text-2xl font-light text-gray-500">/5.0</span></p>
+            </div>
+            
+            <div className="grid grid-cols-3 gap-3 text-center">
+                <Metric score={data.clarity_score} label="Clarity" />
+                <Metric score={data.confidence_score} label="Confidence" />
+                <Metric score={data.pitch_tone_rating} label="Pitch/Tone" />
+            </div>
+
+            <div className="border-t border-gray-700 pt-3 space-y-2">
+                <p className="font-bold text-red-300 text-base">ANALYSIS SUMMARY:</p>
+                <p className="text-sm text-gray-300 leading-snug">{data.analysis_summary}</p>
+
+                <p className="font-bold text-red-300 text-base pt-2">IMPROVEMENT TIP:</p>
+                <p className="italic text-sm text-gray-300 border-l-2 border-green-500 pl-3">"{data.improvement_tip}"</p>
+            </div>
+        </div>
+    );
+};
+
+const Metric = ({ score, label }) => (
+    <div className="p-2 rounded-lg bg-gray-800 border border-gray-700">
+        <span className="block text-red-400 text-2xl font-extrabold">{score.toFixed(1)}</span>
+        <span className="block text-gray-400 uppercase text-[10px] font-mono mt-1">{label}</span>
+    </div>
+);
+
+
+/**
+ * Main application component.
+ */
+const App = () => {
+    const [isAuthReady, setIsAuthReady] = useState(false);
+    const [userId, setUserId] = useState(null);
+    const [talkgroups, setTalkgroups] = useState([]);
+    const [scannerLogs, setScannerLogs] = useState([]);
+    const [selectedTalkgroupId, setSelectedTalkgroupId] = useState('FIRE_DEPT');
+    const [scriptInput, setScriptInput] = useState('');
+    
+    const [analysisData, setAnalysisData] = useState(null);
+    const [isAnalyzing, setIsAnalyzing] = useState(false);
+    const [analysisError, setAnalysisError] = useState(null);
+    const [isTransmitting, setIsTransmitting] = useState(false);
+
+    // --- Authentication and Initialization ---
+    useEffect(() => {
+        if (!auth || !db) {
+            console.error("Firebase is not initialized. Check if __firebase_config is correctly provided.");
+            setIsAuthReady(true);
+            return;
+        }
+
+        const setupAuth = async (user) => {
+            if (user) {
+                setUserId(user.uid);
+                await initializeTalkgroups(db);
+            } else {
+                try {
+                    // Fallback to anonymous sign-in if no token is available
+                    const anonUser = await signInAnonymously(auth);
+                    setUserId(anonUser.user.uid);
+                    await initializeTalkgroups(db);
+                } catch (e) {
+                    console.error("Anonymous sign in failed:", e);
+                }
+            }
+            setIsAuthReady(true);
+        };
+
+        const trySignIn = async () => {
+            if (initialAuthToken) {
+                try {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } catch (e) {
+                    console.error("Custom token sign in failed:", e);
+                }
+            }
+        };
+
+        trySignIn();
+        const unsubscribe = onAuthStateChanged(auth, setupAuth);
+
+        return () => unsubscribe();
+    }, []);
+
+    // Default Talkgroup Setup
+    const initializeTalkgroups = async (dbInstance) => {
+        const tgCollectionRef = collection(dbInstance, 'artifacts', appId, 'public', 'data', 'talkgroups');
+        const defaultGroups = [
+            { id: 'FIRE_DEPT', name: 'Fire/Rescue Dispatch', priority: 1 },
+            { id: 'POLICE_E', name: 'Police East Patrol', priority: 2 },
+            { id: 'PUBLIC_WORKS', name: 'Public Works Maint', priority: 3 },
+            { id: 'TRANSPORT', name: 'Transit Authority', priority: 4 },
+        ];
+
+        try {
+            // Only initialize if the collection is truly empty
+            const snapshot = await getDocs(tgCollectionRef);
+            if (snapshot.empty) {
+                for (const group of defaultGroups) {
+                    await setDoc(doc(tgCollectionRef, group.id), {
+                        name: group.name,
+                        priority: group.priority
+                    });
+                }
+            }
+        } catch (e) {
+            console.error("Error initializing talkgroups:", e);
+        }
+    };
+
+    // --- Firestore Listeners ---
+    useEffect(() => {
+        if (!isAuthReady || !db || !userId) return;
+        
+        // 1. Listen for Talkgroups (Public Channels)
+        const tgCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'talkgroups');
+        const unsubscribeTg = onSnapshot(tgCollectionRef, (snapshot) => {
+            const groups = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setTalkgroups(groups);
+            if (groups.length > 0 && !groups.find(g => g.id === selectedTalkgroupId)) {
+                setSelectedTalkgroupId(groups[0].id);
+            }
+        }, (error) => {
+            console.error("Error fetching talkgroups:", error);
+        });
+
+        // 2. Listen for Scanner Logs (Live Traffic Feed)
+        const logsCollectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'scanner_logs');
+        // Fetch last 15 logs, ordered by timestamp
+        const q = query(logsCollectionRef, orderBy('timestamp', 'desc'), limit(15)); 
+        
+        const unsubscribeLogs = onSnapshot(q, (snapshot) => {
+            const logs = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data(),
+                // Format timestamp for display
+                time: doc.data().timestamp?.toDate().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) || '...'
+            })).reverse(); // Reverse to display oldest at top, newest at bottom
+            setScannerLogs(logs);
+        }, (error) => {
+            console.error("Error fetching scanner logs:", error);
+        });
+
+        return () => {
+            unsubscribeTg();
+            unsubscribeLogs();
+        };
+    }, [isAuthReady, userId, selectedTalkgroupId]);
+    
+    // --- Handlers ---
+    const handleTalkgroupChange = (e) => {
+        setSelectedTalkgroupId(e.target.value);
+    };
+
+    const handlePTTPress = async () => {
+        if (!scriptInput.trim() || !userId || !db) {
+            setAnalysisError("Please enter a script and ensure the app is authenticated.");
+            return;
+        }
+
+        setIsTransmitting(true);
+        setIsAnalyzing(true);
+        setAnalysisError(null);
+        setAnalysisData(null);
+        
+        // 1. Simulate Transmission (Log to Firestore)
+        await logTransmission(db, userId, selectedTalkgroupId, scriptInput.trim());
+        
+        // Brief delay to simulate the transmission time
+        await new Promise(resolve => setTimeout(resolve, 500));
+        setIsTransmitting(false);
+
+        // 2. Perform AI Pitch Analysis
+        try {
+            const analysis = await analyzePitchPerformance(scriptInput.trim());
+            setAnalysisData(analysis);
+        } catch (error) {
+            console.error("Pitch Analysis Error:", error);
+            setAnalysisError(error.message || "An unknown error occurred during AI analysis. Check console for details.");
+        } finally {
+            setIsAnalyzing(false);
+        }
+    };
+    
+    const currentTalkgroup = talkgroups.find(g => g.id === selectedTalkgroupId) || { id: 'N/A', name: 'Loading...' };
+
+    if (!isAuthReady) {
+        return <div className="min-h-screen bg-gray-900 text-white flex justify-center items-center font-mono">
+            <Loader className="w-6 h-6 animate-spin mr-2 text-red-500" />
+            Establishing secure system connection...
+        </div>;
+    }
+
+    return (
+        <div className="w-full max-w-md mx-auto p-4 flex flex-col items-center bg-gray-800 rounded-xl shadow-2xl min-h-screen font-sans">
+            <h1 className="text-3xl font-extrabold text-white mb-2 text-center flex items-center">
+                <Mic className="w-6 h-6 mr-2 text-red-500" />
+                <span className="bg-clip-text text-transparent bg-gradient-to-r from-red-400 to-white">
+                    TRS COMMAND 
+                </span>
+            </h1>
+            <p className="text-xs text-gray-400 mb-4 text-center font-mono p-1 rounded bg-gray-700">
+                Operator ID: <span className="text-red-400">{userId ? userId : 'N/A'}</span>
+            </p>
+
+            {/* Global Scanner Section */}
+            <ScannerDisplay logs={scannerLogs} currentTalkgroup={currentTalkgroup} />
+
+            {/* Talkgroup Selector */}
+            <div className="mb-6 w-full p-3 bg-gray-700 rounded-xl border border-gray-600">
+                <label htmlFor="talkgroup-select" className="block text-sm font-semibold mb-2 text-gray-300 flex items-center">
+                    <RefreshCcw className="w-4 h-4 mr-1 text-red-400" /> Active Talkgroup
+                </label>
+                <select 
+                    id="talkgroup-select" 
+                    value={selectedTalkgroupId}
+                    onChange={handleTalkgroupChange}
+                    className="w-full p-2 rounded-lg bg-gray-800 border border-gray-600 text-white focus:ring-red-500 focus:border-red-500 transition"
+                    disabled={isTransmitting || isAnalyzing}
+                >
+                    {talkgroups.length === 0 ? (
+                        <option>Loading Channels...</option>
+                    ) : (
+                        talkgroups.map(g => (
+                            <option key={g.id} value={g.id}>
+                                {g.name} (Priority {g.priority})
+                            </option>
+                        ))
+                    )}
+                </select>
+            </div>
+
+            {/* PTT & Pitch Analyzer Input */}
+            <div className="mb-6 w-full bg-gray-700 p-4 rounded-xl shadow-inner border border-red-600/50">
+                <h2 className="text-lg font-bold mb-3 text-white flex items-center">
+                    <MessageSquare className="w-5 h-5 mr-2 text-red-400" /> Transmission Script
+                </h2>
+                <textarea 
+                    id="transmission-input" 
+                    value={scriptInput}
+                    onChange={(e) => setScriptInput(e.target.value)}
+                    className="w-full p-3 rounded-lg bg-gray-800 border-2 border-transparent text-white placeholder-gray-400 focus:border-red-500 focus:ring-red-500 resize-none transition duration-150" 
+                    rows="4" 
+                    placeholder={`Enter the script you would transmit on the ${currentTalkgroup.name} channel...`}
+                    disabled={isTransmitting || isAnalyzing}
+                ></textarea>
+                <button 
+                    onClick={handlePTTPress}
+                    className={`w-full mt-3 py-3 rounded-xl text-white font-extrabold uppercase tracking-widest text-lg shadow-xl flex items-center justify-center transform transition duration-200 ease-in-out hover:scale-[1.01]
+                        ${isAnalyzing || isTransmitting ? 'bg-gray-500 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700 active:bg-red-800 shadow-red-900/50'}`}
+                    disabled={isAnalyzing || isTransmitting || !scriptInput.trim()}
+                >
+                    {isTransmitting ? (
+                        <>
+                            <Send className="w-5 h-5 mr-2 animate-pulse" />
+                            TRANSMITTING LIVE...
+                        </>
+                    ) : isAnalyzing ? (
+                        <>
+                            <Loader className="w-5 h-5 mr-2 animate-spin" />
+                            ANALYZING PITCH
+                        </>
+                    ) : (
+                        <>
+                            <Mic className="w-6 h-6 mr-2" />
+                            PTT: TRANSMIT & ANALYZE
+                        </>
+                    )}
+                </button>
+            </div>
+
+            {/* Pitch Performance Analysis Section */}
+            <div className="w-full">
+                <h2 className="text-xl font-bold mb-3 text-red-400 flex items-center">
+                    <BarChart3 className="w-5 h-5 mr-2" />
+                    AI Pitch Performance Metrics
+                </h2>
+                <PitchReport data={analysisData} isLoading={isAnalyzing} error={analysisError} />
+            </div>
+        </div>
+    );
+};
+
+export default App;
+
