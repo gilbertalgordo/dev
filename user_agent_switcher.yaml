@@ -1,0 +1,149 @@
+import requests
+
+# 1. Define the URL you want to scrape or access
+TARGET_URL = 'http://example.com' 
+
+# 2. Define the Googlebot User-Agent string
+# This is an example of a mobile Googlebot (smartphone) User-Agent
+# Note: Google uses several different User-Agents.
+GOOGLEBOT_USER_AGENT = 'Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.7390.122 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
+
+# 3. Create the headers dictionary with the User-Agent
+headers = {
+    'User-Agent': GOOGLEBOT_USER_AGENT
+}
+
+# 4. Make the GET request with the defined headers
+try:
+    response = requests.get(TARGET_URL, headers=headers)
+    
+    # 5. Check if the request was successful
+    if response.status_code == 200:
+        print(f"Successfully accessed {TARGET_URL} with Googlebot User-Agent.")
+        print("First 500 characters of response content:")
+        print(response.text[:500])
+    else:
+        print(f"Failed to access {TARGET_URL}. Status Code: {response.status_code}")
+
+except requests.exceptions.RequestException as e:
+    print(f"An error occurred: {e}")
+
+
+
+pip install requests
+
+
+
+import requests
+import time
+import random
+
+class GoogleBotAgent:
+    """
+    An advanced, end-to-end Googlebot-mimicking agent using a requests session.
+    
+    Features:
+    - Persistent HTTP session for efficiency.
+    - Randomly rotates between verified Googlebot desktop and mobile User-Agents.
+    - Implements a polite delay between requests.
+    """
+
+    # A list of verifiable Googlebot User-Agents (Desktop and Smartphone)
+    # The actual list is much larger, but this provides a good sample for rotation.
+    GOOGLEBOT_USER_AGENTS = [
+        # Googlebot Desktop (Primary)
+        'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+        # Googlebot Smartphone (Modern)
+        'Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.7390.122 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+        # Googlebot Desktop (Secondary/Older format)
+        'Googlebot/2.1 (+http://www.google.com/bot.html)',
+        # Googlebot Mobile (General)
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 15_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.6 Mobile/15E148 Safari/604.1 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
+    ]
+    
+    # Define a polite delay range (in seconds)
+    MIN_DELAY = 2  # Minimum wait time
+    MAX_DELAY = 5  # Maximum wait time
+
+    def __init__(self, delay_range=(MIN_DELAY, MAX_DELAY)):
+        """Initializes the session and sets a random Googlebot User-Agent."""
+        self.session = requests.Session()
+        self.delay_range = delay_range
+        self._set_random_user_agent()
+        print(f"Agent initialized. Current User-Agent: {self.session.headers['User-Agent']}")
+
+    def _set_random_user_agent(self):
+        """Randomly selects a Googlebot User-Agent and sets it for the session."""
+        selected_ua = random.choice(self.GOOGLEBOT_USER_AGENTS)
+        self.session.headers.update({
+            'User-Agent': selected_ua,
+            # Including common headers to appear more like a legitimate browser/bot
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive'
+        })
+
+    def make_request(self, url, method='GET', **kwargs):
+        """
+        Executes a request with a polite delay and returns the response.
+        
+        This method is the "end-to-end" core of the agent.
+        """
+        # 1. Polite Delay (Crucial for advanced/ethical agent)
+        sleep_time = random.uniform(*self.delay_range)
+        print(f"Pausing for {sleep_time:.2f} seconds to be polite...")
+        time.sleep(sleep_time)
+
+        # 2. Re-randomize User-Agent (Optional, but good for long runs)
+        # self._set_random_user_agent() 
+        # print(f"Switching to UA: {self.session.headers['User-Agent'][:40]}...")
+
+        # 3. Execute the Request
+        print(f"Making {method} request to {url}...")
+        try:
+            response = self.session.request(method, url, **kwargs)
+            response.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
+            return response
+        except requests.exceptions.HTTPError as e:
+            print(f"HTTP Error: {e.response.status_code} on {url}. Content may be restricted.")
+            return e.response
+        except requests.exceptions.RequestException as e:
+            print(f"An unexpected request error occurred: {e}")
+            return None
+
+    def close(self):
+        """Closes the underlying session."""
+        self.session.close()
+        print("Agent session closed.")
+
+# --- End-to-End Execution Example ---
+
+if __name__ == '__main__':
+    # 1. Initialize the Agent
+    my_bot_agent = GoogleBotAgent(delay_range=(3, 7)) # Custom delay: 3 to 7 seconds
+
+    try:
+        # 2. Make the first request
+        url_1 = 'http://quotes.toscrape.com/' # A publicly available, scrapable site
+        response_1 = my_bot_agent.make_request(url_1)
+
+        if response_1 and response_1.status_code == 200:
+            print("\n--- Request 1 Success ---")
+            print(f"Status: {response_1.status_code}")
+            print(f"Content length: {len(response_1.text)} characters")
+            # Example parsing (could be extended with BeautifulSoup)
+            print(f"Title tag preview: {response_1.text.split('<title>')[1].split('</title>')[0]}")
+            
+            # 3. Make a second request to demonstrate the session and delay
+            # Note: The User-Agent remains the same for the session (by default)
+            url_2 = 'http://quotes.toscrape.com/page/2/'
+            response_2 = my_bot_agent.make_request(url_2)
+
+            if response_2 and response_2.status_code == 200:
+                print("\n--- Request 2 Success ---")
+                print(f"Status: {response_2.status_code}")
+                print(f"Content length: {len(response_2.text)} characters")
+            
+    finally:
+        # 4. Clean up the session
+        my_bot_agent.close()
