@@ -1,49 +1,65 @@
 import React, { useState, useEffect } from 'react';
-import { Heart, Droplet, Dna, Activity, Loader2, Zap, AlertTriangle, CheckCircle, Bone, Brain, MessageSquare } from 'lucide-react';
+import { Heart, Droplet, Dna, Activity, Clock, Loader2, Thermometer } from 'lucide-react';
 
-// --- MOCK API ADDONS (Simulating Data Fetching and AI Interpretation) ---
+// --- MOCK API ADDONS (Simulating Data Fetching from API Endpoints) ---
 
-// 1. Vitals API Mock
+// Mock data structures
 const MOCK_VITALS = [
-  { id: 1, name: 'Resting Heart Rate', value: '62 bpm', trend: 'Stable', icon: Heart, color: 'text-red-500', detail: 'From wearable, 7-day average.' },
-  { id: 2, name: 'SpO2 Level', value: '98%', trend: 'Optimal', icon: Zap, color: 'text-blue-500', detail: 'Nightly average reading.' },
-  { id: 3, name: 'Sleep Score', value: '78/100', trend: 'Improving', icon: Clock, color: 'text-green-500', detail: 'Last night’s quality.' },
-  { id: 4, name: 'Steps Today', value: '11,200', trend: 'High', icon: Activity, color: 'text-indigo-500', detail: 'Exceeded daily goal.' },
+  { id: 1, name: 'Heart Rate', value: '72 bpm', trend: 'Stable', icon: Heart, color: 'text-red-500', detail: 'Resting average.' },
+  { id: 2, name: 'Blood Pressure', value: '120/80 mmHg', trend: 'Optimal', icon: Droplet, color: 'text-blue-500', detail: 'Last measured (AM).' },
+  { id: 3, name: 'Body Temperature', value: '98.6 °F', trend: 'Normal', icon: Thermometer, color: 'text-orange-500', detail: 'Stable oral reading.' },
+  { id: 4, name: 'Steps Today', value: '8,500', trend: 'Increasing', icon: Activity, color: 'text-green-500', detail: 'Goal: 10,000.' },
 ];
 
-const fetchVitals = () => {
-  return new Promise(resolve => setTimeout(() => resolve(MOCK_VITALS), 1000));
-};
-
-// 2. Blood Test API Mock
 const MOCK_BLOOD_TESTS = [
-  { id: 1, name: 'Fasting Glucose', value: '92 mg/dL', status: 'Optimal', color: 'bg-green-500', icon: CheckCircle },
-  { id: 2, name: 'Vitamin D', value: '28 ng/mL', status: 'Deficient', color: 'bg-red-500', icon: AlertTriangle },
-  { id: 3, name: 'Ferritin', value: '145 ng/mL', status: 'Normal', color: 'bg-green-500', icon: CheckCircle },
-  { id: 4, name: 'hs-CRP', value: '0.8 mg/L', status: 'Low Inflammation', color: 'bg-green-500', icon: CheckCircle },
+  { id: 1, name: 'Lipid Panel (Cholesterol)', date: '2024-09-15', status: 'In Range', detail: 'Total Cholesterol: 185 mg/dL. Good ratio.', color: 'bg-green-100/50' },
+  { id: 2, name: 'Complete Blood Count (CBC)', date: '2024-09-10', status: 'Normal', detail: 'All markers within reference range.', color: 'bg-green-100/50' },
+  { id: 3, name: 'Glucose (Fasting)', date: '2024-09-15', status: 'Slightly High', detail: '105 mg/dL. Suggest follow-up.', color: 'bg-yellow-100/50' },
 ];
 
+const MOCK_DNA_RESULTS = {
+  gene: 'APOE (Apolipoprotein E)',
+  variant: 'E3/E4',
+  risk_factor: 'Elevated Risk for Cardio',
+  recommendation: 'Focus on diet and regular exercise. Consult a specialist.',
+  detail_link: '#',
+};
+
+/**
+ * Simulates fetching vital signs from a backend API.
+ * @returns {Promise<Array>} A promise that resolves with vital signs data.
+ */
+const fetchVitals = () => {
+  return new Promise(resolve => {
+    // Simulate network delay
+    setTimeout(() => {
+      resolve(MOCK_VITALS);
+    }, 1200);
+  });
+};
+
+/**
+ * Simulates fetching blood test results from a lab integration API.
+ * @returns {Promise<Array>} A promise that resolves with blood test data.
+ */
 const fetchBloodTests = () => {
-  return new Promise(resolve => setTimeout(() => resolve(MOCK_BLOOD_TESTS), 1300));
+  return new Promise(resolve => {
+    setTimeout(() => {
+      resolve(MOCK_BLOOD_TESTS);
+    }, 1500);
+  });
 };
 
-// 3. DNA/Genomics API Mock (Simulating an AI Interpretation Add-on)
-const MOCK_INTERPRETED_DNA_SUMMARY = {
-  gene: 'MTHFR (Methylenetetrahydrofolate Reductase)',
-  variant: 'C677T (Heterozygous)',
-  summary: "Your genetic profile suggests a *minor variance* in the MTHFR gene, which is commonly associated with reduced efficiency in converting folic acid to its active form (folate). This is a prevalent finding and primarily informs nutritional recommendations.",
-  risk_areas: [
-    { area: "Folate Metabolism", level: "Moderate" },
-    { area: "Homocysteine Levels", level: "Low" },
-  ],
-  actionable_recommendation: "Consult with a nutritionist to ensure adequate intake of dietary folate (leafy greens, legumes) or discuss the use of a Methylated B-vitamin supplement.",
-  date: '2024-09-25'
-};
-
-const interpretDnaResultsWithAI = () => {
-  // This function simulates calling a complex backend service (e.g., a Gemini-powered API)
-  // that takes raw genomic data and returns a structured, analyzed interpretation.
-  return new Promise(resolve => setTimeout(() => resolve(MOCK_INTERPRETED_DNA_SUMMARY), 1800));
+/**
+ * Simulates fetching processed DNA test results from a genomics API.
+ * @returns {Promise<Object>} A promise that resolves with DNA result data.
+ */
+const fetchDnaResults = () => {
+  return new new Promise(resolve => {
+    setTimeout(() => {
+      resolve(MOCK_DNA_RESULTS);
+    }, 1800);
+  });
 };
 
 // --- UTILITY COMPONENTS ---
@@ -55,13 +71,7 @@ const LoadingIndicator = ({ text = "Loading data..." }) => (
   </div>
 );
 
-const Pill = ({ children, color }) => (
-  <span className={`text-xs font-bold px-3 py-1 rounded-full text-white shadow-md ${color}`}>
-    {children}
-  </span>
-);
-
-// --- VIEW COMPONENTS ---
+// --- MAIN CONTENT TABS ---
 
 const VitalsView = () => {
   const [vitals, setVitals] = useState([]);
@@ -81,17 +91,24 @@ const VitalsView = () => {
   if (loading) return <LoadingIndicator text="Fetching real-time vital signs..." />;
 
   return (
-    <div className="space-y-5">
-      <h2 className="text-xl font-semibold text-gray-800 border-b pb-2">Recent Vitals</h2>
+    <div className="space-y-4">
+      <h2 className="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Current Vitals</h2>
       <div className="grid grid-cols-2 gap-4">
         {vitals.map(v => (
-          <div key={v.id} className="bg-white p-4 rounded-xl shadow-lg border border-gray-100 transition duration-300 hover:shadow-xl hover:scale-[1.02]">
+          <div key={v.id} className="bg-white p-4 rounded-xl shadow-lg border border-gray-100 transition duration-300 hover:shadow-xl">
             <v.icon className={`w-6 h-6 mb-2 ${v.color}`} />
             <p className="text-sm font-medium text-gray-500">{v.name}</p>
-            <p className="text-xl font-bold text-gray-800 mt-1">{v.value}</p>
-            <p className="text-xs mt-1 text-gray-400 truncate">{v.detail}</p>
+            <p className="text-2xl font-bold text-gray-800 mt-1">{v.value}</p>
+            <p className={`text-xs mt-1 font-semibold ${v.trend === 'Optimal' || v.trend === 'Normal' || v.trend === 'Stable' ? 'text-green-600' : 'text-yellow-600'}`}>
+              {v.trend}
+            </p>
           </div>
         ))}
+      </div>
+      <div className="p-4 bg-indigo-50 rounded-xl mt-4 shadow-inner">
+        <p className="text-sm text-indigo-700 font-medium flex items-center">
+          <Clock className="w-4 h-4 mr-2" /> Data last updated: {new Date().toLocaleTimeString()}
+        </p>
       </div>
     </div>
   );
@@ -112,30 +129,25 @@ const BloodTestsView = () => {
     });
   }, []);
 
-  if (loading) return <LoadingIndicator text="Retrieving and structuring lab results..." />;
+  if (loading) return <LoadingIndicator text="Processing lab results..." />;
 
   return (
     <div className="space-y-4">
-      <h2 className="text-xl font-semibold text-gray-800 border-b pb-2">Latest Blood Markers (2024-09-15)</h2>
+      <h2 className="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Latest Lab Results</h2>
       {tests.map(t => (
-        <div key={t.id} className="bg-white p-4 rounded-xl shadow-md border border-gray-200 flex items-center justify-between">
-          <div className="flex items-center">
-            <div className={`p-2 rounded-full ${t.color.replace('bg-', 'bg-')} mr-4`}>
-                <t.icon className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h3 className="text-base font-semibold text-gray-800">{t.name}</h3>
-              <p className="text-sm text-gray-500">{t.value}</p>
-            </div>
+        <div key={t.id} className={`${t.color} p-4 rounded-xl shadow-md border border-gray-200`}>
+          <div className="flex justify-between items-center mb-2">
+            <h3 className="text-lg font-semibold text-gray-800">{t.name}</h3>
+            <span className={`text-xs font-bold px-3 py-1 rounded-full ${
+              t.status === 'In Range' || t.status === 'Normal' ? 'bg-green-500 text-white' : 'bg-yellow-500 text-gray-900'
+            }`}>
+              {t.status}
+            </span>
           </div>
-          <Pill color={t.color}>{t.status}</Pill>
+          <p className="text-sm text-gray-600 mb-2">{t.detail}</p>
+          <p className="text-xs text-gray-500 italic">Report Date: {t.date}</p>
         </div>
       ))}
-      <div className="pt-2">
-        <p className="text-sm text-gray-500 italic flex items-center">
-            <Droplet className="w-4 h-4 mr-1"/> Check your action plan for the Deficient result.
-        </p>
-      </div>
     </div>
   );
 };
@@ -146,7 +158,7 @@ const DnaView = () => {
 
   useEffect(() => {
     setLoading(true);
-    interpretDnaResultsWithAI().then(data => {
+    fetchDnaResults().then(data => {
       setDnaResult(data);
       setLoading(false);
     }).catch(error => {
@@ -155,43 +167,39 @@ const DnaView = () => {
     });
   }, []);
 
-  if (loading) return <LoadingIndicator text="AI Add-on interpreting raw genomic data..." />;
-  if (!dnaResult) return <div className="p-4 text-center text-gray-500">No comprehensive genomic summary available.</div>;
+  if (loading) return <LoadingIndicator text="Analyzing genomic data..." />;
+  if (!dnaResult) return <div className="p-4 text-center text-gray-500">No DNA results found.</div>;
 
-  const { gene, variant, summary, risk_areas, actionable_recommendation, date } = dnaResult;
+  const { gene, variant, risk_factor, recommendation, detail_link } = dnaResult;
 
   return (
     <div className="space-y-6">
-      <h2 className="text-xl font-semibold text-gray-800 border-b pb-2 flex items-center">
-        <Dna className="w-5 h-5 mr-2 text-indigo-600"/> Genomic AI Summary
-      </h2>
+      <h2 className="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Genomic Insights</h2>
 
-      <div className="bg-indigo-50 p-6 rounded-xl shadow-inner border border-indigo-200">
-        <p className="text-sm font-medium text-indigo-700">Gene of Focus: <span className="font-bold">{gene}</span></p>
-        <p className="text-sm font-medium text-indigo-700">Variant Detected: <span className="font-mono bg-indigo-100 px-1 rounded">{variant}</span></p>
-      </div>
+      <div className="bg-white p-6 rounded-xl shadow-2xl border border-indigo-100">
+        <Dna className="w-8 h-8 text-indigo-600 mb-3" />
+        <p className="text-sm font-medium text-gray-500">Analyzed Gene</p>
+        <p className="text-2xl font-bold text-gray-900 mb-4">{gene}</p>
 
-      <div className="bg-white p-5 rounded-xl shadow-lg border border-gray-100">
-        <h3 className="text-lg font-semibold text-gray-800 flex items-center mb-3">
-          <MessageSquare className="w-4 h-4 mr-2 text-gray-500"/> AI Interpretation
-        </h3>
-        <p className="text-sm text-gray-700 leading-relaxed italic">{summary}</p>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        {risk_areas.map((risk, index) => (
-          <div key={index} className="bg-white p-4 rounded-xl shadow-md border-l-4 border-yellow-500">
-            <p className="text-sm font-medium text-gray-500">{risk.area}</p>
-            <p className={`text-lg font-bold mt-1 ${risk.level === 'Moderate' ? 'text-yellow-600' : 'text-green-600'}`}>
-              {risk.level}
-            </p>
+        <div className="grid grid-cols-2 gap-4 text-sm mb-4">
+          <div>
+            <p className="font-semibold text-gray-700">Variant Detected:</p>
+            <p className="text-indigo-600 font-mono bg-indigo-50 px-2 py-1 rounded">{variant}</p>
           </div>
-        ))}
-      </div>
+          <div>
+            <p className="font-semibold text-gray-700">Calculated Risk:</p>
+            <span className="font-bold text-red-600 bg-red-100 px-2 py-1 rounded-full">{risk_factor}</span>
+          </div>
+        </div>
 
-      <div className="p-5 bg-yellow-50 rounded-xl border border-yellow-200">
-        <h3 className="text-base font-bold text-yellow-800 mb-2">Actionable Recommendation</h3>
-        <p className="text-sm text-yellow-700">{actionable_recommendation}</p>
+        <div className="mt-4 pt-4 border-t border-gray-100">
+          <p className="font-semibold text-gray-700 mb-2">Personalized Recommendation:</p>
+          <p className="text-base text-gray-700 italic">{recommendation}</p>
+        </div>
+
+        <a href={detail_link} className="mt-6 inline-block text-sm text-indigo-600 hover:text-indigo-800 font-semibold transition duration-200">
+          View Full Report &rarr;
+        </a>
       </div>
     </div>
   );
@@ -218,26 +226,20 @@ const App = () => {
   const tabs = [
     { id: 'vitals', name: 'Vitals', icon: Heart },
     { id: 'blood', name: 'Blood Tests', icon: Droplet },
-    { id: 'dna', name: 'Genomics (AI)', icon: Dna },
+    { id: 'dna', name: 'DNA Results', icon: Dna },
   ];
 
   return (
-    <div className="min-h-screen bg-gray-100 font-sans p-4 sm:p-8">
-      <style>{`
-        /* Custom font for a clean, modern look */
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
-        body { font-family: 'Inter', sans-serif; }
-      `}</style>
-      
+    <div className="min-h-screen bg-gray-50 font-sans p-4 sm:p-8">
       <div className="max-w-md mx-auto bg-white rounded-3xl shadow-2xl overflow-hidden ring-4 ring-indigo-500/10">
         
         {/* Header */}
-        <header className="p-6 bg-gradient-to-r from-indigo-700 to-blue-600 text-white shadow-lg">
+        <header className="p-6 bg-indigo-600 text-white shadow-md">
           <h1 className="text-2xl font-extrabold flex items-center">
-            <Bone className="w-7 h-7 mr-2" />
-            Google Health Intelligence
+            <Activity className="w-7 h-7 mr-2" />
+            Health Dashboard
           </h1>
-          <p className="text-sm opacity-90 mt-1">A unified view of your biometric and genetic insights.</p>
+          <p className="text-sm opacity-90 mt-1">Your core health and genomic data.</p>
         </header>
 
         {/* Tab Navigation */}
@@ -249,10 +251,10 @@ const App = () => {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex flex-col items-center p-2 rounded-xl transition duration-300 w-1/3 mx-1 ${
+                className={`flex flex-col items-center p-2 rounded-xl transition duration-300 ${
                   isActive
-                    ? 'text-indigo-700 bg-indigo-100 shadow-lg transform scale-105 font-bold'
-                    : 'text-gray-500 hover:text-indigo-600 hover:bg-gray-50'
+                    ? 'text-indigo-600 bg-indigo-50 shadow-md transform scale-105'
+                    : 'text-gray-500 hover:text-indigo-500 hover:bg-gray-50'
                 }`}
               >
                 <Icon className="w-5 h-5 mb-1" />
@@ -269,7 +271,7 @@ const App = () => {
 
         {/* Footer */}
         <footer className="p-4 text-center text-xs text-gray-400 border-t mt-4">
-            <p>Simulated Health API Integration.</p>
+            <p>&copy; 2024 HealthTech Simulator. Data is mock data.</p>
         </footer>
 
       </div>
@@ -278,6 +280,8 @@ const App = () => {
 };
 
 export default App;
+
+
 
 
 
