@@ -279,3 +279,287 @@ const App = () => {
 
 export default App;
 
+
+
+
+import React, { useState, useEffect } from 'react';
+import { Heart, Droplet, Dna, Activity, Loader2, Zap, AlertTriangle, CheckCircle, Bone, Brain, MessageSquare } from 'lucide-react';
+
+// --- MOCK API ADDONS (Simulating Data Fetching and AI Interpretation) ---
+
+// 1. Vitals API Mock
+const MOCK_VITALS = [
+  { id: 1, name: 'Resting Heart Rate', value: '62 bpm', trend: 'Stable', icon: Heart, color: 'text-red-500', detail: 'From wearable, 7-day average.' },
+  { id: 2, name: 'SpO2 Level', value: '98%', trend: 'Optimal', icon: Zap, color: 'text-blue-500', detail: 'Nightly average reading.' },
+  { id: 3, name: 'Sleep Score', value: '78/100', trend: 'Improving', icon: Clock, color: 'text-green-500', detail: 'Last night’s quality.' },
+  { id: 4, name: 'Steps Today', value: '11,200', trend: 'High', icon: Activity, color: 'text-indigo-500', detail: 'Exceeded daily goal.' },
+];
+
+const fetchVitals = () => {
+  return new Promise(resolve => setTimeout(() => resolve(MOCK_VITALS), 1000));
+};
+
+// 2. Blood Test API Mock
+const MOCK_BLOOD_TESTS = [
+  { id: 1, name: 'Fasting Glucose', value: '92 mg/dL', status: 'Optimal', color: 'bg-green-500', icon: CheckCircle },
+  { id: 2, name: 'Vitamin D', value: '28 ng/mL', status: 'Deficient', color: 'bg-red-500', icon: AlertTriangle },
+  { id: 3, name: 'Ferritin', value: '145 ng/mL', status: 'Normal', color: 'bg-green-500', icon: CheckCircle },
+  { id: 4, name: 'hs-CRP', value: '0.8 mg/L', status: 'Low Inflammation', color: 'bg-green-500', icon: CheckCircle },
+];
+
+const fetchBloodTests = () => {
+  return new Promise(resolve => setTimeout(() => resolve(MOCK_BLOOD_TESTS), 1300));
+};
+
+// 3. DNA/Genomics API Mock (Simulating an AI Interpretation Add-on)
+const MOCK_INTERPRETED_DNA_SUMMARY = {
+  gene: 'MTHFR (Methylenetetrahydrofolate Reductase)',
+  variant: 'C677T (Heterozygous)',
+  summary: "Your genetic profile suggests a *minor variance* in the MTHFR gene, which is commonly associated with reduced efficiency in converting folic acid to its active form (folate). This is a prevalent finding and primarily informs nutritional recommendations.",
+  risk_areas: [
+    { area: "Folate Metabolism", level: "Moderate" },
+    { area: "Homocysteine Levels", level: "Low" },
+  ],
+  actionable_recommendation: "Consult with a nutritionist to ensure adequate intake of dietary folate (leafy greens, legumes) or discuss the use of a Methylated B-vitamin supplement.",
+  date: '2024-09-25'
+};
+
+const interpretDnaResultsWithAI = () => {
+  // This function simulates calling a complex backend service (e.g., a Gemini-powered API)
+  // that takes raw genomic data and returns a structured, analyzed interpretation.
+  return new Promise(resolve => setTimeout(() => resolve(MOCK_INTERPRETED_DNA_SUMMARY), 1800));
+};
+
+// --- UTILITY COMPONENTS ---
+
+const LoadingIndicator = ({ text = "Loading data..." }) => (
+  <div className="flex flex-col items-center justify-center p-8 text-indigo-500">
+    <Loader2 className="w-8 h-8 animate-spin" />
+    <p className="mt-3 text-sm font-medium">{text}</p>
+  </div>
+);
+
+const Pill = ({ children, color }) => (
+  <span className={`text-xs font-bold px-3 py-1 rounded-full text-white shadow-md ${color}`}>
+    {children}
+  </span>
+);
+
+// --- VIEW COMPONENTS ---
+
+const VitalsView = () => {
+  const [vitals, setVitals] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    fetchVitals().then(data => {
+      setVitals(data);
+      setLoading(false);
+    }).catch(error => {
+      console.error("Failed to fetch vitals:", error);
+      setLoading(false);
+    });
+  }, []);
+
+  if (loading) return <LoadingIndicator text="Fetching real-time vital signs..." />;
+
+  return (
+    <div className="space-y-5">
+      <h2 className="text-xl font-semibold text-gray-800 border-b pb-2">Recent Vitals</h2>
+      <div className="grid grid-cols-2 gap-4">
+        {vitals.map(v => (
+          <div key={v.id} className="bg-white p-4 rounded-xl shadow-lg border border-gray-100 transition duration-300 hover:shadow-xl hover:scale-[1.02]">
+            <v.icon className={`w-6 h-6 mb-2 ${v.color}`} />
+            <p className="text-sm font-medium text-gray-500">{v.name}</p>
+            <p className="text-xl font-bold text-gray-800 mt-1">{v.value}</p>
+            <p className="text-xs mt-1 text-gray-400 truncate">{v.detail}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const BloodTestsView = () => {
+  const [tests, setTests] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    fetchBloodTests().then(data => {
+      setTests(data);
+      setLoading(false);
+    }).catch(error => {
+      console.error("Failed to fetch blood tests:", error);
+      setLoading(false);
+    });
+  }, []);
+
+  if (loading) return <LoadingIndicator text="Retrieving and structuring lab results..." />;
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-xl font-semibold text-gray-800 border-b pb-2">Latest Blood Markers (2024-09-15)</h2>
+      {tests.map(t => (
+        <div key={t.id} className="bg-white p-4 rounded-xl shadow-md border border-gray-200 flex items-center justify-between">
+          <div className="flex items-center">
+            <div className={`p-2 rounded-full ${t.color.replace('bg-', 'bg-')} mr-4`}>
+                <t.icon className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h3 className="text-base font-semibold text-gray-800">{t.name}</h3>
+              <p className="text-sm text-gray-500">{t.value}</p>
+            </div>
+          </div>
+          <Pill color={t.color}>{t.status}</Pill>
+        </div>
+      ))}
+      <div className="pt-2">
+        <p className="text-sm text-gray-500 italic flex items-center">
+            <Droplet className="w-4 h-4 mr-1"/> Check your action plan for the Deficient result.
+        </p>
+      </div>
+    </div>
+  );
+};
+
+const DnaView = () => {
+  const [dnaResult, setDnaResult] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    interpretDnaResultsWithAI().then(data => {
+      setDnaResult(data);
+      setLoading(false);
+    }).catch(error => {
+      console.error("Failed to fetch DNA results:", error);
+      setLoading(false);
+    });
+  }, []);
+
+  if (loading) return <LoadingIndicator text="AI Add-on interpreting raw genomic data..." />;
+  if (!dnaResult) return <div className="p-4 text-center text-gray-500">No comprehensive genomic summary available.</div>;
+
+  const { gene, variant, summary, risk_areas, actionable_recommendation, date } = dnaResult;
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-xl font-semibold text-gray-800 border-b pb-2 flex items-center">
+        <Dna className="w-5 h-5 mr-2 text-indigo-600"/> Genomic AI Summary
+      </h2>
+
+      <div className="bg-indigo-50 p-6 rounded-xl shadow-inner border border-indigo-200">
+        <p className="text-sm font-medium text-indigo-700">Gene of Focus: <span className="font-bold">{gene}</span></p>
+        <p className="text-sm font-medium text-indigo-700">Variant Detected: <span className="font-mono bg-indigo-100 px-1 rounded">{variant}</span></p>
+      </div>
+
+      <div className="bg-white p-5 rounded-xl shadow-lg border border-gray-100">
+        <h3 className="text-lg font-semibold text-gray-800 flex items-center mb-3">
+          <MessageSquare className="w-4 h-4 mr-2 text-gray-500"/> AI Interpretation
+        </h3>
+        <p className="text-sm text-gray-700 leading-relaxed italic">{summary}</p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        {risk_areas.map((risk, index) => (
+          <div key={index} className="bg-white p-4 rounded-xl shadow-md border-l-4 border-yellow-500">
+            <p className="text-sm font-medium text-gray-500">{risk.area}</p>
+            <p className={`text-lg font-bold mt-1 ${risk.level === 'Moderate' ? 'text-yellow-600' : 'text-green-600'}`}>
+              {risk.level}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      <div className="p-5 bg-yellow-50 rounded-xl border border-yellow-200">
+        <h3 className="text-base font-bold text-yellow-800 mb-2">Actionable Recommendation</h3>
+        <p className="text-sm text-yellow-700">{actionable_recommendation}</p>
+      </div>
+    </div>
+  );
+};
+
+// --- MAIN APPLICATION COMPONENT ---
+
+const App = () => {
+  const [activeTab, setActiveTab] = useState('vitals'); // vitals, blood, dna
+
+  const renderContent = () => {
+    switch (activeTab) {
+      case 'vitals':
+        return <VitalsView />;
+      case 'blood':
+        return <BloodTestsView />;
+      case 'dna':
+        return <DnaView />;
+      default:
+        return <VitalsView />;
+    }
+  };
+
+  const tabs = [
+    { id: 'vitals', name: 'Vitals', icon: Heart },
+    { id: 'blood', name: 'Blood Tests', icon: Droplet },
+    { id: 'dna', name: 'Genomics (AI)', icon: Dna },
+  ];
+
+  return (
+    <div className="min-h-screen bg-gray-100 font-sans p-4 sm:p-8">
+      <style>{`
+        /* Custom font for a clean, modern look */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+      `}</style>
+      
+      <div className="max-w-md mx-auto bg-white rounded-3xl shadow-2xl overflow-hidden ring-4 ring-indigo-500/10">
+        
+        {/* Header */}
+        <header className="p-6 bg-gradient-to-r from-indigo-700 to-blue-600 text-white shadow-lg">
+          <h1 className="text-2xl font-extrabold flex items-center">
+            <Bone className="w-7 h-7 mr-2" />
+            Google Health Intelligence
+          </h1>
+          <p className="text-sm opacity-90 mt-1">A unified view of your biometric and genetic insights.</p>
+        </header>
+
+        {/* Tab Navigation */}
+        <nav className="flex justify-around p-3 bg-white border-b border-gray-100 shadow-inner">
+          {tabs.map(tab => {
+            const isActive = activeTab === tab.id;
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex flex-col items-center p-2 rounded-xl transition duration-300 w-1/3 mx-1 ${
+                  isActive
+                    ? 'text-indigo-700 bg-indigo-100 shadow-lg transform scale-105 font-bold'
+                    : 'text-gray-500 hover:text-indigo-600 hover:bg-gray-50'
+                }`}
+              >
+                <Icon className="w-5 h-5 mb-1" />
+                <span className="text-xs font-semibold">{tab.name}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Content Area */}
+        <main className="p-6">
+          {renderContent()}
+        </main>
+
+        {/* Footer */}
+        <footer className="p-4 text-center text-xs text-gray-400 border-t mt-4">
+            <p>Simulated Health API Integration.</p>
+        </footer>
+
+      </div>
+    </div>
+  );
+};
+
+export default App;
+
