@@ -1,0 +1,196 @@
+import json
+import requests
+from datetime import datetime, timezone
+from dateutil import parser
+
+# The USGS API provides real-time data feeds worldwide.
+# This specific URL fetches all earthquakes of magnitude 1.0+ within the last hour.
+USGS_API_URL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/1.0_hour.geojson"
+
+def get_recent_earthquakes():
+    """Fetches recent earthquake data from the USGS API."""
+    print("🌍 Fetching worldwide earthquake data for the last hour...")
+    try:
+        response = requests.get(USGS_API_URL)
+        response.raise_for_status()  # Check for HTTP errors
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching data: {e}")
+        return None
+
+def track_seismic_activity():
+    """Processes and prints the seismic activity data."""
+    data = get_recent_earthquakes()
+    
+    if data is None:
+        return
+
+    earthquakes = data.get('features', [])
+    
+    if not earthquakes:
+        print("\n--- No significant earthquakes (M1.0+) detected in the last hour. ---")
+        return
+
+    print(f"\n--- Detected {len(earthquakes)} Earthquakes (M1.0+) in the last hour ---")
+    
+    # Get the current time in UTC (USGS uses UTC)
+    now_utc = datetime.now(timezone.utc)
+    
+    for i, quake in enumerate(earthquakes):
+        properties = quake['properties']
+        
+        # 'time' is a Unix timestamp in milliseconds
+        event_timestamp_ms = properties['time']
+        
+        # Convert milliseconds to datetime object
+        event_time_utc = datetime.fromtimestamp(event_timestamp_ms / 1000, tz=timezone.utc)
+        
+        # Calculate time difference
+        time_diff = now_utc - event_time_utc
+        
+        # Format the time difference
+        total_seconds = int(time_diff.total_seconds())
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        seconds = total_seconds % 60
+        
+        # Extract key data
+        magnitude = properties['mag']
+        location = properties['place']
+        
+        # Display the results
+        print("-" * 50)
+        print(f"**{i+1}. Magnitude:** **M{magnitude:.1f}**")
+        print(f"   Location: {location}")
+        print(f"   Time Since Event: **{hours}h {minutes}m {seconds}s ago**")
+        print(f"   Event Time (UTC): {event_time_utc.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+
+# Make sure to install the 'requests' library before running:
+# pip install requests
+# pip install python-dateutil
+
+if __name__ == "__main__':
+    track_seismic_activity()
+
+
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Worldwide Seismic Activity Tracker</title>
+    <style>
+        /* CSS for the map container */
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+        #map {
+            height: 100%;
+            width: 100%;
+        }
+    </style>
+    <script 
+        src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&callback=initMap"
+        async defer>
+    </script>
+</head>
+<body>
+    <div id="map"></div>
+    <script src="tracker.js"></script>
+</body>
+</html>
+
+
+
+let map;
+
+/**
+ * Initializes the Google Map and loads the GeoJSON data.
+ */
+function initMap() {
+    // 1. Initialize the Map
+    map = new google.maps.Map(document.getElementById('map'), {
+        center: { lat: 20, lng: 0 }, // Center the map near the equator
+        zoom: 3,
+        mapTypeId: 'terrain' // Use a terrain map for better visualization
+    });
+
+    // 2. Define the USGS GeoJSON feed URL
+    // This feed gets all earthquakes M2.5+ from the last hour worldwide
+    const earthquakeUrl = 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_hour.geojson';
+
+    // 3. Load the GeoJSON data into the Maps Data Layer
+    // The Data Layer handles parsing the GeoJSON and placing the features on the map.
+    map.data.load(earthquakeUrl, null, (features) => {
+        console.log(`Successfully loaded ${features.length} earthquake events.`);
+    });
+    
+    // 4. Apply a custom style function
+    map.data.setStyle(styleFeature);
+
+    // 5. Add event listener to show earthquake details on click
+    map.data.addListener('click', (event) => {
+        const magnitude = event.feature.getProperty('mag');
+        const place = event.feature.getProperty('place');
+        const time = new Date(event.feature.getProperty('time')).toUTCString();
+        const url = event.feature.getProperty('url');
+
+        const infoWindow = new google.maps.InfoWindow({
+            content: `
+                <h3>🚨 M${magnitude.toFixed(1)} Earthquake</h3>
+                <p>Location: ${place}</p>
+                <p>Time (UTC): ${time}</p>
+                <p><a href="${url}" target="_blank">USGS Details</a></p>
+            `
+        });
+
+        // Anchor the InfoWindow to the clicked geometry
+        infoWindow.setPosition(event.feature.getGeometry().get());
+        infoWindow.open(map);
+    });
+}
+
+/**
+ * Determines the color and radius for each earthquake marker based on magnitude.
+ * @param {google.maps.Data.Feature} feature
+ * @return {google.maps.Data.StyleOptions}
+ */
+function styleFeature(feature) {
+    const magnitude = feature.getProperty('mag');
+    
+    // --- Advanced Styling Logic ---
+    let color;
+    let radius;
+    
+    if (magnitude > 6.0) {
+        color = '#ff0000'; // Red for Major
+        radius = 15;
+    } else if (magnitude > 4.5) {
+        color = '#ff8c00'; // Dark Orange for Strong
+        radius = 10;
+    } else if (magnitude > 2.5) {
+        color = '#ffd700'; // Gold for Minor
+        radius = 5;
+    } else {
+        // Filter out smaller events not covered by the GeoJSON feed URL, 
+        // though the URL should pre-filter them.
+        return { visible: false };
+    }
+    
+    // Create the icon style
+    return {
+        icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            fillColor: color,
+            fillOpacity: 0.8,
+            scale: radius, // Radius scales with magnitude
+            strokeColor: 'white',
+            strokeWeight: 1.0
+        }
+    };
+}
+
+// Attach initMap to the window object so the API can call it
+window.initMap = initMap;
