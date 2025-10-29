@@ -1,0 +1,170 @@
+class Unit:
+    def __init__(self, name, health, armor_type, cost, weapon_type, damage):
+        self.name = name
+        self.health = health
+        self.armor_type = armor_type
+        self.cost = cost
+        self.weapon_type = weapon_type
+        self.damage = damage
+
+    def attack(self, target):
+        # Logic for damage calculation against target's armor type
+        print(f"{self.name} fires its {self.weapon_type} at {target.name}!")
+        # Simplified damage application:
+        target.health -= self.damage
+
+# Define the Harrier Jet Plane
+class Harrier(Unit):
+    def __init__(self):
+        super().__init__(
+            name="Harrier", 
+            health=100, 
+            armor_type="Light", 
+            cost=1200, 
+            weapon_type="Missiles", 
+            damage=50 # Damage value is conceptual
+        )
+        self.is_air = True
+
+# Define the Grizzly Battle Tank
+class GrizzlyTank(Unit):
+    def __init__(self):
+        super().__init__(
+            name="Grizzly Tank", 
+            health=300, 
+            armor_type="Medium", 
+            cost=700, 
+            weapon_type="Cannon", 
+            damage=40 # Damage value is conceptual
+        )
+        self.is_air = False
+
+# Example Usage:
+harrier_a = Harrier()
+grizzly_b = GrizzlyTank()
+
+# print(harrier_a.name) # Output: Harrier
+# harrier_a.attack(grizzly_b) # Output: Harrier fires its Missiles at Grizzly Tank!
+
+
+
+from enum import Enum, auto
+
+# 1. ENUMS FOR CORE GAME MECHANICS
+class DamageType(Enum):
+    """Red Alert 2 damage types for weapon effectiveness."""
+    CANNON = auto()     # Effective vs Heavy Armor (Tanks)
+    MISSILE = auto()    # Effective vs Aircraft & Medium Armor (IFV)
+    PRISM = auto()      # Effective vs Structures & Tanks
+    EXPLOSIVE = auto()  # General purpose, good vs Structures/Infantry
+
+class ArmorType(Enum):
+    """Armor classes affecting damage resistance."""
+    LIGHT = auto()      # Infantry, Rocketeers
+    MEDIUM = auto()     # IFV, Harrier
+    HEAVY = auto()      # Grizzly, Prism Tank
+    AIRCRAFT = auto()   # Used for air-to-air checks
+
+# 2. DAMAGE MULTIPLIER TABLE (RA2-style combat logic)
+DAMAGE_MULTIPLIERS = {
+    # (DamageType, ArmorType): Multiplier (1.0 is standard damage)
+    (DamageType.CANNON, ArmorType.HEAVY): 1.0,
+    (DamageType.CANNON, ArmorType.LIGHT): 0.6,
+    
+    (DamageType.MISSILE, ArmorType.AIRCRAFT): 1.2, # Extra damage to aircraft
+    (DamageType.MISSILE, ArmorType.HEAVY): 0.7,
+    
+    (DamageType.PRISM, ArmorType.HEAVY): 1.1,     # Slight bonus vs tanks
+    (DamageType.PRISM, ArmorType.LIGHT): 0.5,
+}
+
+# 3. BASE CLASS FOR ALL UNITS
+class AlliedUnit:
+    def __init__(self, name, max_health, armor, weapon_damage, damage_type, speed=10):
+        self.name = name
+        self.max_health = max_health
+        self.health = max_health
+        self.armor_type = armor
+        self.weapon_damage = weapon_damage
+        self.damage_type = damage_type
+        self.speed = speed
+        self.is_air = False
+
+    def receive_damage(self, incoming_damage, incoming_type):
+        """Calculates and applies damage based on armor and weapon type."""
+        key = (incoming_type, self.armor_type)
+        multiplier = DAMAGE_MULTIPLIERS.get(key, 1.0) # Default to 1.0 if not specified
+        
+        final_damage = incoming_damage * multiplier
+        self.health -= final_damage
+        
+        # print(f"{self.name} took {final_damage:.2f} damage (Multiplier: {multiplier:.1f})")
+        if self.health <= 0:
+            print(f"**{self.name} has been destroyed!**")
+            return True # Unit destroyed
+        return False # Unit survived
+
+    def attack(self, target):
+        """Unit attacks a target."""
+        print(f"{self.name} fires a {self.damage_type.name} at {target.name}")
+        target.receive_damage(self.weapon_damage, self.damage_type)
+
+# 4. TANK AND AIRCRAFT SUBCLASSES
+
+class GrizzlyTank(AlliedUnit):
+    def __init__(self):
+        super().__init__(
+            name="Grizzly Tank", 
+            max_health=400, 
+            armor=ArmorType.HEAVY, 
+            weapon_damage=30, 
+            damage_type=DamageType.CANNON,
+            speed=7 # Slower than some
+        )
+        self.can_crush = True
+
+class Harrier(AlliedUnit):
+    def __init__(self):
+        super().__init__(
+            name="Harrier Jet", 
+            max_health=120, 
+            armor=ArmorType.AIRCRAFT, 
+            weapon_damage=45, 
+            damage_type=DamageType.MISSILE,
+            speed=25 # Very fast
+        )
+        self.is_air = True
+        self.requires_reload = True
+
+class MirageTank(AlliedUnit):
+    def __init__(self):
+        super().__init__(
+            name="Mirage Tank", 
+            max_health=350, 
+            armor=ArmorType.HEAVY, 
+            weapon_damage=40, 
+            damage_type=DamageType.PRISM,
+            speed=8
+        )
+        self.is_stealthed = False
+        
+    def deploy(self):
+        """Unique Mirage Tank ability: Disguise as a tree."""
+        self.is_stealthed = True
+        print(f"{self.name} deployed and is now disguised!")
+
+
+# 5. SIMULATION EXAMPLE
+print("--- Combat Simulation ---")
+grizzly = GrizzlyTank()
+harrier = Harrier()
+mirage = MirageTank()
+
+# Grizzly attacks Harrier (CANNON vs AIRCRAFT: standard damage 1.0)
+grizzly.attack(harrier)
+# Harrier attacks Mirage (MISSILE vs HEAVY: 0.7 multiplier)
+harrier.attack(mirage) 
+
+# Mirage attacks Grizzly (PRISM vs HEAVY: 1.1 multiplier)
+mirage.attack(grizzly)
+mirage.deploy()
