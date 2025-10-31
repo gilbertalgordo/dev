@@ -1,0 +1,227 @@
+import random
+
+def generate_lottery_numbers(total_main_numbers, main_number_range, total_bonus_numbers=0, bonus_number_range=0):
+    """
+    Generates a set of random, non-repeating lottery numbers.
+
+    Args:
+        total_main_numbers (int): How many main balls are drawn (e.g., 6).
+        main_number_range (int): The maximum number in the main draw (e.g., 49 for 1-49).
+        total_bonus_numbers (int, optional): How many bonus balls are drawn (e.g., 1). Defaults to 0.
+        bonus_number_range (int, optional): The maximum number for the bonus draw (e.g., 26 for 1-26). Defaults to 0.
+
+    Returns:
+        tuple: (list of main numbers, list of bonus numbers)
+    """
+    # 1. Generate the main set of numbers (must be unique)
+    try:
+        if total_main_numbers > main_number_range:
+            raise ValueError("Total numbers to pick cannot be greater than the number range.")
+
+        main_numbers = sorted(random.sample(range(1, main_number_range + 1), total_main_numbers))
+    except ValueError as e:
+        return f"Error: {e}. Check your main number inputs.", []
+
+    # 2. Generate bonus numbers (also unique, but from a different pool)
+    bonus_numbers = []
+    if total_bonus_numbers > 0 and bonus_number_range > 0:
+        try:
+            if total_bonus_numbers > bonus_number_range:
+                 raise ValueError("Total bonus numbers to pick cannot be greater than the bonus number range.")
+
+            # Generate bonus numbers. If they are drawn from the same pool as the main numbers 
+            # and cannot repeat, you would need more complex logic. 
+            # This assumes a separate bonus ball machine (like Powerball or Mega Millions).
+            bonus_numbers = sorted(random.sample(range(1, bonus_number_range + 1), total_bonus_numbers))
+        except ValueError as e:
+            return f"Error: {e}. Check your bonus number inputs.", []
+
+    return main_numbers, bonus_numbers
+
+# --- Interactive Example ---
+
+def interactive_lottery_generator():
+    """Prompts the user for lottery details and prints the generated numbers."""
+    print("--- 🌍 Universal Lottery Number Generator ---")
+    
+    # Get Main Draw Details
+    try:
+        main_num = int(input("Enter the total number of MAIN balls to pick (e.g., 6): "))
+        main_range = int(input("Enter the MAIN number range (e.g., 49 for 1 to 49): "))
+    except ValueError:
+        print("Invalid input. Please enter whole numbers.")
+        return
+
+    # Get Bonus Draw Details
+    bonus_choice = input("Does this lottery have a BONUS/Power/Mega Ball? (yes/no): ").lower()
+    bonus_num = 0
+    bonus_range = 0
+    
+    if bonus_choice == 'yes':
+        try:
+            bonus_num = int(input("How many BONUS balls are drawn (e.g., 1): "))
+            bonus_range = int(input("Enter the BONUS number range (e.g., 26 for 1 to 26): "))
+        except ValueError:
+            print("Invalid input for bonus balls. Skipping bonus numbers.")
+            bonus_num = 0
+            
+    # Generate and Print Results
+    main_picks, bonus_picks = generate_lottery_numbers(
+        total_main_numbers=main_num, 
+        main_number_range=main_range, 
+        total_bonus_numbers=bonus_num, 
+        bonus_number_range=bonus_range
+    )
+    
+    print("\n--- Your Generated 'Prediction' ---")
+    
+    # Check if an error was returned
+    if isinstance(main_picks, str):
+        print(main_picks) # Prints the error message
+    else:
+        print(f"**Main Numbers**: {main_picks}")
+        if bonus_picks:
+            print(f"**Bonus/Power Numbers**: {bonus_picks}")
+        
+    print("\n***Disclaimer: This is a random generator. Lotteries are random events.***")
+
+
+# To run the interactive version:
+if __name__ == "__main__":
+    interactive_lottery_generator()
+
+
+
+pip install pandas numpy scikit-learn tensorflow
+
+
+
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.optimizers import Adam
+from random import sample
+
+# --- PARAMETERS ---
+# You need to adjust these for the specific lottery you are analyzing
+LOTTO_FILE = 'lotto_data.csv'  # Replace with your data file
+N_STEPS = 5                   # The number of past draws to look at to predict the next one
+N_FEATURES = 6                # The number of main balls drawn (e.g., 6 for UK Lotto, 5 for Powerball)
+
+def create_sequences(data, n_steps):
+    """Convert time series data into sequences for LSTM training."""
+    X, y = [], []
+    for i in range(len(data) - n_steps):
+        X.append(data[i:(i + n_steps), :])
+        y.append(data[i + n_steps, :])
+    return np.array(X), np.array(y)
+
+def build_lstm_model(n_steps, n_features):
+    """Builds a basic Sequential LSTM model."""
+    model = Sequential()
+    # LSTM layers are great for sequential/time series data
+    model.add(LSTM(units=100, activation='relu', input_shape=(n_steps, n_features), return_sequences=True))
+    model.add(Dropout(0.2))
+    model.add(LSTM(units=50, activation='relu'))
+    model.add(Dropout(0.2))
+    # Output layer has N_FEATURES nodes (one for each predicted number)
+    model.add(Dense(n_features)) 
+    model.compile(optimizer=Adam(learning_rate=0.001), loss='mse')
+    return model
+
+def predict_lottery_numbers(data_file):
+    """Main function to load data, train model, and generate predictions."""
+    print("--- 🧠 Training Advanced Lottery Prediction Model ---")
+    
+    # 1. Load and Prepare Data
+    try:
+        # Assuming your CSV has columns like 'Date', 'N1', 'N2', 'N3', 'N4', 'N5', 'N6', etc.
+        df = pd.read_csv(data_file)
+        # Select only the number columns and sort them (optional but often done)
+        data = df.iloc[:, 1:1 + N_FEATURES].values  # Adjust column slicing as needed
+    except FileNotFoundError:
+        return f"Error: File '{data_file}' not found. Please provide historical data."
+    except Exception as e:
+        return f"An error occurred during data loading: {e}"
+
+    # 2. Normalize Data
+    scaler = MinMaxScaler()
+    data_scaled = scaler.fit_transform(data)
+
+    # 3. Create Sequences
+    X, y = create_sequences(data_scaled, N_STEPS)
+    
+    # Use 80% for training
+    train_size = int(len(X) * 0.8)
+    X_train, X_test = X[:train_size], X[train_size:]
+    y_train, y_test = y[:train_size], y[train_size:]
+
+    # 4. Build and Train Model
+    model = build_lstm_model(N_STEPS, N_FEATURES)
+    print("Training model...")
+    # Train the model (adjust epochs for better/longer training)
+    model.fit(X_train, y_train, epochs=20, batch_size=32, verbose=0)
+    print("Training complete.")
+
+    # 5. Generate Prediction (The last N_STEPS draws are used as input)
+    last_sequence = data_scaled[-N_STEPS:]
+    last_sequence = np.expand_dims(last_sequence, axis=0) # Add batch dimension
+    
+    # Get the raw prediction from the model
+    predicted_scaled = model.predict(last_sequence)[0]
+
+    # 6. Inverse Transform to get actual numbers
+    # We must match the shape for inverse_transform, so we create a dummy array
+    dummy_array = np.zeros((predicted_scaled.shape[0], scaler.scale_.shape[0]))
+    dummy_array[:N_FEATURES] = predicted_scaled # Put our prediction in the first N_FEATURES columns
+    
+    predicted_numbers_float = scaler.inverse_transform(dummy_array)[:, :N_FEATURES]
+    
+    # Convert to unique integers, constrained by the max number range
+    MAX_NUMBER = df.iloc[:, 1:].max().max() + 1 # Dynamic max number
+    
+    # Round, cast to integer, and ensure numbers are unique and within range
+    final_prediction = np.round(predicted_numbers_float[0]).astype(int)
+    
+    # Post-processing: Make numbers unique and within the range
+    unique_prediction = set()
+    for num in final_prediction:
+        # Clamp to a valid lottery range (e.g., 1 to 69)
+        clamped_num = max(1, min(num, MAX_NUMBER)) 
+        unique_prediction.add(clamped_num)
+        
+    # If the ML model produced duplicate numbers, fill the remaining slots randomly
+    if len(unique_prediction) < N_FEATURES:
+        remaining_count = N_FEATURES - len(unique_prediction)
+        # Get all possible numbers in the range
+        full_range = set(range(1, MAX_NUMBER + 1))
+        # Find numbers not already in the prediction
+        available_numbers = list(full_range - unique_prediction)
+        
+        # Add random, unique numbers to complete the ticket
+        unique_prediction.update(sample(available_numbers, remaining_count))
+
+    return sorted(list(unique_prediction))
+
+# --- EXECUTION ---
+if __name__ == "__main__":
+    # Simulate a data file structure for demonstration
+    # In a real scenario, you'd replace 'lotto_data.csv' with the path to your data.
+    
+    # Example for a 6/49 lotto with 100 draws
+    data = {'N{}'.format(i+1): np.random.randint(1, 50, 100) for i in range(6)}
+    df_simulated = pd.DataFrame(data)
+    df_simulated.to_csv(LOTTO_FILE, index=False) 
+    
+    predicted_numbers = predict_lottery_numbers(LOTTO_FILE)
+    
+    print("\n" + "="*40)
+    print("🔮 LSTM Prediction for Next Draw")
+    if isinstance(predicted_numbers, list):
+        print(f"**Predicted Main Numbers**: {predicted_numbers}")
+    else:
+        print(predicted_numbers)
+    print("="*40)
+
