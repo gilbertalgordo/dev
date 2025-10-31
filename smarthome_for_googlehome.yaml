@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Home Fusion Dashboard</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary': '#4F46E5', // Indigo-600
+                        'secondary': '#1E3A8A', // Blue-800
+                        'surface-dark': '#1F2937', // Gray-800
+                        'surface-light': '#374151', // Gray-700
+                        'text-light': '#F9FAFB', // White
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Custom scrollbar for better aesthetic on dark theme */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #374151; }
+        ::-webkit-scrollbar-thumb { background: #4F46E5; border-radius: 4px; }
+        .card { transition: all 0.3s ease; }
+        .card:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2); }
+    </style>
+</head>
+<body class="bg-gray-900 font-sans text-text-light min-h-screen p-4 md:p-8">
+
+    <div id="app" class="max-w-4xl mx-auto">
+        <header class="mb-8 flex justify-between items-center">
+            <h1 class="text-3xl font-bold text-white tracking-tight">Fusion Home 
+                <span class="text-primary text-2xl font-normal">OS</span>
+            </h1>
+            <div id="user-info" class="text-sm text-gray-400 p-2 bg-surface-dark rounded-full shadow-lg">
+                <span class="font-medium">User ID:</span> Loading...
+            </div>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <div class="flex flex-wrap justify-center mb-8 p-1 bg-surface-dark rounded-xl shadow-xl">
+            <button data-tab="sensors" class="tab-btn p-3 w-1/4 text-center text-sm font-medium rounded-lg transition duration-200 bg-primary shadow-lg text-white">Sensors & Bots</button>
+            <button data-tab="energy" class="tab-btn p-3 w-1/4 text-center text-sm font-medium rounded-lg text-gray-400 hover:text-white hover:bg-surface-light transition duration-200">Energy</button>
+            <button data-tab="fitness" class="tab-btn p-3 w-1/4 text-center text-sm font-medium rounded-lg text-gray-400 hover:text-white hover:bg-surface-light transition duration-200">Fitness</button>
+            <button data-tab="automotive" class="tab-btn p-3 w-1/4 text-center text-sm font-medium rounded-lg text-gray-400 hover:text-white hover:bg-surface-light transition duration-200">Automotive</button>
+        </div>
+
+        <!-- Main Content Area -->
+        <div id="dashboard-content">
+            <!-- Content for selected tab will be dynamically inserted here -->
+            <div class="text-center p-16 text-gray-500">Loading Dashboard...</div>
+        </div>
+
+        <!-- Custom Modal for Alerts/Feedback -->
+        <div id="custom-modal" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 hidden z-50">
+            <div class="bg-surface-light p-6 rounded-xl shadow-2xl max-w-sm w-full border-t-4 border-primary">
+                <h3 id="modal-title" class="text-xl font-bold mb-3 text-white">Action Confirmed</h3>
+                <p id="modal-message" class="text-gray-300 mb-6">The action has been executed successfully.</p>
+                <button onclick="hideModal()" class="w-full bg-primary hover:bg-indigo-700 text-white font-semibold py-2 rounded-lg transition">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, query, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global Firebase Configuration and Initialization (Mandatory)
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let app, db, auth;
+        let userId = 'loading'; // Will be updated on auth state change
+        let currentTab = 'sensors';
+
+        // --- UTILITY FUNCTIONS & AUTH ---
+
+        setLogLevel('Debug');
+
+        /**
+         * Converts a base64 string to an ArrayBuffer. Used for mock audio.
+         * @param {string} base64 The base64 string.
+         * @returns {ArrayBuffer}
+         */
+        const base64ToArrayBuffer = (base64) => {
+            const binaryString = atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        };
+
+        /**
+         * Converts PCM 16-bit audio data to a WAV Blob.
+         * @param {Int16Array} pcm16 Audio data.
+         * @param {number} sampleRate Sample rate.
+         * @returns {Blob} WAV audio blob.
+         */
+        const pcmToWav = (pcm16, sampleRate) => {
+            const numChannels = 1;
+            const bytesPerSample = 2;
+            const blockAlign = numChannels * bytesPerSample;
+            const byteRate = sampleRate * blockAlign;
+            const dataLength = pcm16.length * bytesPerSample;
+            const buffer = new ArrayBuffer(44 + dataLength);
+            const view = new DataView(buffer);
+
+            // Write RIFF header
+            function writeString(view, offset, string) {
+                for (let i = 0; i < string.length; i++) {
+                    view.setUint8(offset + i, string.charCodeAt(i));
+                }
+            }
+            writeString(view, 0, 'RIFF');
+            view.setUint32(4, 36 + dataLength, true);
+            writeString(view, 8, 'WAVE');
+
+            // Write FMT chunk
+            writeString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true); // PCM format
+            view.setUint16(22, numChannels, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, byteRate, true);
+            view.setUint16(32, blockAlign, true);
+            view.setUint16(34, bytesPerSample * 8, true);
+
+            // Write Data chunk
+            writeString(view, 36, 'data');
+            view.setUint32(40, dataLength, true);
+
+            // Write PCM data
+            let offset = 44;
+            for (let i = 0; i < pcm16.length; i++, offset += 2) {
+                view.setInt16(offset, pcm16[i], true);
+            }
+
+            return new Blob([buffer], { type: 'audio/wav' });
+        };
+
+
+        const initializeFirebase = async () => {
+            try {
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        document.getElementById('user-info').innerHTML = `<span class="font-medium">User ID:</span> ${userId.substring(0, 8)}...`;
+                        console.log("Firebase Authenticated. User ID:", userId);
+                        // Once authenticated, load the initial dashboard
+                        loadDashboard(currentTab);
+                    } else {
+                        // Attempt to sign in with custom token or anonymously
+                        if (initialAuthToken) {
+                            await signInWithCustomToken(auth, initialAuthToken);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error("Firebase initialization failed:", error);
+                document.getElementById('user-info').textContent = "Auth Error";
+            }
+        };
+
+        // Custom Modal Logic (replaces alert/confirm)
+        window.showModal = (title, message, isError = false) => {
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-message').textContent = message;
+            const modal = document.getElementById('custom-modal');
+            modal.classList.remove('hidden');
+            modal.querySelector('.border-t-4').style.borderColor = isError ? '#EF4444' : '#4F46E5';
+        };
+
+        window.hideModal = () => {
+            document.getElementById('custom-modal').classList.add('hidden');
+        };
+
+        // --- CORE APPLICATION STATE & MOCK API ---
+
+        // Local state to simulate real-time data from the backend/devices
+        let deviceState = {
+            sensors: {
+                temp_living: 22.5,
+                humidity_bedroom: 48,
+                motion_hall: 'MOTION_DETECTED',
+                light_kitchen: 'OFF',
+                robot_vacuum: 'DOCKED',
+            },
+            energy: {
+                solar_production_kw: 5.2,
+                battery_percent: 85,
+                grid_status: 'EXPORTING', // GRID, IMPORTING, EXPORTING
+            },
+            fitness: {
+                bike_pro: {
+                    status: 'IDLE', // ACTIVE, IDLE
+                    speed_kmh: 0,
+                    cadence_rpm: 0,
+                    heart_rate_bpm: 75,
+                    distance_km: 125.8,
+                },
+            },
+            automotive: {
+                charger_status: 'UNPLUGGED', // UNPLUGGED, PLUGGED_IN, CHARGING
+                ev_battery_percent: 45,
+                charging_rate_kw: 0,
+                target_limit: 80,
+            }
+        };
+
+        /**
+         * Mock Smart Home API Layer - Defines the RESTful structure and simulates calls.
+         * In a real application, these methods would make actual 'fetch' calls to a server.
+         */
+        class SmartHomeAPI {
+            constructor(db, userId) {
+                this.db = db;
+                this.userId = userId;
+                this.delay = 500; // Simulate network latency
+            }
+
+            // --- Private Firestore Helpers ---
+            getPrivateDocRef(collectionName, docId) {
+                return doc(this.db, `artifacts/${appId}/users/${this.userId}/${collectionName}`, docId);
+            }
+            getPublicCollectionRef(collectionName) {
+                // Public data path for shared resources (e.g., Global Energy Data)
+                return collection(this.db, `artifacts/${appId}/public/data/${collectionName}`);
+            }
+
+            // --- Generic Simulation Helper ---
+            simulateCall(successData, isError = false) {
+                return new Promise((resolve, reject) => {
+                    setTimeout(() => {
+                        if (isError) {
+                            reject(new Error("API Simulation Error: Connection failed."));
+                        } else {
+                            resolve(successData);
+                        }
+                    }, this.delay);
+                });
+            }
+
+            // --- 1. SENSOR & AUTOMATION ENDPOINTS ---
+
+            /**
+             * GET /api/v1/devices/sensor/status
+             * Retrieves current status for all general sensors.
+             */
+            getSensorStatus() {
+                // In a real app, this would query Firestore or an external C2C API.
+                return this.simulateCall({
+                    ...deviceState.sensors
+                });
+            }
+
+            /**
+             * POST /api/v1/devices/switch/{deviceId}/control
+             * Controls a generic device (wired or wireless).
+             * @param {string} deviceId e.g., 'light_kitchen'
+             * @param {string} state e.g., 'ON', 'OFF'
+             */
+            async setDeviceState(deviceId, state) {
+                // Simulate state change locally
+                deviceState.sensors[deviceId] = state;
+                const docRef = this.getPrivateDocRef('devices', deviceId);
+                await setDoc(docRef, { state, lastUpdated: new Date().toISOString() }, { merge: true });
+                return this.simulateCall({ success: true, newState: state });
+            }
+
+            /**
+             * POST /api/v1/automation/robot/{robotId}/command
+             * Sends a command to an automation robot (e.g., vacuum, lawnmower).
+             * @param {string} robotId e.g., 'robot_vacuum'
+             * @param {string} command e.g., 'START', 'PAUSE', 'RETURN_TO_BASE'
+             */
+            async sendRobotCommand(robotId, command) {
+                // Simulate robot interaction and status update
+                deviceState.sensors[robotId] = command === 'START' ? 'CLEANING' : (command === 'RETURN_TO_BASE' ? 'DOCKED' : 'PAUSED');
+                return this.simulateCall({ success: true, status: deviceState.sensors[robotId] });
+            }
+
+            // --- 2. RENEWABLE ENERGY ENDPOINTS ---
+
+            /**
+             * GET /api/v1/energy/dashboard
+             * Retrieves overall renewable energy status and flow metrics.
+             */
+            getEnergyMetrics() {
+                // This data might be stored publicly/globally or privately depending on the use case.
+                return this.simulateCall({
+                    ...deviceState.energy
+                });
+            }
+
+            /**
+             * POST /api/v1/energy/battery/set_reserve
+             * Sets the battery reserve percentage for grid independence.
+             * @param {number} percent
+             */
+            async setBatteryReserve(percent) {
+                // In a real app, update battery reserve via inverter API call
+                const docRef = this.getPrivateDocRef('energy_config', 'settings');
+                await updateDoc(docRef, { reserve: percent });
+                return this.simulateCall({ success: true, newReserve: percent });
+            }
+
+            // --- 3. FITNESS ENDPOINTS ---
+
+            /**
+             * GET /api/v1/fitness/indoor/{deviceId}/status
+             * Retrieves real-time metrics from indoor fitness equipment.
+             */
+            getFitnessStatus(deviceId = 'bike_pro') {
+                return this.simulateCall({
+                    ...deviceState.fitness[deviceId]
+                });
+            }
+
+            /**
+             * POST /api/v1/fitness/indoor/{deviceId}/start_workout
+             * Starts or pauses a fitness workout session.
+             * @param {string} deviceId
+             * @param {string} action e.g., 'START', 'PAUSE', 'STOP'
+             */
+            async controlWorkout(deviceId, action) {
+                deviceState.fitness[deviceId].status = action === 'STOP' ? 'IDLE' : (action === 'START' ? 'ACTIVE' : 'PAUSED');
+                // Simulate immediate high-speed data if starting
+                if (action === 'START') {
+                    deviceState.fitness[deviceId].speed_kmh = 28.5;
+                    deviceState.fitness[deviceId].cadence_rpm = 90;
+                    deviceState.fitness[deviceId].heart_rate_bpm = 145;
+                } else if (action === 'STOP') {
+                    deviceState.fitness[deviceId].speed_kmh = 0;
+                    deviceState.fitness[deviceId].cadence_rpm = 0;
+                    deviceState.fitness[deviceId].heart_rate_bpm = 75;
+                }
+                const docRef = this.getPrivateDocRef('fitness_status', deviceId);
+                await setDoc(docRef, deviceState.fitness[deviceId], { merge: true });
+
+                return this.simulateCall({ success: true, newStatus: deviceState.fitness[deviceId].status });
+            }
+
+            // --- 4. AUTOMOTIVE ENDPOINTS ---
+
+            /**
+             * GET /api/v1/auto/charger/status
+             * Retrieves the current EV charging status and configuration.
+             */
+            getAutomotiveStatus() {
+                return this.simulateCall({
+                    ...deviceState.automotive
+                });
+            }
+
+            /**
+             * POST /api/v1/auto/charger/control
+             * Starts, stops, or sets the charging limit.
+             * @param {string} action e.g., 'START_CHARGE', 'STOP_CHARGE', 'SET_LIMIT'
+             * @param {number} [limit] e.g., 80
+             */
+            async controlCharger(action, limit = null) {
+                let message = `Action ${action} executed.`;
+                if (action === 'START_CHARGE') {
+                    deviceState.automotive.charger_status = 'CHARGING';
+                    deviceState.automotive.charging_rate_kw = 120; // Simulating fast charging
+                    message = "EV Fast Charging started!";
+                } else if (action === 'STOP_CHARGE') {
+                    deviceState.automotive.charger_status = 'PLUGGED_IN';
+                    deviceState.automotive.charging_rate_kw = 0;
+                    message = "EV Charging stopped.";
+                } else if (action === 'SET_LIMIT' && limit !== null) {
+                    deviceState.automotive.target_limit = limit;
+                    message = `Target charge limit set to ${limit}%.`;
+                }
+
+                const docRef = this.getPrivateDocRef('automotive_status', 'ev_charger');
+                await setDoc(docRef, deviceState.automotive, { merge: true });
+
+                return this.simulateCall({ success: true, message: message });
+            }
+
+            // --- 5. TEXT-TO-SPEECH (TTS) - FOR FEEDBACK ---
+            /**
+             * POST /api/v1/tts/generate
+             * Generates audio data for a given text prompt using Kore voice.
+             */
+            async generateTTS(text) {
+                const systemPrompt = "Say cheerfully: " + text;
+                const apiKey = ""
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`;
+
+                const payload = {
+                    contents: [{
+                        parts: [{ text: systemPrompt }]
+                    }],
+                    generationConfig: {
+                        responseModalities: ["AUDIO"],
+                        speechConfig: {
+                            voiceConfig: {
+                                prebuiltVoiceConfig: { voiceName: "Kore" }
+                            }
+                        }
+                    },
+                    model: "gemini-2.5-flash-preview-tts"
+                };
+
+                // Simple exponential backoff implementation for API call
+                const MAX_RETRIES = 3;
+                for (let i = 0; i < MAX_RETRIES; i++) {
+                    try {
+                        const response = await fetch(apiUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+
+                        if (!response.ok) {
+                            throw new Error(`TTS API failed with status: ${response.status}`);
+                        }
+
+                        const result = await response.json();
+                        const part = result?.candidates?.[0]?.content?.parts?.[0];
+                        const audioData = part?.inlineData?.data;
+                        const mimeType = part?.inlineData?.mimeType;
+
+                        if (audioData && mimeType && mimeType.startsWith("audio/")) {
+                            const sampleRateMatch = mimeType.match(/rate=(\d+)/);
+                            const sampleRate = sampleRateMatch ? parseInt(sampleRateMatch[1], 10) : 16000;
+                            const pcmData = base64ToArrayBuffer(audioData);
+                            const pcm16 = new Int16Array(pcmData);
+                            const wavBlob = pcmToWav(pcm16, sampleRate);
+                            return URL.createObjectURL(wavBlob);
+                        } else {
+                            throw new Error("TTS response missing audio data.");
+                        }
+
+                    } catch (error) {
+                        console.error(`Attempt ${i + 1} failed:`, error);
+                        if (i < MAX_RETRIES - 1) {
+                            await new Promise(res => setTimeout(res, Math.pow(2, i) * 1000)); // Exponential delay
+                        } else {
+                            throw new Error("Failed to generate TTS audio after multiple retries.");
+                        }
+                    }
+                }
+            }
+
+            // --- Public function to play TTS feedback ---
+            async playTTSFeedback(text) {
+                try {
+                    const audioUrl = await this.generateTTS(text);
+                    const audio = new Audio(audioUrl);
+                    audio.play();
+                } catch (error) {
+                    console.error("Could not play TTS feedback:", error);
+                    // Fallback to visual only
+                    showModal("TTS Error", `Could not generate voice feedback. Message: "${text}"`, true);
+                }
+            }
+        }
+
+        let api; // Instance of SmartHomeAPI will be stored here
+
+        // --- DASHBOARD RENDERING LOGIC ---
+
+        const renderSensorsDashboard = () => {
+            const sensors = deviceState.sensors;
+            const content = `
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                    <!-- Environmental Sensors (Wired/Wireless) -->
+                    <div class="p-6 bg-surface-dark rounded-xl shadow-lg card">
+                        <h2 class="text-xl font-semibold mb-4 text-primary">Environmental Sensors</h2>
+                        <div class="space-y-4">
+                            ${sensorCard('Temperature (Living)', 'wi-thermometer text-red-400', `${sensors.temp_living}°C`, 'Current Indoor Temp')}
+                            ${sensorCard('Humidity (Bedroom)', 'wi-humidity text-blue-400', `${sensors.humidity_bedroom}%`, 'Current Indoor Humidity')}
+                            ${sensorCard('Hall Motion', sensors.motion_hall === 'MOTION_DETECTED' ? 'wi-day-sunny-overcast text-yellow-500' : 'wi-moon-alt-waxing-crescent-1 text-gray-400', sensors.motion_hall.replace('_', ' '), 'Last Detected Event')}
+                        </div>
+                    </div>
+
+                    <!-- Home Automation Robot Control -->
+                    <div class="p-6 bg-surface-dark rounded-xl shadow-lg card">
+                        <h2 class="text-xl font-semibold mb-4 text-primary">Automation Robot Control</h2>
+                        <div class="flex flex-col space-y-4">
+                            ${robotCard('Robot Vacuum', 'fas fa-robot text-teal-400', sensors.robot_vacuum)}
+                            <div class="flex space-x-2">
+                                <button onclick="handleRobotCommand('robot_vacuum', 'START')" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-3 rounded-lg transition text-sm">Start Clean</button>
+                                <button onclick="handleRobotCommand('robot_vacuum', 'PAUSE')" class="flex-1 bg-yellow-600 hover:bg-yellow-700 text-white font-semibold py-3 rounded-lg transition text-sm">Pause</button>
+                                <button onclick="handleRobotCommand('robot_vacuum', 'RETURN_TO_BASE')" class="flex-1 bg-red-600 hover:bg-red-700 text-white font-semibold py-3 rounded-lg transition text-sm">Dock</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Wired/Wireless Light Control (Example of Automation) -->
+                    <div class="md:col-span-2 p-6 bg-surface-dark rounded-xl shadow-lg card">
+                        <h2 class="text-xl font-semibold mb-4 text-primary">Wired/Wireless Light Control</h2>
+                        <div class="flex justify-between items-center p-4 bg-surface-light rounded-lg shadow-md">
+                            <div class="flex items-center space-x-3">
+                                <span class="text-2xl ${sensors.light_kitchen === 'ON' ? 'text-yellow-400' : 'text-gray-500'}">💡</span>
+                                <span class="text-lg font-medium">Kitchen Overhead Light (Wired)</span>
+                            </div>
+                            <button onclick="toggleDeviceState('light_kitchen', '${sensors.light_kitchen}')"
+                                    class="px-4 py-2 rounded-full font-bold transition
+                                    ${sensors.light_kitchen === 'ON' ? 'bg-yellow-500 hover:bg-yellow-600 text-black' : 'bg-gray-600 hover:bg-gray-500 text-white'}">
+                                ${sensors.light_kitchen === 'ON' ? 'Turn OFF' : 'Turn ON'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.getElementById('dashboard-content').innerHTML = content;
+        };
+
+        const renderEnergyDashboard = () => {
+            const energy = deviceState.energy;
+            const automotive = deviceState.automotive;
+            const content = `
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- Solar Production Card -->
+                    ${dataCard('Solar Production', `${energy.solar_production_kw} kW`, 'Current generation', 'wi-solar-panel text-yellow-500')}
+
+                    <!-- Home Battery Card -->
+                    ${dataCard('Home Battery', `${energy.battery_percent}%`, 'State of Charge', 'fas fa-battery-half text-green-500', `Current Status: ${energy.grid_status}`)}
+
+                    <!-- Grid Status Card -->
+                    <div class="md:col-span-2 p-6 bg-surface-dark rounded-xl shadow-lg card">
+                        <h2 class="text-xl font-semibold mb-4 text-primary">Grid & System Flow</h2>
+                        <div class="flex flex-col space-y-4">
+                            <p class="text-gray-400">Current Grid Operation: <span class="font-bold text-white">${energy.grid_status}</span></p>
+                            <div class="flex items-center justify-between p-4 bg-surface-light rounded-lg shadow-md">
+                                <label for="reserve-slider" class="text-lg font-medium">Battery Reserve: ${automotive.target_limit}%</label>
+                                <input type="range" id="reserve-slider" min="10" max="90" value="${automotive.target_limit}" class="w-2/3 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-lg"
+                                    oninput="document.getElementById('battery-reserve-value').textContent=this.value + '%'">
+                                <span id="battery-reserve-value" class="w-12 text-right">${automotive.target_limit}%</span>
+                            </div>
+                            <button onclick="handleSetBatteryReserve()" class="w-full bg-primary hover:bg-indigo-700 text-white font-semibold py-3 rounded-lg transition">Set Reserve Limit</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.getElementById('dashboard-content').innerHTML = content;
+        };
+
+        const renderFitnessDashboard = () => {
+            const bike = deviceState.fitness.bike_pro;
+            const is_active = bike.status === 'ACTIVE';
+            const content = `
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                    <!-- Indoor Fitness Device Status -->
+                    <div class="md:col-span-2 p-6 bg-surface-dark rounded-xl shadow-lg card">
+                        <h2 class="text-xl font-semibold mb-4 text-primary">Indoor Bike Pro Status</h2>
+                        <div class="flex justify-between items-center p-4 ${is_active ? 'bg-green-800/20 border border-green-700' : 'bg-surface-light'} rounded-lg shadow-md mb-4">
+                            <div class="flex items-center space-x-3">
+                                <span class="text-3xl">🚴</span>
+                                <span class="text-lg font-medium">${is_active ? 'Workout ACTIVE' : 'Device IDLE'}</span>
+                            </div>
+                            <button onclick="handleWorkoutControl('${is_active ? 'STOP' : 'START'}')"
+                                    class="px-6 py-3 rounded-lg font-bold transition
+                                    ${is_active ? 'bg-red-500 hover:bg-red-600' : 'bg-primary hover:bg-indigo-700'} text-white">
+                                ${is_active ? 'STOP Workout' : 'START Workout'}
+                            </button>
+                        </div>
+
+                        <h3 class="text-lg font-semibold mb-3 text-gray-300">Real-Time Metrics</h3>
+                        <div class="grid grid-cols-2 gap-4">
+                            ${dataCard('Speed', `${bike.speed_kmh.toFixed(1)} km/h`, 'Current Speed', 'fas fa-tachometer-alt text-yellow-400', is_active ? 'Real-Time' : 'Last Session')}
+                            ${dataCard('Cadence', `${bike.cadence_rpm} RPM`, 'Pedal Revolutions', 'fas fa-sync-alt text-orange-400', is_active ? 'Real-Time' : 'N/A')}
+                            ${dataCard('Heart Rate', `${bike.heart_rate_bpm} BPM`, 'Current Heart Rate', 'fas fa-heartbeat text-red-500', is_active ? 'Via Chest Strap' : 'N/A')}
+                            ${dataCard('Total Distance', `${bike.distance_km.toFixed(1)} km`, 'All-Time Distance', 'fas fa-road text-gray-400', 'Lifetime Metric')}
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.getElementById('dashboard-content').innerHTML = content;
+        };
+
+        const renderAutomotiveDashboard = () => {
+            const auto = deviceState.automotive;
+            const is_charging = auto.charger_status === 'CHARGING';
+            const status_color = auto.charger_status === 'CHARGING' ? 'text-green-500' : (auto.charger_status === 'PLUGGED_IN' ? 'text-yellow-500' : 'text-red-500');
+
+            const content = `
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                    <!-- Charging Status Card (Fast Charging Capability) -->
+                    <div class="p-6 bg-surface-dark rounded-xl shadow-lg card md:col-span-2">
+                        <h2 class="text-xl font-semibold mb-4 text-primary">EV Fast Charging Terminal</h2>
+                        <div class="flex justify-between items-center p-4 ${is_charging ? 'bg-green-800/20 border border-green-700' : 'bg-surface-light'} rounded-lg shadow-md mb-4">
+                            <div class="flex items-center space-x-3">
+                                <span class="text-3xl ${status_color}">🔌</span>
+                                <span class="text-xl font-medium">Status: ${auto.charger_status.replace('_', ' ')}</span>
+                            </div>
+                            <span class="text-lg font-semibold ${is_charging ? 'text-green-400' : 'text-gray-400'}">${is_charging ? auto.charging_rate_kw + ' kW' : 'Ready'}</span>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4 mt-4">
+                            ${dataCard('Current EV Battery', `${auto.ev_battery_percent}%`, 'State of Charge', 'fas fa-car-battery text-blue-400')}
+                            ${dataCard('Target Limit', `${auto.target_limit}%`, 'Set Charging Cap', 'fas fa-percentage text-purple-400')}
+                        </div>
+                    </div>
+
+                    <!-- Charging Controls -->
+                    <div class="p-6 bg-surface-dark rounded-xl shadow-lg card">
+                        <h2 class="text-xl font-semibold mb-4 text-primary">Charge Control</h2>
+                        <div class="space-y-3">
+                            <button onclick="handleChargerControl('START_CHARGE')"
+                                class="w-full py-3 rounded-lg font-bold transition ${auto.charger_status === 'CHARGING' ? 'bg-gray-700 text-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700 text-white'}"
+                                ${auto.charger_status === 'CHARGING' ? 'disabled' : ''}>
+                                Start Fast Charge
+                            </button>
+                            <button onclick="handleChargerControl('STOP_CHARGE')"
+                                class="w-full py-3 rounded-lg font-bold transition ${auto.charger_status !== 'CHARGING' ? 'bg-gray-700 text-gray-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700 text-white'}"
+                                ${auto.charger_status !== 'CHARGING' ? 'disabled' : ''}>
+                                Stop Charge
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Limit Setter -->
+                    <div class="p-6 bg-surface-dark rounded-xl shadow-lg card">
+                        <h2 class="text-xl font-semibold mb-4 text-primary">Set Charge Limit</h2>
+                        <div class="flex flex-col space-y-4">
+                            <div class="flex items-center justify-between">
+                                <label for="charge-limit-slider" class="text-lg font-medium">Limit: ${auto.target_limit}%</label>
+                                <input type="range" id="charge-limit-slider" min="50" max="100" step="5" value="${auto.target_limit}" class="w-2/3 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer range-lg"
+                                    oninput="document.getElementById('charge-limit-value').textContent=this.value + '%'">
+                                <span id="charge-limit-value" class="w-12 text-right">${auto.target_limit}%</span>
+                            </div>
+                            <button onclick="handleChargerControl('SET_LIMIT', document.getElementById('charge-limit-slider').value)" class="w-full bg-primary hover:bg-indigo-700 text-white font-semibold py-3 rounded-lg transition">Update Limit</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.getElementById('dashboard-content').innerHTML = content;
+        };
+
+
+        // --- UI COMPONENT TEMPLATES ---
+
+        const dataCard = (title, value, description, iconClass, footerText = '') => `
+            <div class="p-4 bg-surface-light rounded-xl shadow-lg flex flex-col space-y-2 card">
+                <div class="flex items-center justify-between">
+                    <div class="text-lg font-semibold">${title}</div>
+                    <i class="${iconClass} text-2xl"></i>
+                </div>
+                <div class="text-3xl font-extrabold text-white">${value}</div>
+                <div class="text-xs text-gray-400">${description}</div>
+                ${footerText ? `<div class="text-xs text-primary pt-1 border-t border-gray-600">${footerText}</div>` : ''}
+            </div>
+        `;
+
+        const sensorCard = (title, iconClass, value, description) => `
+            <div class="flex justify-between items-center p-3 bg-surface-light rounded-lg shadow-md">
+                <div class="flex items-center space-x-3">
+                    <!-- Placeholder icon since font-awesome/weather icons are not loaded -->
+                    <span class="text-2xl">${title.includes('Temp') ? '🌡️' : (title.includes('Humidity') ? '💧' : '🏃')}</span>
+                    <div>
+                        <div class="text-sm font-medium">${title}</div>
+                        <div class="text-xs text-gray-400">${description}</div>
+                    </div>
+                </div>
+                <div class="text-lg font-bold">${value}</div>
+            </div>
+        `;
+
+        const robotCard = (title, iconClass, status) => `
+            <div class="flex items-center justify-between p-3 bg-surface-light rounded-lg shadow-md">
+                <div class="flex items-center space-x-3">
+                    <span class="text-2xl">🤖</span>
+                    <div>
+                        <div class="text-sm font-medium">${title}</div>
+                    </div>
+                </div>
+                <span class="px-3 py-1 rounded-full text-xs font-semibold ${status === 'CLEANING' ? 'bg-green-500 text-white' : (status === 'DOCKED' ? 'bg-gray-500 text-white' : 'bg-yellow-500 text-black')}">${status}</span>
+            </div>
+        `;
+
+        // --- HANDLER FUNCTIONS ---
+
+        const loadDashboard = (tab) => {
+            console.log(`Loading dashboard for tab: ${tab}`);
+            // Update active button styling
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                if (btn.getAttribute('data-tab') === tab) {
+                    btn.classList.add('bg-primary', 'text-white', 'shadow-lg');
+                    btn.classList.remove('text-gray-400', 'hover:bg-surface-light');
+                } else {
+                    btn.classList.remove('bg-primary', 'text-white', 'shadow-lg');
+                    btn.classList.add('text-gray-400', 'hover:bg-surface-light');
+                }
+            });
+
+            currentTab = tab;
+            const contentDiv = document.getElementById('dashboard-content');
+            contentDiv.innerHTML = '<div class="text-center p-16 text-primary"><i class="fas fa-spinner fa-spin text-4xl mb-3"></i><p>Fetching real-time data...</p></div>';
+
+            // Fetch data and render
+            // Note: For this simulation, we re-fetch all mock state, but in a real app,
+            // we'd use Firestore listeners (onSnapshot) for real-time updates.
+            api.getSensorStatus().then(() => {
+                if (tab === 'sensors') renderSensorsDashboard();
+                else if (tab === 'energy') renderEnergyDashboard();
+                else if (tab === 'fitness') renderFitnessDashboard();
+                else if (tab === 'automotive') renderAutomotiveDashboard();
+            }).catch(error => {
+                contentDiv.innerHTML = `<div class="text-center p-16 text-red-500">Error loading data: ${error.message}</div>`;
+                console.error("Dashboard load error:", error);
+            });
+        };
+
+        // Event listeners for tabs
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => loadDashboard(btn.getAttribute('data-tab')));
+        });
+
+        // --- DEVICE ACTION HANDLERS ---
+
+        window.toggleDeviceState = async (deviceId, currentState) => {
+            const newState = currentState === 'ON' ? 'OFF' : 'ON';
+            try {
+                await api.setDeviceState(deviceId, newState);
+                await api.playTTSFeedback(`${deviceId.replace('_', ' ')} is now ${newState}.`);
+                showModal("Device Update", `${deviceId.replace('_', ' ')} successfully set to ${newState}.`);
+                loadDashboard(currentTab); // Re-render to show new state
+            } catch (error) {
+                showModal("Control Error", `Failed to set device state: ${error.message}`, true);
+            }
+        };
+
+        window.handleRobotCommand = async (robotId, command) => {
+            try {
+                const result = await api.sendRobotCommand(robotId, command);
+                await api.playTTSFeedback(`Robot status is now ${result.status}.`);
+                showModal("Robot Command Sent", `Robot is now ${result.status}.`);
+                loadDashboard(currentTab);
+            } catch (error) {
+                showModal("Command Error", `Failed to send command: ${error.message}`, true);
+            }
+        };
+
+        window.handleSetBatteryReserve = async () => {
+            const reserve = parseInt(document.getElementById('reserve-slider').value);
+            try {
+                await api.setBatteryReserve(reserve);
+                await api.playTTSFeedback(`Battery reserve set to ${reserve} percent.`);
+                showModal("Energy Settings Updated", `Home battery reserve successfully set to ${reserve}%.`);
+                loadDashboard(currentTab);
+            } catch (error) {
+                showModal("Update Error", `Failed to set battery reserve: ${error.message}`, true);
+            }
+        };
+
+        window.handleWorkoutControl = async (action) => {
+            try {
+                const result = await api.controlWorkout('bike_pro', action);
+                const msg = action === 'START' ? 'Workout started' : 'Workout stopped';
+                await api.playTTSFeedback(msg);
+                showModal("Fitness Update", `${msg}. New status: ${result.newStatus}`);
+                loadDashboard(currentTab);
+            } catch (error) {
+                showModal("Control Error", `Failed to control workout: ${error.message}`, true);
+            }
+        };
+
+        window.handleChargerControl = async (action, limit = null) => {
+            try {
+                const result = await api.controlCharger(action, limit);
+                if (action === 'START_CHARGE') {
+                    await api.playTTSFeedback(`Fast Charging sequence initiated. Charging at 120 kilowatts.`);
+                } else if (action === 'STOP_CHARGE') {
+                    await api.playTTSFeedback(`Charging terminated.`);
+                } else if (action === 'SET_LIMIT') {
+                    await api.playTTSFeedback(`Charge limit successfully updated to ${limit} percent.`);
+                }
+                showModal("Automotive Control", result.message);
+                loadDashboard(currentTab);
+            } catch (error) {
+                showModal("Control Error", `Failed to control charger: ${error.message}`, true);
+            }
+        };
+
+
+        // --- INITIALIZATION ---
+        window.onload = () => {
+            initializeFirebase().then(() => {
+                // Initialize the API object after Firebase Auth has completed and userId is set
+                api = new SmartHomeAPI(db, userId);
+
+                // Set up a mock interval to change some sensor data to simulate real-time updates
+                setInterval(() => {
+                    // Simulate temperature fluctuation
+                    deviceState.sensors.temp_living = (22.0 + Math.random()).toFixed(1);
+                    // Simulate charging rate if active
+                    if (deviceState.automotive.charger_status === 'CHARGING') {
+                        deviceState.automotive.ev_battery_percent = Math.min(100, deviceState.automotive.ev_battery_percent + 1);
+                        deviceState.automotive.charging_rate_kw = (100 + Math.random() * 50).toFixed(0); // 100-150kW fast charge
+                        if (deviceState.automotive.ev_battery_percent >= deviceState.automotive.target_limit) {
+                            deviceState.automotive.charger_status = 'PLUGGED_IN';
+                            deviceState.automotive.charging_rate_kw = 0;
+                            api.playTTSFeedback("EV charge limit reached. Charging has stopped.");
+                        }
+                    }
+                    // Re-render the current tab periodically to show state changes
+                    loadDashboard(currentTab);
+                }, 5000); // Update every 5 seconds
+            });
+        };
+    </script>
+</body>
+</html>
+
