@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Treasure Finder | Gemini Proximity Radar</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Lucide Icons -->
+    <script type="module" src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <style>
+        /* Global Font */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        :root {
+            --primary: #4f46e5; /* Indigo-600 */
+            --accent: #10b981; /* Emerald-500 */
+            font-family: 'Inter', sans-serif;
+        }
+
+        /* Custom glow effect for the radar */
+        .radar-glow {
+            box-shadow: 0 0 10px var(--accent), 0 0 20px var(--accent), 0 0 40px rgba(16, 185, 129, 0.5);
+            border: 2px solid var(--accent);
+            animation: pulse 2s infinite ease-in-out;
+        }
+
+        /* Custom glow for meters */
+        .meter-glow {
+            box-shadow: 0 0 5px #facc15, 0 0 10px #facc15; /* Yellow/Amber glow */
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.02); opacity: 0.95; }
+        }
+
+        /* Custom spinner for loading state */
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-left-color: var(--accent);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Utility classes for the UI */
+        .card {
+            background-color: #1f2937; /* Dark slate */
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+        }
+
+        .btn-primary {
+            background-color: var(--primary);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+        .btn-primary:hover {
+            background-color: #4338ca;
+            box-shadow: 0 0 10px var(--primary);
+        }
+
+        /* Metal detector bar styling */
+        #proximity-bar {
+            transition: width 0.5s ease-out;
+            height: 100%;
+            border-radius: 6px;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen p-4 flex items-center justify-center">
+
+    <div class="w-full max-w-5xl space-y-8">
+        <header class="text-center">
+            <h1 class="text-4xl font-extrabold text-white tracking-wider">
+                <span class="text-indigo-400">GEMINI</span> PROXIMITY RADAR
+            </h1>
+            <p class="text-gray-400 mt-1">Simulated Treasure & Anomaly Detection System</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+            <!-- COLUMN 1: INTERFACE & INPUTS -->
+            <div class="lg:col-span-1 space-y-6">
+
+                <!-- Detection Console -->
+                <div class="card">
+                    <h2 class="text-xl font-bold mb-4 flex items-center text-indigo-300">
+                        <i data-lucide="scan-line" class="w-5 h-5 mr-2"></i>
+                        SEARCH TARGET
+                    </h2>
+                    <form id="treasure-form" class="space-y-4">
+                        <textarea id="search-query"
+                                  placeholder="e.g., The Lost City of El Dorado, The Crown Jewels of King Edward, Sunken Pirate Ship Gold..."
+                                  rows="3"
+                                  class="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-sm text-white focus:ring-indigo-500 focus:border-indigo-500"
+                                  required></textarea>
+
+                        <button type="submit" id="search-button" class="btn-primary w-full flex items-center justify-center disabled:opacity-50" disabled>
+                            <i data-lucide="search" class="w-5 h-5 mr-2"></i>
+                            Analyze & Scan Area
+                        </button>
+                        <p id="auth-status" class="text-xs text-center text-yellow-500">
+                            Initializing System...
+                        </p>
+                    </form>
+                </div>
+
+                <!-- Detector Status -->
+                <div class="card">
+                    <h2 class="text-xl font-bold mb-4 flex items-center text-amber-300">
+                        <i data-lucide="magnet" class="w-5 h-5 mr-2"></i>
+                        PROXIMITY DETECTOR
+                    </h2>
+                    <div class="space-y-3">
+                        <div>
+                            <p class="text-sm font-medium mb-1 text-gray-400">Metal Signature Strength:</p>
+                            <div class="w-full h-8 bg-gray-700 rounded-lg overflow-hidden meter-glow">
+                                <div id="proximity-bar" class="h-full bg-red-600" style="width: 0%"></div>
+                            </div>
+                            <p id="proximity-value" class="text-right text-xs mt-1 font-mono">0%</p>
+                        </div>
+                        <div>
+                            <p class="text-sm font-medium mb-1 text-gray-400">Signal Anomaly:</p>
+                            <p id="anomaly-reading" class="text-xl font-mono text-green-400">STABLE (0.00 Hz)</p>
+                        </div>
+                        <div>
+                            <p class="text-sm font-medium mb-1 text-gray-400">Target Coordinates:</p>
+                            <p id="target-coords" class="text-sm font-mono text-cyan-400">N/A (SEARCH REQUIRED)</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- COLUMN 2 & 3: MAP/RADAR & CLUE OUTPUT -->
+            <div class="lg:col-span-2 space-y-6">
+                <!-- Map / Radar View -->
+                <div class="card p-0 h-96 lg:h-[400px] overflow-hidden flex flex-col">
+                    <div class="p-4 bg-gray-800 border-b border-gray-700 flex justify-between items-center">
+                        <span class="text-lg font-mono text-gray-300">AREA SCANNER V2.1</span>
+                        <span id="scan-status" class="text-sm text-emerald-400 flex items-center">
+                            <i data-lucide="monitor-dot" class="w-4 h-4 mr-1 text-red-500 animate-pulse" id="status-light"></i>
+                            AWAITING TARGET
+                        </span>
+                    </div>
+                    <div id="map-simulation" class="flex-grow bg-gray-900 flex items-center justify-center relative radar-glow">
+                        <!-- Simulated Map Image Placeholder -->
+                        <img src="https://placehold.co/800x400/1E293B/9CA3AF?text=SIMULATED+SATELLITE+VIEW"
+                             alt="Simulated Satellite Map"
+                             class="w-full h-full object-cover opacity-50"
+                             onerror="this.onerror=null;this.src='https://placehold.co/800x400/1E293B/9CA3AF?text=MAP+VIEW+OFFLINE'" />
+
+                        <!-- Simulated Radar Pulse -->
+                        <div class="absolute inset-0 flex items-center justify-center">
+                            <div id="radar-pulse" class="w-0 h-0 bg-green-500/50 rounded-full" style="transition: all 1s;"></div>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- Clue Output -->
+                <div class="card">
+                    <h2 class="text-xl font-bold mb-4 flex items-center text-teal-300">
+                        <i data-lucide="message-square-text" class="w-5 h-5 mr-2"></i>
+                        GEMINI CLUE ORACLE
+                    </h2>
+                    <div id="clue-output" class="min-h-[100px] text-gray-300 text-base italic">
+                        The Oracle sleeps. Define a target and press 'Analyze & Scan Area' to awaken the knowledge of ancient treasures.
+                    </div>
+                    <div id="loading-indicator" class="hidden flex items-center justify-center pt-4">
+                        <div class="spinner mr-3"></div>
+                        <span class="text-yellow-400">Decoding cryptic signals...</span>
+                    </div>
+                    <div id="error-message" class="text-red-500 pt-2 hidden"></div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script type="module">
+        // --- Firebase/Auth Setup (MANDATORY for LLM/Data Storage) ---
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Constants and Globals
+        const apiKey = ""; // API Key is provided by Canvas environment
+        const modelUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+        const authStatusElement = document.getElementById('auth-status');
+        const searchButton = document.getElementById('search-button');
+        const searchForm = document.getElementById('treasure-form');
+        const searchQueryInput = document.getElementById('search-query');
+        const clueOutput = document.getElementById('clue-output');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const errorMessage = document.getElementById('error-message');
+        const proximityBar = document.getElementById('proximity-bar');
+        const proximityValue = document.getElementById('proximity-value');
+        const anomalyReading = document.getElementById('anomaly-reading');
+        const targetCoords = document.getElementById('target-coords');
+        const scanStatus = document.getElementById('scan-status');
+        const statusLight = document.getElementById('status-light');
+        const radarPulse = document.getElementById('radar-pulse');
+
+        let isAuthReady = false;
+        let auth, userId;
+        setLogLevel('Debug');
+
+        // --- Auth Initialization ---
+        const initializeAuth = async () => {
+            try {
+                // Global variables are provided by the canvas environment
+                const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+                const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                userId = auth.currentUser?.uid || 'anonymous-user';
+                isAuthReady = true;
+                authStatusElement.textContent = `System online. User ID: ${userId.substring(0, 8)}...`;
+                searchButton.disabled = false;
+                console.log("Firebase Auth Ready. User ID:", userId);
+            } catch (error) {
+                console.error("Error during Firebase initialization:", error);
+                authStatusElement.textContent = 'ERROR: Initialization failed. Check console.';
+                errorMessage.textContent = 'System initialization failed. Cannot connect to Oracle.';
+                errorMessage.style.display = 'block';
+            }
+        };
+        initializeAuth();
+
+        // --- LLM API Call Function (Handles exponential backoff) ---
+        const callGeminiApi = async (prompt, systemInstruction) => {
+            const payload = {
+                contents: [{ parts: [{ text: prompt }] }],
+                systemInstruction: { parts: [{ text: systemInstruction }] },
+                // Note: No tools/search grounding for fictional clues
+            };
+
+            let attempts = 0;
+            const maxAttempts = 5;
+
+            while (attempts < maxAttempts) {
+                try {
+                    const response = await fetch(modelUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        if (response.status === 429) { // Rate limit error
+                            throw new Error('Rate limit exceeded (429).');
+                        }
+                        const errorData = await response.json();
+                        throw new Error(`API error: ${response.statusText}. Details: ${JSON.stringify(errorData)}`);
+                    }
+
+                    const result = await response.json();
+                    return result.candidates?.[0]?.content?.parts?.[0]?.text || "Oracle failed to deliver a clear message.";
+
+                } catch (error) {
+                    attempts++;
+                    if (attempts >= maxAttempts) {
+                        console.error("Gemini API call failed after multiple retries.", error);
+                        throw new Error('Could not connect to the Oracle for clues.');
+                    }
+                    // Exponential backoff
+                    const delay = Math.pow(2, attempts) * 1000 + Math.random() * 1000;
+                    console.warn(`Attempt ${attempts} failed. Retrying in ${delay}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+        };
+
+        // --- Metal Detector Simulation Logic ---
+        const simulateDetector = (query) => {
+            // Simple simulation: based on query length/content, set a random proximity score
+            const hash = query.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+            const seed = hash % 100;
+            
+            // Generate a proximity score between 0 and 99
+            const proximity = Math.floor(Math.random() * 80) + (seed % 20); // Ensures at least a minor reading
+            const proximityPercent = Math.min(proximity, 99); // Max 99%
+
+            // Update UI
+            proximityBar.style.width = `${proximityPercent}%`;
+            proximityBar.className = proximityBar.className.split(' ').filter(c => !c.startsWith('bg-')).join(' ');
+            if (proximityPercent > 75) {
+                proximityBar.classList.add('bg-red-600');
+            } else if (proximityPercent > 50) {
+                proximityBar.classList.add('bg-orange-500');
+            } else if (proximityPercent > 25) {
+                proximityBar.classList.add('bg-yellow-500');
+            } else {
+                proximityBar.classList.add('bg-green-500');
+            }
+
+            proximityValue.textContent = `${proximityPercent}%`;
+
+            // Anomaly/Coordinate Simulation
+            const anomaly = (Math.random() * 20).toFixed(2);
+            anomalyReading.textContent = `ACTIVE (${anomaly} Hz)`;
+
+            const lat = (Math.random() * 180 - 90).toFixed(4);
+            const lon = (Math.random() * 360 - 180).toFixed(4);
+            targetCoords.textContent = `${lat}° N, ${lon}° W`;
+
+            // Radar Pulse Animation
+            radarPulse.style.width = '0%';
+            radarPulse.style.height = '0%';
+            radarPulse.style.opacity = '1';
+            setTimeout(() => {
+                radarPulse.style.width = '100%';
+                radarPulse.style.height = '100%';
+                radarPulse.style.opacity = '0';
+            }, 50); // Small delay to reset before transition starts
+        };
+
+
+        // --- Main Form Submission Handler ---
+        searchForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!isAuthReady || searchButton.disabled) return;
+
+            const query = searchQueryInput.value.trim();
+            if (!query) return;
+
+            searchButton.disabled = true;
+            loadingIndicator.style.display = 'flex';
+            clueOutput.textContent = '';
+            errorMessage.style.display = 'none';
+
+            // UI updates for scanning status
+            scanStatus.textContent = 'SCANNING...';
+            statusLight.classList.remove('text-red-500');
+            statusLight.classList.add('text-yellow-500', 'animate-pulse');
+
+            // 1. Run the metal detector simulation
+            simulateDetector(query);
+
+            // 2. Call the Gemini Oracle for the clue
+            const systemPrompt = "Act as a cryptic, mystical, ancient Oracle who guards the secrets of hidden treasures. Your response must be a single, short paragraph (3-4 sentences max). Provide a poetic, intriguing clue about the user's requested treasure, but DO NOT reveal its exact location, coordinates, or modern name. Use metaphors and historical hints.";
+
+            try {
+                const clue = await callGeminiApi(`The user seeks the treasure of: ${query}`, systemPrompt);
+                clueOutput.textContent = clue;
+                scanStatus.textContent = 'TARGET LOCKED';
+                statusLight.classList.remove('text-yellow-500');
+                statusLight.classList.add('text-emerald-500', 'animate-pulse');
+
+            } catch (error) {
+                clueOutput.textContent = 'Oracle connection interrupted. The secrets remain hidden...';
+                errorMessage.textContent = error.message;
+                errorMessage.style.display = 'block';
+                scanStatus.textContent = 'ERROR';
+                statusLight.classList.remove('text-yellow-500');
+                statusLight.classList.add('text-red-500', 'animate-pulse');
+            } finally {
+                loadingIndicator.style.display = 'none';
+                searchButton.disabled = false;
+            }
+        });
+
+        // Initialize Lucide icons
+        window.onload = () => {
+             lucide.createIcons();
+             searchButton.disabled = false; // Enable button once page loads and auth starts
+             scanStatus.textContent = 'READY';
+             statusLight.classList.remove('animate-pulse');
+             statusLight.classList.add('text-green-500');
+        };
+
+    </script>
+</body>
+</html>
+
