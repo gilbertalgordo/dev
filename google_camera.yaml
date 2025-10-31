@@ -1,0 +1,64 @@
+// In your Activity or Fragment
+
+private fun startCamera() {
+    val cameraProviderFuture = ProcessCameraProvider.getInstance(requireContext())
+
+    cameraProviderFuture.addListener({
+        // Used to bind the lifecycle of cameras to the lifecycle owner
+        val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
+
+        // Preview
+        val preview = Preview.Builder()
+            .build()
+            .also {
+                it.setSurfaceProvider(viewFinder.surfaceProvider) // viewFinder is a PreviewView
+            }
+
+        // Image capture Use Case
+        imageCapture = ImageCapture.Builder()
+            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+            .build()
+        
+        // Image analysis Use Case (where you'd implement custom algorithms)
+        val imageAnalyzer = ImageAnalysis.Builder()
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_LATEST)
+            .build()
+            .also {
+                it.setAnalyzer(cameraExecutor, YourCustomAnalyzer()) // YourCustomAnalyzer holds the medical/military logic
+            }
+
+        // Select back camera as a default
+        val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+        try {
+            // Unbind all use cases before rebinding
+            cameraProvider.unbindAll()
+
+            // Bind use cases to camera
+            cameraProvider.bindToLifecycle(
+                this, cameraSelector, preview, imageCapture, imageAnalyzer)
+
+        } catch(exc: Exception) {
+            Log.e(TAG, "Use case binding failed", exc)
+        }
+
+    }, ContextCompat.getMainExecutor(requireContext()))
+}
+
+// YourCustomAnalyzer class for processing frames in real-time
+class YourCustomAnalyzer : ImageAnalysis.Analyzer {
+    @SuppressLint("UnsafeOptInUsageError")
+    override fun analyze(imageProxy: ImageProxy) {
+        val mediaImage = imageProxy.image
+        if (mediaImage != null) {
+            // **THIS is where you would integrate advanced computer vision (OpenCV) or AI (TensorFlow Lite) logic**
+            // For example:
+            // 1. Convert mediaImage to a format suitable for processing (e.g., a Bitmap or byte array).
+            // 2. Apply a medical-grade color correction or a military-specific thermal filter.
+            // 3. Perform AI object detection for CCTV.
+
+            Log.d(TAG, "Image format: ${imageProxy.format}")
+        }
+        imageProxy.close() // MUST call this to free the buffer
+    }
+}
