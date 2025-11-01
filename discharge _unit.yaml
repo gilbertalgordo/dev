@@ -1,0 +1,196 @@
+#include <avr/io.h>
+#include <util/delay.h>
+
+// Define I/O pins
+#define LOAD_CONTROL_PORT   PORTB
+#define LOAD_CONTROL_DDR    DDRB
+#define LOAD_CONTROL_PIN    PB0    // Pin to control the MOSFET/Relay (Active HIGH to keep load ON)
+
+#define CURRENT_SENSE_ADC   0      // ADC Channel 0 (e.g., connected to PC0)
+
+// Define your fault thresholds
+#define OVERCURRENT_THRESHOLD 500  // Example ADC value (0-1023) for fault
+
+void setup_io() {
+    // Set Load Control Pin as Output
+    LOAD_CONTROL_DDR |= (1 << LOAD_CONTROL_PIN);
+    // Start with load ON
+    LOAD_CONTROL_PORT |= (1 << LOAD_CONTROL_PIN);
+}
+
+void setup_adc() {
+    // Configure ADC: AVcc with external capacitor at AREF, Left-Adjusted Result
+    ADMUX = (1 << REFS0);
+    // Enable ADC, set prescaler (e.g., /64), and start first conversion
+    ADCSRA = (1 << ADEN) | (1 << ADPS2) | (1 << ADPS1);
+}
+
+uint16_t read_adc(uint8_t channel) {
+    // Select ADC Channel
+    ADMUX = (ADMUX & 0xF0) | (channel & 0x0F);
+    // Start conversion
+    ADCSRA |= (1 << ADSC);
+    // Wait for conversion to complete
+    while (ADCSRA & (1 << ADSC));
+    // Read and return the 10-bit result
+    return ADC;
+}
+
+void discharge_load() {
+    // 💥 CRITICAL ACTION: Discharge/Disconnect the Load 💥
+    LOAD_CONTROL_PORT &= ~(1 << LOAD_CONTROL_PIN); 
+    // This will de-energize the relay or turn OFF the MOSFET, 
+    // effectively disconnecting the main power from the load.
+    
+    // Optionally: Blink an LED, log the fault, or trigger an alarm
+}
+
+
+int main() {
+    setup_io();
+    setup_adc();
+
+    while (1) {
+        uint16_t current_reading = read_adc(CURRENT_SENSE_ADC);
+
+        if (current_reading > OVERCURRENT_THRESHOLD) {
+            // Fault detected!
+            discharge_load();
+            
+            // Critical loop for a persistent fault: 
+            // The microcontroller stays here, keeping the load discharged.
+            while(1) {
+                // You might add code here to try to re-enable the load only after a manual reset
+                _delay_ms(1000); 
+            }
+        }
+        
+        // Normal operation loop
+        _delay_ms(100); 
+    }
+    return 0;
+}
+
+
+
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <util/delay.h>
+
+// --- Configuration ---
+#define LOAD_CONTROL_PIN    PD2        // Digital Pin D2 (PD2) for Load Control
+#define FAULT_LED_PIN       PB5        // Pin B5 (LED) for fault indication
+#define CURRENT_SENSE_ADC   0          // ADC Channel 0 (PC0)
+
+// Thresholds for the 10-bit ADC (0-1023)
+#define OVER_THRESHOLD      750        // Overcurrent/Overvoltage Trip
+#define UNDER_THRESHOLD     100        // Undervoltage Trip
+
+// --- Failsafe Functions ---
+
+// Function to immediately disconnect and signal the fault
+void discharge_load_critical() {
+    // 1. Immediately disconnect the load (Failsafe: Active LOW = Disconnect)
+    PORTD &= ~(1 << LOAD_CONTROL_PIN); 
+    
+    // 2. Set Fault LED and signal
+    PORTB |= (1 << FAULT_LED_PIN);
+
+    // 3. Disable all peripherals/interrupts to stabilize (optional but good practice)
+    cli(); 
+    // You might want to halt here or enter a low-power mode after saving fault logs.
+    // For this example, we will stay in a loop.
+    
+    // Critical Loop (Load remains OFF until external reset or restart logic)
+    while (1) {
+        _delay_ms(500);
+        PORTB ^= (1 << FAULT_LED_PIN); // Blink LED
+    }
+}
+
+// --- Initialisation ---
+
+void setup_peripherals() {
+    // 1. I/O Setup
+    DDRD |= (1 << LOAD_CONTROL_PIN);   // Set Load Control as Output
+    DDRB |= (1 << FAULT_LED_PIN);      // Set Fault LED as Output
+    
+    // Start with load ON (Assuming active HIGH to keep ON)
+    PORTD |= (1 << LOAD_CONTROL_PIN); 
+
+    // 2. ADC Setup (Free Running Mode for continuous checks)
+    ADMUX = (1 << REFS0) | CURRENT_SENSE_ADC; // VCC as Ref, select channel
+    ADCSRA = (1 << ADEN) | (1 << ADSC) | (1 << ADATE) | (1 << ADIF) | (1 << ADIE) | (1 << ADPS2) | (1 << ADPS1); 
+    // ADEN: Enable ADC
+    // ADSC: Start Conversion (first one)
+    // ADATE: Auto Trigger Enable (Free Running)
+    // ADIE: ADC Interrupt Enable (Triggered on conversion complete)
+
+    // 3. External Interrupt Setup (INT0 - PD2 is a common choice, but we used it for load control, 
+    // let's use INT1 on PD3 for a real-time hardware trip line)
+    
+    // EICRA: Configure INT1 (PD3) for FALLING edge (immediate trigger)
+    EICRA |= (1 << ISC11); 
+    EICRA &= ~(1 << ISC10); 
+    // EIMSK: Enable External Interrupt 1
+    EIMSK |= (1 << INT1); 
+}
+
+// --- Interrupt Service Routines (ISRs) ---
+
+// 1. External Hardware Trip Interrupt (Highest priority, fastest response)
+ISR(INT1_vect) {
+    // This interrupt is triggered instantly by a dedicated hardware trip signal
+    discharge_load_critical(); 
+}
+
+// 2. ADC Conversion Complete Interrupt (Software-defined fault check)
+ISR(ADC_vect) {
+    uint16_t adc_value = ADC;
+
+    // Check for Over- or Under- limits
+    if (adc_value > OVER_THRESHOLD || adc_value < UNDER_THRESHOLD) {
+        discharge_load_critical();
+    }
+}
+
+// --- Main Program ---
+
+int main() {
+    setup_peripherals();
+    
+    // Enable Global Interrupts
+    sei(); 
+
+    // The main loop does very little, as all critical checks run on interrupts.
+    while (1) {
+        // You could add non-critical tasks here, like communication or display updates.
+        _delay_ms(100); 
+    }
+    return 0;
+}
+
+
+// --- Watchdog Timer Implementation (Add to main.c) ---
+#include <avr/wdt.h>
+
+void setup_wdt() {
+    // Set WDT to trigger a system reset after ~1 second
+    wdt_enable(WDTO_1S);
+}
+
+// In main():
+int main() {
+    setup_peripherals();
+    setup_wdt(); // Enable the watchdog timer
+    sei();
+
+    while (1) {
+        // Feed the dog! Must be called often enough to prevent reset.
+        wdt_reset(); 
+        
+        // Non-critical tasks...
+        _delay_ms(100); 
+    }
+    return 0;
+}
