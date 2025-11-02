@@ -1,0 +1,220 @@
+import numpy as np
+import cv2
+import time
+from typing import Tuple
+
+# Assume: Camera is calibrated. 'K' is the Intrinsic Matrix.
+# R_world_cam and t_world_cam are the Extrinsic parameters.
+CAMERA_MATRIX = np.array([[1000, 0, 320], [0, 1000, 240], [0, 0, 1]]) # Example K
+
+def detect_meteorite(image_data: np.ndarray) -> Tuple[bool, np.ndarray, float]:
+    """
+    Simulates advanced detection (e.g., using a CNN model) and 
+    returns normalized pixel coordinates and estimated depth.
+    """
+    # 1. Preprocessing (e.g., color correction, noise reduction)
+    processed_image = cv2.GaussianBlur(image_data, (5, 5), 0)
+    
+    # 2. Advanced Detection (Placeholder for a Deep Learning Model/Color-Segmentation)
+    # For a real system, replace this with a TensorFlow/PyTorch model inference.
+    
+    # Simulate finding a unique, dark/metallic object (meteorite)
+    # Simple color thresholding for illustration:
+    hsv = cv2.cvtColor(processed_image, cv2.COLOR_BGR2HSV)
+    # Assuming meteorites are often darker/more saturated than surrounding rock/soil
+    lower_bound = np.array([0, 0, 0])
+    upper_bound = np.array([180, 255, 60]) 
+    mask = cv2.inRange(hsv, lower_bound, upper_bound)
+    
+    # Find the largest contour (assuming it's the meteorite)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    if not contours:
+        return False, np.array([0, 0]), 0.0
+
+    # Get the bounding box of the largest contour
+    largest_contour = max(contours, key=cv2.contourArea)
+    x, y, w, h = cv2.boundingRect(largest_contour)
+    
+    # Calculate the centroid (normalized pixel coordinates)
+    u_pixel, v_pixel = x + w // 2, y + h // 2
+
+    # 3. Depth Estimation (Placeholder: Real system uses Stereo/LiDAR data)
+    # Estimate a constant distance for demonstration
+    estimated_depth_m = 3.5  # Assume 3.5 meters away
+    
+    # Normalize coordinates (from pixel space to camera frame)
+    u_normalized = (u_pixel - CAMERA_MATRIX[0, 2]) / CAMERA_MATRIX[0, 0]
+    v_normalized = (v_pixel - CAMERA_MATRIX[1, 2]) / CAMERA_MATRIX[1, 1]
+    
+    target_normalized_coords = np.array([u_normalized, v_normalized])
+    
+    return True, target_normalized_coords, estimated_depth_m
+
+def pixel_to_3d_world(normalized_coords: np.ndarray, depth: float) -> np.ndarray:
+    """Converts normalized camera coordinates and depth to a world-frame target."""
+    # Camera-frame coordinates (Xc, Yc, Zc)
+    Xc = normalized_coords[0] * depth
+    Yc = normalized_coords[1] * depth
+    Zc = depth # Zc is the depth along the camera Z-axis
+    
+    P_camera = np.array([Xc, Yc, Zc, 1])
+    
+    # Real-world system would use a Transformation Matrix (T_world_camera)
+    # to convert P_camera to P_world. This is a simplified placeholder.
+    # We assume a fixed drone position (0, 0, -5) relative to the meteorite field.
+    
+    # Simple drone-local coordinate system: X=forward, Y=right, Z=down
+    P_world = np.array([Zc, -Xc, -Yc]) # Simplified rotation (e.g., Z-forward, X-right, Y-down)
+    
+    # Add an offset to account for the drone's position (e.g., 5m above the ground)
+    P_world += np.array([0, 0, -5.0]) 
+    
+    print(f"Target Local Position (X, Y, Z): {P_world}")
+    return P_world
+
+# --- Main Logic Example ---
+# Load a dummy image (replace with actual camera feed)
+dummy_image = np.zeros((480, 640, 3), dtype=np.uint8)
+# Simulate a meteorite at the center-right of the image
+cv2.circle(dummy_image, (400, 240), 10, (10, 10, 10), -1) 
+
+print("--- Starting Meteorite Scan Cycle ---")
+found, norm_coords, depth = detect_meteorite(dummy_image)
+
+if found:
+    print(f"Meteorite Detected at Normalized Coords: {norm_coords}, Depth: {depth}m")
+    target_waypoint = pixel_to_3d_world(norm_coords, depth)
+    
+    # Send this target_waypoint to the flight controller (e.g., via MAVLink)
+    # send_waypoint_command(target_waypoint) 
+    print(f"Target Waypoint Sent: {target_waypoint}")
+else:
+    print("No target found. Continuing search pattern.")
+
+
+
+// Header file inclusions for the flight controller OS and hardware abstraction layer (HAL)
+#include <hal/gpio.h>
+#include <math.h>
+
+// --- Definitions for the Harvesting Tool Actuators ---
+#define GRIPPER_SERVO_PIN   GPIO_PIN_PB1
+#define ARM_ELBOW_MOTOR_PIN PWM_PIN_PC2
+#define ARM_BASE_MOTOR_PIN  PWM_PIN_PC3
+
+// --- System State Definitions ---
+typedef enum {
+    TOOL_IDLE,          // Arm is stowed, awaiting command
+    TOOL_DEPLOYING,     // Arm is moving to the pre-target position
+    TOOL_ALIGNING,      // Fine adjustments near the meteorite (Vision feedback)
+    TOOL_GRASPING,      // Gripper is closing
+    TOOL_RETRACTING,    // Arm is moving back to the stowed position
+    TOOL_ERROR          // Emergency state
+} ToolState_t;
+
+// --- Global Control Variables ---
+ToolState_t current_tool_state = TOOL_IDLE;
+
+// Structure to hold PID controller gains for position control
+typedef struct {
+    float Kp;
+    float Ki;
+    float Kd;
+    float integral;
+    float prev_error;
+} PID_Controller_t;
+
+// --- PID Implementation ---
+float compute_pid(PID_Controller_t *pid, float setpoint, float current_value, float dt) {
+    float error = setpoint - current_value;
+    pid->integral += error * dt;
+    float derivative = (error - pid->prev_error) / dt;
+    
+    // Anti-windup safeguard
+    if (pid->integral > 10.0f) pid->integral = 10.0f;
+    if (pid->integral < -10.0f) pid->integral = -10.0f;
+
+    float output = pid->Kp * error + pid->Ki * pid->integral + pid->Kd * derivative;
+    
+    pid->prev_error = error;
+    return output;
+}
+
+// --- Tool Motor Control Function ---
+void set_arm_motor_power(int motor_pin, float power) {
+    // This is a placeholder for setting PWM duty cycle or CAN bus command
+    // power is a value between -1.0 and 1.0
+    // HAL_set_pwm_duty_cycle(motor_pin, (int)(power * 1000)); 
+}
+
+// --- Main State Machine Logic ---
+void tool_control_loop(float target_x, float target_y, float target_z, float dt) {
+    static float current_arm_x = 0.0f; // Simplified current position
+    PID_Controller_t arm_x_pid = {0.5f, 0.01f, 0.1f, 0.0f, 0.0f}; // Example PID gains
+
+    switch (current_tool_state) {
+        
+        case TOOL_IDLE:
+            // Check for new mission command from the companion computer
+            if (is_new_command_available()) {
+                current_tool_state = TOOL_DEPLOYING;
+                // Set initial target for deployment
+            }
+            break;
+            
+        case TOOL_DEPLOYING:
+            // 1. Move arm to a safe, pre-grasping position
+            float x_command = compute_pid(&arm_x_pid, target_x, current_arm_x, dt);
+            set_arm_motor_power(ARM_ELBOW_MOTOR_PIN, x_command);
+
+            // current_arm_x is updated by sensor feedback (e.g., encoders)
+            // current_arm_x = read_encoder_value_x();
+
+            if (fabs(target_x - current_arm_x) < 0.01f) {
+                current_tool_state = TOOL_ALIGNING;
+            }
+            break;
+            
+        case TOOL_ALIGNING:
+            // **Advanced Step:** Use visual servoing (data from Python) 
+            // to adjust the final few centimeters.
+            // Example: Small correction vector received from vision system
+            // current_arm_x += visual_correction_vector.x;
+            
+            // If the drone is stable and aligned:
+            if (is_drone_stable() && is_arm_aligned()) {
+                current_tool_state = TOOL_GRASPING;
+            }
+            break;
+            
+        case TOOL_GRASPING:
+            // 1. Send command to close the gripper
+            // HAL_set_gpio(GRIPPER_SERVO_PIN, GRIPPER_CLOSE_POS);
+
+            // 2. Check for "grasp confirmation" (e.g., torque/force sensor spike)
+            if (is_grasp_confirmed()) {
+                current_tool_state = TOOL_RETRACTING;
+            } else if (get_gripper_force() > GRASP_TIMEOUT_FORCE) {
+                // Too much force indicates a jam or too large object, abort
+                current_tool_state = TOOL_ERROR;
+            }
+            break;
+            
+        case TOOL_RETRACTING:
+            // Move arm back to the initial, stowed position safely
+            // set_arm_motor_power(ARM_ELBOW_MOTOR_PIN, -1.0f); // Fast retraction
+            
+            if (is_arm_stowed()) {
+                // Inform the flight controller to change payload mass
+                // set_new_payload_mass(get_current_payload_mass() + METEORITE_MASS);
+                current_tool_state = TOOL_IDLE; 
+            }
+            break;
+
+        case TOOL_ERROR:
+            // Log error, secure the arm, and await manual override or restart.
+            // ... error handling logic ...
+            break;
+    }
+}
