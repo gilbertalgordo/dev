@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Single-Entry Access Control</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+        // Import Firebase modules
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // Use the global variables provided by the Canvas environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db;
+        let auth;
+        let userId = null;
+        let ticketsCollectionRef = null;
+
+        // --- Utility Functions ---
+
+        // Function to set the visual feedback (Green/Red/Info)
+        function setFeedback(message, type = 'info') {
+            const feedbackEl = document.getElementById('feedback-message');
+            const iconEl = document.getElementById('feedback-icon');
+            
+            feedbackEl.textContent = message;
+            feedbackEl.className = 'text-center font-bold p-4 rounded-xl transition-colors duration-500';
+            iconEl.className = 'w-16 h-16 mx-auto mb-4';
+
+            let bgColor = 'bg-gray-200 text-gray-800';
+            let iconSvg = '';
+
+            switch (type) {
+                case 'success':
+                    bgColor = 'bg-green-100 text-green-700 shadow-lg shadow-green-300/50';
+                    iconSvg = `<svg class="w-full h-full text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`;
+                    break;
+                case 'error':
+                    bgColor = 'bg-red-100 text-red-700 shadow-lg shadow-red-300/50';
+                    iconSvg = `<svg class="w-full h-full text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`;
+                    break;
+                default: // info
+                    bgColor = 'bg-blue-100 text-blue-700';
+                    iconSvg = `<svg class="w-full h-full text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`;
+                    break;
+            }
+            feedbackEl.className += ` ${bgColor}`;
+            iconEl.innerHTML = iconSvg;
+        }
+        
+        function showLoading(isLoading) {
+            document.getElementById('loading-spinner').classList.toggle('hidden', !isLoading);
+            document.getElementById('register-button').disabled = isLoading;
+            document.getElementById('check-button').disabled = isLoading;
+        }
+
+        // --- Firebase Setup and Authentication ---
+        if (firebaseConfig) {
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+
+            // Authentication listener
+            onAuthStateChanged(auth, async (user) => {
+                if (user) {
+                    userId = user.uid;
+                    document.getElementById('user-id-display').textContent = userId;
+                    // Path: /artifacts/{appId}/users/{userId}/{your_collection_name}
+                    ticketsCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/tickets`);
+                    setFeedback("System Ready. Register a ticket ID or scan one for entry.", 'info');
+                } else {
+                    setFeedback("Authenticating...", 'info');
+                    if (initialAuthToken) {
+                        try {
+                            await signInWithCustomToken(auth, initialAuthToken);
+                        } catch (error) {
+                            console.error("Error signing in with custom token:", error);
+                            // Fallback to anonymous sign-in if custom token fails
+                            await signInAnonymously(auth);
+                        }
+                    } else {
+                        // Sign in anonymously if no token is available
+                        await signInAnonymously(auth);
+                    }
+                }
+            });
+        } else {
+            setFeedback("Firebase Configuration is missing. Cannot initialize database.", 'error');
+            console.error("Firebase config is required but missing.");
+        }
+
+        // --- Core Application Logic ---
+
+        // 1. Register a new ticket ID
+        window.registerTicket = async function() {
+            if (!ticketsCollectionRef) {
+                setFeedback("System not initialized. Please wait.", 'error');
+                return;
+            }
+
+            const ticketId = document.getElementById('ticket-input').value.trim();
+            if (!ticketId) {
+                setFeedback("Please enter a Ticket ID to register.", 'info');
+                return;
+            }
+            
+            showLoading(true);
+            try {
+                const ticketRef = doc(ticketsCollectionRef, ticketId);
+                const docSnap = await getDoc(ticketRef);
+
+                if (docSnap.exists()) {
+                    setFeedback(`Ticket ID "${ticketId}" already exists. Status: ${docSnap.data().status.toUpperCase()}`, 'info');
+                    return;
+                }
+
+                await setDoc(ticketRef, { 
+                    status: 'valid', 
+                    registeredAt: new Date().toISOString() 
+                });
+                
+                setFeedback(`SUCCESS: Ticket ID "${ticketId}" registered as 'valid'. Ready for first entry.`, 'success');
+                document.getElementById('ticket-input').value = ''; // Clear input
+            } catch (e) {
+                console.error("Error registering ticket:", e);
+                setFeedback("ERROR: Failed to register ticket due to a database issue.", 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        // 2. Check ticket for entry
+        window.checkEntry = async function() {
+            if (!ticketsCollectionRef) {
+                setFeedback("System not initialized. Please wait.", 'error');
+                return;
+            }
+
+            const ticketId = document.getElementById('ticket-input').value.trim();
+            if (!ticketId) {
+                setFeedback("Please enter a Ticket ID to check entry.", 'info');
+                return;
+            }
+            
+            showLoading(true);
+
+            try {
+                const ticketRef = doc(ticketsCollectionRef, ticketId);
+                const docSnap = await getDoc(ticketRef);
+
+                if (!docSnap.exists()) {
+                    // Refusal 1: Invalid/Non-existent Ticket
+                    setFeedback(`ENTRY REFUSED: Invalid Ticket ID "${ticketId}". Not found in system.`, 'error');
+                    return;
+                }
+
+                const ticketData = docSnap.data();
+
+                if (ticketData.status === 'valid') {
+                    // Grant Entry & Update Status
+                    await setDoc(ticketRef, { 
+                        ...ticketData, 
+                        status: 'used', 
+                        usedAt: new Date().toISOString(),
+                        usedBy: userId
+                    });
+                    
+                    setFeedback(`ENTRY GRANTED: Ticket ID "${ticketId}" is valid! Status updated to 'used'.`, 'success');
+
+                } else if (ticketData.status === 'used') {
+                    // Refusal 2: Bypass Attempt Detected (Ticket already used)
+                    setFeedback(`ENTRY REFUSED: Ticket ID "${ticketId}" is already USED. Bypass attempt detected.`, 'error');
+                
+                } else {
+                    // Refusal 3: Any other invalid status
+                    setFeedback(`ENTRY REFUSED: Ticket ID "${ticketId}" has an unknown status: ${ticketData.status.toUpperCase()}.`, 'error');
+                }
+
+                document.getElementById('ticket-input').value = ''; // Clear input
+
+            } catch (e) {
+                console.error("Error checking entry:", e);
+                setFeedback("ERROR: Failed to check entry due to a database issue.", 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        // Handle Enter keypress on the input field
+        document.addEventListener('DOMContentLoaded', () => {
+            const ticketInput = document.getElementById('ticket-input');
+            ticketInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    document.getElementById('check-button').click();
+                }
+            });
+        });
+
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fb;
+        }
+        .container-shadow {
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+        button {
+            transition: all 0.3s ease;
+            transform: translate(0);
+        }
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8 min-h-screen flex items-center justify-center">
+
+    <div class="w-full max-w-lg bg-white p-6 md:p-10 rounded-2xl container-shadow">
+        <h1 class="text-3xl font-extrabold text-center text-gray-800 mb-6">Access Control Validator</h1>
+        <p class="text-sm text-center text-gray-500 mb-8">System ID: <span id="user-id-display" class="font-mono text-xs bg-gray-100 p-1 rounded">...loading userId...</span></p>
+
+        <!-- Ticket Input Area -->
+        <div class="mb-8">
+            <label for="ticket-input" class="block text-lg font-semibold text-gray-700 mb-2">Ticket ID / Vehicle ID</label>
+            <input type="text" id="ticket-input" 
+                   placeholder="Enter or scan ticket ID..." 
+                   class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-lg"
+                   autocomplete="off" required>
+        </div>
+
+        <!-- Feedback Display Area -->
+        <div id="feedback-area" class="min-h-[160px] flex flex-col justify-center items-center p-4 mb-8 bg-gray-50 rounded-xl border border-gray-200">
+            <div id="loading-spinner" class="hidden">
+                <div class="w-8 h-8 border-4 border-indigo-200 border-t-indigo-500 rounded-full animate-spin"></div>
+            </div>
+            <div id="feedback-icon" class="w-16 h-16 mx-auto mb-4">
+                <!-- SVG Icon will be injected here -->
+            </div>
+            <p id="feedback-message" class="text-center font-bold text-gray-700 p-4 rounded-xl">
+                Initializing access system...
+            </p>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="flex flex-col space-y-4">
+            <button id="check-button" onclick="checkEntry()" 
+                    class="flex items-center justify-center bg-indigo-600 text-white font-bold py-3 px-6 rounded-xl text-lg hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-500 focus:ring-opacity-50">
+                <svg class="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path></svg>
+                CHECK ENTRY / SCAN TICKET
+            </button>
+            <button id="register-button" onclick="registerTicket()" 
+                    class="bg-gray-200 text-gray-700 font-bold py-3 px-6 rounded-xl text-lg hover:bg-gray-300 focus:outline-none focus:ring-4 focus:ring-gray-400 focus:ring-opacity-50">
+                <svg class="w-6 h-6 mr-2 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                REGISTER NEW TICKET (Admin)
+            </button>
+        </div>
+        
+    </div>
+
+</body>
+</html>
+
