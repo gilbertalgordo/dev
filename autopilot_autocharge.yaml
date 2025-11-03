@@ -1,0 +1,229 @@
+# Simplified Self-Driving Control Loop (Pseudo-Code)
+class AutonomousController:
+    def __init__(self):
+        self.current_speed = 0
+        self.target_speed = 0
+        self.steering_angle = 0
+
+    def process_sensor_data(self, camera_data, lidar_data):
+        # 1. Perception: Detect lanes, obstacles, and traffic signs
+        lanes = self.detect_lanes(camera_data)
+        obstacles = self.detect_obstacles(lidar_data)
+        return lanes, obstacles
+
+    def path_planning(self, destination, current_pos, lanes, obstacles):
+        # 2. Planning: Determine a safe, legal trajectory
+        if self.is_obstacle_ahead(obstacles):
+            self.target_speed = 0 # Emergency Stop
+            self.steering_angle = self.calculate_evasive_maneuver(obstacles)
+        elif self.is_off_lane(lanes):
+            self.target_speed = 20
+            self.steering_angle = self.calculate_lane_correction(lanes)
+        else:
+            # Follow target speed and trajectory
+            self.target_speed = 50
+            self.steering_angle = self.calculate_smooth_turn(current_pos, destination)
+
+    def execute_control(self):
+        # 3. Control: Send commands to actuators (PID Controller used here conceptually)
+        acceleration = self.pid_speed_control(self.target_speed, self.current_speed)
+        
+        # Actuate steering and throttle/brake
+        send_to_actuators(
+            steering_command=self.steering_angle,
+            acceleration_command=acceleration
+        )
+
+# Main Loop (Highly simplified)
+controller = AutonomousController()
+while True:
+    data = acquire_sensor_data()
+    lanes, obstacles = controller.process_sensor_data(data['camera'], data['lidar'])
+    controller.path_planning(data['map_destination'], data['gps_location'], lanes, obstacles)
+    controller.execute_control()
+
+
+
+# Simplified Drone Altitude Controller (Conceptual PID Logic)
+class PIDController:
+    def __init__(self, Kp, Ki, Kd):
+        self.Kp = Kp  # Proportional gain
+        self.Ki = Ki  # Integral gain
+        self.Kd = Kd  # Derivative gain
+        self.integral = 0
+        self.previous_error = 0
+
+    def calculate(self, setpoint, measured_value, dt):
+        error = setpoint - measured_value
+        
+        # Proportional term
+        P_out = self.Kp * error
+        
+        # Integral term
+        self.integral += error * dt
+        I_out = self.Ki * self.integral
+        
+        # Derivative term
+        derivative = (error - self.previous_error) / dt
+        D_out = self.Kd * derivative
+        
+        # Save error for next cycle
+        self.previous_error = error
+        
+        # The output is the control signal (e.g., motor thrust)
+        return P_out + I_out + D_out
+
+# Altitude Control Example
+PID_ALTITUDE = PIDController(Kp=0.5, Ki=0.01, Kd=0.1)
+TARGET_ALTITUDE = 10.0  # meters
+TIME_STEP = 0.01 # seconds
+
+def update_drone_thrust(current_altitude):
+    thrust_correction = PID_ALTITUDE.calculate(
+        setpoint=TARGET_ALTITUDE, 
+        measured_value=current_altitude, 
+        dt=TIME_STEP
+    )
+    
+    base_thrust = 500  # Thrust needed to hover
+    new_motor_thrust = base_thrust + thrust_correction
+    
+    # Send new_motor_thrust to the drone's flight controller
+    # control_motors(new_motor_thrust)
+    return new_motor_thrust
+
+
+
+# Simplified Self-Charging Logic
+def check_charging_status(battery_level_percent, current_location):
+    LOW_BATTERY_THRESHOLD = 20  # %
+    
+    if battery_level_percent < LOW_BATTERY_THRESHOLD:
+        print("CRITICAL: Battery low. Initiating search for charging station.")
+        # Find the nearest charging station/dock
+        charging_station = find_nearest_charging_location(current_location)
+        
+        if charging_station:
+            # Set the charging station as the new destination
+            set_navigation_target(charging_station)
+            return "NAVIGATING_TO_CHARGE"
+        else:
+            # Initiate emergency landing or power-down sequence
+            return "EMERGENCY_POWER_DOWN"
+            
+    elif battery_level_percent < 50:
+        # If running low and near a known charging area, top up
+        if is_near_frequent_charge_spot(current_location):
+            return "IDLE_CHARGING_SUGGESTED"
+            
+    return "OPERATIONAL"
+
+# Example Usage:
+# status = check_charging_status(15, (40.71, -74.01))
+# print(f"System Status: {status}")
+
+
+
+// C++ Pseudo-Code for Model Predictive Control (MPC)
+
+// State vector (x, y, heading, velocity, acceleration)
+typedef Eigen::VectorXd StateVector; 
+
+// Input vector (steering angle delta, throttle/brake)
+typedef Eigen::VectorXd InputVector; 
+
+class MPC_Controller {
+private:
+    // P-matrix: State Transition Model (Vehicle Dynamics)
+    // Q-matrix: Cost on State Error (e.g., deviation from target lane/trajectory)
+    // R-matrix: Cost on Input Change (e.g., aggressive steering/acceleration)
+    
+public:
+    InputVector solve_optimization(const StateVector& current_state, 
+                                 const Trajectory& target_trajectory, 
+                                 double lookahead_time_s) {
+        
+        // 1. Define the Cost Function (J)
+        // Minimize: SUM [ (State_Error^T * Q * State_Error) + (Input_Change^T * R * Input_Change) ]
+        
+        // 2. Define Constraints
+        // - Kinematic/Dynamic model constraints (how the vehicle moves)
+        // - Safety constraints (must not collide with detected obstacles)
+        // - Physical constraints (max_throttle, max_steering_rate, etc.)
+        
+        // 3. Solve the Non-linear Optimization Problem (e.g., using IPOPT or OSQP library)
+        // Finds the optimal sequence of control inputs (U*) over the horizon.
+        Optimal_Inputs U_star = NMPC_Solver(CostFunction_J, Constraints);
+        
+        // 4. Implement only the FIRST optimal input
+        InputVector first_input = U_star.at(0);
+        return first_input;
+    }
+};
+
+// Main loop would call:
+// InputVector control_command = mpc.solve_optimization(current_state, path, 1.5);
+// send_to_actuators(control_command.steering_delta, control_command.throttle);
+
+
+
+# Python Pseudo-Code for Kalman Filter SOC Estimation
+
+class KalmanFilterBMS:
+    def __init__(self, process_noise, measure_noise):
+        # 1. State: SOC (State of Charge)
+        self.soc_estimate = 0.5 
+        # 2. Uncertainty (Covariance)
+        self.P_covariance = 1.0
+        # Noise parameters (tuned through extensive testing)
+        self.Q = process_noise  # How fast the state can change (coulomb counting error)
+        self.R = measure_noise  # How noisy the voltage measurement is
+
+    def predict(self, current_coulombs, dt):
+        """Estimate next SOC based on current draw (Coulomb Counting)."""
+        # A_matrix (State transition): Since SOC is linear over short time, A ≈ 1
+        
+        # B_matrix (Control input): current * dt / capacity
+        soc_change = (current_coulombs * dt) / BATTERY_CAPACITY_AH
+        
+        self.soc_estimate += soc_change
+        self.P_covariance += self.Q  # Increase uncertainty over time
+
+    def update(self, measured_voltage, measured_temp):
+        """Correct the SOC estimate using a voltage measurement."""
+        # 1. Measurement Function (H):
+        # H is the function that maps the SOC state to the measurable voltage (non-linear OCV-SOC curve)
+        open_circuit_voltage = OCV_LOOKUP(self.soc_estimate, measured_temp)
+        
+        # 2. Kalman Gain (K): Balances trust between prediction and measurement
+        K = self.P_covariance / (self.P_covariance + self.R)
+        
+        # 3. Residual/Innovation: Difference between measured voltage and estimated voltage
+        residual = measured_voltage - open_circuit_voltage
+        
+        # 4. Update State and Uncertainty
+        self.soc_estimate += K * residual
+        self.P_covariance *= (1 - K)
+        
+        return self.soc_estimate
+
+# High-Level Self-Charging Decision Logic
+def self_charge_planner(soc_percent, nav_range_km, current_location):
+    SAFETY_BUFFER_KM = 50.0 
+    CRITICAL_SOC = 0.15 
+    
+    estimated_range = nav_range_km * (soc_percent / 100.0)
+
+    if soc_percent < CRITICAL_SOC or estimated_range < SAFETY_BUFFER_KM:
+        # Initiate A* or RRT* search for the nearest compatible charging station
+        nearest_station = find_optimal_charging_point(current_location)
+        
+        if nearest_station:
+            # Command the autonomous system to navigate to the charging point
+            return "INITIATE_CHARGE_NAVIGATION", nearest_station
+        else:
+            # System Failsafe: Emergency land/dock at nearest safe point
+            return "CRITICAL_FAILSAFE_DOCKING", find_nearest_safe_dock()
+    
+    return "CONTINUE_MISSION", None
+
