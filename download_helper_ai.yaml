@@ -250,3 +250,180 @@ function analyzeFileWithAI(fileName, mimeType, fileSize) {
 // Example usage:
 // const { category, newName } = analyzeFileWithAI(file.name, file.mimeType, file.size);
 // console.log(`AI Suggestion: Category: ${category}, New Name: ${newName}`);
+
+
+
+// ADVANCED BACKEND CODE (Node.js / Express)
+
+// Dependencies: googleapis, express, node-fetch or axios
+const { google } = require('googleapis');
+
+/**
+ * Express Middleware function to stream a Google Drive file via Range headers.
+ * This function secures your API Key and enables Resumable Downloads.
+ */
+module.exports = async (req, res) => {
+    // 1. Authentication Check & Setup
+    // Assume req.user.token is a valid, authenticated Google OAuth access token
+    const accessToken = req.user.token; 
+    const fileId = req.params.fileId;
+    
+    // Initialize Drive client with the user's token
+    const auth = new google.auth.OAuth2();
+    auth.setCredentials({ access_token: accessToken });
+    const drive = google.drive({ version: 'v3', auth });
+
+    try {
+        // 2. Get Metadata for Size & Type
+        const metaResponse = await drive.files.get({ fileId: fileId, fields: 'size,mimeType,name' });
+        const fileSize = parseInt(metaResponse.data.size);
+        const mimeType = metaResponse.data.mimeType;
+        const fileName = metaResponse.data.name;
+
+        // 3. Handle HTTP Range Header (Resumability)
+        const range = req.headers.range;
+        if (!range) {
+            // For simple, non-chunked download (small files)
+            res.setHeader('Content-Length', fileSize);
+            res.status(200);
+        } else {
+            const parts = range.replace(/bytes=/, "").split("-");
+            const start = parseInt(parts[0], 10);
+            const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+            const chunkSize = (end - start) + 1;
+
+            // 4. Set Response Headers for Chunking
+            res.writeHead(206, { // 206 Partial Content
+                'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+                'Accept-Ranges': 'bytes',
+                'Content-Length': chunkSize,
+                'Content-Type': mimeType,
+            });
+        }
+        
+        // 5. Request the specific byte range from Google Drive
+        const downloadRequest = await drive.files.get({
+            fileId: fileId,
+            alt: 'media',
+            // Pass the Range header directly to the Google Drive API request
+            headers: { 'Range': range || undefined } 
+        }, {
+            responseType: 'stream'
+        });
+
+        // 6. Stream the File to the Client
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+        downloadRequest.data.pipe(res);
+
+    } catch (error) {
+        console.error('Drive Download Error:', error);
+        res.status(500).send('File download failed.');
+    }
+};
+
+// Example Express usage: app.get('/download/:fileId', authMiddleware, module.exports);
+
+
+
+// ADVANCED MOBILE CODE (React Native / Expo)
+import RNFS from 'react-native-fs'; // Requires installation and linking
+// import BackgroundDownloader from 'react-native-background-downloader'; // For true background downloads
+
+const downloadResumableFile = (fileId, fileName, userToken) => {
+    const backendUrl = `YOUR_BACKEND_URL/download/${fileId}`;
+    const destinationPath = `${RNFS.DocumentDirectoryPath}/${fileName}`;
+    
+    // Define the download configuration
+    const options = {
+        fromUrl: backendUrl,
+        toFile: destinationPath,
+        headers: {
+            'Authorization': `Bearer ${userToken}`,
+            // RNFS automatically manages the Range header for resumability
+        },
+        progress: (res) => {
+            const progress = (res.bytesWritten / res.contentLength) * 100;
+            // Update UI state or use a native progress bar
+            // console.log(`Progress: ${progress.toFixed(1)}%`);
+        },
+        progressDivider: 1, // Update progress on every chunk
+        // ... more background-specific options (e.g., resume support on failure)
+    };
+
+    const downloadTask = RNFS.downloadFile(options);
+
+    // AI Concept: Pre-analyze and save AI-derived tags to the device database
+    // saveAITagsToDatabase(fileId, analyzeFileWithAI(fileName, 'mime/type', 1000));
+    
+    return downloadTask.promise;
+};
+
+
+
+// AI HELPER CODE (Backend - Node.js)
+// Dependencies: @google/genai or Google Cloud SDK
+
+const { GoogleGenAI } = require('@google/genai');
+const ai = new GoogleGenAI({ apiKey: 'YOUR_GEMINI_API_KEY' }); // Use secure storage for key
+
+async function getSmartFileNameAndTags(fileId, fileMimeType) {
+    // 1. Fetch a small, clean text sample of the document from Drive
+    // For PDFs/Docs, you might use the Drive Export API or Document AI.
+    
+    let fileContentSnippet = "The file is a large image of type PNG. It appears to be a corporate logo.";
+    if (fileMimeType.includes('pdf') || fileMimeType.includes('document')) {
+        // Placeholder: Actual implementation uses complex Document AI or Drive API export
+        fileContentSnippet = await extractTextSample(fileId, fileMimeType); 
+    }
+
+    // 2. Prompt the Gemini Model
+    const prompt = `Analyze this file snippet and its type: "${fileContentSnippet}". 
+                    Suggest a category and a clean, user-friendly filename (without extension). 
+                    Respond only with a JSON object { "category": "...", "suggestedName": "..." }.`;
+
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt
+    });
+
+    try {
+        // Use regex to extract the JSON object from the potentially conversational response
+        const jsonMatch = response.text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+            return JSON.parse(jsonMatch[0]);
+        }
+    } catch (e) {
+        console.error("AI Response Parsing Error:", e);
+    }
+    
+    return { category: 'Unclassified', suggestedName: 'New Download' };
+}
+
+
+
+// BROWSER EXTENSION CODE (Manifest V3 - service_worker.js)
+
+// 1. Add a context menu item on Google Drive links
+chrome.contextMenus.create({
+    id: "smartDownload",
+    title: "AI Download Helper: Start Chunked Download",
+    contexts: ["link"],
+    targetUrlPatterns: ["*://drive.google.com/*"] // Target GDrive links
+});
+
+// 2. Listener for the context menu click
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+    if (info.menuItemId === "smartDownload") {
+        // Extract the File ID from the link URL
+        const url = new URL(info.linkUrl);
+        const fileId = url.searchParams.get('id');
+
+        if (fileId) {
+            // Hand-off: Redirect the user's current tab to the web app's custom URL scheme
+            // This is the cleanest way to bridge the extension to the web app.
+            const handoffURL = `https://your-webapp.com/download-trigger?fileId=${fileId}&token=USER_SESSION_TOKEN`;
+
+            chrome.tabs.update(tab.id, { url: handoffURL });
+        }
+    }
+});
