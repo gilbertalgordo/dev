@@ -1,0 +1,252 @@
+// --- Prerequisites:
+// 1. You MUST load the Google APIs script in your HTML:
+//    <script src="https://apis.google.com/js/api.js"></script>
+// 2. You MUST have a button to trigger the picker:
+//    <button onclick="authAndOpenPicker()">Select File from Google Drive</button>
+
+// Replace with your actual credentials
+const CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com';
+const API_KEY = 'YOUR_GOOGLE_API_KEY';
+const DISCOVERY_DOCS = ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"];
+const SCOPES = 'https://www.googleapis.com/auth/drive.readonly';
+
+/**
+ * Step 1: Initialize gapi and authorize the user.
+ */
+function authAndOpenPicker() {
+    gapi.load('client:auth2:picker', () => {
+        gapi.client.init({
+            apiKey: API_KEY,
+            clientId: CLIENT_ID,
+            discoveryDocs: DISCOVERY_DOCS,
+            scope: SCOPES
+        }).then(() => {
+            if (gapi.auth2.getAuthInstance().isSignedIn.get()) {
+                createPicker();
+            } else {
+                // If not signed in, sign in and then open the picker
+                gapi.auth2.getAuthInstance().signIn().then(createPicker);
+            }
+        }, function(error) {
+            console.error("Error initializing gapi:", error);
+            alert("Error during authorization. Check console.");
+        });
+    });
+}
+
+/**
+ * Step 2: Create and display the Google Picker.
+ */
+function createPicker() {
+    const accessToken = gapi.auth.getToken().access_token;
+
+    // View to select only documents from Drive
+    const view = new google.picker.View(google.picker.ViewId.DOCS);
+    view.setMimeTypes('image/jpeg,image/png,application/pdf'); // Example: filter by file types
+
+    const picker = new google.picker.PickerBuilder()
+        .setAppId(CLIENT_ID.split('-')[0]) // The App ID is the first part of the Client ID
+        .setOAuthToken(accessToken)
+        .addView(view)
+        .setCallback(pickerCallback)
+        .build();
+    
+    picker.setVisible(true);
+}
+
+/**
+ * Step 3: Handle the selected file and initiate download.
+ */
+function pickerCallback(data) {
+    if (data.action == google.picker.Action.PICKED) {
+        const file = data.docs[0];
+        const fileId = file.id;
+        const fileName = file.name;
+
+        // Use the Drive API to fetch the file content
+        gapi.client.drive.files.get({
+            fileId: fileId,
+            alt: 'media' // 'media' is key for file content
+        }, {
+            responseType: 'blob' // Important: ensures the response is a downloadable Blob
+        }).then(response => {
+            console.log('File fetched successfully:', fileName);
+            // Function to trigger the browser download
+            triggerDownload(response.body, fileName); 
+        }, error => {
+            console.error('Download failed:', error);
+            alert('Failed to download file. See console for details.');
+        });
+    }
+}
+
+/**
+ * Step 4: Generic client-side function to trigger a download.
+ */
+function triggerDownload(dataBlob, filename) {
+    const url = window.URL.createObjectURL(dataBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+}
+
+
+// Server-side code (Node.js/Express)
+
+const { google } = require('googleapis');
+// Assume you have an authenticated Google client ('driveClient') initialized
+// with the necessary credentials and access token.
+
+/**
+ * Handles a chunked file download request from the frontend.
+ * @param {string} fileId - The ID of the Google Drive file.
+ * @param {object} res - Express response object.
+ * @param {string} token - The user's Google Access Token.
+ */
+async function streamFileChunked(fileId, res, token) {
+    // 1. Initialize Drive Client with User's Access Token
+    const auth = new google.auth.OAuth2();
+    auth.setCredentials({ access_token: token });
+    const drive = google.drive({ version: 'v3', auth });
+
+    // 2. Get file metadata to determine file size
+    const meta = await drive.files.get({ fileId: fileId, fields: 'size,mimeType,name' });
+    const fileSize = parseInt(meta.data.size);
+    const mimeType = meta.data.mimeType;
+    const fileName = meta.data.name;
+
+    // 3. Handle Range Header (for resumable downloads)
+    const range = req.headers.range;
+    if (!range) {
+        // Simple download for small files
+        const simpleDownload = await drive.files.get({ fileId: fileId, alt: 'media' }, { responseType: 'stream' });
+        res.setHeader('Content-Type', mimeType);
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+        simpleDownload.data.pipe(res);
+        return;
+    }
+
+    // Advanced: Chunked download logic
+    const parts = range.replace(/bytes=/, "").split("-");
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    const chunkSize = (end - start) + 1;
+
+    // 4. Request the specific byte range from Google Drive
+    const driveRequest = await drive.files.get({
+        fileId: fileId,
+        alt: 'media',
+        headers: { 'Range': `bytes=${start}-${end}` }
+    }, {
+        responseType: 'stream'
+    });
+
+    // 5. Set HTTP Headers for Chunked Response
+    res.writeHead(206, { // 206 Partial Content status
+        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': chunkSize,
+        'Content-Type': mimeType,
+        'Content-Disposition': `attachment; filename="${fileName}"`
+    });
+
+    // 6. Pipe the chunk stream to the client
+    driveRequest.data.pipe(res);
+}
+
+// Example Express Route
+// app.get('/download/:fileId', (req, res) => {
+//     const userToken = req.user.googleAccessToken; // Token from authenticated session
+//     streamFileChunked(req.params.fileId, res, userToken).catch(err => {
+//         console.error(err);
+//         res.status(500).send('Download failed.');
+//     });
+// });
+
+
+// Frontend code (React Native)
+import RNFS from 'react-native-fs';
+
+const downloadFileFromBackend = async (fileId, fileName, userToken) => {
+    // 1. Define the destination path on the mobile device
+    const downloadDest = `${RNFS.DocumentDirectoryPath}/${fileName}`;
+    const backendUrl = `YOUR_BACKEND_URL/download/${fileId}`;
+
+    const options = {
+        fromUrl: backendUrl,
+        toFile: downloadDest,
+        headers: {
+            // Pass the user's authentication token to your secure backend proxy
+            'Authorization': `Bearer ${userToken}`, 
+            // The RNFS library automatically handles the 'Range' header for resumability
+        },
+        progress: (res) => {
+            // Calculate and display download progress
+            let progress = (res.bytesWritten / res.contentLength) * 100;
+            console.log(`Download Progress: ${progress.toFixed(2)}%`);
+            // Update UI state here (e.g., setDownloadProgress(progress))
+        },
+        // Optional: Implement background download on iOS/Android
+        background: true, 
+        // Optional: Handle download interruption and resume
+        begin: (response) => {
+            console.log('Download started:', response);
+        }
+    };
+
+    try {
+        const response = RNFS.downloadFile(options);
+        const result = await response.promise;
+
+        if (result.statusCode === 200 || result.statusCode === 206) {
+            console.log('File downloaded successfully to:', result.filePath);
+            // AI Concept: Trigger file categorization/processing after download
+            // processFileWithAI(result.filePath); 
+            return result.filePath;
+        } else {
+            throw new Error(`Download failed with status: ${result.statusCode}`);
+        }
+    } catch (error) {
+        console.error('Download error:', error);
+    }
+};
+
+
+/**
+ * AI Concept: Analyze file metadata (and optionally content sample) to suggest tags/name.
+ * @param {string} fileName - Original file name (e.g., 'IMG_0123.jpg')
+ * @param {string} mimeType - File MIME type (e.g., 'image/jpeg')
+ * @param {number} fileSize - File size in bytes
+ * @returns {object} Suggested classification and name
+ */
+function analyzeFileWithAI(fileName, mimeType, fileSize) {
+    // 1. Rule-based checks (the "cheap" AI)
+    if (fileName.includes('invoice') || mimeType.includes('pdf')) {
+        return { category: 'Finance', newName: `Invoice-${new Date().getFullYear()}.pdf` };
+    }
+    
+    // 2. Call a Machine Learning Model API (Requires Backend/Vertex AI)
+    // NOTE: This is a placeholder for a secure API call.
+    /*
+    const aiResponse = await fetch('YOUR_AI_SERVICE_ENDPOINT', {
+        method: 'POST',
+        body: JSON.stringify({ fileName, mimeType, fileSize })
+    });
+    const data = await aiResponse.json();
+    return { 
+        category: data.predictedCategory, 
+        newName: data.suggestedName 
+    };
+    */
+    
+    // Default fallback
+    return { category: 'Uncategorized', newName: fileName };
+}
+
+// Example usage:
+// const { category, newName } = analyzeFileWithAI(file.name, file.mimeType, file.size);
+// console.log(`AI Suggestion: Category: ${category}, New Name: ${newName}`);
