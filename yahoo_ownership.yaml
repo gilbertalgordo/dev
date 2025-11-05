@@ -1,0 +1,44 @@
+yourdomain.com. 3600 IN TXT "verification=7f4a2c9b-1f3e-4b2a-9d12-EXAMPLETOKEN"
+
+ownership-token: 7f4a2c9b-1f3e-4b2a-9d12-EXAMPLETOKEN
+owner: Gilbert Algordo
+purpose: developer verification
+
+
+curl -I https://yourdomain.com/.well-known/ownership-verification.txt
+# or to view content:
+curl https://yourdomain.com/.well-known/ownership-verification.txt
+
+
+<head>
+  <!-- Ownership verification meta tag -->
+  <meta name="ownership-verification" content="7f4a2c9b-1f3e-4b2a-9d12-EXAMPLETOKEN" />
+  <!-- other head content -->
+</head>
+
+
+curl -s https://yourdomain.com | grep "ownership-verification"
+
+
+# Save as verify_helpers.py
+import uuid
+import requests
+
+def generate_token():
+    return str(uuid.uuid4())
+
+def check_file(url):
+    try:
+        r = requests.get(url, timeout=8)
+        r.raise_for_status()
+        return r.text[:1000]  # return first 1000 chars
+    except Exception as e:
+        return f"ERROR: {e}"
+
+if __name__ == "__main__":
+    token = generate_token()
+    print("Generated token:", token)
+    # Example check:
+    url = "https://yourdomain.com/.well-known/ownership-verification.txt"
+    print("HTTP check for", url)
+    print(check_file(url))
