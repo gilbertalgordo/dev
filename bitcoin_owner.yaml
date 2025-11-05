@@ -1,0 +1,66 @@
+# python3
+# pip install bitcoinlib
+from bitcoinlib.keys import HDKey
+
+message = "Proof of control for transfer request: bitcoin.org maintainer claim. Date: 2025-11-05"
+# Replace with your WIF or seed that you control
+wif = "L1aW4aubDFB7yfras2S1mN3bqg9w..."  # <- your private key in WIF (never share it!)
+key = HDKey(import_key=wif)
+
+sig = key.sign_message(message)
+address = key.address()
+
+print("Address:", address)
+print("Message:", message)
+print("Signature (base64):", sig)
+
+
+
+# python3
+import hmac, hashlib, uuid, base64, time
+
+# A human-readable claim
+claim = "claim=bitcoin.org-maintainer-transfer;user=g.dev/gilbert_algordo;date=2025-11-05"
+nonce = uuid.uuid4().hex
+timestamp = str(int(time.time()))
+payload = f"{claim};nonce={nonce};ts={timestamp}"
+
+# Use a secret only you control to create HMAC — you will publish payload and they will check presence in DNS.
+# You could instead simply publish payload as TXT if they only need proof that DNS is controlled.
+# DO NOT publish any private secret.
+# The signature here is optional; many projects accept a plain token in TXT.
+secret = "use-your-own-secret-for-hmac"  # keep private, or omit HMAC and just use payload
+signature = base64.b64encode(hmac.new(secret.encode(), payload.encode(), hashlib.sha256).digest()).decode()
+
+print("Add this TXT record to your domain (example):")
+print(f'_maintain-proof TXT "{payload};sig={signature}"')
+
+
+
+I, Gilbert Algordo (g.dev/gilbert_algordo), request transfer/ownership verification for bitcoin.org maintainership.
+Date: 2025-11-05
+I control the PGP key with fingerprint: <your-fingerprint>
+
+
+
+gpg --armor --sign --local-user <your-key-id> --output claim.sig claim.txt
+
+
+
+Hi bitcoin.org maintainers,
+
+I’m Gilbert Algordo (g.dev/gilbert_algordo). I’m requesting transfer/ownership consideration for contributor/developer access to the bitcoin.org project.
+
+Reason: [briefly state purpose—e.g., ongoing maintenance, security upgrades, documentation work]
+Proofs of control I can provide:
+- Bitcoin-address signature: address: [your BTC address], message and base64 signature available.
+- PGP-signed claim using key fingerprint: [your PGP fingerprint].
+- DNS TXT record at [your-domain] with the verification token you request.
+
+Contributions: [link to PRs, commits, issues, or other relevant work]
+
+I’m happy to follow any governance steps you require, provide additional verification, or join a transition period to ensure continuity.
+
+Thanks for considering this. I look forward to your instructions.
+
+— Gilbert Algordo
