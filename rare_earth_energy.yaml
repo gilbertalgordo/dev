@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rare Earth & Energy Easy Finder</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f4f8; /* Light gray-blue background */
+        }
+        .container-card {
+            box-shadow: 0 10px 25px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        .text-gradient {
+            background-image: linear-gradient(to right, #10b981, #06b6d4); /* Emerald to Cyan */
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 flex items-start justify-center">
+
+    <div class="w-full max-w-2xl bg-white rounded-xl container-card p-6 md:p-8 mt-4">
+        
+        <!-- Header -->
+        <header class="text-center mb-6">
+            <h1 class="text-3xl md:text-4xl font-extrabold text-gradient mb-1">
+                Resource Finder
+            </h1>
+            <p class="text-gray-500 text-sm md:text-base">Rare Earth Elements & Green Energy Sources</p>
+        </header>
+
+        <!-- Search Input -->
+        <div class="mb-6">
+            <input type="text" id="searchInput" placeholder="e.g., Neodymium, Lithium-ion, Solar Power"
+                   class="w-full p-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500 transition duration-150 text-gray-700"
+                   aria-label="Enter Rare Earth or Energy Topic">
+            <button id="searchButton" 
+                    class="w-full mt-3 p-3 bg-emerald-500 text-white font-semibold rounded-lg hover:bg-emerald-600 transition duration-150 shadow-md active:scale-[0.99] disabled:opacity-60">
+                Find Latest Information
+            </button>
+        </div>
+
+        <!-- Quick Select Tags -->
+        <div class="mb-6">
+            <h3 class="text-sm font-medium text-gray-600 mb-2">Quick Lookups:</h3>
+            <div id="tagContainer" class="flex flex-wrap gap-2">
+                <!-- Tags will be populated here by JavaScript -->
+            </div>
+        </div>
+
+        <!-- Output and Loading Area -->
+        <div class="mt-8 border-t pt-6">
+            <h2 class="text-xl font-bold text-gray-700 mb-4">Results:</h2>
+            
+            <!-- Loading Indicator -->
+            <div id="loadingIndicator" class="hidden text-center py-8">
+                <div class="animate-spin inline-block w-8 h-8 border-4 border-t-4 border-cyan-500 border-opacity-25 rounded-full border-t-cyan-500" role="status">
+                    <span class="sr-only">Loading...</span>
+                </div>
+                <p class="mt-2 text-cyan-600 font-medium">Searching the web for current data...</p>
+            </div>
+
+            <!-- Error Message -->
+            <div id="errorDisplay" class="hidden p-4 bg-red-100 text-red-700 rounded-lg">
+                <!-- Error text will go here -->
+            </div>
+
+            <!-- Content Output -->
+            <div id="resultsOutput" class="min-h-24">
+                <p class="text-gray-500 italic">Enter a topic and click "Find Latest Information" to get started.</p>
+            </div>
+
+            <!-- Sources Output -->
+            <div id="sourcesOutput" class="mt-4 pt-4 border-t hidden">
+                <h3 class="text-sm font-semibold text-gray-600 mb-2">Sources Grounding This Answer:</h3>
+                <ul id="sourcesList" class="space-y-1 text-sm text-gray-600">
+                    <!-- Sources will be listed here -->
+                </ul>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // Global environment variables
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const apiKey = ""; // API key is provided at runtime by the environment if empty
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+        // DOM Elements
+        const searchInput = document.getElementById('searchInput');
+        const searchButton = document.getElementById('searchButton');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const resultsOutput = document.getElementById('resultsOutput');
+        const sourcesOutput = document.getElementById('sourcesOutput');
+        const sourcesList = document.getElementById('sourcesList');
+        const errorDisplay = document.getElementById('errorDisplay');
+        const tagContainer = document.getElementById('tagContainer');
+
+        // Example Rare Earth and Energy Topics for quick selection
+        const quickTopics = [
+            "Neodymium", "Dysprosium", "Yttrium", "Cerium", 
+            "Lithium Mining", "Solar Power Technology", 
+            "Wind Energy Trends", "Battery Recycling",
+            "Hydrogen Fuel Cells"
+        ];
+
+        // --- Initialization and Event Listeners ---
+
+        /** Populates quick select buttons */
+        function createQuickTags() {
+            quickTopics.forEach(topic => {
+                const button = document.createElement('button');
+                button.textContent = topic;
+                button.className = 'px-3 py-1 text-xs font-medium bg-cyan-100 text-cyan-700 rounded-full hover:bg-cyan-200 transition duration-150 focus:outline-none focus:ring-2 focus:ring-cyan-500 active:scale-[0.98]';
+                button.onclick = () => {
+                    searchInput.value = topic;
+                    fetchData(topic);
+                };
+                tagContainer.appendChild(button);
+            });
+        }
+
+        searchButton.addEventListener('click', () => {
+            const query = searchInput.value.trim();
+            if (query) {
+                fetchData(query);
+            } else {
+                displayError("Please enter a resource or energy topic to search.");
+            }
+        });
+
+        // Allow pressing Enter in the input field
+        searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                searchButton.click();
+            }
+        });
+
+        window.onload = createQuickTags;
+
+        // --- API & Utility Functions ---
+
+        /** Base64 decode utility */
+        function base64ToArrayBuffer(base64) {
+            const binary_string = window.atob(base64);
+            const len = binary_string.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binary_string.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        /** Utility to wait for a delay */
+        const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+        /**
+         * Generic fetch wrapper with exponential backoff.
+         * @param {string} url - The API endpoint URL.
+         * @param {object} options - Fetch options (method, headers, body).
+         * @param {number} maxRetries - Maximum number of retries.
+         * @returns {Promise<Response>}
+         */
+        async function fetchWithBackoff(url, options, maxRetries = 5) {
+            for (let i = 0; i < maxRetries; i++) {
+                try {
+                    const response = await fetch(url, options);
+                    if (response.status === 429) { // Too Many Requests
+                        const delayTime = Math.pow(2, i) * 1000 + Math.random() * 1000;
+                        await delay(delayTime);
+                        continue; // Retry the request
+                    }
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response;
+                } catch (error) {
+                    if (i === maxRetries - 1) {
+                        throw error; // Throw if it's the last attempt
+                    }
+                    const delayTime = Math.pow(2, i) * 1000 + Math.random() * 1000;
+                    await delay(delayTime);
+                }
+            }
+            throw new Error("Maximum retries reached.");
+        }
+
+
+        /**
+         * Calls the Gemini API to get grounded information.
+         * @param {string} query - The resource or energy topic to search for.
+         */
+        async function fetchData(query) {
+            // Clear previous results and display loading
+            resultsOutput.innerHTML = '';
+            sourcesOutput.classList.add('hidden');
+            errorDisplay.classList.add('hidden');
+            loadingIndicator.classList.remove('hidden');
+            searchButton.disabled = true;
+
+            const systemPrompt = "You are a specialized resource guide for critical materials and clean energy sources. When provided with a rare earth element or energy topic, provide a concise, factual summary (2-3 sentences max) detailing its primary uses, and global relevance, grounding your response with up-to-date information.";
+
+            const payload = {
+                contents: [{ parts: [{ text: `Provide information on: ${query}` }] }],
+                tools: [{ "google_search": {} }],
+                systemInstruction: {
+                    parts: [{ text: systemPrompt }]
+                },
+            };
+
+            try {
+                const response = await fetchWithBackoff(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+                const candidate = result.candidates?.[0];
+
+                if (candidate && candidate.content?.parts?.[0]?.text) {
+                    const text = candidate.content.parts[0].text;
+                    displayResults(text, candidate.groundingMetadata);
+                } else {
+                    displayError("Could not generate a response. Please try a different query.");
+                }
+
+            } catch (error) {
+                console.error("API Fetch Error:", error);
+                displayError(`Failed to fetch data: ${error.message}.`);
+            } finally {
+                loadingIndicator.classList.add('hidden');
+                searchButton.disabled = false;
+            }
+        }
+
+        // --- Display Functions ---
+
+        /** Displays the generated text and sources */
+        function displayResults(text, groundingMetadata) {
+            // Display main text
+            resultsOutput.innerHTML = `<p class="text-gray-800 leading-relaxed">${text}</p>`;
+            
+            // Handle sources
+            sourcesList.innerHTML = '';
+            let sources = [];
+
+            if (groundingMetadata && groundingMetadata.groundingAttributions) {
+                sources = groundingMetadata.groundingAttributions
+                    .map(attribution => ({
+                        uri: attribution.web?.uri,
+                        title: attribution.web?.title,
+                    }))
+                    .filter(source => source.uri && source.title); // Ensure sources are valid
+            }
+
+            if (sources.length > 0) {
+                sources.forEach((source, index) => {
+                    const li = document.createElement('li');
+                    li.className = 'list-disc ml-5 hover:text-cyan-600';
+                    li.innerHTML = `<a href="${source.uri}" target="_blank" class="underline hover:no-underline">${index + 1}. ${source.title}</a>`;
+                    sourcesList.appendChild(li);
+                });
+                sourcesOutput.classList.remove('hidden');
+            } else {
+                sourcesOutput.classList.add('hidden');
+            }
+        }
+
+        /** Displays an error message */
+        function displayError(message) {
+            errorDisplay.textContent = message;
+            errorDisplay.classList.remove('hidden');
+            resultsOutput.innerHTML = '';
+            sourcesOutput.classList.add('hidden');
+        }
+
+    </script>
+</body>
+</html>
+
