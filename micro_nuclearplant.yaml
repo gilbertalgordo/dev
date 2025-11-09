@@ -1,0 +1,193 @@
+class MicroNuclearReactor:
+    """
+    Conceptual model of a Micro Nuclear Reactor (MR) for power generation.
+    NOTE: This is NOT functional code for a real reactor.
+    """
+
+    # --- Core Operational Parameters ---
+    ELECTRICAL_CAPACITY_MWE = 10.0  # Typical output: 10 MWe (Megawatts electric)
+    THERMAL_CAPACITY_MWT = 35.0    # Typical thermal output
+    DIMENSIONS = "Van-Sized/Truck-Portable"
+    FUEL_TYPE = "High-Assay Low-Enriched Uranium (HALEU)"
+
+    def __init__(self, reactor_name):
+        """Initializes the reactor state."""
+        self.name = reactor_name
+        self.is_running = False
+        self.uptime_days = 0
+        self.current_power_mwe = 0.0
+
+    def start_reactor(self):
+        """Simulates initiating the nuclear reaction."""
+        if not self.is_running:
+            print(f"[{self.name}] Initiating core reaction sequence...")
+            self.is_running = True
+            self.current_power_mwe = self.ELECTRICAL_CAPACITY_MWE
+            print(f"[{self.name}] Operational. Generating {self.current_power_mwe} MWe.")
+        else:
+            print(f"[{self.name}] Reactor is already running.")
+
+    def simulate_power_generation(self, hours):
+        """Simulates power generation over a period."""
+        if self.is_running:
+            total_energy_kwh = self.current_power_mwe * 1000 * hours
+            self.uptime_days += hours / 24
+            print(f"[{self.name}] Generated {total_energy_kwh:.2f} kWh over {hours} hours.")
+            print(f"[{self.name}] Total uptime: {self.uptime_days:.1f} days.")
+        else:
+            print(f"[{self.name}] Reactor is offline. Cannot generate power.")
+
+    def shutdown_reactor(self):
+        """Simulates a controlled shutdown (e.g., passive cooling mechanism engagement)."""
+        if self.is_running:
+            print(f"[{self.name}] Engaging passive safety shutdown sequence...")
+            self.is_running = False
+            self.current_power_mwe = 0.0
+            print(f"[{self.name}] Shutdown complete. Core is safely cooled.")
+        else:
+            print(f"[{self.name}] Reactor is already shut down.")
+
+# --- Demonstration ---
+if __name__ == "__main__":
+    aurora = MicroNuclearReactor("Aurora-10MWe")
+    
+    print(f"--- Reactor Specifications for {aurora.name} ---")
+    print(f"Footprint: {aurora.DIMENSIONS}")
+    print(f"Capacity: {aurora.ELECTRICAL_CAPACITY_MWE} MWe")
+    print("-" * 35)
+
+    aurora.start_reactor()
+    aurora.simulate_power_generation(24) # Simulate 1 day of operation
+    aurora.shutdown_reactor()
+
+
+
+# sensor_publisher.py
+# Requirements: google-cloud-pubsub
+# pip install google-cloud-pubsub
+
+import json
+import time
+import random
+from google.cloud import pubsub_v1
+
+PROJECT_ID = "your-gcp-project"
+TOPIC_ID = "telemetry-topic"
+publisher = pubsub_v1.PublisherClient()
+topic_path = publisher.topic_path(PROJECT_ID, TOPIC_ID)
+
+def make_sample_telemetry():
+    return {
+        "timestamp": int(time.time()),
+        "device_id": "van01",
+        "battery_soc": round(random.uniform(20, 100), 2),   # state of charge %
+        "battery_voltage": round(random.uniform(48, 54), 2),
+        "solar_power_w": round(random.uniform(0, 2000), 1),
+        "load_power_w": round(random.uniform(100, 2000), 1),
+        "gps": {"lat": 40.0 + random.uniform(-0.01, 0.01), "lon": -74.0 + random.uniform(-0.01, 0.01)}
+    }
+
+def publish_loop():
+    while True:
+        message = make_sample_telemetry()
+        payload = json.dumps(message).encode("utf-8")
+        future = publisher.publish(topic_path, payload)
+        print("Published", message)
+        time.sleep(2)  # 2s between messages
+
+if __name__ == "__main__":
+    publish_loop()
+
+
+
+# optimizer.py
+# Requirements: google-cloud-bigquery, google-cloud-pubsub
+import time
+from google.cloud import bigquery, pubsub_v1
+import json
+
+PROJECT_ID = "your-gcp-project"
+COMMAND_TOPIC = "command-topic"   # where plans are published
+BQ_DATASET = "energy_dataset"
+BQ_TABLE = "telemetry"
+
+bq = bigquery.Client()
+publisher = pubsub_v1.PublisherClient()
+command_topic_path = publisher.topic_path(PROJECT_ID, COMMAND_TOPIC)
+
+def get_latest_state(device_id="van01", minutes=5):
+    query = f"""
+    SELECT *
+    FROM `{bq.project}.{BQ_DATASET}.{BQ_TABLE}`
+    WHERE device_id = @device_id
+    ORDER BY timestamp DESC
+    LIMIT 1
+    """
+    job = bq.query(query, job_config=bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("device_id","STRING",device_id)]
+    ))
+    rows = list(job.result())
+    return dict(rows[0]) if rows else None
+
+def compute_simple_plan(state):
+    # Very simple rule-based plan: If solar > load and SOC < 95 -> charge battery.
+    plan = {"device_id": state['device_id'], "action": "idle", "timestamp": int(time.time())}
+    if state['solar_power_w'] - state['load_power_w'] > 200 and state['battery_soc'] < 95:
+        plan['action'] = "charge"
+        plan['power_w'] = min(1500, int(state['solar_power_w'] - state['load_power_w']))
+    elif state['battery_soc'] > 30 and state['load_power_w'] > state['solar_power_w']:
+        plan['action'] = "discharge"
+        plan['power_w'] = min(1500, int(state['load_power_w'] - state['solar_power_w']))
+    return plan
+
+def publish_plan(plan):
+    publisher.publish(command_topic_path, json.dumps(plan).encode('utf-8'))
+
+if __name__ == "__main__":
+    while True:
+        state = get_latest_state()
+        if state:
+            plan = compute_simple_plan(state)
+            publish_plan(plan)
+            print("Published plan:", plan)
+        else:
+            print("No state yet.")
+        time.sleep(10)
+
+
+
+# quantum_demo.py
+# pip install qiskit numpy
+
+import numpy as np
+from qiskit import Aer
+from qiskit.algorithms import QAOA, NumPyMinimumEigensolver
+from qiskit_optimization import QuadraticProgram
+from qiskit_optimization.algorithms import MinimumEigenOptimizer
+from qiskit.utils import algorithm_globals
+
+# Toy problem: schedule 2 time slots to minimize cost while meeting a "demand" (very small and safe)
+def make_toy_schedule_problem():
+    qp = QuadraticProgram()
+    qp.binary_var(name='x0')  # use/charge at timeslot 0
+    qp.binary_var(name='x1')  # timeslot 1
+    # minimize cost: example costs per slot
+    qp.minimize(linear={'x0': 3, 'x1': 2})
+    # constraint: meet at least one timeslot (simplified)
+    qp.linear_constraint({'x0': 1, 'x1': 1}, '>=', 1, name='demand')
+    return qp
+
+def run_qaoa(qp):
+    backend = Aer.get_backend('aer_simulator_statevector')
+    seed = 123
+    algorithm_globals.random_seed = seed
+
+    qaoa = QAOA(reps=1, quantum_instance=backend)
+    optimizer = MinimumEigenOptimizer(min_eigen_solver=qaoa)
+    result = optimizer.solve(qp)
+    return result
+
+if __name__ == "__main__":
+    qp = make_toy_schedule_problem()
+    res = run_qaoa(qp)
+    print("Quantum toy schedule result:", res)
