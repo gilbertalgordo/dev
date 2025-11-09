@@ -61,6 +61,38 @@ if __name__ == "__main__":
     aurora.shutdown_reactor()
 
 
+# main.py
+from flask import Flask, request, jsonify
+# Assume 'reactor_model' is your imported Python simulation core
+from .simulator_core import simulate_timestep, get_status 
+
+app = Flask(__name__)
+
+# gcloud command to deploy this:
+# gcloud run deploy microreactor-api --source . --platform managed
+
+@app.route('/api/control/insert-rod', methods=['POST'])
+def adjust_control_rod():
+    """Endpoint to simulate control rod insertion."""
+    try:
+        data = request.get_json()
+        rod_depth = data.get('depth', 0.5)  # E.g., depth in meters
+
+        # --- Trigger simulation logic (simplified) ---
+        new_power_level = simulate_timestep(control_rod_adjustment=rod_depth)
+        
+        return jsonify({
+            "status": "Success",
+            "message": f"Control rod inserted to {rod_depth}m.",
+            "new_power_output_MWe": new_power_level
+        }), 200
+    except Exception as e:
+        return jsonify({"status": "Error", "message": str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8080)
+
+
 
 # sensor_publisher.py
 # Requirements: google-cloud-pubsub
