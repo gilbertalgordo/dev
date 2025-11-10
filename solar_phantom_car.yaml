@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stealth Solar Vehicle Interface</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #00ffc8;
+            --secondary-color: #00cc99;
+            --bg-dark: #0d1117;
+        }
+        body {
+            font-family: 'Orbitron', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--primary-color);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .dashboard-container {
+            border: 2px solid var(--primary-color);
+            box-shadow: 0 0 20px rgba(0, 255, 200, 0.5);
+            background-color: #161b22;
+        }
+        .stat-card {
+            background-color: #0d1117;
+            border-left: 2px solid var(--secondary-color);
+            padding: 1rem;
+            margin: 0.5rem 0;
+            transition: all 0.3s;
+        }
+        .stat-card:hover {
+            background-color: #1a232e;
+            box-shadow: 0 0 10px rgba(0, 255, 200, 0.3);
+        }
+        .indicator {
+            width: 1rem;
+            height: 1rem;
+            border-radius: 50%;
+            display: inline-block;
+            transition: all 0.3s;
+        }
+        /* Custom styles for the car graphic */
+        .car-surface {
+            position: absolute;
+            transition: all 0.5s ease-in-out;
+            border: 1px solid rgba(0, 255, 200, 0.5);
+            box-shadow: 0 0 5px rgba(0, 255, 200, 0.3);
+        }
+        .windshield { top: 10%; left: 30%; width: 40%; height: 25%; background: rgba(0, 200, 255, 0.1); border-radius: 15px 15px 5px 5px; }
+        .sunroof { top: 35%; left: 30%; width: 40%; height: 15%; background: rgba(0, 200, 255, 0.1); border-radius: 0; }
+        .hood { top: 50%; left: 15%; width: 70%; height: 25%; background: rgba(0, 200, 255, 0.1); border-radius: 10px 10px 0 0; }
+        .window-l { top: 10%; left: 15%; width: 15%; height: 35%; background: rgba(0, 200, 255, 0.1); border-radius: 10px 0 0 10px; }
+        .window-r { top: 10%; right: 15%; width: 15%; height: 35%; background: rgba(0, 200, 255, 0.1); border-radius: 0 10px 10px 0; }
+    </style>
+</head>
+<body>
+
+    <script>
+        // --- Globals ---
+        const PBT_OPACITY_NORMAL = 0.2;
+        const PBT_OPACITY_STEALTH = 0.95;
+        const PBT_COLOR_NORMAL = 'rgba(0, 200, 255, '; // Light Blue/Cyan
+        const PBT_COLOR_STEALTH = 'rgba(0, 0, 0, ';   // Near Black
+
+        // --- Core Simulation Logic ---
+        const solarSurfaces = [
+            { id: 'windshield', area: 1.5, element: null },
+            { id: 'sunroof', area: 0.8, element: null },
+            { id: 'hood', area: 2.0, element: null },
+            { id: 'window-l', area: 0.7, element: null },
+            { id: 'window-r', area: 0.7, element: null }
+        ];
+
+        let isStealthMode = false;
+        let ambientLight = 1000; // Lux (Simulated)
+
+        // Simplified MPPT Simulation: P = V * I. Max Power occurs at a certain V/I curve point.
+        // We simulate efficiency based on current conditions.
+        function calculateSolarPower() {
+            // Solar Cell Efficiency (Max 25% under ideal conditions)
+            let baseEfficiency = 0.25;
+
+            // Light Intensity Scaling (e.g., 1000 Lux = 100% intensity)
+            let intensityFactor = Math.min(1, ambientLight / 1000);
+
+            // Stealth Mode Penalty: PBT mode sacrifices some transparency/light absorption for stealth.
+            let stealthPenalty = isStealthMode ? 0.3 : 1.0; // 70% power loss in stealth mode
+
+            let totalPower = 0;
+            let totalArea = solarSurfaces.reduce((sum, s) => sum + s.area, 0);
+
+            // Power (Watts) = Intensity (Sunlight Power per m²) * Area (m²) * Efficiency * Stealth Factor
+            // Standard Sunlight: ~1000 W/m²
+            totalPower = (1000 * intensityFactor) * totalArea * baseEfficiency * stealthPenalty;
+
+            // MPPT always ensures the highest possible power is extracted for the current light level
+            // Max Power Point is implicitly found in this simplified model.
+
+            return Math.max(0, totalPower); // Ensure power is not negative
+        }
+
+        function updateSimulation() {
+            // 1. Simulate environment change (e.g., cloudy passing)
+            const hour = new Date().getHours();
+            // Simple day/night cycle
+            if (hour >= 7 && hour <= 18) {
+                // Simulate daytime light fluctuations
+                ambientLight = 500 + Math.floor(Math.random() * 500);
+            } else {
+                // Night or very low light
+                ambientLight = Math.floor(Math.random() * 50);
+            }
+
+            // 2. Calculate Power
+            const powerWatts = calculateSolarPower();
+            const powerKw = powerWatts / 1000;
+
+            // 3. Update UI Metrics
+            document.getElementById('stat-power').textContent = powerKw.toFixed(2);
+            document.getElementById('stat-light').textContent = ambientLight.toFixed(0);
+            document.getElementById('stat-mppt').textContent = isStealthMode ? 'ADJUSTED' : 'OPTIMAL';
+
+            // 4. Update UI Visuals (PBT Mode)
+            const newOpacity = isStealthMode ? PBT_OPACITY_STEALTH : PBT_OPACITY_NORMAL;
+            const newColor = isStealthMode ? PBT_COLOR_STEALTH : PBT_COLOR_NORMAL;
+            const statusText = isStealthMode ? 'ACTIVE' : 'OFFLINE';
+
+            document.getElementById('stealth-status-text').textContent = statusText;
+            document.getElementById('stealth-indicator').style.backgroundColor = isStealthMode ? '#ff3860' : '#00ffc8';
+
+            solarSurfaces.forEach(surface => {
+                const element = document.getElementById(surface.id);
+                if (element) {
+                    element.style.backgroundColor = newColor + newOpacity + ')';
+                }
+            });
+        }
+
+        // --- Event Handlers ---
+        function toggleStealthMode() {
+            isStealthMode = !isStealthMode;
+            updateSimulation();
+            console.log('Stealth Mode Toggled:', isStealthMode);
+        }
+
+
+        // --- Initialization ---
+        window.onload = function() {
+            // Set up element references
+            solarSurfaces.forEach(surface => {
+                surface.element = document.getElementById(surface.id);
+            });
+
+            // Initial run
+            updateSimulation();
+
+            // Run simulation every 2 seconds
+            setInterval(updateSimulation, 2000);
+
+            // Attach event listener to the button
+            document.getElementById('stealth-toggle-btn').addEventListener('click', toggleStealthMode);
+        };
+    </script>
+
+    <!-- Dashboard Layout -->
+    <div class="dashboard-container w-full max-w-5xl p-6 rounded-xl mx-auto flex flex-col lg:flex-row">
+        
+        <!-- Left Column: Status and Controls -->
+        <div class="lg:w-1/3 p-4">
+            <h1 class="text-3xl font-bold mb-6 border-b-2 border-secondary-color pb-2">SYSTEM MONITOR</h1>
+
+            <!-- Power Status -->
+            <div class="stat-card rounded-lg">
+                <p class="text-sm text-gray-400">TOTAL POWER GENERATED</p>
+                <p class="text-4xl font-bold"><span id="stat-power">0.00</span> <span class="text-2xl text-secondary-color">kW</span></p>
+            </div>
+
+            <!-- MPPT Status -->
+            <div class="stat-card rounded-lg">
+                <p class="text-sm text-gray-400">MPPT EFFICIENCY STATUS</p>
+                <p class="text-4xl font-bold text-yellow-300" id="stat-mppt">OPTIMAL</p>
+            </div>
+
+            <!-- Environmental Condition -->
+            <div class="stat-card rounded-lg">
+                <p class="text-sm text-gray-400">AMBIENT LIGHT (Simulated)</p>
+                <p class="text-4xl font-bold"><span id="stat-light">0</span> <span class="text-2xl text-secondary-color">Lux</span></p>
+            </div>
+
+            <!-- PBT Stealth Mode Control -->
+            <div class="mt-8 stat-card rounded-lg border-red-500 border-opacity-50">
+                <p class="text-xl font-bold mb-3 flex items-center">
+                    PBT STEALTH MODE
+                    <span id="stealth-indicator" class="indicator ml-3 bg-secondary-color shadow-lg shadow-secondary-color/50"></span>
+                </p>
+                <p class="text-lg mb-4">Status: <span id="stealth-status-text" class="font-bold text-red-500">OFFLINE</span></p>
+                <button id="stealth-toggle-btn" class="w-full py-3 rounded-lg text-lg font-bold transition-all duration-300
+                    bg-red-700 hover:bg-red-500 text-white shadow-xl shadow-red-900/50">
+                    ACTIVATE / DEACTIVATE
+                </button>
+            </div>
+            
+        </div>
+
+        <!-- Right Column: Vehicle Visualization -->
+        <div class="lg:w-2/3 p-4 relative h-[600px] flex items-center justify-center mt-8 lg:mt-0">
+            <h2 class="text-2xl font-bold absolute top-0">SOLAR SURFACE VISUALIZER</h2>
+
+            <!-- Conceptual Car Outline (Simple Block) -->
+            <div class="w-4/5 h-4/5 bg-gray-800 rounded-2xl relative shadow-2xl shadow-gray-900/70">
+                <div class="absolute inset-0 border-4 border-gray-600 rounded-2xl"></div>
+
+                <!-- Solar Surface Overlays (Visual Representation) -->
+                <div id="windshield" class="car-surface windshield">
+                    <p class="absolute inset-0 text-xs text-center p-1 opacity-50">WINDSHIELD</p>
+                </div>
+                <div id="sunroof" class="car-surface sunroof">
+                    <p class="absolute inset-0 text-xs text-center p-1 opacity-50">SUNROOF</p>
+                </div>
+                <div id="hood" class="car-surface hood">
+                    <p class="absolute inset-0 text-xs text-center p-1 opacity-50">HOOD</p>
+                </div>
+                <div id="window-l" class="car-surface window-l">
+                    <p class="absolute inset-0 text-xs text-center p-1 opacity-50">W.L</p>
+                </div>
+                <div id="window-r" class="car-surface window-r">
+                    <p class="absolute inset-0 text-xs text-center p-1 opacity-50">W.R</p>
+                </div>
+
+                <p class="absolute bottom-5 left-1/2 transform -translate-x-1/2 text-sm text-gray-500">
+                    INTEGRATED SOLAR ARRAY (m²: 5.7)
+                </p>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
+
