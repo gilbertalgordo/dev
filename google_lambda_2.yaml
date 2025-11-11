@@ -1,0 +1,82 @@
+import os
+import json
+from google import genai
+from google.genai import types
+from google.genai.errors import APIError
+
+# --- Configuration ---
+# Your API key will be automatically sourced from the 
+# GEMINI_API_KEY environment variable if you set it in the Cloud Function configuration.
+MODEL_NAME = "gemini-2.5-flash" 
+
+# Initialize the Gemini Client
+try:
+    client = genai.Client()
+except Exception as e:
+    print(f"Error initializing Gemini client: {e}")
+    client = None
+
+def dialogflow_webhook_fulfillment(request):
+    """
+    Receives a webhook request from Dialogflow CX/Vertex AI Agent Builder, 
+    processes it with Gemini, and returns the response.
+    """
+    if client is None:
+        return json.dumps({
+            'fulfillment_response': {
+                'messages': [{'text': {'text': ["I am currently experiencing a service outage. Please try again later."]}}]
+            }
+        })
+
+    # Dialogflow sends a JSON request
+    request_json = request.get_json(silent=True)
+    
+    # Extract the user's raw query text
+    try:
+        # For Dialogflow CX
+        query_text = request_json['text']
+    except (KeyError, TypeError):
+        # Fallback if structure is different (e.g., Dialogflow ES)
+        query_text = request_json.get('sessionInfo', {}).get('parameters', {}).get('user_query', 'Hello')
+
+    # --- Advanced AI Logic with Gemini ---
+    try:
+        # Define the system instruction to give the assistant a personality/context
+        system_instruction = "You are a helpful and friendly virtual assistant specializing in advanced technology topics. Keep your answers concise and informative."
+
+        config = types.GenerateContentConfig(
+            system_instruction=system_instruction
+        )
+        
+        # Call the Gemini API for a response
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=[query_text],
+            config=config,
+        )
+        
+        ai_response_text = response.text
+        
+    except APIError as e:
+        ai_response_text = f"An AI service error occurred: {e}"
+    except Exception as e:
+        ai_response_text = f"An unexpected error occurred: {e}"
+
+    # --- Construct the Dialogflow Response ---
+    # The response format must adhere to Dialogflow's webhook specification.
+    dialogflow_response = {
+        'fulfillment_response': {
+            'messages': [
+                {
+                    'text': {
+                        # Dialogflow expects an array of strings
+                        'text': [ai_response_text]
+                    }
+                }
+            ]
+        }
+    }
+
+    # Return the JSON response
+    return json.dumps(dialogflow_response), 200, {'Content-Type': 'application/json'}
+
