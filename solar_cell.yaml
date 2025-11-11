@@ -1,0 +1,130 @@
+pip install pvlib numpy matplotlib
+
+
+# advanced_solar_module.py
+"""
+Advanced solar module design + durability simulator
+- Supports glass or transparent GFRP front/back stacks
+- Encapsulant choice: POE or EVA
+- Optical throughput with AR coating option
+- Simple degradation model (damp-heat, edge seal, mechanical)
+- Outputs IV curve (pvlib singlediode) and multi-year power projection
+"""
+import numpy as np
+import matplotlib.pyplot as plt
+from pvlib.pvsystem import singlediode
+
+# ----------------- DESIGN PARAMETERS (edit these) -----------------
+# Electrical baseline (per-module or per-cell-group scaled)
+IL_base = 9.0          # photo current (A) at 1000 W/m2 baseline (adjust to match cell)
+I0_base = 1e-7
+Rs = 0.4
+Rsh = 2000
+nNsVth = 1.6
+
+# Optical / mechanical design choices
+front_mat = 'glass'    # 'glass' or 'tgfrp' (transparent GFRP)
+back_mat = 'glass'     # 'glass' or 'tgfrp' or 'backsheet'
+glass_th_mm = 3.2
+tgfrp_extra_loss = 0.04  # extra fractional loss if using tgfrp (depends on resin/fiber)
+use_double_glass = True
+ar_present = True
+ar_gain = 0.03         # fractional transmission gain from AR (typical 0.02-0.05)
+
+# Encapsulant
+encapsulant = 'POE'    # 'POE' or 'EVA'
+encap_wvtr = {'POE':1.0, 'EVA':3.0}  # relative water vapor transmission (lower better)
+
+# Durability knobs
+edge_seal_quality = 0.9   # 0..1 (1 excellent)
+initial_annual_degradation = 0.005  # baseline 0.5%/yr
+moisture_sensitivity = 0.04         # extra annual loss per unit poor barrier
+mechanical_stress_rate = 0.003      # extra annual percent loss from cycles
+years = 25
+dt_months = 6
+
+# Environment / operating point
+irradiance = 1000.0   # W/m2
+cell_temp_C = 25.0
+
+# ----------------- OPTICAL MODEL (simple, empirical) -----------------
+def optical_throughput(front, back, glass_th_mm, ar, tgfrp_loss, double_glass):
+    # base transmissivity for a single glass sheet (low-iron solar glass)
+    base_glass_t = 0.92
+    # effect of thickness (small)
+    thickness_loss = max(0.0, (glass_th_mm - 3.2) * 0.001)
+    t_front = base_glass_t - thickness_loss
+    if front == 'tgfrp' or back == 'tgfrp':
+        # transparent GFRP tends to have higher scattering/loss unless optimized
+        t_front -= tgfrp_loss
+    if ar:
+        t_front = min(0.995, t_front + ar_gain)
+    if double_glass:
+        # two glass surfaces -> multiply transmissions (approx)
+        return t_front * t_front
+    return t_front
+
+opt_t = optical_throughput(front_mat, back_mat, glass_th_mm, ar_present,
+                           tgfrp_extra_loss, use_double_glass)
+print(f"[INFO] Estimated optical throughput (stack): {opt_t:.3f}")
+
+# ----------------- SINGLE-DIODE IV (pvlib) -----------------
+def compute_iv(IL, I0, Rs, Rsh, nNsVth):
+    sd = singlediode(IL, I0, Rs, Rsh, nNsVth)
+    return sd
+
+# Effective IL after optics (linear approx)
+IL_effective = IL_base * (irradiance / 1000.0) * opt_t
+
+sd0 = compute_iv(IL_effective, I0_base, Rs, Rsh, nNsVth)
+print(f"[BASE] Isc={sd0['Isc']:.3f} A  Voc={sd0['Voc']:.3f} V  Pmp={sd0['Pm']:.3f} W")
+
+# ----------------- SIMPLE DEGRADATION / LIFETIME MODEL -----------------
+def annual_degradation_factor(year, init_deg, edge_q, encap_wvtr, moist_sens, mech_rate):
+    # poorer edge seal and higher encapsulant WVTR increases annual loss
+    edge_penalty = (1.0 - edge_q) * 0.06  # up to ~6% extra/year if seal is terrible
+    encap_penalty = (encap_wvtr - 1.0) * 0.01  # relative WVTR scaling
+    annual_loss = init_deg + edge_penalty + (moist_sens * encap_penalty) + mech_rate
+    annual_loss = min(0.15, annual_loss)  # cap to 15%/yr
+    return (1.0 - annual_loss) ** year
+
+# produce multi-year projection
+times = []
+powers = []
+steps = int((years * 12) / dt_months)
+for s in range(steps + 1):
+    year = (s * dt_months) / 12.0
+    factor = annual_degradation_factor(year,
+                                       initial_annual_degradation,
+                                       edge_seal_quality,
+                                       encap_wvtr[encapsulant],
+                                       moisture_sensitivity,
+                                       mechanical_stress_rate)
+    IL_deg = IL_effective * factor
+    sd_deg = compute_iv(IL_deg, I0_base, Rs, Rsh, nNsVth)
+    times.append(year)
+    powers.append(sd_deg['Pm'])
+
+# ----------------- PLOTTING -----------------
+plt.figure(figsize=(8,4))
+plt.plot(times, powers, marker='o')
+plt.xlabel('Years')
+plt.ylabel('Max power (W)')
+plt.title(f'Projected power over {years} years — {front_mat}/{back_mat} stack, {encapsulant} encapsulant')
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+# ----------------- SIMPLE BOM / FAB NOTES PRINTOUT -----------------
+print("\n=== Suggested BOM / Materials (starter) ===")
+print(f"Front glass: low-iron tempered solar glass, {glass_th_mm} mm (antireflective surface: {ar_present})")
+if front_mat == 'tgfrp':
+    print("Front sheet: transparent GFRP (index-matched resin, optimized fiber spacing)")
+print(f"Encapsulant: {encapsulant} (POE recommended for damp climates)")
+print("Back: " + ("glass (double-glass durable)" if back_mat=='glass' else back_mat))
+print("Edge seal: high-quality butyl + secondary polymeric seal; aim for edge_seal_quality >= 0.9")
+print("Frame: optionally frameless (glass-glass) or robust frame with drainage and bonded sealant")
+print("\n=== Notes ===")
+print("- Validate optical transmittance with measured spectral data and convolve with cell EQE for precise IL.")
+print("- Run IEC 61215 / IEC 61730 tests (thermal cycle, damp heat 85C/85% RH) during qualification.")
+print("- If using tGFRP, verify long-term UV stability of resin and resin-fiber refractive index match.")
