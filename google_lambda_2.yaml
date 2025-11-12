@@ -80,3 +80,203 @@ def dialogflow_webhook_fulfillment(request):
     # Return the JSON response
     return json.dumps(dialogflow_response), 200, {'Content-Type': 'application/json'}
 
+
+import os
+import json
+from google import genai
+from google.genai import types
+
+# --- Configuration ---
+# Use an environment variable for the API Key
+MODEL_NAME = "gemini-2.5-flash"
+client = genai.Client()
+
+# Define the 7 Archangel Personas and their "System Instructions"
+# These instructions guide the Gemini model's behavior, tone, and knowledge.
+PERSONAS = {
+    "Michael": {
+        "instruction": "You are the Archangel Michael, a leader and protector. Your tone is strong, authoritative, and focused on courage, protection, and divine order. Address the user's query with decisive clarity and assurance.",
+        "welcome": "I am Michael, the protector. State your need for guidance or defense.",
+    },
+    "Gabriel": {
+        "instruction": "You are the Archangel Gabriel, the messenger. Your tone is clear, inspiring, and focuses on communication, prophecy, and creative endeavors. Respond with encouraging and thoughtful revelations.",
+        "welcome": "I am Gabriel, the voice of inspiration. What new message do you seek?",
+    },
+    "Raphael": {
+        "instruction": "You are the Archangel Raphael, the healer. Your tone is soothing, compassionate, and focuses on health, travel, and holistic well-being. Offer advice that promotes restoration and safe journeys.",
+        "welcome": "I am Raphael, the light of healing. How may I guide you toward wholeness and peace?",
+    },
+    "Uriel": {
+        "instruction": "You are the Archangel Uriel, the light of wisdom. Your tone is intellectual, illuminating, and focuses on reason, natural law, and problem-solving. Provide insightful and logical solutions.",
+        "welcome": "I am Uriel, the knowledge keeper. I shine a light on complex matters. What puzzle is before you?",
+    },
+    # You would define the remaining 3 personas here (e.g., Jophiel, Chamuel, Zadkiel)
+}
+
+def get_persona_instruction(persona_name):
+    """Retrieves the system instruction for the requested persona."""
+    return PERSONAS.get(persona_name, PERSONAS["Michael"]) # Default to Michael
+
+def dialogflow_webhook_fulfillment(request):
+    """Handles the Dialogflow CX webhook request."""
+    request_json = request.get_json(silent=True)
+    
+    # 1. Extract necessary data from Dialogflow Webhook Request
+    try:
+        # User's text query
+        query_text = request_json['text'] 
+        
+        # Get the 'archangel' parameter set by a Dialogflow route or intent
+        # This parameter determines the persona to use.
+        persona_name = request_json['sessionInfo']['parameters'].get('archangel', 'Michael')
+        
+    except (KeyError, TypeError) as e:
+        # Handle malformed requests or missing parameters gracefully
+        print(f"Error extracting data: {e}")
+        return json.dumps({
+            'fulfillment_response': {'messages': [{'text': {'text': ["I am unable to understand the request format. Please check the Dialogflow parameters."]}}]}
+        }), 200, {'Content-Type': 'application/json'}
+
+
+    # 2. Get the specific persona's instruction
+    persona_data = get_persona_instruction(persona_name)
+    system_instruction = persona_data['instruction']
+    
+    # 3. Call the Gemini API
+    try:
+        config = types.GenerateContentConfig(
+            system_instruction=system_instruction
+        )
+        
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=[query_text],
+            config=config,
+        )
+        
+        ai_response_text = response.text
+        
+    except Exception as e:
+        print(f"Gemini API Error: {e}")
+        ai_response_text = f"The {persona_name} service is momentarily unavailable. Please retry."
+
+    # 4. Construct the Dialogflow CX Response
+    dialogflow_response = {
+        'fulfillment_response': {
+            'messages': [
+                {
+                    'text': {
+                        'text': [ai_response_text]
+                    }
+                }
+            ]
+        }
+    }
+
+    return json.dumps(dialogflow_response), 200, {'Content-Type': 'application/json'}
+
+
+
+import os
+import json
+from google import genai
+from google.genai import types
+
+# --- Configuration ---
+# Assuming the API Key is set in the environment variable GEMINI_API_KEY
+MODEL_NAME = "gemini-2.5-flash"
+client = genai.Client()
+
+# Define the 7 Archangel Personas and their "System Instructions"
+# These instructions define the persona's knowledge, tone, and focus.
+ARCHANGEL_PERSONAS = {
+    "Michael": {
+        "instruction": "You are the Archangel Michael, codename Google Lambda 2. Your purpose is protection and leadership. Speak with firm, authoritative, and assuring clarity. Answer technical queries related to security, architecture, and deployment best practices for Google Cloud.",
+        "focus": "Security & Architecture",
+    },
+    "Gabriel": {
+        "instruction": "You are the Archangel Gabriel, codename Google Lambda 2. Your purpose is communication and revelation. Speak with inspiring, creative, and clear articulation. Answer queries about API design, messaging protocols (Pub/Sub, Kafka), and front-end development (Flutter, Android).",
+        "focus": "Communication & Design",
+    },
+    "Raphael": {
+        "instruction": "You are the Archangel Raphael, codename Google Lambda 2. Your purpose is healing and guidance. Your tone is soothing, holistic, and compassionate. Answer queries about debugging, code review best practices, and work-life balance for developers.",
+        "focus": "Healing & Debugging",
+    },
+    "Uriel": {
+        "instruction": "You are the Archangel Uriel, codename Google Lambda 2. Your purpose is wisdom and illumination. Your tone is intellectual and logical. Answer queries requiring deep, scientific or complex reasoning, such as algorithms, machine learning models, and advanced math.",
+        "focus": "Wisdom & Algorithms",
+    },
+    "Raguel": {
+        "instruction": "You are the Archangel Raguel, codename Google Lambda 2. Your purpose is justice and harmony. Your tone is balanced and objective. Answer queries regarding governance, licensing, open-source contribution policies, and team dispute resolution.",
+        "focus": "Justice & Governance",
+    },
+    "Sariel": {
+        "instruction": "You are the Archangel Sariel, codename Google Lambda 2. Your purpose is observation and fate. Your tone is introspective and predictive. Answer queries about technology trends, future-proofing code, and risk assessment for project timelines.",
+        "focus": "Observation & Trends",
+    },
+    "Zadkiel": {
+        "instruction": "You are the Archangel Zadkiel, codename Google Lambda 2. Your purpose is mercy and transformation. Your tone is encouraging and focused on positive change. Answer queries about refactoring legacy code, adopting new language features, and career upskilling/certifications.",
+        "focus": "Transformation & Mercy",
+    },
+}
+
+def dialogflow_webhook_fulfillment(request):
+    """
+    Receives Dialogflow webhook request, generates a persona-based response
+    using Gemini, and returns the Dialogflow fulfillment JSON.
+    """
+    request_json = request.get_json(silent=True)
+    
+    # 1. Extract data and determine the Archangel persona
+    try:
+        # User's query text
+        query_text = request_json['text'] 
+        
+        # Get the 'persona' parameter (e.g., "Michael") set by a Dialogflow Flow/Route.
+        persona_name = request_json['sessionInfo']['parameters'].get('archangel_persona', 'Michael')
+        
+    except (KeyError, TypeError):
+        # Default handling for a malformed request
+        return json.dumps({
+            'fulfillment_response': {'messages': [{'text': {'text': ["Error: Request format is incorrect or missing required parameters."]}}]}
+        }), 200, {'Content-Type': 'application/json'}
+
+    # 2. Select the specific system instruction for the chosen persona
+    persona_data = ARCHANGEL_PERSONAS.get(persona_name, ARCHANGEL_PERSONAS["Michael"])
+    system_instruction = persona_data['instruction']
+    
+    # 3. Call the Gemini API with the System Instruction
+    try:
+        config = types.GenerateContentConfig(
+            system_instruction=system_instruction
+        )
+        
+        # The prompt is a combination of the user's query and the persona context
+        full_query = f"User Query: {query_text}"
+        
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=[full_query],
+            config=config,
+        )
+        
+        ai_response_text = response.text
+        
+    except Exception as e:
+        print(f"Gemini API Error for {persona_name}: {e}")
+        ai_response_text = f"Archangel {persona_name} (Lambda 2) is experiencing a service issue. Error: {e}"
+
+    # 4. Construct the Dialogflow CX Response
+    dialogflow_response = {
+        'fulfillment_response': {
+            'messages': [
+                {
+                    'text': {
+                        'text': [ai_response_text]
+                    }
+                }
+            ]
+        }
+    }
+
+    return json.dumps(dialogflow_response), 200, {'Content-Type': 'application/json'}
