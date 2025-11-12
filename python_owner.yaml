@@ -1,0 +1,124 @@
+# Save as check_txt.py
+# Usage: python check_txt.py example.com _acme-challenge.example.com
+
+import sys
+try:
+    import dns.resolver
+except ImportError:
+    print("dnspython not installed. Install with: pip install dnspython")
+    sys.exit(1)
+
+def get_txt(name):
+    try:
+        answers = dns.resolver.resolve(name, 'TXT')
+        return [b''.join(r.strings).decode('utf-8') if hasattr(r, 'strings') else str(r) for r in answers]
+    except Exception as e:
+        return f"Error: {e}"
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python check_txt.py <domain-or-record>")
+        sys.exit(1)
+    name = sys.argv[1]
+    print(f"Querying TXT records for: {name}\n")
+    records = get_txt(name)
+    if isinstance(records, list):
+        for i, r in enumerate(records, 1):
+            print(f"{i}. {r}")
+    else:
+        print(records)
+
+
+# check_txt.py
+# Usage: python check_txt.py example.com
+# Requires: pip install dnspython
+
+import sys
+import dns.resolver
+
+def get_txt(name):
+    try:
+        answers = dns.resolver.resolve(name, 'TXT')
+        out = []
+        for r in answers:
+            try:
+                # dnspython v2: r.strings is bytes list
+                out.append(''.join([s.decode('utf-8') for s in r.strings]))
+            except Exception:
+                out.append(str(r))
+        return out
+    except Exception as e:
+        return [f"Error: {e}"]
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python check_txt.py <domain-or-record>")
+        sys.exit(1)
+    name = sys.argv[1]
+    records = get_txt(name)
+    print(f"TXT records for {name}:")
+    for i, r in enumerate(records, 1):
+        print(f"{i}. {r}")
+
+
+
+# check_file.py
+# Usage: python check_file.py https://example.com/.well-known/verify-token.txt
+# Requires: pip install requests
+
+import sys
+import requests
+
+def check_url(url):
+    try:
+        r = requests.get(url, timeout=10)
+        return r.status_code, r.text[:1000]
+    except Exception as e:
+        return None, str(e)
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python check_file.py <url>")
+        sys.exit(1)
+    url = sys.argv[1]
+    status, content_or_err = check_url(url)
+    if status is None:
+        print("Error:", content_or_err)
+    else:
+        print("HTTP status:", status)
+        print("First 1000 chars of response body:\n")
+        print(content_or_err)
+
+
+
+# whois_check.py
+# Usage: python whois_check.py example.com
+# Requires: pip install python-whois
+
+import sys
+import whois
+
+def get_whois(domain):
+    try:
+        w = whois.whois(domain)
+        return w
+    except Exception as e:
+        return f"Error: {e}"
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python whois_check.py <domain>")
+        sys.exit(1)
+    domain = sys.argv[1]
+    info = get_whois(domain)
+    if isinstance(info, str):
+        print(info)
+    else:
+        # print a compact summary
+        print("Domain:", getattr(info, 'domain_name', None))
+        print("Registrar:", getattr(info, 'registrar', None))
+        print("Creation Date:", getattr(info, 'creation_date', None))
+        print("Expiration Date:", getattr(info, 'expiration_date', None))
+        print("Name Servers:", getattr(info, 'name_servers', None))
+        print("Emails / Contacts:", getattr(info, 'emails', None))
+        
