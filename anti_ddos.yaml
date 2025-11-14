@@ -1,0 +1,162 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
+import time
+import numpy as np
+
+# --- 1. Simulation of Network Flow Data ---
+# In a real system, this would be real-time data from a network sensor.
+def generate_simulated_data(num_flows=5000):
+    np.random.seed(42)
+    data = {
+        'src_ip_count': np.random.randint(1, 100, num_flows), # Number of unique source IPs
+        'packet_rate': np.random.randint(10, 5000, num_flows), # Packets per second (PPS)
+        'avg_packet_size': np.random.randint(64, 1500, num_flows), # Average packet size
+        'syn_ratio': np.random.rand(num_flows) * 0.1, # Ratio of SYN packets to total
+        'label': 0 # 0 for Normal
+    }
+    df = pd.DataFrame(data)
+
+    # Simulate a DDoS attack scenario for 10% of the data
+    attack_flows = df.sample(frac=0.1)
+    attack_flows['src_ip_count'] = np.random.randint(200, 5000, len(attack_flows)) # High unique source IPs
+    attack_flows['packet_rate'] = np.random.randint(5000, 50000, len(attack_flows)) # Very high PPS
+    attack_flows['syn_ratio'] = np.random.rand(len(attack_flows)) * 0.8 + 0.2 # Higher SYN ratio (e.g., SYN Flood)
+    attack_flows['label'] = 1 # 1 for Attack
+    
+    df.update(attack_flows)
+    return df
+
+# --- 2. Model Training ---
+def train_ddos_detector(data_df):
+    X = data_df[['src_ip_count', 'packet_rate', 'avg_packet_size', 'syn_ratio']]
+    y = data_df['label']
+    
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+    
+    # Using Random Forest is a common and effective choice for this type of classification
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    model.fit(X_train, y_train)
+    
+    # Evaluate the model
+    y_pred = model.predict(X_test)
+    print(f"✅ Model Accuracy: {accuracy_score(y_test, y_pred) * 100:.2f}%")
+    
+    return model
+
+# --- 3. Real-Time Monitoring and Disconnection Logic ---
+def monitor_and_mitigate(model, flow_data):
+    features = flow_data[['src_ip_count', 'packet_rate', 'avg_packet_size', 'syn_ratio']]
+    
+    # Predict with the trained model
+    prediction = model.predict(features)
+    
+    if prediction[0] == 1:
+        print("\n🚨 **DDoS ATTACK DETECTED!** 🚨")
+        print(f"Flow Features: {flow_data.iloc[0].to_dict()}")
+        
+        # --- MITIGATION TRIGGER (The Disconnector) ---
+        target_ip = "192.168.1.100" # Target IP determined by the flow analysis
+        
+        # In a real system, this function would call a network API:
+        # 1. Block the top contributing source IPs/subnets via a firewall rule.
+        # 2. Redirect the traffic to a scrubbing center via BGP routing.
+        # 3. Apply a rate limit on the target server's traffic.
+        
+        print(f"-> **Triggering Disconnection/Mitigation for Target IP:** {target_ip}")
+        # Placeholder for the actual network interaction:
+        # disconnector_api.block_ip(target_ip, duration='30m') 
+        print("-> Action: Traffic blocked or scrubbed by network controller.")
+    else:
+        print(f"Traffic is **Normal**. Packet Rate: {flow_data['packet_rate'].iloc[0]} PPS.")
+
+# --- EXECUTION ---
+if __name__ == "__main__":
+    print("--- Training AI Detector ---")
+    simulated_dataset = generate_simulated_data(num_flows=10000)
+    ddos_model = train_ddos_detector(simulated_dataset)
+
+    print("\n--- Simulating Real-Time Monitoring ---")
+
+    # Scenario 1: Normal Traffic
+    normal_flow = pd.DataFrame([
+        {'src_ip_count': 25, 'packet_rate': 2500, 'avg_packet_size': 1200, 'syn_ratio': 0.05}
+    ])
+    monitor_and_mitigate(ddos_model, normal_flow)
+    
+    time.sleep(1) # Wait 1 second
+
+    # Scenario 2: Attack Traffic (High PPS, High Source Count)
+    attack_flow = pd.DataFrame([
+        {'src_ip_count': 3500, 'packet_rate': 45000, 'avg_packet_size': 800, 'syn_ratio': 0.65}
+    ])
+    monitor_and_mitigate(ddos_model, attack_flow)
+
+
+
+import numpy as np
+import pandas as pd
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv1D, MaxPooling1D, Flatten, Dense
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+import random
+import time
+
+# --- A. Data Simulation (Simulating Time-Series Flow Data) ---
+def generate_advanced_data(num_samples=10000, sequence_length=5):
+    # Features: [PPS, BPS, Unique_Src_IPs, SYN_Ratio]
+    X_normal = np.random.rand(num_samples, sequence_length, 4) * [3000, 1000000, 100, 0.05]
+    y_normal = np.zeros(num_samples)
+
+    # Attack Simulation: High PPS, High Unique Src IPs, High SYN Ratio
+    X_attack = np.random.rand(num_samples // 10, sequence_length, 4) * [60000, 50000000, 5000, 0.8]
+    X_attack += np.random.rand(num_samples // 10, sequence_length, 4) * [50000, 10000000, 2000, 0.1]
+    y_attack = np.ones(num_samples // 10)
+
+    X = np.concatenate((X_normal, X_attack))
+    y = np.concatenate((y_normal, y_attack))
+    
+    # Shuffle and split
+    indices = np.arange(len(X))
+    np.random.shuffle(indices)
+    return X[indices], y[indices]
+
+# --- B. 1D-CNN Model Creation ---
+def create_cnn_model(sequence_length, num_features):
+    model = Sequential([
+        # 1D Conv layer to find temporal patterns in the flow features
+        Conv1D(filters=32, kernel_size=2, activation='relu', input_shape=(sequence_length, num_features)),
+        MaxPooling1D(pool_size=1),
+        Flatten(),
+        Dense(50, activation='relu'),
+        Dense(1, activation='sigmoid') # Binary classification (Normal/Attack)
+    ])
+    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+    return model
+
+# --- C. Model Training & Preparation ---
+def train_and_prep_model():
+    X, y = generate_advanced_data()
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # Note: Real-world scenario requires a streaming scaler like Apache Flink/Kafka Streams
+    # For simulation, we use a simple fit on the 2D version of the data
+    scaler = StandardScaler()
+    
+    # Reshape X_train from (samples, sequence_len, features) to (samples * sequence_len, features) for scaling
+    X_train_2d = X_train.reshape(-1, X_train.shape[-1])
+    scaler.fit(X_train_2d)
+    
+    # Apply scaling and reshape back
+    X_train_scaled = scaler.transform(X_train_2d).reshape(X_train.shape)
+    
+    # Create and train model
+    model = create_cnn_model(X_train.shape[1], X_train.shape[2])
+    print("--- Training 1D-CNN Detector (Epochs: 2) ---")
+    model.fit(X_train_scaled, y_train, epochs=2, batch_size=32, verbose=0)
+    
+    return model, scaler
+
+# ddos_model, feature_scaler = train_and_prep_model()
