@@ -1,0 +1,588 @@
+# net_monitor.py
+# Requirements: pip install speedtest-cli
+import csv
+import datetime
+import subprocess
+import sys
+import time
+from shutil import which
+
+try:
+    import speedtest
+except Exception as e:
+    print("Install dependency: pip install speedtest-cli")
+    raise SystemExit(1)
+
+LOGFILE = "net_log.csv"
+INTERVAL_SECONDS = 15 * 60  # every 15 minutes
+
+def run_speedtest():
+    s = speedtest.Speedtest()
+    s.get_best_server()          # may take a few seconds
+    s.download()
+    s.upload(pre_allocate=False)
+    res = s.results.dict()
+    return {
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "ping_ms": res.get("ping"),
+        "download_bps": res.get("download"),
+        "upload_bps": res.get("upload"),
+        "server": res.get("server", {}).get("sponsor")
+    }
+
+def run_ping(target="8.8.8.8", count=4):
+    if which("ping") is None:
+        return {"ping_avg_ms": None}
+    cmd = ["ping", "-c", str(count), target]
+    p = subprocess.run(cmd, capture_output=True, text=True)
+    out = p.stdout
+    # simple parse for unix ping
+    avg = None
+    for line in out.splitlines():
+        if "rtt min/avg/max/mdev" in line:
+            parts = line.split("=")[1].split("/")
+            avg = float(parts[1])
+    return {"ping_avg_ms": avg}
+
+def run_traceroute(target="8.8.8.8", max_hops=16):
+    if which("traceroute") is None:
+        return {"hops": None}
+    cmd = ["traceroute", "-m", str(max_hops), target]
+    p = subprocess.run(cmd, capture_output=True, text=True)
+    return {"hops": p.stdout}
+
+def ensure_logfile():
+    try:
+        with open(LOGFILE, "x", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=[
+                "timestamp","ping_ms","download_bps","upload_bps","server","ping_avg_ms"
+            ])
+            writer.writeheader()
+    except FileExistsError:
+        pass
+
+def append_log(row):
+    with open(LOGFILE, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=[
+            "timestamp","ping_ms","download_bps","upload_bps","server","ping_avg_ms"
+        ])
+        writer.writerow(row)
+
+def main():
+    ensure_logfile()
+    print("Starting network monitor. Logs ->", LOGFILE)
+    try:
+        while True:
+            st = run_speedtest()
+            p = run_ping()
+            row = {
+                "timestamp": st["timestamp"],
+                "ping_ms": st["ping_ms"],
+                "download_bps": int(st["download_bps"]) if st["download_bps"] else None,
+                "upload_bps": int(st["upload_bps"]) if st["upload_bps"] else None,
+                "server": st.get("server"),
+                "ping_avg_ms": p.get("ping_avg_ms")
+            }
+            append_log(row)
+            print(f'{row["timestamp"]}: DL={row["download_bps"]}bps UL={row["upload_bps"]}bps ping={row["ping_avg_ms"]}ms')
+            time.sleep(INTERVAL_SECONDS)
+    except KeyboardInterrupt:
+        print("Stopped by user")
+
+if __name__ == "__main__":
+    main()
+
+
+#!/usr/bin/env bash
+# tune_network.sh  -- run as root
+set -e
+
+echo "Applying kernel network tuning for high-latency WAN (for your own machine/router only)."
+
+# Enable BBR if available
+if sysctl net.ipv4.tcp_congestion_control | grep -q bbr; then
+  sysctl -w net.ipv4.tcp_congestion_control=bbr
+else
+  echo "BBR not available in kernel or not loaded. Consider installing a newer kernel."
+fi
+
+# Increase socket buffers
+sysctl -w net.core.rmem_max=268435456
+sysctl -w net.core.wmem_max=268435456
+sysctl -w net.ipv4.tcp_rmem="4096 87380 268435456"
+sysctl -w net.ipv4.tcp_wmem="4096 65536 268435456"
+
+# Increase netdev backlog and other tuning items
+sysctl -w net.core.netdev_max_backlog=250000
+sysctl -w net.ipv4.tcp_mtu_probing=1
+sysctl -w net.ipv4.tcp_window_scaling=1
+sysctl -w net.ipv4.tcp_sack=1
+sysctl -w net.ipv4.tcp_no_metrics_save=1
+
+# Persist changes (Debian/Ubuntu style)
+CONF="/etc/sysctl.d/99-satellite-tune.conf"
+cat > "$CONF" <<EOF
+# High-latency WAN tuning (applied by user)
+net.ipv4.tcp_congestion_control = bbr
+net.core.rmem_max = 268435456
+net.core.wmem_max = 268435456
+net.ipv4.tcp_rmem = 4096 87380 268435456
+net.ipv4.tcp_wmem = 4096 65536 268435456
+net.core.netdev_max_backlog=250000
+net.ipv4.tcp_mtu_probing=1
+net.ipv4.tcp_window_scaling=1
+net.ipv4.tcp_sack=1
+net.ipv4.tcp_no_metrics_save=1
+EOF
+
+sysctl --system
+echo "Done. Reboot recommended if kernel updates were required."
+
+
+# nginx caching + brotli example (for a proxy cache)
+proxy_cache_path /var/cache/nginx levels=1:2 keys_zone=my_cache:200m max_size=20g inactive=7d use_temp_path=off;
+
+server {
+    listen 8080;
+
+    # enable brotli if compiled
+    brotli on;
+    brotli_comp_level 5;
+    brotli_types text/plain text/css application/javascript application/json application/xml application/rss+xml image/svg+xml;
+
+    location / {
+        proxy_pass http://$http_host$request_uri;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_cache my_cache;
+        proxy_cache_valid 200 302  6h;
+        proxy_cache_valid 404      1m;
+        proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+        add_header X-Proxy-Cache $upstream_cache_status;
+        # adjust headers for cacheability
+        proxy_hide_header Cache-Control;
+        proxy_ignore_headers X-Accel-Expires Expires Cache-Control Set-Cookie;
+    }
+}
+
+
+#!/usr/bin/env python3
+# fastget.py -- parallel ranged downloader for large files
+# usage: python3 fastget.py URL output_file [num_parts]
+
+import sys, requests, os, math
+from concurrent.futures import ThreadPoolExecutor
+
+URL = sys.argv[1]
+OUT = sys.argv[2]
+PARTS = int(sys.argv[3]) if len(sys.argv) > 3 else 8
+
+r = requests.head(URL, allow_redirects=True)
+if 'accept-ranges' not in r.headers and r.headers.get('Accept-Ranges','').lower()!='bytes':
+    print("Server may not support range requests; falling back to single download.")
+    res = requests.get(URL, stream=True)
+    with open(OUT, 'wb') as f:
+        for chunk in res.iter_content(1024*1024):
+            if chunk:
+                f.write(chunk)
+    sys.exit(0)
+
+size = int(r.headers.get('content-length', 0))
+if size == 0:
+    print("Unknown size, do single-threaded download.")
+    res = requests.get(URL, stream=True)
+    with open(OUT, 'wb') as f:
+        for chunk in res.iter_content(1024*1024):
+            if chunk:
+                f.write(chunk)
+    sys.exit(0)
+
+part_sz = math.ceil(size / PARTS)
+tmpfiles = []
+
+def download_part(i):
+    start = i*part_sz
+    end = min(start + part_sz - 1, size-1)
+    headers = {'Range': f'bytes={start}-{end}'}
+    r = requests.get(URL, headers=headers, stream=True)
+    tmp = f'{OUT}.part{i}'
+    with open(tmp, 'wb') as f:
+        for chunk in r.iter_content(1024*1024):
+            if chunk:
+                f.write(chunk)
+    return tmp
+
+with ThreadPoolExecutor(max_workers=PARTS) as ex:
+    futures = [ex.submit(download_part, i) for i in range(PARTS)]
+    for f in futures:
+        tmpfiles.append(f.result())
+
+# combine
+with open(OUT, 'wb') as outf:
+    for t in tmpfiles:
+        with open(t,'rb') as tf:
+            while True:
+                b = tf.read(1024*1024)
+                if not b: break
+                outf.write(b)
+        os.remove(t)
+
+print("Download complete:", OUT)
+
+
+#!/bin/bash
+# qos.sh  -- basic HTB shaping example (replace IFACE and rates)
+IFACE="eth0"
+UP=100mbit   # set to your uplink capacity
+DOWN=100mbit # shaping download is harder on CPE; this shapes egress at router
+
+tc qdisc del dev $IFACE root 2>/dev/null || true
+tc qdisc add dev $IFACE root handle 1: htb default 30
+tc class add dev $IFACE parent 1: classid 1:1 htb rate $UP
+# high priority for small/interactive
+tc class add dev $IFACE parent 1:1 classid 1:10 htb rate 30mbit ceil $UP prio 1
+# bulk class
+tc class add dev $IFACE parent 1:1 classid 1:20 htb rate 60mbit ceil $UP prio 3
+# default
+tc class add dev $IFACE parent 1:1 classid 1:30 htb rate 10mbit ceil $UP prio 4
+
+# attach sfq qdisc to classes
+tc qdisc add dev $IFACE parent 1:10 handle 10: sfq
+tc qdisc add dev $IFACE parent 1:20 handle 20: sfq
+tc qdisc add dev $IFACE parent 1:30 handle 30: sfq
+
+# filter VoIP/UDP to high priority (example ports 5060, 3478)
+tc filter add dev $IFACE protocol ip parent 1:0 prio 1 u32 match ip protocol 17 0xff match ip dport 5060 0xffff flowid 1:10
+tc filter add dev $IFACE protocol ip parent 1:0 prio 1 u32 match ip protocol 17 0xff match ip dport 3478 0xffff flowid 1:10
+
+# small TCP flows to high priority (heuristic using fw mark or packet size)
+# For simple case, prioritize packets < 1000 bytes
+tc filter add dev $IFACE protocol ip parent 1:0 prio 2 u32 match u32 0 0 flowid 1:10
+
+
+#!/usr/bin/env bash
+# tune_network.sh  -- for long-fat pipe (run as root)
+set -e
+echo "Applying high-latency WAN tuning..."
+
+# enable BBR if available
+if grep -q '^CONFIG_TCP_CONG_BBR=y' /boot/config-$(uname -r) 2>/dev/null || modinfo tcp_bbr >/dev/null 2>&1; then
+  sysctl -w net.ipv4.tcp_congestion_control=bbr
+  echo "BBR enabled"
+else
+  echo "BBR not available. Consider upgrading kernel."
+fi
+
+# socket buffer sizes
+sysctl -w net.core.rmem_max=268435456
+sysctl -w net.core.wmem_max=268435456
+sysctl -w net.ipv4.tcp_rmem='4096 87380 268435456'
+sysctl -w net.ipv4.tcp_wmem='4096 65536 268435456'
+
+# other helpful tuning
+sysctl -w net.core.netdev_max_backlog=250000
+sysctl -w net.ipv4.tcp_mtu_probing=1
+sysctl -w net.ipv4.tcp_window_scaling=1
+sysctl -w net.ipv4.tcp_sack=1
+sysctl -w net.ipv4.tcp_no_metrics_save=1
+
+# persist for Debian/Ubuntu
+cat >/etc/sysctl.d/99-satellite-tune.conf <<'EOF'
+net.ipv4.tcp_congestion_control = bbr
+net.core.rmem_max = 268435456
+net.core.wmem_max = 268435456
+net.ipv4.tcp_rmem = 4096 87380 268435456
+net.ipv4.tcp_wmem = 4096 65536 268435456
+net.core.netdev_max_backlog=250000
+net.ipv4.tcp_mtu_probing=1
+net.ipv4.tcp_window_scaling=1
+net.ipv4.tcp_sack=1
+net.ipv4.tcp_no_metrics_save=1
+EOF
+
+sysctl --system
+echo "Tuning applied. Reboot if you changed kernel modules."
+
+
+version: "3.8"
+services:
+  nginx:
+    image: nginx:stable
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./cache:/var/cache/nginx
+    ports:
+      - "3128:3128"
+    restart: unless-stopped
+
+
+worker_processes auto;
+events { worker_connections 1024; }
+http {
+  proxy_cache_path /var/cache/nginx levels=1:2 keys_zone=mycache:200m max_size=50g inactive=7d use_temp_path=off;
+  server {
+    listen 3128;
+    location / {
+      proxy_pass $scheme://$http_host$request_uri;
+      proxy_set_header Host $host;
+      proxy_cache mycache;
+      proxy_cache_valid 200 302 6h;
+      proxy_cache_valid 404 1m;
+      proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+      add_header X-Proxy-Cache $upstream_cache_status;
+    }
+  }
+}
+
+
+#!/usr/bin/env python3
+# fastget.py
+import sys, math, os
+from concurrent.futures import ThreadPoolExecutor
+import requests
+
+URL = sys.argv[1]
+OUT = sys.argv[2]
+PARTS = int(sys.argv[3]) if len(sys.argv)>3 else 8
+
+h = requests.head(URL, allow_redirects=True)
+size = int(h.headers.get('content-length', 0))
+if size == 0 or 'range' not in h.headers.get('accept-ranges','').lower():
+    print("Server may not support ranges; doing single stream.")
+    r = requests.get(URL, stream=True)
+    with open(OUT,'wb') as f:
+        for chunk in r.iter_content(1024*1024):
+            if chunk: f.write(chunk)
+    sys.exit(0)
+
+part_sz = math.ceil(size / PARTS)
+parts = []
+
+def dl(i):
+    s = i*part_sz
+    e = min(s+part_sz-1, size-1)
+    headers = {'Range': f'bytes={s}-{e}'}
+    r = requests.get(URL, headers=headers, stream=True)
+    tmp = f'{OUT}.part{i}'
+    with open(tmp,'wb') as f:
+        for chunk in r.iter_content(1024*1024):
+            if chunk: f.write(chunk)
+    return tmp
+
+with ThreadPoolExecutor(max_workers=PARTS) as ex:
+    files = list(ex.map(dl, range(PARTS)))
+
+with open(OUT,'wb') as out:
+    for f in files:
+        with open(f,'rb') as inf:
+            while True:
+                b = inf.read(1024*1024)
+                if not b: break
+                out.write(b)
+        os.remove(f)
+print("Done:", OUT)
+
+
+#!/bin/bash
+IFACE="eth0"
+UP="30mbit"   # set to your measurable uplink capacity
+tc qdisc del dev $IFACE root 2>/dev/null || true
+tc qdisc add dev $IFACE root handle 1: htb default 30
+tc class add dev $IFACE parent 1: classid 1:1 htb rate $UP
+tc class add dev $IFACE parent 1:1 classid 1:10 htb rate 8mbit ceil $UP prio 1
+tc class add dev $IFACE parent 1:1 classid 1:20 htb rate 18mbit ceil $UP prio 2
+tc class add dev $IFACE parent 1:1 classid 1:30 htb rate 4mbit ceil $UP prio 3
+
+tc qdisc add dev $IFACE parent 1:10 handle 10: sfq
+tc qdisc add dev $IFACE parent 1:20 handle 20: sfq
+tc qdisc add dev $IFACE parent 1:30 handle 30: sfq
+
+# prioritize small packets (heuristic)
+tc filter add dev $IFACE protocol ip parent 1:0 prio 1 u32 match u16 0 0 flowid 1:10
+
+
+#!/usr/bin/env bash
+# tune_network.sh  -- run as root
+set -e
+echo "Applying high-latency WAN tuning..."
+
+# Try to enable BBR if kernel supports it
+if modprobe tcp_bbr 2>/dev/null || modinfo tcp_bbr >/dev/null 2>&1; then
+  sysctl -w net.ipv4.tcp_congestion_control=bbr
+  echo "Set tcp_congestion_control=bbr"
+else
+  echo "BBR not present or kernel lacks module. Consider upgrading kernel if you want BBR."
+fi
+
+# Socket buffer sizes (reasonable large values)
+sysctl -w net.core.rmem_max=268435456
+sysctl -w net.core.wmem_max=268435456
+sysctl -w net.ipv4.tcp_rmem='4096 87380 268435456'
+sysctl -w net.ipv4.tcp_wmem='4096 65536 268435456'
+
+# Other helpful settings for long-fat pipes
+sysctl -w net.core.netdev_max_backlog=250000
+sysctl -w net.ipv4.tcp_mtu_probing=1
+sysctl -w net.ipv4.tcp_window_scaling=1
+sysctl -w net.ipv4.tcp_sack=1
+sysctl -w net.ipv4.tcp_no_metrics_save=1
+sysctl -w net.ipv4.tcp_syn_retries=3
+
+# Persist settings in /etc/sysctl.d/99-satellite-tune.conf (Debian/Ubuntu style)
+CONF="/etc/sysctl.d/99-satellite-tune.conf"
+cat > "$CONF" <<'EOF'
+# High-latency WAN tuning (applied by user)
+net.ipv4.tcp_congestion_control = bbr
+net.core.rmem_max = 268435456
+net.core.wmem_max = 268435456
+net.ipv4.tcp_rmem = 4096 87380 268435456
+net.ipv4.tcp_wmem = 4096 65536 268435456
+net.core.netdev_max_backlog = 250000
+net.ipv4.tcp_mtu_probing = 1
+net.ipv4.tcp_window_scaling = 1
+net.ipv4.tcp_sack = 1
+net.ipv4.tcp_no_metrics_save = 1
+net.ipv4.tcp_syn_retries = 3
+EOF
+
+sysctl --system >/dev/null
+echo "Tuning applied. Reboot recommended if kernel modules were changed."
+
+
+#!/usr/bin/env python3
+"""
+net_monitor.py
+Periodic speedtest + ping + traceroute logger.
+Run on a machine you control. Logs CSV + traceroute text.
+Requires: pip install speedtest-cli python-dateutil
+"""
+import csv, datetime, os, subprocess, time
+from dateutil import tz
+import speedtest
+
+LOG_CSV = "net_log.csv"
+TR_DIR = "traces"
+INTERVAL = 15 * 60  # seconds between tests (15 minutes)
+
+os.makedirs(TR_DIR, exist_ok=True)
+
+CSV_FIELDS = [
+    "utc_ts","local_ts","download_bps","upload_bps","ping_ms",
+    "server_name","server_sponsor","server_country","public_ip",
+    "ping_avg_ms"
+]
+
+def utc_now_iso():
+    return datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc).isoformat()
+
+def local_now_str():
+    return datetime.datetime.now(tz=tz.tzlocal()).isoformat()
+
+def run_speedtest():
+    s = speedtest.Speedtest()
+    s.get_best_server()
+    s.download()
+    s.upload(pre_allocate=False)
+    r = s.results.dict()
+    return r
+
+def run_ping(target="8.8.8.8", count=5):
+    try:
+        p = subprocess.run(["ping","-c",str(count),target], capture_output=True, text=True, timeout=20)
+        out = p.stdout
+        # parse avg from 'rtt min/avg/max/mdev = ...'
+        avg = None
+        for line in out.splitlines():
+            if "rtt min/avg/max/mdev" in line:
+                parts = line.split("=")[1].strip().split("/")
+                if len(parts)>=2:
+                    avg = float(parts[1])
+        return avg, out
+    except Exception as e:
+        return None, str(e)
+
+def run_traceroute(target="8.8.8.8", max_hops=30):
+    try:
+        p = subprocess.run(["traceroute","-m",str(max_hops), target], capture_output=True, text=True, timeout=60)
+        return p.stdout
+    except Exception as e:
+        return str(e)
+
+def ensure_csv():
+    if not os.path.exists(LOG_CSV):
+        with open(LOG_CSV,"w",newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
+            writer.writeheader()
+
+def append_row(data):
+    with open(LOG_CSV,"a",newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
+        writer.writerow(data)
+
+def main():
+    ensure_csv()
+    print("Starting network monitor. Logs:", LOG_CSV)
+    try:
+        while True:
+            ts_utc = utc_now_iso()
+            ts_local = local_now_str()
+            try:
+                st = run_speedtest()
+                dl = int(st.get("download",0))
+                ul = int(st.get("upload",0))
+                ping = st.get("ping", None)
+                server = st.get("server",{})
+                sname = server.get("name") or server.get("sponsor")
+                sponsor = server.get("sponsor")
+                country = server.get("country")
+                public_ip = st.get("client",{}).get("ip")
+            except Exception as e:
+                dl = ul = ping = None
+                sname = sponsor = country = public_ip = None
+                print("Speedtest failed:", e)
+
+            ping_avg, ping_out = run_ping()
+            tr = run_traceroute()
+            # save traceroute file
+            tr_file = os.path.join(TR_DIR, f"tr_{int(time.time())}.txt")
+            with open(tr_file,"w") as tf:
+                tf.write(f"Timestamp: {ts_utc}\n\nTraceroute:\n")
+                tf.write(tr)
+
+            row = {
+                "utc_ts": ts_utc,
+                "local_ts": ts_local,
+                "download_bps": dl,
+                "upload_bps": ul,
+                "ping_ms": ping,
+                "server_name": sname,
+                "server_sponsor": sponsor,
+                "server_country": country,
+                "public_ip": public_ip,
+                "ping_avg_ms": ping_avg
+            }
+            append_row(row)
+            print(f"{ts_local}: DL={dl}bps UL={ul}bps ping={ping_avg}ms")
+            time.sleep(INTERVAL)
+    except KeyboardInterrupt:
+        print("Stopped by user")
+
+if __name__=="__main__":
+    main()
+
+
+[Unit]
+Description=Network Monitor (speedtest + ping + traceroute)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/net_monitor
+ExecStart=/usr/bin/python3 /opt/net_monitor/net_monitor.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
