@@ -1,0 +1,340 @@
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Sun, Car, BatteryCharging, Zap, Minimize2, Maximize2, RefreshCw } from 'lucide-react';
+
+// --- System Configuration Constants ---
+
+// Conceptual surface areas (in square meters) for a Humvee
+const SURFACE_AREAS = {
+    hood: 1.5,      // Standard hood area
+    windshield: 1.2, // Tilted glass area (less efficient due to angle)
+    sideWindows: 1.5, // Total area of side glass (transparent/thin film)
+    rearGlass: 0.5,   // Total area of rear glass
+};
+
+const INITIAL_STATE = {
+    // Environmental/Input Parameters
+    irradiance: 1000, // Solar Irradiance (G) in W/m² (1000 = standard test condition)
+    panelEfficiency: 0.15, // Thin-film/transparent solar efficiency (15%)
+    temperature: 25, // Panel Temperature in °C (for voltage calculation)
+    incidenceAngle: 30, // Sun Incidence Angle (degrees from normal)
+
+    // MPPT & PBT Parameters
+    batteryVoltage: 12.8, // Target Battery Voltage (V)
+    pbtEfficiency: 0.95, // Power Boost Technology (DC-DC conversion efficiency)
+    currentV_mppt: 25.0, // Simulated Voltage at Maximum Power Point (Vmp)
+};
+
+// --- Utility Functions (Simulating Physics & MPPT Logic) ---
+
+// Temperature correction factor for Vmp (conceptual)
+const VOLTAGE_TEMP_COEFF = -0.003; // -0.3% per °C rise
+
+/**
+ * Calculates the theoretical raw power output from a single surface.
+ * Power (W) = Area * Irradiance * Efficiency * cos(angle)
+ */
+const calculateRawPower = (area, irradiance, efficiency, angle) => {
+    const angleRad = (angle * Math.PI) / 180;
+    // Cosine correction for angle of incidence
+    const effectiveIrradiance = irradiance * Math.cos(angleRad);
+    return area * effectiveIrradiance * efficiency;
+};
+
+/**
+ * Simplified MPPT Simulation: Finds the theoretical maximum power point (Vmp).
+ * In a real system, MPPT adjusts the load to find the actual Vmp. Here, we simulate
+ * how Vmp shifts based on environmental factors (Irradiance and Temperature).
+ */
+const getSimulatedVmp = (irradiance, temperature) => {
+    // Base Vmp (e.g., 30V at STC 1000W/m² and 25°C)
+    let Vmp_stc = 30.0;
+    
+    // 1. Temperature Correction: Voltage decreases as temperature increases
+    const tempDelta = temperature - 25;
+    const V_temp_corr = Vmp_stc * (1 + (VOLTAGE_TEMP_COEFF * tempDelta));
+    
+    // 2. Irradiance Influence: Vmp has a slight, non-linear dependency on Irradiance
+    // We simulate a slight drop in Vmp at lower light levels
+    const irradianceFactor = 0.8 + 0.2 * (irradiance / 1000); // Between 0.8 and 1.0
+    
+    return V_temp_corr * irradianceFactor;
+};
+
+/**
+ * Calculates the total usable power after MPPT optimization and PBT conversion.
+ */
+const calculateSystemOutput = (rawPower, v_mppt, pbtEfficiency, batteryVoltage) => {
+    // MPPT Function: Ensures Vmp is tracked, maximizing the power available.
+    // In simulation, we assume rawPower is the P_max found by the MPPT.
+    const P_mppt = rawPower;
+
+    // PBT Function: Boosts/Bucks the Vmp to the battery voltage (e.g., 12.8V)
+    // Usable Power = P_mppt * PBT_Efficiency
+    const P_usable = P_mppt * pbtEfficiency;
+
+    // Output Current (I = P/V)
+    const I_charge = P_usable / batteryVoltage;
+
+    return { P_usable, I_charge, P_mppt };
+};
+
+
+// --- Main Application Component ---
+
+const App = () => {
+    const [state, setState] = useState(INITIAL_STATE);
+    const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+
+    useEffect(() => {
+        const handleResize = () => setIsMobile(window.innerWidth < 768);
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
+
+    const handleInputChange = useCallback((key, value) => {
+        setState(prev => ({
+            ...prev,
+            [key]: value
+        }));
+    }, []);
+
+    // Calculate all outputs using useMemo for efficiency
+    const results = useMemo(() => {
+        const { irradiance, panelEfficiency, temperature, incidenceAngle, pbtEfficiency, batteryVoltage } = state;
+
+        // 1. Calculate Raw Power for each surface
+        const rawPowerOutputs = Object.entries(SURFACE_AREAS).map(([name, area]) => ({
+            name,
+            area,
+            rawPower: calculateRawPower(area, irradiance, panelEfficiency, incidenceAngle),
+        }));
+
+        const totalRawPower = rawPowerOutputs.reduce((sum, item) => sum + item.rawPower, 0);
+
+        // 2. Simulate MPPT and PBT
+        const simulatedVmp = getSimulatedVmp(irradiance, temperature);
+        const { P_usable, I_charge, P_mppt } = calculateSystemOutput(
+            totalRawPower,
+            simulatedVmp,
+            pbtEfficiency,
+            batteryVoltage
+        );
+
+        return {
+            rawPowerOutputs,
+            totalRawPower,
+            simulatedVmp,
+            P_usable,
+            I_charge,
+            P_mppt
+        };
+    }, [state]);
+
+    // UI Helper for Sliders
+    const SliderControl = ({ label, value, min, max, step, unit, stateKey }) => (
+        <div className="space-y-2 p-3 bg-gray-50 rounded-lg shadow-inner">
+            <label className="text-sm font-semibold text-gray-700 block">
+                {label}: <span className="font-bold text-indigo-600">{value.toFixed(step < 1 ? 1 : 0)}{unit}</span>
+            </label>
+            <input
+                type="range"
+                min={min}
+                max={max}
+                step={step}
+                value={value}
+                onChange={(e) => handleInputChange(stateKey, parseFloat(e.target.value))}
+                className="w-full h-2 bg-indigo-200 rounded-lg appearance-none cursor-pointer range-lg"
+            />
+        </div>
+    );
+
+    // Placeholder variables for Canvas Firebase setup (Required for Canvas environment)
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+    const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+    // Note: No Firebase initialization or data storage is performed as this is a simulation.
+
+
+    const PowerCard = ({ title, value, unit, icon, color }) => (
+        <div className="p-4 bg-white rounded-xl shadow-lg flex items-center justify-between transition duration-300 hover:shadow-xl">
+            <div className={`text-xl font-extrabold ${color}`}>
+                {value.toFixed(2)}
+                <span className="text-sm font-medium ml-1 text-gray-500">{unit}</span>
+            </div>
+            <div className="flex flex-col items-end">
+                <span className="text-sm font-semibold text-gray-500 mb-1">{title}</span>
+                {icon}
+            </div>
+        </div>
+    );
+
+    return (
+        <div className="min-h-screen bg-gray-100 p-4 sm:p-8 font-sans">
+            <div className="max-w-4xl mx-auto">
+                <header className="text-center mb-8">
+                    <h1 className="text-4xl font-extrabold text-indigo-700 flex items-center justify-center">
+                        <Car className="mr-3 h-8 w-8 text-indigo-500" />
+                        Humvee Solar Hybrid Simulator
+                    </h1>
+                    <p className="text-gray-500 mt-2 text-md">
+                        Modeling Power from Integrated Solar Windows, Windshield, & Hood (MPPT + PBT Hybrid)
+                    </p>
+                </header>
+
+                {/* --- Input Controls --- */}
+                <div className="bg-white p-6 rounded-2xl shadow-2xl mb-8 border border-indigo-200">
+                    <h2 className="text-xl font-bold mb-4 text-indigo-600 flex items-center">
+                        <Sun className="h-5 w-5 mr-2" />
+                        Environment & System Inputs
+                    </h2>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <SliderControl
+                            label="Solar Irradiance (G)"
+                            value={state.irradiance}
+                            min={0}
+                            max={1000}
+                            step={10}
+                            unit=" W/m²"
+                            stateKey="irradiance"
+                        />
+                        <SliderControl
+                            label="Panel Efficiency (η)"
+                            value={state.panelEfficiency}
+                            min={0.05}
+                            max={0.25}
+                            step={0.01}
+                            unit=""
+                            stateKey="panelEfficiency"
+                        />
+                        <SliderControl
+                            label="Module Temperature"
+                            value={state.temperature}
+                            min={0}
+                            max={60}
+                            step={1}
+                            unit=" °C"
+                            stateKey="temperature"
+                        />
+                         <SliderControl
+                            label="Incidence Angle (Shading/Tilt)"
+                            value={state.incidenceAngle}
+                            min={0}
+                            max={90}
+                            step={1}
+                            unit="°"
+                            stateKey="incidenceAngle"
+                        />
+                        <SliderControl
+                            label="Battery Voltage (Target)"
+                            value={state.batteryVoltage}
+                            min={10}
+                            max={14.5}
+                            step={0.1}
+                            unit=" V"
+                            stateKey="batteryVoltage"
+                        />
+                        <SliderControl
+                            label="PBT Conversion Efficiency"
+                            value={state.pbtEfficiency}
+                            min={0.85}
+                            max={0.99}
+                            step={0.01}
+                            unit=""
+                            stateKey="pbtEfficiency"
+                        />
+                    </div>
+                </div>
+
+                {/* --- Output Results --- */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    <PowerCard
+                        title="Peak MPPT Power"
+                        value={results.P_mppt}
+                        unit="W"
+                        icon={<Zap className="h-6 w-6 text-yellow-500" />}
+                        color="text-yellow-600"
+                    />
+                    <PowerCard
+                        title="Usable PBT Output Power"
+                        value={results.P_usable}
+                        unit="W"
+                        icon={<Maximize2 className="h-6 w-6 text-emerald-500" />}
+                        color="text-emerald-600"
+                    />
+                    <PowerCard
+                        title="Charging Current (I)"
+                        value={results.I_charge}
+                        unit="A"
+                        icon={<BatteryCharging className="h-6 w-6 text-red-500" />}
+                        color="text-red-600"
+                    />
+                </div>
+
+                {/* --- Detailed Component Breakdown --- */}
+                <div className="bg-white p-6 rounded-2xl shadow-2xl border border-indigo-200">
+                    <h2 className="text-xl font-bold mb-4 text-indigo-600 flex items-center">
+                        <Minimize2 className="h-5 w-5 mr-2" />
+                        Component Breakdown & MPPT State
+                    </h2>
+                    
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                        <div className="p-3 bg-indigo-50 rounded-lg border border-indigo-300">
+                            <p className="text-sm font-medium text-indigo-700">Simulated MPPT Voltage (Vmp)</p>
+                            <p className="text-2xl font-bold text-indigo-800">{results.simulatedVmp.toFixed(2)} <span className="text-sm font-normal">V</span></p>
+                            <p className="text-xs text-indigo-500 mt-1">
+                                * Voltage adjusted for Temp/Irradiance (The target voltage for MPPT to operate at for maximum power)
+                            </p>
+                        </div>
+                        <div className="p-3 bg-red-50 rounded-lg border border-red-300">
+                            <p className="text-sm font-medium text-red-700">Angle-Corrected Irradiance</p>
+                            <p className="text-2xl font-bold text-red-800">
+                                {(state.irradiance * Math.cos(state.incidenceAngle * Math.PI / 180)).toFixed(0)} <span className="text-sm font-normal">W/m²</span>
+                            </p>
+                            <p className="text-xs text-red-500 mt-1">
+                                * The effective energy hitting the angled surface.
+                            </p>
+                        </div>
+                    </div>
+
+                    <h3 className="text-lg font-semibold mt-6 mb-3 text-gray-700">Raw Power per Integrated Panel</h3>
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Location</th>
+                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Area (m²)</th>
+                                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Raw Power (W)</th>
+                                </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                                {results.rawPowerOutputs.map(item => (
+                                    <tr key={item.name} className="hover:bg-gray-50">
+                                        <td className="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900 capitalize">{item.name}</td>
+                                        <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-500">{item.area.toFixed(1)}</td>
+                                        <td className="px-4 py-2 whitespace-nowrap text-sm font-bold text-right text-indigo-600">{item.rawPower.toFixed(2)}</td>
+                                    </tr>
+                                ))}
+                                <tr className="bg-indigo-50 font-bold">
+                                    <td className="px-4 py-2 text-sm text-indigo-700" colSpan="2">TOTAL RAW POWER</td>
+                                    <td className="px-4 py-2 text-sm text-right text-indigo-700">{results.totalRawPower.toFixed(2)} W</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div className="mt-8 text-center text-sm text-gray-500 p-4 rounded-lg bg-gray-200">
+                    <p>
+                        <span className="font-bold">MPPT (Maximum Power Point Tracking):</span> The MPPT stage ensures the solar array is always loaded optimally at Vmp (e.g., {results.simulatedVmp.toFixed(2)}V), maximizing the output power ({results.P_mppt.toFixed(2)}W).
+                    </p>
+                    <p className="mt-2">
+                        <span className="font-bold">PBT (Power Boost Technology):</span> This hybrid DC-DC converter (Simulated Efficiency: {(state.pbtEfficiency * 100).toFixed(0)}%) takes the MPPT output and converts it to the battery charging voltage (e.g., {state.batteryVoltage.toFixed(1)}V) with minimal loss, resulting in a usable power of {results.P_usable.toFixed(2)}W.
+                    </p>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export default App;
+
