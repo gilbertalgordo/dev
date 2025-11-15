@@ -1,0 +1,140 @@
+# BEGIN MAINTENANCE MODE
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # IMPORTANT: REPLACE 'YOUR.IP.ADDRESS.HERE' with your actual public IP address
+  # This allows YOU to still view the live site while others see the maintenance page.
+  RewriteCond %{REMOTE_ADDR} !^123\.456\.789\.000$
+  
+  # Prevent a redirect loop: Don't redirect if the request is for the maintenance page itself.
+  RewriteCond %{REQUEST_URI} !^/maintenance\.html$ [NC]
+  
+  # Redirect all other requests to maintenance.html
+  RewriteRule ^(.*)$ /maintenance.html [R=503,L]
+</IfModule>
+
+# Set the proper 503 response code for the maintenance page
+ErrorDocument 503 /maintenance.html
+
+# Optional: Tell the browser/search engine how long to wait before checking again (in seconds)
+Header always set Retry-After "3600" 
+
+# END MAINTENANCE MODE
+
+
+
+<?php
+// --- Maintenance Mode Settings ---
+$maintenance_active = true;
+$allowed_ips = array(
+    '123.456.789.000', // REPLACE with your IP address (no slashes needed)
+    // Add more IPs here if necessary, e.g., '987.654.321.000',
+);
+
+$current_ip = $_SERVER['REMOTE_ADDR'];
+$is_admin = in_array($current_ip, $allowed_ips);
+
+if ($maintenance_active && ! $is_admin) {
+    // Set the proper HTTP response code
+    header('HTTP/1.1 503 Service Unavailable', true, 503);
+    // Tell search engines to check back in one hour (3600 seconds)
+    header('Retry-After: 3600');
+    
+    // Check if a dedicated maintenance file exists
+    if (file_exists('maintenance.php')) {
+        require_once('maintenance.php');
+    } else {
+        // Fallback simple message
+        echo '<h1>We are currently undergoing scheduled maintenance.</h1><p>Please check back soon.</p>';
+    }
+    
+    exit();
+}
+// If not in maintenance, or if it's an allowed IP, the rest of the site code runs as usual.
+?>
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Site Under Maintenance</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding-top: 50px; background-color: #f4f4f4; color: #333; }
+        .container { background: #fff; padding: 40px; border-radius: 8px; max-width: 600px; margin: 0 auto; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        h1 { color: #cc0000; }
+        p { line-height: 1.6; }
+        .retry-text { margin-top: 30px; font-style: italic; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛠️ Scheduled Maintenance</h1>
+        <p>Our website is currently undergoing essential maintenance to improve performance and security.</p>
+        <p>We apologize for any inconvenience this may cause and appreciate your patience.</p>
+        <p class="retry-text">We expect to be back online shortly. Please check back in about one hour.</p>
+    </div>
+</body>
+</html>
+
+
+
+# ----------------------------------------------------
+# ADVANCED MAINTENANCE MODE CONFIGURATION
+# ----------------------------------------------------
+
+# 1. DEFINE MAINTENANCE MODE STATUS
+# To activate maintenance mode, UNCOMMENT the line below.
+# SetEnv MAINTENANCE_MODE 1
+
+# 2. DEFINE EXCLUDED IPs (Access Allowed)
+# Change the IP addresses below to your own public IP.
+# If you have multiple IPs, duplicate the line: SetEnvIf REMOT E_ADDR "123\.456\.789\.000" AllowAccess
+SetEnvIf REMOTE_ADDR "123\.456\.789\.000" AllowAccess
+SetEnvIf REMOTE_ADDR "098\.765\.432\.111" AllowAccess
+
+# 3. MAINTENANCE MODE LOGIC
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    
+    # Check if Maintenance Mode is active AND the user is NOT an allowed IP
+    RewriteCond %{ENV:MAINTENANCE_MODE} =1
+    RewriteCond %{ENV:AllowAccess} !^AllowAccess$
+    
+    # EXCLUSIONS: Ignore requests for static assets (so maintenance.html loads correctly)
+    # This prevents CSS, JS, Fonts, and Image files from being redirected.
+    RewriteCond %{REQUEST_URI} !\.(jpe?g?|png|gif|css|js|ico|woff|woff2|ttf|svg|eot)$ [NC]
+    
+    # EXCLUSION: Ignore requests for the maintenance page itself (to prevent loop)
+    RewriteCond %{REQUEST_URI} !^/maintenance\.html$ [NC]
+    
+    # ACTION: Redirect everything else to maintenance.html with a 503 response
+    # The [R=503] flag is crucial for SEO, indicating "Service Unavailable"
+    RewriteRule ^(.*)$ /maintenance.html [R=503,L]
+</IfModule>
+
+# 4. SERVER CONFIGURATION FOR 503 RESPONSE
+# This ensures that when /maintenance.html is loaded, it correctly sends a 503 HTTP header.
+
+# The ErrorDocument directive automatically sets the 503 status code for the file
+ErrorDocument 503 /maintenance.html
+
+# Set the Retry-After header: tells crawlers to wait 3600 seconds (1 hour) before checking back.
+# This prevents crawlers from treating the downtime as permanent.
+<IfModule mod_headers.c>
+    Header always set Retry-After "3600"
+</IfModule>
+
+# ----------------------------------------------------
+# END ADVANCED MAINTENANCE MODE
+# ----------------------------------------------------
+
+
+
+SetEnv MAINTENANCE_MODE 1
+
+
+
+#SetEnv MAINTENANCE_MODE 1
