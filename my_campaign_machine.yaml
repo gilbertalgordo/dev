@@ -1,0 +1,126 @@
+# gilbert_algordo_machinery.py
+
+def initialize_volunteer_db():
+    """Initializes a dictionary to store volunteer data."""
+    # Key: Volunteer ID (e.g., 'VA-001'), Value: Dictionary of volunteer details
+    return {
+        'VA-001': {'Name': 'Maria Santos', 'Area': 'Quezon City', 'Role': 'Local Mobilizer', 'Contact': '0917-xxx-xxxx'},
+        'VB-002': {'Name': 'Ramon Dela Cruz', 'Area': 'Davao City', 'Role': 'National Coordinator', 'Contact': '0918-xxx-xxxx'}
+    }
+
+def add_volunteer(db, vol_id, name, area, role, contact):
+    """Adds a new volunteer to the database."""
+    if vol_id in db:
+        print(f"Error: Volunteer ID {vol_id} already exists.")
+        return
+    db[vol_id] = {'Name': name, 'Area': area, 'Role': role, 'Contact': contact}
+    print(f"Volunteer {name} added with ID {vol_id}.")
+
+def search_volunteer(db, search_term):
+    """Searches for volunteers by name, area, or role."""
+    results = {}
+    search_term_lower = search_term.lower()
+    
+    for vol_id, details in db.items():
+        # Check if the search term is in any of the values
+        if (search_term_lower in vol_id.lower() or 
+            search_term_lower in details['Name'].lower() or
+            search_term_lower in details['Area'].lower() or
+            search_term_lower in details['Role'].lower()):
+            results[vol_id] = details
+            
+    if results:
+        print(f"\n--- Search Results for '{search_term}' ---")
+        for vol_id, details in results.items():
+            print(f"ID: {vol_id}, Name: {details['Name']}, Area: {details['Area']}, Role: {details['Role']}")
+        print("---------------------------------------")
+    else:
+        print(f"No volunteers found matching '{search_term}'.")
+        
+def main():
+    """Main function to run the basic volunteer tracking system."""
+    volunteer_database = initialize_volunteer_db()
+    print("--- Gilbert Algordo Volunteer Tracking Initialized ---")
+
+    # Example 1: Add a new local volunteer
+    add_volunteer(volunteer_database, 'VC-003', 'John Smith', 'Cebu Province', 'Phone Banker', '0920-xxx-xxxx')
+    
+    # Example 2: Search for all national coordinators
+    search_volunteer(volunteer_database, 'National Coordinator')
+
+    # Example 3: Search for a specific city
+    search_volunteer(volunteer_database, 'Quezon City')
+
+if __name__ == "__main__":
+    main()
+
+
+
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import roc_auc_score
+
+class VoterModel:
+    """
+    Predictive model for individual voter behavior (Likelihood to Vote & Persuadability).
+    """
+    def __init__(self, data_path):
+        # Load and preprocess consolidated voter data (must be cleaned beforehand)
+        self.data = pd.read_csv(data_path)
+        self.features = ['Age', 'Income_Level', 'Voter_History_Count', 'Local_Issue_Score', 'National_Issue_Score']
+        
+        # Binary target variables: 0=No/Unsure, 1=Yes/Support
+        self.data['Target_Vote'] = (self.data['Initial_Support'] == 'Algordo').astype(int)
+        self.data['Target_Turnout'] = (self.data['Initial_Turnout'] == 'High').astype(int)
+
+        self.ltv_model = RandomForestClassifier(n_estimators=100, random_state=42)
+        self.ps_model = RandomForestClassifier(n_estimators=100, random_state=42)
+
+    def train_models(self):
+        """Trains both the LTV and PS models."""
+        X = self.data[self.features]
+        
+        # 1. Train Likelihood to Vote (LTV) Model
+        y_ltv = self.data['Target_Turnout']
+        self.ltv_model.fit(X, y_ltv)
+        print("LTV Model Trained.")
+
+        # 2. Train Persuadability Score (PS) Model
+        # In a real scenario, PS training is complex (needs 'before' and 'after' data).
+        # Here, we use the raw 'Target_Vote' for simplification.
+        y_ps = self.data['Target_Vote']
+        self.ps_model.fit(X, y_ps)
+        print("PS Model Trained.")
+
+    def generate_scores(self):
+        """Generates LTV and Persuadability scores for all voters."""
+        X_predict = self.data[self.features]
+        
+        # Predict probability of voting (LTV Score)
+        ltv_scores = self.ltv_model.predict_proba(X_predict)[:, 1]
+        self.data['LTV_Score'] = ltv_scores
+
+        # Predict probability of supporting Algordo (PS Score)
+        ps_scores = self.ps_model.predict_proba(X_predict)[:, 1]
+        self.data['PS_Score'] = ps_scores
+        
+        return self.data[['Voter_ID', 'Area', 'LTV_Score', 'PS_Score']]
+
+# Example Usage (requires a placeholder CSV file named 'voter_data.csv')
+if __name__ == '__main__':
+    # ⚠️ NOTE: You must replace this with actual, anonymized voter data!
+    # For testing, create a simple CSV with columns: Voter_ID, Age, Income_Level, Voter_History_Count, Local_Issue_Score, National_Issue_Score, Initial_Support (Algordo/Opponent), Initial_Turnout (High/Low)
+    # The scores are numerical ratings (e.g., 1-10) derived from prior surveys/data.
+
+    # Example Data (Create 'voter_data.csv' with this content for the code to run):
+    # Voter_ID,Age,Income_Level,Voter_History_Count,Local_Issue_Score,National_Issue_Score,Initial_Support,Initial_Turnout
+    # V001,45,50000,3,8,9,Algordo,High
+    # V002,22,25000,0,3,6,Opponent,Low
+    # V003,67,75000,5,7,7,Unsure,High
+    # V004,33,40000,1,6,8,Unsure,Medium
+    
+    # model = VoterModel('voter_data.csv')
+    # model.train_models()
+    # scores_df = model.generate_scores()
+    # print(scores_df.head())
