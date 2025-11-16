@@ -124,3 +124,44 @@ if __name__ == '__main__':
     # model.train_models()
     # scores_df = model.generate_scores()
     # print(scores_df.head())
+
+
+
+def apply_winning_strategy(scores_df, ltv_threshold=0.65, ps_threshold_high=0.75, ps_threshold_medium=0.50):
+    """Assigns each voter to a strategic campaign bucket."""
+    
+    def assign_bucket(row):
+        ltv = row['LTV_Score']
+        ps = row['PS_Score']
+
+        # Quadrant I: GOTV (High LTV, High PS) - Our solid base.
+        if ltv >= ltv_threshold and ps >= ps_threshold_high:
+            return 'I_Base_GOTV'
+        
+        # Quadrant II: Persuade (High LTV, Medium-High PS) - The key swing target.
+        elif ltv >= ltv_threshold and ps >= ps_threshold_medium:
+            return 'II_Persuade_Target'
+            
+        # Quadrant IV: Monitor (Low LTV, Medium-High PS) - Must increase turnout.
+        elif ltv < ltv_threshold and ps >= ps_threshold_medium:
+            return 'IV_Monitor_Potential'
+            
+        # Quadrant III: Ignore (All others, low ROI) - Save resources.
+        else:
+            return 'III_Ignore_LowROI'
+
+    # Apply the function to create the new column
+    scores_df['Strategy_Bucket'] = scores_df.apply(assign_bucket, axis=1)
+    
+    # Analyze the resulting distribution
+    strategy_summary = scores_df.groupby('Strategy_Bucket')['Voter_ID'].count()
+    
+    print("\n--- Strategy Bucket Summary ---")
+    print(strategy_summary.sort_values(ascending=False))
+    print("\nActionable List:")
+    print(scores_df[scores_df['Strategy_Bucket'] == 'II_Persuade_Target'].head())
+    
+    return scores_df
+
+# Example: Applying the strategy to the generated scores (requires running the VoterModel first)
+# final_scores = apply_winning_strategy(scores_df)
