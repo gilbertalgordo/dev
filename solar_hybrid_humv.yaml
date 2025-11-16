@@ -1,340 +1,228 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Sun, Car, BatteryCharging, Zap, Minimize2, Maximize2, RefreshCw } from 'lucide-react';
+import math
+import random
 
-// --- System Configuration Constants ---
+# --- SYSTEM CONSTANTS AND PARAMETERS ---
+# Assumed values for the high-level system components.
+SOLAR_EFFICIENCY = 0.18  # 18% efficiency for advanced integrated solar cells
+BATTERY_CAPACITY_KWH = 20.0  # Total capacity of the Power Block Transfer (PBT) battery pack
+MAX_MOTOR_POWER_KW = 150.0  # Peak power demand of the electric motor
+SYSTEM_VOLTAGE = 400.0  # High voltage bus (in Volts)
 
-// Conceptual surface areas (in square meters) for a Humvee
-const SURFACE_AREAS = {
-    hood: 1.5,      // Standard hood area
-    windshield: 1.2, // Tilted glass area (less efficient due to angle)
-    sideWindows: 1.5, // Total area of side glass (transparent/thin film)
-    rearGlass: 0.5,   // Total area of rear glass
-};
+# Areas in square meters (m^2) for the 'secret' solar surfaces
+AREA_WINDOW_WINDSHIELD = 3.5
+AREA_HOOD_ROOF = 5.0
+TOTAL_SOLAR_AREA = AREA_WINDOW_WINDSHIELD + AREA_HOOD_ROOF
 
-const INITIAL_STATE = {
-    // Environmental/Input Parameters
-    irradiance: 1000, // Solar Irradiance (G) in W/m² (1000 = standard test condition)
-    panelEfficiency: 0.15, // Thin-film/transparent solar efficiency (15%)
-    temperature: 25, // Panel Temperature in °C (for voltage calculation)
-    incidenceAngle: 30, // Sun Incidence Angle (degrees from normal)
+# MPPT/Battery simulation parameters
+CHARGE_EFFICIENCY = 0.95  # Battery charging efficiency
+DISCHARGE_EFFICIENCY = 0.98 # Battery discharging efficiency
+IRRADIANCE_MAX = 1000 # Max solar irradiance (W/m^2)
 
-    // MPPT & PBT Parameters
-    batteryVoltage: 12.8, // Target Battery Voltage (V)
-    pbtEfficiency: 0.95, // Power Boost Technology (DC-DC conversion efficiency)
-    currentV_mppt: 25.0, // Simulated Voltage at Maximum Power Point (Vmp)
-};
+class SolarSurface:
+    """Represents an integrated photovoltaic surface (window, hood, etc.)."""
+    def __init__(self, name: str, area: float, efficiency: float):
+        self.name = name
+        self.area = area
+        self.efficiency = efficiency
 
-// --- Utility Functions (Simulating Physics & MPPT Logic) ---
+    def calculate_raw_power(self, irradiance_w_m2: float) -> float:
+        """
+        Calculates raw theoretical power output in Watts (W) based on irradiance.
+        
+        Power (W) = Irradiance (W/m^2) * Area (m^2) * Efficiency
+        """
+        raw_power_w = irradiance_w_m2 * self.area * self.efficiency
+        return raw_power_w
 
-// Temperature correction factor for Vmp (conceptual)
-const VOLTAGE_TEMP_COEFF = -0.003; // -0.3% per °C rise
+class MPPT_Controller:
+    """
+    Simulates the Maximum Power Point Tracking (MPPT) logic.
+    In a real system, this would use Perturb and Observe or Incremental Conductance.
+    Here, it simulates the conversion efficiency and voltage regulation.
+    """
+    def __init__(self, voltage: float):
+        self.output_voltage = voltage
+        self.conversion_loss = 0.05  # 5% energy loss during DC-DC conversion (MPPT)
+        self.last_power = 0.0
+        self.last_current = 0.0
 
-/**
- * Calculates the theoretical raw power output from a single surface.
- * Power (W) = Area * Irradiance * Efficiency * cos(angle)
- */
-const calculateRawPower = (area, irradiance, efficiency, angle) => {
-    const angleRad = (angle * Math.PI) / 180;
-    // Cosine correction for angle of incidence
-    const effectiveIrradiance = irradiance * Math.cos(angleRad);
-    return area * effectiveIrradiance * efficiency;
-};
+    def get_max_power_output(self, raw_solar_power_w: float) -> float:
+        """
+        Calculates the usable power output after MPPT conversion losses.
+        (Output is in kW for system management consistency)
+        """
+        mppt_power_w = raw_solar_power_w * (1.0 - self.conversion_loss)
+        return mppt_power_w / 1000.0  # Convert to kW
 
-/**
- * Simplified MPPT Simulation: Finds the theoretical maximum power point (Vmp).
- * In a real system, MPPT adjusts the load to find the actual Vmp. Here, we simulate
- * how Vmp shifts based on environmental factors (Irradiance and Temperature).
- */
-const getSimulatedVmp = (irradiance, temperature) => {
-    // Base Vmp (e.g., 30V at STC 1000W/m² and 25°C)
-    let Vmp_stc = 30.0;
-    
-    // 1. Temperature Correction: Voltage decreases as temperature increases
-    const tempDelta = temperature - 25;
-    const V_temp_corr = Vmp_stc * (1 + (VOLTAGE_TEMP_COEFF * tempDelta));
-    
-    // 2. Irradiance Influence: Vmp has a slight, non-linear dependency on Irradiance
-    // We simulate a slight drop in Vmp at lower light levels
-    const irradianceFactor = 0.8 + 0.2 * (irradiance / 1000); // Between 0.8 and 1.0
-    
-    return V_temp_corr * irradianceFactor;
-};
+class PBT_System:
+    """
+    Power Block Transfer System: Manages energy flow and battery State of Charge (SOC).
+    This acts as the central power distribution unit.
+    """
+    def __init__(self, capacity_kwh: float, charge_eff: float, discharge_eff: float):
+        self.capacity_kwh = capacity_kwh
+        self.charge_efficiency = charge_eff
+        self.discharge_efficiency = discharge_eff
+        # SOC is stored as a percentage (0.0 to 100.0)
+        self.soc_percent = 80.0 
 
-/**
- * Calculates the total usable power after MPPT optimization and PBT conversion.
- */
-const calculateSystemOutput = (rawPower, v_mppt, pbtEfficiency, batteryVoltage) => {
-    // MPPT Function: Ensures Vmp is tracked, maximizing the power available.
-    // In simulation, we assume rawPower is the P_max found by the MPPT.
-    const P_mppt = rawPower;
+    def update_soc(self, net_energy_kwh: float):
+        """
+        Updates the State of Charge based on net energy flow (charge/discharge).
+        Takes net energy in kWh.
+        """
+        # Convert net energy (kWh) to SOC percentage change
+        
+        if net_energy_kwh > 0:
+            # Charging: Apply charging loss
+            chargeable_energy_kwh = net_energy_kwh * self.charge_efficiency
+        else:
+            # Discharging: Apply discharging loss (requires more battery energy to output same power)
+            chargeable_energy_kwh = net_energy_kwh / self.discharge_efficiency
 
-    // PBT Function: Boosts/Bucks the Vmp to the battery voltage (e.g., 12.8V)
-    // Usable Power = P_mppt * PBT_Efficiency
-    const P_usable = P_mppt * pbtEfficiency;
+        soc_change = (chargeable_energy_kwh / self.capacity_kwh) * 100.0
+        self.soc_percent += soc_change
 
-    // Output Current (I = P/V)
-    const I_charge = P_usable / batteryVoltage;
+        # Clamping SOC between 0% and 100%
+        self.soc_percent = max(0.0, min(100.0, self.soc_percent))
+        
+        if self.soc_percent == 0.0 and net_energy_kwh < 0:
+            print(f"--- Battery DEPLETED at {self.soc_percent:.2f}% ---")
+        elif self.soc_percent == 100.0 and net_energy_kwh > 0:
+            print(f"--- Battery FULL at {self.soc_percent:.2f}% ---")
+            
+        return self.soc_percent
 
-    return { P_usable, I_charge, P_mppt };
-};
+    def get_soc_kwh(self) -> float:
+        """Returns the current energy stored in kWh."""
+        return (self.soc_percent / 100.0) * self.capacity_kwh
 
+class HybridHumvee:
+    """The main simulation class for the hybrid Humvee power system."""
+    def __init__(self):
+        # Initialize solar surfaces (secretly integrated PV)
+        self.solar_surfaces = [
+            SolarSurface("Windows/Windshield", AREA_WINDOW_WINDSHIELD, SOLAR_EFFICIENCY),
+            SolarSurface("Hood/Roof", AREA_HOOD_ROOF, SOLAR_EFFICIENCY)
+        ]
+        self.mppt = MPPT_Controller(SYSTEM_VOLTAGE)
+        self.pbt = PBT_System(BATTERY_CAPACITY_KWH, CHARGE_EFFICIENCY, DISCHARGE_EFFICIENCY)
+        self.max_motor_power_kw = MAX_MOTOR_POWER_KW
 
-// --- Main Application Component ---
+    def simulate_hour(self, hour: int, irradiance_w_m2: float, motor_demand_kw: float) -> dict:
+        """
+        Simulates one hour of operation.
+        :param hour: The hour of the day (for logging).
+        :param irradiance_w_m2: The solar irradiance for this hour (W/m^2).
+        :param motor_demand_kw: The power demanded by the electric drive motor (kW).
+        :return: Dictionary of performance metrics for the hour.
+        """
+        
+        # 1. Total Solar Power Harvesting (W)
+        total_raw_solar_w = sum(s.calculate_raw_power(irradiance_w_m2) for s in self.solar_surfaces)
+        
+        # 2. MPPT Output (Usable Power, kW)
+        solar_supply_kw = self.mppt.get_max_power_output(total_raw_solar_w)
 
-const App = () => {
-    const [state, setState] = useState(INITIAL_STATE);
-    const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
-
-    useEffect(() => {
-        const handleResize = () => setIsMobile(window.innerWidth < 768);
-        window.addEventListener('resize', handleResize);
-        return () => window.removeEventListener('resize', handleResize);
-    }, []);
-
-    const handleInputChange = useCallback((key, value) => {
-        setState(prev => ({
-            ...prev,
-            [key]: value
-        }));
-    }, []);
-
-    // Calculate all outputs using useMemo for efficiency
-    const results = useMemo(() => {
-        const { irradiance, panelEfficiency, temperature, incidenceAngle, pbtEfficiency, batteryVoltage } = state;
-
-        // 1. Calculate Raw Power for each surface
-        const rawPowerOutputs = Object.entries(SURFACE_AREAS).map(([name, area]) => ({
-            name,
-            area,
-            rawPower: calculateRawPower(area, irradiance, panelEfficiency, incidenceAngle),
-        }));
-
-        const totalRawPower = rawPowerOutputs.reduce((sum, item) => sum + item.rawPower, 0);
-
-        // 2. Simulate MPPT and PBT
-        const simulatedVmp = getSimulatedVmp(irradiance, temperature);
-        const { P_usable, I_charge, P_mppt } = calculateSystemOutput(
-            totalRawPower,
-            simulatedVmp,
-            pbtEfficiency,
-            batteryVoltage
-        );
-
+        # 3. Power Block Transfer (PBT) Logic
+        
+        # Calculate the power deficit or surplus (kW)
+        net_power_flow_kw = solar_supply_kw - motor_demand_kw
+        
+        # Determine the action (Charge, Discharge, or Buffer)
+        if net_power_flow_kw > 0:
+            # Surplus: Charge the battery (net_energy_kwh is positive)
+            energy_exchange_kwh = net_power_flow_kw * 1  # 1 hour duration
+            pbt_action = "CHARGE"
+        elif net_power_flow_kw < 0:
+            # Deficit: Discharge battery to cover the shortfall (net_energy_kwh is negative)
+            # Check if battery can cover the deficit
+            required_kwh = abs(net_power_flow_kw) * 1
+            available_kwh = self.pbt.get_soc_kwh()
+            
+            if required_kwh > available_kwh:
+                # Critical: Not enough battery power, system must enter limp mode or activate fossil fuel backup
+                pbt_action = "CRITICAL_DEFICIT"
+                energy_exchange_kwh = -available_kwh # Drain remaining energy
+                power_deficit_kw = required_kwh - available_kwh
+                # In a real hybrid, the diesel engine would start here to provide the power_deficit_kw
+            else:
+                pbt_action = "DISCHARGE"
+                energy_exchange_kwh = net_power_flow_kw * 1 # net_power_flow_kw is already negative
+        else:
+            # Buffer state: Demand perfectly matches supply
+            pbt_action = "BUFFER"
+            energy_exchange_kwh = 0.0
+            
+        # 4. Update Battery SOC
+        initial_soc = self.pbt.soc_percent
+        final_soc = self.pbt.update_soc(energy_exchange_kwh)
+        
         return {
-            rawPowerOutputs,
-            totalRawPower,
-            simulatedVmp,
-            P_usable,
-            I_charge,
-            P_mppt
-        };
-    }, [state]);
+            "hour": hour,
+            "irradiance_w_m2": irradiance_w_m2,
+            "motor_demand_kw": motor_demand_kw,
+            "solar_supply_kw": solar_supply_kw,
+            "net_flow_kw": net_power_flow_kw,
+            "pbt_action": pbt_action,
+            "soc_initial": initial_soc,
+            "soc_final": final_soc
+        }
 
-    // UI Helper for Sliders
-    const SliderControl = ({ label, value, min, max, step, unit, stateKey }) => (
-        <div className="space-y-2 p-3 bg-gray-50 rounded-lg shadow-inner">
-            <label className="text-sm font-semibold text-gray-700 block">
-                {label}: <span className="font-bold text-indigo-600">{value.toFixed(step < 1 ? 1 : 0)}{unit}</span>
-            </label>
-            <input
-                type="range"
-                min={min}
-                max={max}
-                step={step}
-                value={value}
-                onChange={(e) => handleInputChange(stateKey, parseFloat(e.target.value))}
-                className="w-full h-2 bg-indigo-200 rounded-lg appearance-none cursor-pointer range-lg"
-            />
-        </div>
-    );
+# --- SIMULATION SCENARIO ---
 
-    // Placeholder variables for Canvas Firebase setup (Required for Canvas environment)
-    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-    const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-    // Note: No Firebase initialization or data storage is performed as this is a simulation.
+def run_simulation(humvee: HybridHumvee, hours: list):
+    """Runs a 24-hour simulation."""
+    print("--- Hybrid Humvee MPPT/PBT Simulation Start ---")
+    print(f"Total Solar Area: {humvee.solar_surfaces[0].area + humvee.solar_surfaces[1].area} m²")
+    print(f"Battery Capacity: {humvee.pbt.capacity_kwh} kWh | Initial SOC: {humvee.pbt.soc_percent:.2f}%\n")
+    
+    results = []
+    
+    for hour, (irradiance, demand) in enumerate(hours):
+        # Simulate an hour of operation
+        result = humvee.simulate_hour(hour, irradiance, demand)
+        results.append(result)
+        
+        # Display hourly results
+        print(f"Hour {result['hour']:02d} | Irradiance: {irradiance:4d} W/m² | Motor Demand: {demand:5.1f} kW | "
+              f"Solar Supply: {result['solar_supply_kw']:5.1f} kW | Net Flow: {result['net_flow_kw']:5.1f} kW | "
+              f"PBT Action: {result['pbt_action']:10s} | SOC: {result['soc_initial']:.2f}% -> {result['soc_final']:.2f}%")
 
+    print("\n--- Simulation Complete ---")
+    
+# Example 24-hour mission profile (Irradiance W/m², Motor Demand kW)
+# Note: Demand is scaled for a realistic patrol/operation cycle.
 
-    const PowerCard = ({ title, value, unit, icon, color }) => (
-        <div className="p-4 bg-white rounded-xl shadow-lg flex items-center justify-between transition duration-300 hover:shadow-xl">
-            <div className={`text-xl font-extrabold ${color}`}>
-                {value.toFixed(2)}
-                <span className="text-sm font-medium ml-1 text-gray-500">{unit}</span>
-            </div>
-            <div className="flex flex-col items-end">
-                <span className="text-sm font-semibold text-gray-500 mb-1">{title}</span>
-                {icon}
-            </div>
-        </div>
-    );
+MISSION_PROFILE = [
+    (0, 5.0),    # 00:00 (Night, Idling)
+    (0, 10.0),   # 01:00 (Night, Moving slowly)
+    (0, 5.0),    # 02:00
+    (0, 5.0),    # 03:00
+    (0, 5.0),    # 04:00
+    (50, 15.0),   # 05:00 (Dawn, Pre-operation check)
+    (200, 20.0),  # 06:00 (Sun rising, Light patrol)
+    (500, 30.0),  # 07:00
+    (800, 50.0),  # 08:00 (Peak operation, High demand)
+    (950, 40.0),  # 09:00 (High solar charge potential)
+    (1000, 10.0), # 10:00 (Mid-day, Halted, High charge) - MPPT is critical here
+    (900, 15.0),  # 11:00
+    (850, 35.0),  # 12:00
+    (700, 45.0),  # 13:00 (High demand again)
+    (500, 30.0),  # 14:00
+    (300, 10.0),  # 15:00
+    (100, 5.0),   # 16:00 (Sun setting)
+    (0, 2.0),     # 17:00 (Dusk, Lights on, Low demand)
+    (0, 10.0),    # 18:00 (Night Patrol)
+    (0, 15.0),    # 19:00
+    (0, 5.0),     # 20:00
+    (0, 5.0),     # 21:00
+    (0, 5.0),     # 22:00
+    (0, 5.0),     # 23:00
+]
 
-    return (
-        <div className="min-h-screen bg-gray-100 p-4 sm:p-8 font-sans">
-            <div className="max-w-4xl mx-auto">
-                <header className="text-center mb-8">
-                    <h1 className="text-4xl font-extrabold text-indigo-700 flex items-center justify-center">
-                        <Car className="mr-3 h-8 w-8 text-indigo-500" />
-                        Humvee Solar Hybrid Simulator
-                    </h1>
-                    <p className="text-gray-500 mt-2 text-md">
-                        Modeling Power from Integrated Solar Windows, Windshield, & Hood (MPPT + PBT Hybrid)
-                    </p>
-                </header>
+# Run the simulation
+humvee_system = HybridHumvee()
+run_simulation(humvee_system, MISSION_PROFILE)
 
-                {/* --- Input Controls --- */}
-                <div className="bg-white p-6 rounded-2xl shadow-2xl mb-8 border border-indigo-200">
-                    <h2 className="text-xl font-bold mb-4 text-indigo-600 flex items-center">
-                        <Sun className="h-5 w-5 mr-2" />
-                        Environment & System Inputs
-                    </h2>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <SliderControl
-                            label="Solar Irradiance (G)"
-                            value={state.irradiance}
-                            min={0}
-                            max={1000}
-                            step={10}
-                            unit=" W/m²"
-                            stateKey="irradiance"
-                        />
-                        <SliderControl
-                            label="Panel Efficiency (η)"
-                            value={state.panelEfficiency}
-                            min={0.05}
-                            max={0.25}
-                            step={0.01}
-                            unit=""
-                            stateKey="panelEfficiency"
-                        />
-                        <SliderControl
-                            label="Module Temperature"
-                            value={state.temperature}
-                            min={0}
-                            max={60}
-                            step={1}
-                            unit=" °C"
-                            stateKey="temperature"
-                        />
-                         <SliderControl
-                            label="Incidence Angle (Shading/Tilt)"
-                            value={state.incidenceAngle}
-                            min={0}
-                            max={90}
-                            step={1}
-                            unit="°"
-                            stateKey="incidenceAngle"
-                        />
-                        <SliderControl
-                            label="Battery Voltage (Target)"
-                            value={state.batteryVoltage}
-                            min={10}
-                            max={14.5}
-                            step={0.1}
-                            unit=" V"
-                            stateKey="batteryVoltage"
-                        />
-                        <SliderControl
-                            label="PBT Conversion Efficiency"
-                            value={state.pbtEfficiency}
-                            min={0.85}
-                            max={0.99}
-                            step={0.01}
-                            unit=""
-                            stateKey="pbtEfficiency"
-                        />
-                    </div>
-                </div>
-
-                {/* --- Output Results --- */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                    <PowerCard
-                        title="Peak MPPT Power"
-                        value={results.P_mppt}
-                        unit="W"
-                        icon={<Zap className="h-6 w-6 text-yellow-500" />}
-                        color="text-yellow-600"
-                    />
-                    <PowerCard
-                        title="Usable PBT Output Power"
-                        value={results.P_usable}
-                        unit="W"
-                        icon={<Maximize2 className="h-6 w-6 text-emerald-500" />}
-                        color="text-emerald-600"
-                    />
-                    <PowerCard
-                        title="Charging Current (I)"
-                        value={results.I_charge}
-                        unit="A"
-                        icon={<BatteryCharging className="h-6 w-6 text-red-500" />}
-                        color="text-red-600"
-                    />
-                </div>
-
-                {/* --- Detailed Component Breakdown --- */}
-                <div className="bg-white p-6 rounded-2xl shadow-2xl border border-indigo-200">
-                    <h2 className="text-xl font-bold mb-4 text-indigo-600 flex items-center">
-                        <Minimize2 className="h-5 w-5 mr-2" />
-                        Component Breakdown & MPPT State
-                    </h2>
-                    
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-                        <div className="p-3 bg-indigo-50 rounded-lg border border-indigo-300">
-                            <p className="text-sm font-medium text-indigo-700">Simulated MPPT Voltage (Vmp)</p>
-                            <p className="text-2xl font-bold text-indigo-800">{results.simulatedVmp.toFixed(2)} <span className="text-sm font-normal">V</span></p>
-                            <p className="text-xs text-indigo-500 mt-1">
-                                * Voltage adjusted for Temp/Irradiance (The target voltage for MPPT to operate at for maximum power)
-                            </p>
-                        </div>
-                        <div className="p-3 bg-red-50 rounded-lg border border-red-300">
-                            <p className="text-sm font-medium text-red-700">Angle-Corrected Irradiance</p>
-                            <p className="text-2xl font-bold text-red-800">
-                                {(state.irradiance * Math.cos(state.incidenceAngle * Math.PI / 180)).toFixed(0)} <span className="text-sm font-normal">W/m²</span>
-                            </p>
-                            <p className="text-xs text-red-500 mt-1">
-                                * The effective energy hitting the angled surface.
-                            </p>
-                        </div>
-                    </div>
-
-                    <h3 className="text-lg font-semibold mt-6 mb-3 text-gray-700">Raw Power per Integrated Panel</h3>
-                    <div className="overflow-x-auto">
-                        <table className="min-w-full divide-y divide-gray-200">
-                            <thead className="bg-gray-50">
-                                <tr>
-                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Location</th>
-                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Area (m²)</th>
-                                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Raw Power (W)</th>
-                                </tr>
-                            </thead>
-                            <tbody className="bg-white divide-y divide-gray-200">
-                                {results.rawPowerOutputs.map(item => (
-                                    <tr key={item.name} className="hover:bg-gray-50">
-                                        <td className="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900 capitalize">{item.name}</td>
-                                        <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-500">{item.area.toFixed(1)}</td>
-                                        <td className="px-4 py-2 whitespace-nowrap text-sm font-bold text-right text-indigo-600">{item.rawPower.toFixed(2)}</td>
-                                    </tr>
-                                ))}
-                                <tr className="bg-indigo-50 font-bold">
-                                    <td className="px-4 py-2 text-sm text-indigo-700" colSpan="2">TOTAL RAW POWER</td>
-                                    <td className="px-4 py-2 text-sm text-right text-indigo-700">{results.totalRawPower.toFixed(2)} W</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <div className="mt-8 text-center text-sm text-gray-500 p-4 rounded-lg bg-gray-200">
-                    <p>
-                        <span className="font-bold">MPPT (Maximum Power Point Tracking):</span> The MPPT stage ensures the solar array is always loaded optimally at Vmp (e.g., {results.simulatedVmp.toFixed(2)}V), maximizing the output power ({results.P_mppt.toFixed(2)}W).
-                    </p>
-                    <p className="mt-2">
-                        <span className="font-bold">PBT (Power Boost Technology):</span> This hybrid DC-DC converter (Simulated Efficiency: {(state.pbtEfficiency * 100).toFixed(0)}%) takes the MPPT output and converts it to the battery charging voltage (e.g., {state.batteryVoltage.toFixed(1)}V) with minimal loss, resulting in a usable power of {results.P_usable.toFixed(2)}W.
-                    </p>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-export default App;
-
+                 
