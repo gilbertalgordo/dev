@@ -1,0 +1,202 @@
+pip install pandas
+
+
+
+import pandas as pd
+import random
+
+# --- 1. SIMULATE HISTORICAL CRIME DATA ---
+def generate_crime_data(num_days=30):
+    """Generates simulated crime data for several 'zones' over a period of days."""
+    zones = ['Zone A', 'Zone B', 'Zone C', 'Zone D', 'Zone E']
+    
+    # Create a base crime count, making 'Zone C' inherently a 'hotspot'
+    base_crime = {
+        'Zone A': 5,
+        'Zone B': 8,
+        'Zone C': 15,  # Higher base crime rate for Zone C
+        'Zone D': 7,
+        'Zone E': 10
+    }
+    
+    data = []
+    for day in range(1, num_days + 1):
+        for zone in zones:
+            # Simulate daily variation (random noise)
+            count = base_crime[zone] + random.randint(-3, 3)
+            if count < 0:
+                count = 0
+            
+            data.append({
+                'Date': f'Day {day}',
+                'Zone': zone,
+                'Crime_Count': count
+            })
+            
+    return pd.DataFrame(data)
+
+# --- 2. THE AI (PREDICTIVE ALGORITHM) ---
+def predictive_algorithm(historical_data, window=7):
+    """
+    Simulates a simple predictive policing algorithm.
+    It identifies the zone with the highest average crime count over the last 'window' days.
+    """
+    print(f"## 💡 Running Predictive Analysis (Last {window} Days) ##")
+    
+    # Get the data for the most recent 'window' days
+    recent_data = historical_data.tail(len(historical_data.Zone.unique()) * window)
+    
+    # Calculate the average crime rate per zone in the recent period
+    average_crime = recent_data.groupby('Zone')['Crime_Count'].mean().sort_values(ascending=False)
+    
+    print("\nAverage Crime Count per Zone (Recent Data):")
+    print(average_crime.to_string())
+    
+    # The 'prediction' is the zone with the highest recent average crime count
+    hotspot_zone = average_crime.index[0]
+    
+    return hotspot_zone
+
+# --- 3. EXECUTION ---
+if __name__ == "__main__":
+    
+    # Generate data
+    historical_df = generate_crime_data(num_days=30)
+    
+    # Display a snippet of the data
+    print("## 📊 Historical Crime Data Snippet (Last 5 Days) ##")
+    print(historical_df.tail(20).to_string(index=False))
+    print("-" * 50)
+    
+    # Run the simple AI prediction
+    predicted_hotspot = predictive_algorithm(historical_df, window=7)
+    
+    print("-" * 50)
+    print(f"\n🚨 **AI RECOMMENDED ACTION:** Deploy **extra patrols** to **{predicted_hotspot}** tomorrow.")
+    print("-" * 50)
+
+
+
+pip install pandas scikit-learn
+
+
+
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.metrics import classification_report
+from sklearn.pipeline import Pipeline
+import random
+
+# --- 1. SIMULATE ADVANCED CRIME DATASET ---
+# In a real system, this would be thousands of actual police reports.
+data = [
+    # High Priority - Assault / Robbery
+    ("Man aggressively grabbed my bag and ran down the alley. I was pushed hard.", "Robbery", "High"),
+    ("Loud fighting outside. Someone shouted they had a knife and hit the victim repeatedly.", "Assault", "High"),
+    ("Urgent: A store clerk is being threatened with a weapon right now.", "Robbery", "High"),
+    # Medium Priority - Theft / Vandalism
+    ("My car window was smashed overnight. A laptop was stolen from the back seat.", "Theft", "Medium"),
+    ("Someone spray-painted graffiti on the side of the public library wall.", "Vandalism", "Medium"),
+    ("I saw a person walking away with a bike that wasn't theirs from the rack.", "Theft", "Medium"),
+    # Low Priority - Nuisance / Non-Emergency
+    ("My neighbor's dog barks constantly, preventing me from sleeping.", "Nuisance", "Low"),
+    ("There is a pothole on Main Street that needs filling soon.", "Non-Emergency", "Low"),
+    ("A wallet was found on the street; no one is around to claim it.", "Lost Property", "Low"),
+    ("My cat is stuck up a very tall tree. It can't get down.", "Non-Emergency", "Low"),
+]
+
+# Create a DataFrame for structured data handling
+df = pd.DataFrame(data, columns=['Report_Text', 'Crime_Type', 'Priority'])
+
+# --- 2. TRAIN THE CLASSIFICATION MODEL ---
+# The target variable is the 'Crime_Type'
+X_train, X_test, y_train_type, y_test_type = train_test_split(
+    df['Report_Text'], df['Crime_Type'], test_size=0.3, random_state=42
+)
+
+# Use a machine learning Pipeline for efficiency:
+# 1. TfidfVectorizer: Converts text into numerical features (words become weights).
+# 2. MultinomialNB: A classifier good for text data.
+model_type = Pipeline([
+    ('tfidf', TfidfVectorizer(stop_words='english')),
+    ('clf', MultinomialNB())
+])
+
+# Train the model to classify the Crime_Type
+model_type.fit(X_train, y_train_type)
+
+# --- 3. TRAIN A SEPARATE PRIORITY MODEL ---
+# The target variable is the 'Priority'
+X_train_p, X_test_p, y_train_p, y_test_p = train_test_split(
+    df['Report_Text'], df['Priority'], test_size=0.3, random_state=42
+)
+
+model_priority = Pipeline([
+    ('tfidf', TfidfVectorizer(stop_words='english')),
+    ('clf', MultinomialNB())
+])
+
+# Train the model to assign a Priority
+model_priority.fit(X_train_p, y_train_p)
+
+# --- 4. THE ADVANCED AI FUNCTION ---
+def process_incident_report(report_text, type_model, priority_model):
+    """
+    Takes a new, incoming police report text and uses the trained models 
+    to classify its type and priority for dispatch.
+    """
+    
+    # Predict the crime type
+    predicted_type = type_model.predict([report_text])[0]
+    
+    # Predict the priority level
+    predicted_priority = priority_model.predict([report_text])[0]
+    
+    # Get the confidence (probability) for the highest priority class
+    # For simplicity, we just look at the confidence of the predicted priority
+    probabilities = priority_model.predict_proba([report_text])[0]
+    confidence = max(probabilities) * 100
+    
+    return {
+        "Report": report_text,
+        "Classification": predicted_type,
+        "Priority": predicted_priority,
+        "Confidence": f"{confidence:.2f}%"
+    }
+
+# --- 5. EXECUTION AND TESTING ---
+if __name__ == "__main__":
+    
+    print("## 🤖 Police AI Incident Classifier System Initialized ##")
+    
+    # --- A. Test with High Priority Incident ---
+    new_report_high = "A masked individual just smashed the display case and took jewelry. They are fleeing on foot now!"
+    result_high = process_incident_report(new_report_high, model_type, model_priority)
+    
+    print("\n--- NEW INCIDENT REPORT (High-Risk) ---")
+    print(f"REPORT TEXT: {result_high['Report']}")
+    print(f"AI CLASSIFICATION: **{result_high['Classification']}**")
+    print(f"AI PRIORITY LEVEL: **{result_high['Priority']}** (Confidence: {result_high['Confidence']})")
+    
+    # --- B. Test with Low Priority Incident ---
+    new_report_low = "Found an abandoned bicycle leaning against a traffic light pole."
+    result_low = process_incident_report(new_report_low, model_type, model_priority)
+    
+    print("\n--- NEW INCIDENT REPORT (Low-Risk) ---")
+    print(f"REPORT TEXT: {result_low['Report']}")
+    print(f"AI CLASSIFICATION: **{result_low['Classification']}**")
+    print(f"AI PRIORITY LEVEL: **{result_low['Priority']}** (Confidence: {result_low['Confidence']})")
+
+    # --- C. Evaluation (Optional, but important for real systems) ---
+    print("\n## Model Evaluation (Crime Type) ##")
+    y_pred_type = model_type.predict(X_test)
+    print(classification_report(y_test_type, y_pred_type, zero_division=0))
+    
+    print("## Model Evaluation (Priority) ##")
+    y_pred_p = model_priority.predict(X_test_p)
+    print(classification_report(y_test_p, y_pred_p, zero_division=0))
+
+
+
