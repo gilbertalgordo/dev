@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ghost Box Simulator</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Inter font -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0d0d0d;
+        }
+        /* Custom pulsing glow effect for the active state */
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 15px rgba(255, 69, 0, 0.7); }
+            50% { box-shadow: 0 0 30px rgba(255, 140, 0, 1), 0 0 50px rgba(255, 140, 0, 0.5); }
+        }
+        .scanning {
+            animation: pulse-glow 1.5s infinite ease-in-out;
+        }
+        .screen-text {
+            text-shadow: 0 0 5px #0d0d0d, 0 0 10px #ff6600;
+        }
+    </style>
+    <!-- Load Tone.js for advanced audio synthesis -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <div id="app" class="w-full max-w-sm bg-gray-900 border-4 border-gray-700 rounded-xl shadow-2xl p-6 transition duration-300">
+
+        <h1 class="text-3xl font-bold text-center mb-6 text-orange-500">
+            Spirit Box V2
+        </h1>
+
+        <!-- Simulated Display -->
+        <div id="display" class="h-32 bg-gray-800 rounded-lg mb-6 p-4 flex flex-col justify-center items-center scanning-display transition duration-300">
+            <p class="text-xs text-orange-400 mb-1">SCANNING FREQUENCY</p>
+            <p id="frequency-readout" class="text-5xl font-mono screen-text text-orange-500 transition-all duration-100 ease-linear">---</p>
+            <p id="fragment-text" class="text-md font-bold text-red-500 mt-2 opacity-0 transition-opacity duration-300">...fragment detected</p>
+        </div>
+
+        <!-- Control Panel -->
+        <div class="space-y-4">
+            <button id="toggle-btn" 
+                    class="w-full py-4 text-2xl font-extrabold text-white bg-red-700 hover:bg-red-600 active:bg-red-800 rounded-lg shadow-lg transition duration-150 transform hover:scale-[1.02] focus:outline-none focus:ring-4 focus:ring-red-500/50"
+                    onclick="toggleScanning()">
+                START SCAN
+            </button>
+
+            <!-- Status Indicator -->
+            <div class="flex items-center justify-center space-x-2">
+                <span id="status-light" class="h-4 w-4 rounded-full bg-gray-600 transition duration-300"></span>
+                <span id="status-text" class="text-sm text-gray-400">System Offline</span>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // Global State
+        let isScanning = false;
+        let noise, filter, sweepLFO, fragmentLoop, mainVolume, fragmentSynth;
+        const toggleBtn = document.getElementById('toggle-btn');
+        const statusLight = document.getElementById('status-light');
+        const statusText = document.getElementById('status-text');
+        const frequencyReadout = document.getElementById('frequency-readout');
+        const fragmentText = document.getElementById('fragment-text');
+
+        // --- Utility Functions ---
+
+        // Helper to handle Tone.js initialization and AudioContext start
+        async function initializeTone() {
+            try {
+                // Tone.start() ensures the AudioContext is running (required after user interaction)
+                await Tone.start();
+
+                // 1. Core Static Generation (Noise and Filter)
+                noise = new Tone.Noise("white").start();
+                
+                // Bandpass filter to shape the noise into 'static'
+                filter = new Tone.Filter(1000, "bandpass").toDestination(); 
+
+                // Main Volume control for the overall Spirit Box output
+                mainVolume = new Tone.Volume(-20).chain(filter);
+                noise.connect(mainVolume);
+
+                // 2. Scanning Effect (LFO on Filter Frequency)
+                // Sweep LFO: Rapidly changes the center frequency of the filter
+                sweepLFO = new Tone.LFO(15, 800, 1200).start(); // 15 Hz sweep rate, 800Hz to 1200Hz range
+                sweepLFO.connect(filter.frequency);
+
+                // 3. Fragment Voice Generator (Quick noise burst with an envelope)
+                fragmentSynth = new Tone.NoiseSynth({
+                    noise: { type: "pink" },
+                    envelope: {
+                        attack: 0.005,
+                        decay: 0.08,
+                        sustain: 0,
+                        release: 0.05
+                    }
+                }).toDestination();
+                
+                // Random Loop to trigger fragments quickly
+                fragmentLoop = new Tone.Loop(() => {
+                    if (Math.random() > 0.95) { // 5% chance of triggering a fragment every 100ms
+                        triggerFragment();
+                    }
+                }, "0.1").start(0);
+
+                // Set initial state to mute everything
+                noise.volume.value = -Infinity;
+                fragmentSynth.volume.value = -Infinity;
+                fragmentLoop.mute = true;
+                
+                return true;
+
+            } catch (error) {
+                console.error("Error initializing Tone.js:", error);
+                return false;
+            }
+        }
+
+        // --- Simulation Logic ---
+
+        function updateFrequencyDisplay() {
+            if (!isScanning) {
+                frequencyReadout.textContent = "---";
+                return;
+            }
+
+            // Get current filter frequency (simulated frequency being scanned)
+            const currentFreq = filter.frequency.value; 
+            const formattedFreq = currentFreq.toFixed(2);
+            frequencyReadout.textContent = formattedFreq + " MHz";
+        }
+
+        function triggerFragment() {
+            // Randomize the tone of the "voice"
+            const randomPitch = Math.random() * 200 + 400; // Random pitch between 400Hz and 600Hz
+            fragmentSynth.triggerAttackRelease(0.08, Tone.now(), 0.5, randomPitch); // Trigger noise burst
+
+            // Show text fragment
+            fragmentText.style.opacity = '1';
+            
+            // Randomize the fragment sound (optional: quickly change filter)
+            const oldQ = filter.Q.value;
+            filter.Q.value = Math.random() * 10 + 2; // Increase Q momentarily
+            
+            setTimeout(() => {
+                fragmentText.style.opacity = '0';
+                filter.Q.value = oldQ; // Restore Q value
+            }, 300);
+        }
+
+        // --- Control Functions ---
+
+        async function startScanning() {
+            if (isScanning) return;
+            isScanning = true;
+            
+            if (!noise) {
+                await initializeTone();
+            }
+
+            // Unmute and start LFO
+            noise.volume.rampTo(-5, 0.5); // Fade in static volume
+            fragmentSynth.volume.rampTo(-10, 0.5); // Bring up fragments volume slightly
+            fragmentLoop.mute = false;
+
+            // Start visual update loop
+            Tone.Transport.scheduleRepeat(updateFrequencyDisplay, "0.05");
+            Tone.Transport.start();
+
+            // Update UI
+            toggleBtn.textContent = "STOP SCAN";
+            toggleBtn.classList.remove('bg-red-700', 'hover:bg-red-600', 'active:bg-red-800', 'focus:ring-red-500/50');
+            toggleBtn.classList.add('bg-green-700', 'hover:bg-green-600', 'active:bg-green-800', 'focus:ring-green-500/50');
+            statusLight.classList.remove('bg-gray-600');
+            statusLight.classList.add('scanning');
+            statusLight.style.backgroundColor = 'orangered';
+            statusText.textContent = "Scanning...";
+            document.getElementById('display').classList.add('scanning');
+
+            console.log("Spirit Box Scanning Started.");
+        }
+
+        function stopScanning() {
+            if (!isScanning) return;
+            isScanning = false;
+
+            // Fade out volume and stop LFO/Transport
+            noise.volume.rampTo(-Infinity, 0.5);
+            fragmentSynth.volume.rampTo(-Infinity, 0.5);
+            fragmentLoop.mute = true;
+            Tone.Transport.stop(); // Stops the scheduled repeat function
+
+            // Reset UI
+            toggleBtn.textContent = "START SCAN";
+            toggleBtn.classList.remove('bg-green-700', 'hover:bg-green-600', 'active:bg-green-800', 'focus:ring-green-500/50');
+            toggleBtn.classList.add('bg-red-700', 'hover:bg-red-600', 'active:bg-red-800', 'focus:ring-red-500/50');
+            statusLight.classList.remove('scanning');
+            statusLight.style.backgroundColor = ''; // Reset inline color
+            statusLight.classList.add('bg-gray-600');
+            statusText.textContent = "System Offline";
+            document.getElementById('display').classList.remove('scanning');
+            frequencyReadout.textContent = "---";
+            fragmentText.style.opacity = '0';
+
+            console.log("Spirit Box Scanning Stopped.");
+        }
+
+        window.toggleScanning = function() {
+            // First check if Tone.js is initialized (for the very first click)
+            if (!noise) {
+                // Start Tone.js context, then proceed
+                initializeTone().then(success => {
+                    if (success) {
+                        isScanning ? stopScanning() : startScanning();
+                    } else {
+                        statusText.textContent = "Audio Initialization Failed!";
+                    }
+                });
+            } else {
+                isScanning ? stopScanning() : startScanning();
+            }
+        }
+
+        // Initialize Tone.js structures on load (but keep volumes muted until user clicks)
+        window.onload = initializeTone;
+        
+    </script>
+</body>
+</html>
+
