@@ -1,0 +1,560 @@
+# app.py (Simplified Python/Flask for Backend Logic)
+from flask import Flask, jsonify, request
+
+app = Flask(__name__)
+
+# --- Simplified Data Models ---
+
+def get_realtime_data(station_id, vehicle_id):
+    """Simulates real-time data from the Charging Station (via OCPP/ISO 15118)"""
+    # In a real system, this would fetch data from a database/telemetry system
+    return {
+        "status": "CHARGING",
+        "current_soc": 55, # State of Charge (%)
+        "max_charge_rate_kw": 350, # Max power the station can deliver
+        "actual_power_kw": 280,
+        "time_to_100_min": 12,
+        "battery_type": "QUANTUM", # EV, Hybrid, QUANTUM
+        "renewable_percentage": 92 # % of power sourced from solar/wind
+    }
+
+# --- API Endpoint ---
+
+@app.route('/charge/start', methods=['POST'])
+def start_charge_session():
+    data = request.json
+    vehicle_id = data.get('vehicle_id')
+    station_id = data.get('station_id')
+    
+    # 1. Authorization & Payment (Skipped for brevity)
+    # 2. Communicate with Charger Hardware (via OCPP protocol)
+    
+    print(f"Starting ultrafast charge for {vehicle_id} at {station_id}...")
+    
+    # Logic for Quantum Charging Optimization:
+    # A 'Quantum Battery' may allow for charge rates that are dynamically 
+    # adjusted based on quantum state decoherence limits (simulated here)
+    if get_realtime_data(station_id, vehicle_id)["battery_type"] == "QUANTUM":
+        return jsonify({
+            "session_id": "QS7890",
+            "message": "Quantum Charge Initiated: Energy-State Optimized.",
+            "success": True
+        })
+    
+    return jsonify({
+        "session_id": "EV1234",
+        "message": "Ultrafast Charge Initiated.",
+        "success": True
+    })
+
+@app.route('/charge/status/<station_id>/<vehicle_id>', methods=['GET'])
+def get_charge_status(station_id, vehicle_id):
+    # This is the endpoint the mobile app polls to update the animation
+    status_data = get_realtime_data(station_id, vehicle_id)
+    return jsonify(status_data)
+
+if __name__ == '__main__':
+    # Running the API locally on port 5000
+    # In a real system, this would be a secure, cloud-hosted server
+    # app.run(debug=True, port=5000)
+    pass
+
+
+
+// Swift/SwiftUI for iOS App - ChargeStatusView.swift
+import SwiftUI
+
+struct ChargeStatus: Decodable {
+    let status: String
+    let current_soc: Int
+    let max_charge_rate_kw: Int
+    let actual_power_kw: Int
+    let time_to_100_min: Int
+    let battery_type: String
+    let renewable_percentage: Int
+}
+
+struct ChargeStatusView: View {
+    // Observable object to store and update the charge data
+    @State private var status: ChargeStatus?
+    let stationID = "ST001"
+    let vehicleID = "CAR999"
+    
+    var body: some View {
+        VStack {
+            Text("⚡ Ultrafast Charging Status")
+                .font(.largeTitle).bold()
+            
+            // --- DIGITAL ANIMATION SECTION ---
+            
+            if let status = status {
+                ChargeAnimation(
+                    soc: status.current_soc, 
+                    isQuantum: status.battery_type == "QUANTUM"
+                )
+                
+                // Display key metrics
+                VStack(alignment: .leading, spacing: 10) {
+                    StatusRow(label: "Battery SOC:", value: "\(status.current_soc)%")
+                    StatusRow(label: "Power Flow:", value: "\(status.actual_power_kw) kW (Time to 100%: \(status.time_to_100_min) min)")
+                    StatusRow(label: "Source:", value: "Renewable Grid (\(status.renewable_percentage)% Clean)")
+                }
+                .padding()
+                .background(Color.gray.opacity(0.1))
+                .cornerRadius(10)
+            } else {
+                ProgressView("Connecting to Station...")
+            }
+        }
+        .onAppear {
+            // Start fetching data when the view appears
+            Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { _ in
+                fetchChargeStatus()
+            }
+        }
+    }
+    
+    // Function to fetch data from the Backend API
+    func fetchChargeStatus() {
+        // NOTE: Replace with your actual backend URL
+        guard let url = URL(string: "http://localhost:5000/charge/status/\(stationID)/\(vehicleID)") else { return }
+        
+        URLSession.shared.dataTask(with: url) { data, response, error in
+            guard let data = data else { return }
+            
+            if let decodedStatus = try? JSONDecoder().decode(ChargeStatus.self, from: data) {
+                DispatchQueue.main.async {
+                    self.status = decodedStatus
+                }
+            }
+        }.resume()
+    }
+}
+
+// --- Digital Animation Component ---
+// This simple view simulates the visual effect of charging
+struct ChargeAnimation: View {
+    var soc: Int
+    var isQuantum: Bool
+    
+    var body: some View {
+        VStack {
+            ZStack(alignment: .bottom) {
+                // Battery Container
+                RoundedRectangle(cornerRadius: 15)
+                    .stroke(isQuantum ? Color.purple : Color.green, lineWidth: 3)
+                    .frame(width: 100, height: 200)
+                
+                // Animated Charge Level (SOC)
+                Rectangle()
+                    .fill(isQuantum ? Color.purple : Color.green)
+                    .frame(width: 94, height: 200 * CGFloat(soc) / 100)
+                    .animation(.linear(duration: 3), value: soc) // Smooth animation
+            }
+            // "Quantum" effect visualization (e.g., a pulsing glow)
+            .shadow(color: isQuantum ? .purple : .clear, radius: isQuantum ? 15 : 0)
+            
+            Text("\(soc)%")
+                .font(.title)
+                .bold()
+        }
+        .padding(.vertical, 30)
+    }
+}
+
+
+
+from fastapi import FastAPI
+from pydantic import BaseModel
+import random
+import time
+
+app = FastAPI()
+
+# --- Advanced Data Models ---
+
+class ChargeSessionData(BaseModel):
+    session_id: str
+    vehicle_id: str
+    battery_type: str  # EV_Li-Ion, Hybrid_PHEV, QUANTUM_ENTANGLED
+    soc: float         # State of Charge (0.0 to 100.0)
+    max_rate_kw: float
+    current_kw: float
+    renewable_supply_percent: float
+    optimization_status: str
+
+# --- Quantum and Renewable Optimization Algorithm ---
+
+def calculate_optimized_rate(session: ChargeSessionData) -> float:
+    """
+    Implements the Dynamic Charging Optimization Logic.
+    """
+    base_rate_kw = session.max_rate_kw
+    
+    # 1. Renewable Energy Scaling (V2G/V1G Ready)
+    # The grid can supply more power if the source is clean.
+    renewable_factor = 1.0 + (session.renewable_supply_percent / 1000.0)
+    
+    # 2. Battery Type-Specific Logic
+    if session.battery_type == "QUANTUM_ENTANGLED":
+        # Quantum Battery Logic: The rate is limited not by heat, but by
+        # an abstract 'Decoherence Limit' that is only high at low/mid SOC.
+        # This simulates a "flash charge" window.
+        if 20.0 < session.soc < 80.0:
+            quantum_boost = 1.5
+            optimization_status = "Quantum Flash Mode: Max Power Available."
+        else:
+            quantum_boost = 0.8
+            optimization_status = "Quantum Maintenance Mode: Tapering."
+        
+        optimized_rate = base_rate_kw * quantum_boost * renewable_factor
+    
+    elif session.battery_type == "EV_Li-Ion":
+        # Standard Li-Ion Logic: Rate is aggressively tapered above 80% to preserve cell health.
+        if session.soc > 80.0:
+            li_ion_taper = (100.0 - session.soc) / 20.0 
+            optimized_rate = base_rate_kw * max(0.2, li_ion_taper) * renewable_factor
+            optimization_status = "Li-Ion Taper: Cell Preservation Activated."
+        else:
+            optimized_rate = base_rate_kw * renewable_factor
+            optimization_status = "Li-Ion Ultra-Fast Mode."
+            
+    else: # Hybrid_PHEV
+        optimized_rate = base_rate_kw * 0.5 # Hybrids typically have smaller packs with lower peak C-rates
+        optimization_status = "Hybrid Mode: Rate Capped for Smaller Pack."
+    
+    # Ensure the rate doesn't exceed the station's physical limit
+    return min(optimized_rate, base_rate_kw), optimization_status
+
+# --- API Endpoints ---
+
+@app.get("/api/v1/charge/status/{session_id}", response_model=ChargeSessionData)
+async def get_charge_status(session_id: str):
+    """
+    Provides real-time, optimized charging data for the mobile app animation.
+    """
+    # Simulate real-time data fetch (would come from a high-throughput cache like Redis)
+    
+    # Placeholder for dynamic State of Charge (SOC) simulation
+    soc = round(random.uniform(20.0, 95.0), 1)
+    
+    # Placeholder for Renewable % (would come from a connected Smart Grid API)
+    renewable_supply = random.randint(60, 100) 
+    
+    # Example vehicle profile for demonstration
+    vehicle_profile = {
+        "v_quantum_123": "QUANTUM_ENTANGLED",
+        "v_sport_ev": "EV_Li-Ion",
+        "v_city_hybrid": "Hybrid_PHEV"
+    }
+    
+    battery_type = vehicle_profile.get(session_id, "EV_Li-Ion")
+    max_rate = 350.0 if battery_type != "Hybrid_PHEV" else 50.0
+
+    # Calculate the optimized rate
+    actual_power_kw, opt_status = calculate_optimized_rate(
+        ChargeSessionData(
+            session_id=session_id,
+            vehicle_id=session_id,
+            battery_type=battery_type,
+            soc=soc,
+            max_rate_kw=max_rate,
+            current_kw=0, # Will be set below
+            renewable_supply_percent=renewable_supply,
+            optimization_status=""
+        )
+    )
+
+    return ChargeSessionData(
+        session_id=session_id,
+        vehicle_id=session_id,
+        battery_type=battery_type,
+        soc=soc,
+        max_rate_kw=max_rate,
+        current_kw=round(actual_power_kw, 1),
+        renewable_supply_percent=renewable_supply,
+        optimization_status=opt_status
+    )
+
+
+
+// Swift/SwiftUI - AdvancedChargeView.swift
+import SwiftUI
+
+// Struct aligned with the FastAPI model
+struct ChargeStatus: Codable {
+    let session_id: String
+    let battery_type: String
+    let soc: Double
+    let current_kw: Double
+    let renewable_supply_percent: Double
+    let optimization_status: String
+}
+
+struct AdvancedChargeView: View {
+    @State private var status: ChargeStatus?
+    let sessionID = "v_quantum_123" // Example: Simulating a Quantum Vehicle
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Text("⚡ Quantum Charge Protocol ⚡")
+                .font(.title).bold()
+            
+            // --- DIGITAL ANIMATION COMPONENT ---
+            if let status = status {
+                QuantumFlowAnimation(
+                    soc: status.soc, 
+                    currentKw: status.current_kw,
+                    type: status.battery_type
+                )
+                
+                // --- Key Metrics & Optimization Status ---
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Optimization Status:")
+                        .font(.headline)
+                    Text(status.optimization_status)
+                        .font(.subheadline)
+                        .foregroundColor(status.battery_type == "QUANTUM_ENTANGLED" ? .purple : .green)
+                    
+                    Divider()
+                    
+                    MetricRow(label: "Current Power", value: "\(Int(status.current_kw)) kW", color: .red)
+                    MetricRow(label: "Battery Type", value: status.battery_type, color: .gray)
+                    MetricRow(label: "Renewable Source", value: "\(Int(status.renewable_supply_percent))%", color: .green)
+                }
+                .padding()
+                .background(Color(.systemBackground).shadow(radius: 5))
+                .cornerRadius(12)
+                
+            } else {
+                ProgressView("Connecting to Optimization Grid...")
+            }
+        }
+        .padding()
+        .onAppear {
+            // Poll the API every 2 seconds for real-time updates
+            Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
+                fetchChargeStatus()
+            }
+        }
+    }
+    
+    func fetchChargeStatus() {
+        // Assume API is running on localhost:8000
+        guard let url = URL(string: "http://localhost:8000/api/v1/charge/status/\(sessionID)") else { return }
+        
+        URLSession.shared.dataTask(with: url) { data, _, error in
+            guard let data = data else { return }
+            
+            if let decodedStatus = try? JSONDecoder().decode(ChargeStatus.self, from: data) {
+                DispatchQueue.main.async {
+                    self.status = decodedStatus
+                }
+            }
+        }.resume()
+    }
+}
+
+// --- Digital Animation SwiftUI View ---
+
+struct QuantumFlowAnimation: View {
+    var soc: Double
+    var currentKw: Double
+    var type: String
+    
+    // Determine the color based on battery type
+    var flowColor: Color {
+        type == "QUANTUM_ENTANGLED" ? Color.purple : Color.green
+    }
+    
+    var body: some View {
+        ZStack {
+            // 1. The main battery container
+            RoundedRectangle(cornerRadius: 25)
+                .stroke(flowColor.opacity(0.5), lineWidth: 4)
+                .frame(width: 150, height: 300)
+            
+            // 2. The SOC fill level (main progress bar)
+            VStack {
+                Spacer()
+                Rectangle()
+                    .fill(flowColor)
+                    .frame(width: 146, height: 300 * CGFloat(soc / 100.0))
+            }
+            .frame(width: 150, height: 300)
+            .clipped()
+            .cornerRadius(25)
+            .animation(.easeInOut(duration: 1.0), value: soc)
+            
+            // 3. The "Flow" Animation (Particle/Energy Effect)
+            // This uses a simple repeating animation to simulate energy flow
+            VStack {
+                ForEach(0..<10) { i in
+                    Circle()
+                        .fill(flowColor)
+                        .frame(width: 5 + CGFloat(currentKw / 100.0), height: 5 + CGFloat(currentKw / 100.0))
+                        .opacity(0.8)
+                        // A continuously animating offset gives the "flow" effect
+                        .offset(y: CGFloat(i * 30) - (CGFloat(Int(soc * 10)) % 30) ) 
+                        .animation(.linear(duration: 0.1).repeatForever(autoreverses: false), value: soc)
+                }
+            }
+            .frame(width: 150, height: 300)
+            .mask(
+                // Use the lightning bolt shape to mask the flowing particles
+                Image(systemName: "bolt.fill") 
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 80, height: 250)
+            )
+            
+            // 4. The SOC Text Overlay
+            Text("\(Int(soc))%")
+                .font(.system(size: 40, weight: .black))
+                .foregroundColor(.white)
+        }
+    }
+}
+
+
+
+// Kotlin/Jetpack Compose - AdvancedChargeScreen.kt
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import retrofit2.http.GET
+
+// --- Retrofit API Interface ---
+interface ChargeApi {
+    @GET("/api/v1/charge/status/{session_id}")
+    suspend fun getChargeStatus(@retrofit2.http.Path("session_id") sessionId: String): ChargeStatus
+}
+
+// Data Class (Aligned with FastAPI model)
+data class ChargeStatus(
+    val session_id: String,
+    val battery_type: String,
+    val soc: Double,
+    val current_kw: Double,
+    val renewable_supply_percent: Double,
+    val optimization_status: String
+)
+
+@Composable
+fun AdvancedChargeScreen(sessionId: String) {
+    // State to hold the current charging data
+    var status by remember { mutableStateOf<ChargeStatus?>(null) }
+    
+    // Coroutine to poll the API (simulating real-time updates)
+    LaunchedEffect(sessionId) {
+        // In a real app, use a proper Retrofit instance
+        val api = FakeChargeApi(sessionId) 
+        while (isActive) {
+            try {
+                status = api.getChargeStatus(sessionId)
+            } catch (e: Exception) {
+                println("API Error: ${e.message}")
+            }
+            delay(2000) // Poll every 2 seconds
+        }
+    }
+
+    Scaffold(topBar = { TopAppBar(title = { Text("⚡ Ultra-Grid Charge") }) }) { padding ->
+        Column(
+            modifier = Modifier.padding(padding).fillMaxSize().padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            status?.let { data ->
+                QuantumFlowAnimationCompose(
+                    soc = data.soc,
+                    currentKw = data.current_kw,
+                    type = data.battery_type
+                )
+                
+                Spacer(modifier = Modifier.height(24.dp))
+                
+                // --- Key Metrics & Optimization Status ---
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Optimization Status:", style = MaterialTheme.typography.titleMedium)
+                        Text(data.optimization_status, 
+                            color = if (data.battery_type.contains("QUANTUM")) Color(0xFF9C27B0) else Color.Green
+                        )
+                        Divider(modifier = Modifier.padding(vertical = 8.dp))
+                        MetricRowCompose(label = "Current Power", value = "${data.current_kw.toInt()} kW")
+                        MetricRowCompose(label = "Renewable Source", value = "${data.renewable_supply_percent.toInt()}% Clean")
+                    }
+                }
+            } ?: CircularProgressIndicator()
+        }
+    }
+}
+
+// --- Digital Animation Jetpack Compose View ---
+
+@Composable
+fun QuantumFlowAnimationCompose(soc: Double, currentKw: Double, type: String) {
+    val flowColor = if (type.contains("QUANTUM")) Color(0xFF9C27B0) else Color.Green // Purple for Quantum
+    
+    // Animate the SOC fill level
+    val animatedSoc by animateFloatAsState(targetValue = soc.toFloat(), animationSpec = tween(1000))
+
+    Box(contentAlignment = Alignment.Center) {
+        Canvas(modifier = Modifier.size(150.dp, 300.dp)) {
+            val width = size.width
+            val height = size.height
+
+            // 1. Battery container
+            drawRoundRect(color = flowColor.copy(alpha = 0.5f), style = Stroke(width = 8f), size = size)
+
+            // 2. SOC Fill Level
+            val fillHeight = (height * (animatedSoc / 100f))
+            drawRect(
+                color = flowColor,
+                topLeft = Offset(0f, height - fillHeight),
+                size = androidx.compose.ui.geometry.Size(width, fillHeight)
+            )
+
+            // 3. The "Flow" Animation (Simplified Canvas effect)
+            val particleCount = 20
+            val particleSize = 4f + (currentKw / 100f).toFloat() * 2 // Scale particle size by power
+            
+            // Simple continuous offset animation
+            val time = remember { Animatable(0f) }
+            LaunchedEffect(Unit) {
+                while (true) {
+                    time.animateTo(1f, animationSpec = keyframes { durationMillis = 500 })
+                    time.snapTo(0f)
+                }
+            }
+
+            for (i in 0 until particleCount) {
+                val progress = (i.toFloat() / particleCount.toFloat()) + time.value
+                val yPos = height * (1f - (progress % 1f))
+                
+                drawCircle(
+                    color = Color.White.copy(alpha = 0.7f),
+                    radius = particleSize,
+                    center = Offset(width / 2f, yPos)
+                )
+            }
+        }
+        
+        // 4. The SOC Text Overlay
+        Text("${soc.toInt()}%", 
+            fontSize = 40.sp, 
+            color = Color.White, 
+            modifier = Modifier.align(Alignment.Center)
+        )
+    }
+}
