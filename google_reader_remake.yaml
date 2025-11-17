@@ -1,0 +1,501 @@
+mkdir reader-remake
+cd reader-remake
+npm init -y
+npm install express node-fetch
+
+
+
+const express = require('express');
+const app = express();
+const port = 3000;
+
+// Middleware to parse JSON bodies
+app.use(express.json());
+
+// --- Placeholder Data ---
+// In a real app, this would come from a database (e.g., PostgreSQL or MongoDB)
+const feedData = {
+    'tech': [
+        { id: 1, title: 'Article 1: New Tech Trend', feedTitle: 'Tech Blog', content: '...', read: false, starred: false },
+        { id: 2, title: 'Article 2: AI Update', feedTitle: 'AI News', content: '...', read: false, starred: false },
+    ],
+    'news': [
+        { id: 3, title: 'Article 3: World Event', feedTitle: 'Global News', content: '...', read: false, starred: false },
+    ]
+};
+
+// --- API Endpoints ---
+
+// Get list of categories (folders) and feeds
+app.get('/api/subscriptions', (req, res) => {
+    // A real implementation would fetch user's subscriptions from the DB
+    res.json({
+        categories: Object.keys(feedData),
+        feeds: [
+            { id: 'feed/tech', title: 'Tech Blog' },
+            { id: 'feed/ai', title: 'AI News' },
+            { id: 'feed/global', title: 'Global News' },
+        ]
+    });
+});
+
+// Get articles for a specific category or the whole reading list
+app.get('/api/stream/:streamId', (req, res) => {
+    const streamId = req.params.streamId;
+    let articles = [];
+
+    if (streamId === 'user/-/state/com.google/reading-list') {
+        // "All Items" view
+        articles = Object.values(feedData).flat();
+    } else if (feedData[streamId]) {
+        // Articles for a specific category
+        articles = feedData[streamId];
+    }
+
+    res.json({
+        streamId: streamId,
+        items: articles.filter(item => !item.read) // Show unread items by default
+    });
+});
+
+// Mark an item as read/unread or starred/unstarred
+app.post('/api/item/state', (req, res) => {
+    const { itemId, action } = req.body; // e.g., { itemId: 1, action: 'mark-read' }
+    
+    // In a real app, you'd update the database here
+    let found = false;
+    for (const category in feedData) {
+        const item = feedData[category].find(i => i.id === itemId);
+        if (item) {
+            if (action === 'mark-read') item.read = true;
+            if (action === 'mark-unread') item.read = false;
+            if (action === 'mark-starred') item.starred = true;
+            if (action === 'mark-unstarred') item.starred = false;
+            found = true;
+            break;
+        }
+    }
+    
+    if (found) {
+        res.status(200).send({ message: `${action} applied to item ${itemId}` });
+    } else {
+        res.status(404).send({ message: 'Item not found' });
+    }
+});
+
+
+app.listen(port, () => {
+    console.log(`Google Reader Remake API running at http://localhost:${port}`);
+});
+
+
+
+npm install rss-parser
+
+
+
+const Parser = require('rss-parser');
+const parser = new Parser();
+const MAX_ARTICLES_PER_FEED = 50; // Limit to keep data manageable
+
+/**
+ * Fetches, parses, and formats a single RSS/Atom feed.
+ * @param {string} feedUrl The URL of the RSS/Atom feed.
+ */
+async function fetchAndParseFeed(feedUrl) {
+    try {
+        const feed = await parser.parseURL(feedUrl);
+        console.log(`Successfully fetched feed: ${feed.title}`);
+
+        const articles = feed.items.slice(0, MAX_ARTICLES_PER_FEED).map(item => ({
+            // Use an MD5 hash of the original item URL/GUID as a unique ID
+            itemId: item.guid || item.link, 
+            title: item.title,
+            link: item.link,
+            content: item.content || item.contentSnippet,
+            pubDate: item.pubDate ? new Date(item.pubDate) : new Date(),
+            feedTitle: feed.title,
+            feedUrl: feedUrl,
+            // Initial state for new articles
+            read: false, 
+            starred: false,
+        }));
+
+        // In a real application, you would insert/update these articles in your database
+        return {
+            feedTitle: feed.title,
+            articles: articles
+        };
+
+    } catch (error) {
+        console.error(`Error fetching feed ${feedUrl}:`, error.message);
+        return null;
+    }
+}
+
+// --- Example Usage ---
+const exampleFeedUrl = 'https://www.theverge.com/rss/index.xml';
+
+// The "worker" would call this for all subscribed URLs:
+// fetchAndParseFeed(exampleFeedUrl).then(data => console.log(data ? data.articles[0] : 'Fetch failed.'));
+
+
+
+// A simple function to generate a short, URL-friendly ID
+// In production, you would use a dedicated library like 'shortid' or a DB sequence
+function generateShortCode() {
+    return Math.random().toString(36).substring(2, 8);
+}
+
+// In a real app, this would be a dedicated table in your database (e.g., 'shares')
+const sharedArticles = {}; 
+
+// POST /api/share - Endpoint to create a unique shareable link
+app.post('/api/share', (req, res) => {
+    const { itemId, userId, commentary } = req.body;
+    
+    // 1. Validate permissions (optional)
+    if (!userId) {
+        return res.status(401).send({ message: 'Authentication required for sharing.' });
+    }
+
+    // 2. Generate and store the share record
+    const shareCode = generateShortCode();
+    sharedArticles[shareCode] = {
+        itemId: itemId,
+        sharedBy: userId,
+        timestamp: Date.now(),
+        commentary: commentary || '',
+        redirectUrl: `/article/${itemId}`, // The URL to the original article
+        // In a real app: Store in DB and link to the article's actual URL
+    };
+
+    const fullShareUrl = `http://localhost:3000/s/${shareCode}`;
+    
+    res.json({ 
+        message: 'Share link created successfully',
+        shareUrl: fullShareUrl,
+        commentaryUrl: `${fullShareUrl}?c=true` // Optional: Link to a version with commentary
+    });
+});
+
+
+// GET /s/:shareCode - Endpoint for Auto-Redirect with Advanced Syndication
+app.get('/s/:shareCode', (req, res) => {
+    const shareCode = req.params.shareCode;
+    const shareRecord = sharedArticles[shareCode];
+    
+    if (!shareRecord) {
+        return res.status(404).send('Share link not found.');
+    }
+    
+    // --- ADVANCED SYNDICATION LOGIC ---
+    // Here you would check the User-Agent, geo-location, or custom headers
+    // to decide where to redirect them.
+    
+    // Example: Check if the request is from a known sharing service/bot
+    const userAgent = req.headers['user-agent'] || '';
+    if (userAgent.includes('Twitterbot') || userAgent.includes('Slackbot')) {
+        // Option 1: Serve custom HTML/Meta tags for rich preview (advanced syndication)
+        // This is crucial for Twitter/Facebook rich cards (Open Graph/Twitter Card tags)
+        res.send(`
+            <!DOCTYPE html>
+            <html>
+                <head>
+                    <meta property="og:title" content="Shared by ${shareRecord.sharedBy}: ${shareRecord.commentary || 'Check out this article!'}">
+                    <meta property="og:description" content="Read the full story: ${shareRecord.redirectUrl}">
+                    <meta http-equiv="refresh" content="0; url=${shareRecord.redirectUrl}">
+                </head>
+            </html>
+        `);
+        return;
+    }
+
+    // Option 2: Default redirect for users
+    res.redirect(302, shareRecord.redirectUrl);
+});
+
+
+
+<button id="advanced-share-btn">Share Article</button>
+<div id="share-output" style="margin-top: 10px;"></div>
+
+<script>
+document.getElementById('advanced-share-btn').addEventListener('click', async () => {
+    // --- Data to be shared ---
+    const articleId = 123; // Get the ID of the currently viewed article
+    const userId = 'user-alice'; 
+    const commentary = prompt("Add a comment to your share (optional):");
+
+    if (commentary === null) return; // User cancelled
+
+    try {
+        const response = await fetch('/api/share', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ itemId: articleId, userId, commentary }),
+        });
+
+        const data = await response.json();
+
+        // 1. Copy the short link to the clipboard
+        await navigator.clipboard.writeText(data.shareUrl);
+        
+        // 2. Display the options
+        const output = document.getElementById('share-output');
+        output.innerHTML = `
+            <p>✅ Link copied: <strong>${data.shareUrl}</strong></p>
+            <p><strong>Options:</strong></p>
+            <ul>
+                <li><a href="${data.shareUrl}" target="_blank">View Shared Link</a> (Direct article)</li>
+                <li><a href="https://twitter.com/intent/tweet?text=${encodeURIComponent('My comment: ' + commentary)}&url=${encodeURIComponent(data.shareUrl)}" target="_blank">Share to Twitter</a></li>
+                </ul>
+        `;
+
+    } catch (error) {
+        document.getElementById('share-output').innerHTML = `<p style="color: red;">Error sharing: ${error.message}</p>`;
+    }
+});
+</script>
+
+
+
+// Dependency: Install 'xml' -> npm install xml
+const xml = require('xml'); 
+
+app.get('/api/syndication/opml', (req, res) => {
+    const userId = req.query.user_id; // Get user ID from query or session
+    
+    // --- 1. Fetch user subscriptions from DB (Conceptual data) ---
+    const userSubscriptions = [
+        { title: 'Tech News', url: 'https://example.com/tech/rss', category: 'Technology' },
+        { title: 'Science Blog', url: 'https://example.com/science/rss', category: 'Science' },
+        { title: 'Personal Updates', url: 'https://example.com/personal/rss', category: 'Technology' },
+    ];
+    
+    // --- 2. Structure the OPML XML ---
+    const opmlBody = [];
+    
+    // Simple grouping by category
+    const categories = userSubscriptions.reduce((acc, sub) => {
+        acc[sub.category] = acc[sub.category] || [];
+        acc[sub.category].push({
+            outline: {
+                _attr: {
+                    type: 'rss',
+                    text: sub.title,
+                    xmlUrl: sub.url,
+                    htmlUrl: sub.url.replace('/rss', '/'), // Assuming the feed URL structure
+                }
+            }
+        });
+        return acc;
+    }, {});
+    
+    for (const category in categories) {
+        opmlBody.push({
+            outline: [
+                { _attr: { text: category, title: category } },
+                ...categories[category]
+            ]
+        });
+    }
+
+    const opmlDocument = {
+        opml: [
+            { _attr: { version: '1.0' } },
+            { 
+                head: [
+                    { title: `Subscriptions for ${userId}` },
+                    { dateCreated: new Date().toUTCString() }
+                ]
+            },
+            { body: opmlBody }
+        ]
+    };
+
+    // --- 3. Send the response ---
+    res.set('Content-Type', 'text/xml');
+    res.set('Content-Disposition', 'attachment; filename="reader-subscriptions.opml"');
+    res.send(xml(opmlDocument, { declaration: true, indent: true }));
+});
+
+
+
+// NOTE: This code is conceptual. Requires a Google API client library 
+// (e.g., 'googleapis' for Node.js) and proper OAuth 2.0 setup.
+
+async function syncBloggerPosts(accessToken, blogId, lastSyncTimestamp) {
+    // 1. Initialize Google API client with user's access token
+    const { google } = require('googleapis');
+    const blogger = google.blogger({
+        version: 'v3',
+        auth: accessToken // OAuth 2.0 token
+    });
+
+    try {
+        // 2. Fetch the latest posts from the user's blog
+        const response = await blogger.posts.list({
+            blogId: blogId,
+            fetchBodies: true, // Get the full content
+            orderBy: 'updated',
+            maxResults: 20,
+            // Use 'lastSyncTimestamp' to fetch only new/updated posts
+            // This is the "sync" part to prevent re-fetching all data
+            // startDate: new Date(lastSyncTimestamp).toISOString()
+        });
+
+        const newPosts = response.data.items || [];
+        
+        // 3. Process new posts
+        const readerItems = newPosts.map(post => ({
+            itemId: `blogger-${post.id}`,
+            title: post.title,
+            content: post.content, // Blogger HTML content
+            link: post.url,
+            pubDate: post.published,
+            feedTitle: response.data.name,
+            read: false,
+        }));
+
+        // 4. Save/Update posts in your Reader database
+        // db.saveBloggerItems(userId, readerItems);
+
+        console.log(`Synced ${readerItems.length} posts from Blogger blog ID ${blogId}`);
+        return readerItems;
+
+    } catch (error) {
+        console.error('Blogger Sync Error:', error.message);
+        throw new Error('Failed to sync with Blogger API.');
+    }
+}
+
+// // Example usage in a cron job or background worker:
+// // syncBloggerPosts(user.bloggerToken, user.bloggerId, user.lastBloggerSync); 
+
+
+
+npm install express googleapis @google-cloud/pubsub rss-parser xml shortid
+
+
+
+const express = require('express');
+const { google } = require('googleapis');
+const { PubSub } = require('@google-cloud/pubsub');
+const shortid = require('shortid');
+const app = express();
+app.use(express.json());
+
+// --- Google Cloud/OAuth Setup ---
+const pubSubClient = new PubSub({ projectId: 'YOUR_GCP_PROJECT_ID' });
+const oauth2Client = new google.auth.OAuth2(
+    'YOUR_CLIENT_ID',
+    'YOUR_CLIENT_SECRET',
+    'YOUR_REDIRECT_URL'
+);
+
+// In a real app, this would be retrieved from a database linked to the user's session
+const USER_TOKENS = new Map(); // Store user IDs -> Blogger Access Tokens
+
+
+
+// Scope needed for Blogger: 'https://www.googleapis.com/auth/blogger'
+app.get('/api/sync/blogger', async (req, res) => {
+    const userId = req.session.userId; // Assuming user is logged in
+    const tokens = USER_TOKENS.get(userId);
+    
+    if (!tokens) {
+        return res.status(401).send({ message: 'Blogger connection not found. Please authorize.' });
+    }
+
+    try {
+        oauth2Client.setCredentials(tokens);
+        const blogger = google.blogger({ version: 'v3', auth: oauth2Client });
+        
+        // Use the user's blog ID (stored in DB after OAuth)
+        const blogId = 'USER_BLOG_ID_FROM_DB'; 
+
+        const response = await blogger.posts.list({
+            blogId: blogId,
+            fetchBodies: true,
+            maxResults: 20, 
+            // In production, use `startDate` param to fetch only new items since last sync
+        });
+
+        const articles = response.data.items.map(post => ({
+            id: `blogger-${post.id}`,
+            title: post.title,
+            content: post.content,
+            link: post.url,
+            feedTitle: response.data.name,
+            published: post.published,
+        }));
+
+        // db.saveArticles(articles); // Save to your reader's DB
+
+        res.json({ message: `Successfully synced ${articles.length} posts from Blogger.` });
+    } catch (error) {
+        console.error('Blogger Sync Error:', error.message);
+        res.status(500).send({ message: 'Failed to sync Blogger. Token expired or permissions issue.' });
+    }
+});
+
+
+
+// Global placeholder for share records (use database in production)
+const shareRecords = new Map();
+
+// POST /api/share - Create unique link
+app.post('/api/share', (req, res) => {
+    const { articleId, articleTitle, commentary } = req.body;
+    
+    const shareCode = shortid.generate();
+    const articleLink = `/article/${articleId}`; // The internal link to your reader app
+    
+    shareRecords.set(shareCode, {
+        id: articleId,
+        title: articleTitle,
+        commentary: commentary,
+        internalPath: articleLink,
+    });
+
+    res.json({ 
+        shareUrl: `https://your-reader.com/s/${shareCode}`, 
+        message: 'Share link created.'
+    });
+});
+
+// GET /s/:shareCode - Auto Redirect with Syndication
+app.get('/s/:shareCode', (req, res) => {
+    const shareCode = req.params.shareCode;
+    const record = shareRecords.get(shareCode);
+    
+    if (!record) {
+        return res.status(404).send('Shared article not found.');
+    }
+    
+    const userAgent = req.headers['user-agent'] || '';
+    
+    // Check for bots (e.g., Facebook, Twitter, Slack)
+    if (userAgent.includes('bot') || userAgent.includes('Bot')) {
+        // --- ADVANCED SYNDICATION: Inject Rich Preview Meta Tags ---
+        res.send(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta property="og:title" content="${record.title}">
+                <meta property="og:description" content="Shared by a reader: ${record.commentary || 'Check out this article!'}">
+                <meta property="og:url" content="https://your-reader.com${record.internalPath}">
+                <meta http-equiv="refresh" content="0; url=https://your-reader.com${record.internalPath}">
+            </head>
+            <body>Redirecting...</body>
+            </html>
+        `);
+        return;
+    }
+
+    // Default: Redirect human users to the internal path (302 Found)
+    res.redirect(302, `https://your-reader.com${record.internalPath}`);
+});
