@@ -1,0 +1,164 @@
+import time
+from typing import Dict, List, Union
+
+class FinancialTracker:
+    """
+    A conceptual model for a Financial AI to track earnings and sponsorships.
+
+    NOTE: This code is for simulation and educational purposes only. 
+    It does not handle real-world transactions, security, or banking APIs. 
+    Never use simple scripts like this for handling actual money.
+    """
+    def __init__(self):
+        # Data structures to store transactions
+        self.earnings: List[Dict[str, Union[str, float, int]]] = []
+        self.sponsorships: List[Dict[str, Union[str, float, int]]] = []
+        self.current_balance: float = 0.0
+
+    def record_earning(self, source: str, amount: float):
+        """Records a new earning transaction (e.g., ad revenue, product sales)."""
+        if amount > 0:
+            transaction = {
+                "type": "EARNING",
+                "source": source,
+                "amount": amount,
+                "timestamp": int(time.time())
+            }
+            self.earnings.append(transaction)
+            self.current_balance += amount
+            print(f"💰 Recorded Earning: ${amount:.2f} from {source}")
+        else:
+            print("🚫 Error: Earning amount must be positive.")
+
+    def record_sponsor_fund(self, sponsor_name: str, amount: float):
+        """Records a fund received from a sponsor."""
+        if amount > 0:
+            transaction = {
+                "type": "SPONSORSHIP",
+                "sponsor": sponsor_name,
+                "amount": amount,
+                "timestamp": int(time.time())
+            }
+            self.sponsorships.append(transaction)
+            self.current_balance += amount
+            print(f"🤝 Recorded Sponsorship: ${amount:.2f} from {sponsor_name}")
+        else:
+            print("🚫 Error: Sponsorship amount must be positive.")
+
+    def get_total_funds(self) -> float:
+        """Returns the current calculated total balance."""
+        return self.current_balance
+
+    def get_summary(self):
+        """Prints a summary of all financial activities."""
+        total_earnings = sum(t['amount'] for t in self.earnings)
+        total_sponsorships = sum(t['amount'] for t in self.sponsorships)
+        
+        print("\n--- Financial Summary ---")
+        print(f"Total Earnings: ${total_earnings:.2f}")
+        print(f"Total Sponsorships: ${total_sponsorships:.2f}")
+        print(f"--- Current Balance: ${self.current_balance:.2f} ---")
+        print("-------------------------")
+
+
+# --- Example Usage ---
+tracker = FinancialTracker()
+
+# 1. Collect earnings
+tracker.record_earning("Affiliate Sales", 150.75)
+tracker.record_earning("Ad Revenue (Platform X)", 420.00)
+
+# 2. Collect sponsor funds
+tracker.record_sponsor_fund("Tech Corp Sponsor", 2500.00)
+tracker.record_sponsor_fund("Local Business Partner", 500.00)
+
+# 3. View totals
+tracker.get_summary()
+
+# 4. Total calculation
+print(f"\nFinal Calculated Funds: ${tracker.get_total_funds():.2f}")
+
+
+
+import pandas as pd
+from datetime import datetime
+from typing import Literal
+
+class AdvancedFinancialModel:
+    """
+    A conceptual financial model demonstrating advanced data handling 
+    using the Pandas library for tracking income streams.
+    """
+    def __init__(self):
+        # Initialize an empty DataFrame to store all transactions
+        self.transactions = pd.DataFrame(
+            columns=['Timestamp', 'Category', 'Source', 'Amount']
+        )
+        self.transactions['Amount'] = self.transactions['Amount'].astype(float)
+        
+    def record_transaction(self, category: Literal['EARNING', 'SPONSORSHIP'], 
+                           source: str, amount: float):
+        """Records a new transaction and adds it to the DataFrame."""
+        if amount <= 0:
+            print("🚫 Error: Transaction amount must be positive.")
+            return
+
+        new_data = {
+            'Timestamp': datetime.now(),
+            'Category': category,
+            'Source': source,
+            'Amount': amount
+        }
+        
+        # Add the new data as a row to the DataFrame
+        self.transactions.loc[len(self.transactions)] = new_data
+        print(f"✅ Recorded {category}: ${amount:.2f} from {source}")
+
+    def get_summary_by_category(self) -> pd.DataFrame:
+        """Calculates and returns the total income grouped by category."""
+        summary = self.transactions.groupby('Category')['Amount'].sum().reset_index()
+        summary.columns = ['Category', 'Total Income']
+        return summary
+
+    def get_top_sources(self, n: int = 3) -> pd.DataFrame:
+        """Identifies and returns the top N income sources."""
+        top_sources = (self.transactions.groupby('Source')['Amount']
+                       .sum()
+                       .nlargest(n)
+                       .reset_index())
+        top_sources.columns = ['Source', 'Total Income']
+        return top_sources
+
+    def calculate_monthly_growth(self):
+        """Calculates and returns the total income per month."""
+        if self.transactions.empty:
+            return "No data to calculate growth."
+            
+        # Ensure the Timestamp is the index and resample by month
+        df_monthly = self.transactions.set_index('Timestamp').resample('M')['Amount'].sum()
+        return df_monthly.to_frame(name='Monthly Total')
+
+
+# --- Example Usage with Advanced Model ---
+model = AdvancedFinancialModel()
+
+# Record sample data
+model.record_transaction('EARNING', 'YouTube Ads', 850.50)
+model.record_transaction('EARNING', 'Affiliate Sales', 120.00)
+model.record_transaction('SPONSORSHIP', 'Gaming Brand X', 5000.00)
+model.record_transaction('EARNING', 'YouTube Ads', 910.25)
+model.record_transaction('SPONSORSHIP', 'Software Company Y', 1500.00)
+
+print("\n" + "="*40)
+print("💰 Categorized Income Summary")
+print("="*40)
+print(model.get_summary_by_category())
+
+print("\n" + "="*40)
+print("🌟 Top 3 Income Sources")
+print("="*40)
+print(model.get_top_sources(n=3))
+
+# Note: Monthly growth requires transactions spanning multiple dates for meaningful results
+# print("\nMonthly Growth (Conceptual):")
+# print(model.calculate_monthly_growth())
