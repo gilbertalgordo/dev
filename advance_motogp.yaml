@@ -1,0 +1,666 @@
+// --- MOTORCYCLE_CONFIG.h ---
+
+// PIN DEFINITIONS
+#define THROTTLE_PIN A0          // Analog Pin for throttle input
+#define BALANCE_MOTOR_EN_PIN 9   // Enable pin for balancing motor driver
+#define BALANCE_MOTOR_IN1 10     // Input 1 for balancing motor driver
+#define BALANCE_MOTOR_IN2 11     // Input 2 for balancing motor driver
+#define SOLAR_CHARGE_PIN A1      // Analog pin for solar charge monitoring
+#define SECRET_WINDSHIELD_PIN 12 // Digital pin for windshield opacity control (e.g., controlling a relay or electrochromic film)
+#define SPEED_SENSOR_PIN 2       // Interrupt pin for wheel speed sensor
+
+// CONSTANTS
+const float WHEEL_CIRCUMFERENCE_M = 2.0; // In meters
+const int MAX_THROTTLE_LIMIT = 255;      // Max analog write value for "extra full throttle" mode
+const int STANDARD_THROTTLE_LIMIT = 180; // Standard max throttle
+const float PID_KP = 80.0;               // Proportional constant (Needs extensive tuning)
+const float PID_KI = 0.8;                // Integral constant
+const float PID_KD = 10.0;               // Derivative constant
+
+
+
+// --- MOTORCYCLE_MAIN.ino ---
+
+#include "MPU6050.h"       // Library for IMU (Inertial Measurement Unit)
+#include <PID_v1.h>        // Library for PID controller
+#include <BLEDevice.h>     // ESP32 BLE Library
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
+
+// --- Global Variables ---
+// Auto-Balancing System (PID)
+MPU6050 imu;
+double BalanceInput, BalanceOutput, BalanceSetpoint = 0; // Setpoint is 0 degrees (upright)
+PID BalancePID(&BalanceInput, &BalanceOutput, &BalanceSetpoint, PID_KP, PID_KI, PID_KD, DIRECT);
+
+// Speedometer
+volatile long speedSensorPulses = 0;
+long lastSpeedTime = 0;
+float currentSpeedKPH = 0.0;
+
+// Throttle Control
+int throttleLimit = STANDARD_THROTTLE_LIMIT;
+
+// BLE Service UUID for the motorcycle
+#define SERVICE_UUID        "4c4c0001-f29e-4a64-9b88-1a5c60a92f02"
+#define THROTTLE_CHAR_UUID  "4c4c0002-f29e-4a64-9b88-1a5c60a92f02"
+#define WINDSHIELD_CHAR_UUID "4c4c0003-f29e-4a64-9b88-1a5c60a92f02"
+
+// --- Function Prototypes ---
+void readSpeedSensor();
+void updateSpeedometer();
+void handleFullThrottleMode();
+void updateBalanceMotor(double correction);
+void setupBLE();
+
+// --- SETUP ---
+void setup() {
+    Serial.begin(115200);
+    // 1. PIN SETUP
+    pinMode(SPEED_SENSOR_PIN, INPUT_PULLUP);
+    pinMode(THROTTLE_PIN, INPUT);
+    pinMode(BALANCE_MOTOR_EN_PIN, OUTPUT);
+    // ... other pins
+
+    // 2. INTERRUPT FOR SPEED
+    attachInterrupt(digitalPinToInterrupt(SPEED_SENSOR_PIN), readSpeedSensor, RISING);
+
+    // 3. IMU (Automatic Balancing) SETUP
+    imu.initialize();
+    BalancePID.SetMode(AUTOMATIC);
+    BalancePID.SetOutputLimits(-255, 255); // Motor control range
+
+    // 4. BLE SETUP
+    setupBLE();
+
+    Serial.println("Motorcycle System Initialized.");
+}
+
+// --- MAIN LOOP ---
+void loop() {
+    // 1. Automatic Balancing
+    if (imu.testConnection()) {
+        // Read the angle (pitch or roll, depending on IMU mounting)
+        BalanceInput = imu.getRotationX(); // Example: get pitch angle
+        BalancePID.Compute();
+        updateBalanceMotor(BalanceOutput);
+    }
+
+    // 2. Throttle Management (Reading user input and enforcing limit)
+    int rawThrottle = analogRead(THROTTLE_PIN);
+    int limitedThrottle = map(rawThrottle, 0, 1023, 0, throttleLimit);
+    // Code to send limitedThrottle to the main motor controller (not shown)
+
+    // 3. Speedometer Update
+    updateSpeedometer();
+    // Code to display currentSpeedKPH on the digital speedometer screen (not shown)
+
+    // 4. Solar Charging Status (Simple check)
+    int solarVoltage = analogRead(SOLAR_CHARGE_PIN);
+    // Code to manage battery charging based on solarVoltage (not shown)
+
+    // 5. Short delay for loop control
+    delay(10);
+}
+
+// --- FEATURE IMPLEMENTATIONS ---
+
+// Speedometer: Calculate speed based on wheel rotation pulses
+void readSpeedSensor() {
+    // This interrupt routine is called every time a magnet passes the sensor
+    // We only update the pulse count here; time-based calculation happens in loop()
+    speedSensorPulses++;
+}
+
+void updateSpeedometer() {
+    long currentTime = millis();
+    long timeDelta = currentTime - lastSpeedTime;
+
+    if (timeDelta >= 1000) { // Update speed every 1 second
+        // Reset pulses and update time
+        noInterrupts();
+        float pulses = speedSensorPulses;
+        speedSensorPulses = 0;
+        interrupts();
+        lastSpeedTime = currentTime;
+
+        // Calculate distance traveled in the timeDelta (1 second)
+        // Assume 50 pulses per wheel revolution for simplicity
+        float distanceMeters = (pulses / 50.0) * WHEEL_CIRCUMFERENCE_M;
+
+        // Calculate speed (m/s) and convert to km/h
+        float speedMPS = distanceMeters / (timeDelta / 1000.0);
+        currentSpeedKPH = speedMPS * 3.6;
+    }
+}
+
+// Automatic Balancing: Use PID output to control a counterweight/reaction wheel
+void updateBalanceMotor(double correction) {
+    if (abs(correction) > 5) { // Only engage if significant correction is needed
+        if (correction > 0) {
+            // Spin motor in one direction to push the bike the other way
+            digitalWrite(BALANCE_MOTOR_IN1, HIGH);
+            digitalWrite(BALANCE_MOTOR_IN2, LOW);
+        } else {
+            // Spin motor in the opposite direction
+            digitalWrite(BALANCE_MOTOR_IN1, LOW);
+            digitalWrite(BALANCE_MOTOR_IN2, HIGH);
+        }
+        analogWrite(BALANCE_MOTOR_EN_PIN, abs(correction)); // PWM speed control
+    } else {
+        // Stop the motor when close to the setpoint
+        analogWrite(BALANCE_MOTOR_EN_PIN, 0);
+    }
+}
+
+// BLE Callbacks: Handle incoming commands from a smartphone app
+class BLEThrottleCallback : public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+        std::string value = pCharacteristic->getValue();
+        if (value.length() > 0) {
+            // Check for the "secret" code to activate full throttle
+            if (value.compare("FULL_POWER_CODE") == 0) {
+                throttleLimit = MAX_THROTTLE_LIMIT;
+                Serial.println("Full Throttle Mode ACTIVATED!");
+            } else if (value.compare("STANDARD_MODE") == 0) {
+                throttleLimit = STANDARD_THROTTLE_LIMIT;
+                Serial.println("Standard Throttle Mode Activated.");
+            }
+        }
+    }
+};
+
+class BLEWindshieldCallback : public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+        std::string value = pCharacteristic->getValue();
+        if (value.length() > 0) {
+            // '1' for opaque (secret mode), '0' for transparent
+            if (value[0] == '1') {
+                digitalWrite(SECRET_WINDSHIELD_PIN, HIGH);
+                Serial.println("Windshield Opaque (Secret) Mode.");
+            } else {
+                digitalWrite(SECRET_WINDSHIELD_PIN, LOW);
+                Serial.println("Windshield Transparent Mode.");
+            }
+        }
+    }
+};
+
+void setupBLE() {
+    BLEDevice::init("Motorcycle_Viper");
+    BLEServer *pServer = BLEDevice::createServer();
+    BLEService *pService = pServer->createService(SERVICE_UUID);
+
+    // Throttle Characteristic
+    BLECharacteristic *pThrottleChar = pService->createCharacteristic(
+                                        THROTTLE_CHAR_UUID,
+                                        BLECharacteristic::PROPERTY_WRITE
+                                      );
+    pThrottleChar->setCallbacks(new BLEThrottleCallback());
+
+    // Windshield Characteristic
+    BLECharacteristic *pWindshieldChar = pService->createCharacteristic(
+                                        WINDSHIELD_CHAR_UUID,
+                                        BLECharacteristic::PROPERTY_WRITE
+                                      );
+    pWindshieldChar->setCallbacks(new BLEWindshieldCallback());
+
+    pService->start();
+    BLEAdvertising *pAdvertising = pServer->getAdvertising();
+    pAdvertising->start();
+    Serial.println("BLE advertising started.");
+}
+
+
+
+// --- Motocross_Config.h ---
+
+// PIN DEFINITIONS
+#define THROTTLE_OVERRIDE_PIN 25 // PWM or Digital Pin to signal "Extra Full Throttle" mode to the main ECU
+#define SOLAR_WINDSHIELD_PIN  26 // Pin for electrochromic film control (HIGH = Opaque/Secret)
+#define BALANCE_MOTOR_PWM_PIN 27 // PWM Pin for motor/reaction wheel speed
+#define IMU_SDA_PIN 21           // I2C Data (MPU6050/9250)
+#define IMU_SCL_PIN 22           // I2C Clock
+#define SPEED_PULSE_PIN 34       // Input pin for wheel speed sensor (interrupt)
+
+// BLE Service and Characteristic UUIDs
+// The phone app sends commands to these characteristics
+const char* SERVICE_UUID = "4B719DA5-B62C-40E9-9C64-4CE19D30BEEF";
+const char* THROTTLE_CHAR_UUID = "B26D4D6B-255B-4C92-A62E-2A479F63C44C"; // Write command to unlock throttle
+const char* WINDSHIELD_CHAR_UUID = "78D32A00-4C2C-42F7-A77E-F0E84D0A47B4"; // Write command to change tint
+
+// System Constants
+const int STANDARD_THROTTLE_LIMIT = 85;  // Standard limit (e.g., 85% power)
+const int EXTRA_FULL_THROTTLE = 100;     // Unlocked limit (100% power)
+int currentThrottleLimit = STANDARD_THROTTLE_LIMIT;
+
+// PID Constants for Auto-Balancing (Requires rigorous tuning)
+const double Kp = 150.0;
+const double Ki = 1.2;
+const double Kd = 15.0;
+const double SETPOINT_ANGLE = 0.0; // The target upright angle (0 degrees)
+
+
+
+// --- Main_ECU_Interface.ino ---
+
+#include "Motocross_Config.h"
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <MPU6050.h> // Library for IMU
+#include <PID_v1.h>  // Standard PID library
+
+// --- System Objects ---
+MPU6050 imu;
+PID BalancePID(&Input, &Output, &SETPOINT_ANGLE, Kp, Ki, Kd, DIRECT);
+
+// --- Global Variables ---
+// Balancing
+double Input, Output;
+
+// Speedometer
+volatile unsigned long speedPulses = 0;
+unsigned long lastSpeedCheckTime = 0;
+float currentSpeedKPH = 0.0;
+
+// --- Function Prototypes ---
+void handleBLEThrottleWrite(std::string value);
+void handleBLEWindshieldWrite(std::string value);
+void IRAM_ATTR countSpeedPulse();
+
+// --- SETUP ---
+void setup() {
+    Serial.begin(115200);
+    
+    // 1. Feature Pin Setup
+    pinMode(THROTTLE_OVERRIDE_PIN, OUTPUT);
+    pinMode(SOLAR_WINDSHIELD_PIN, OUTPUT);
+    pinMode(BALANCE_MOTOR_PWM_PIN, OUTPUT);
+
+    // 2. Speedometer Setup (Using Interrupt for high accuracy)
+    pinMode(SPEED_PULSE_PIN, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(SPEED_PULSE_PIN), countSpeedPulse, FALLING);
+
+    // 3. IMU & Balancing Setup
+    Wire.begin(IMU_SDA_PIN, IMU_SCL_PIN);
+    imu.initialize();
+    BalancePID.SetMode(AUTOMATIC);
+    BalancePID.SetOutputLimits(-255, 255); // Motor PWM range
+
+    // 4. BLE Setup (for Secret Features)
+    setupBLE();
+
+    Serial.println("KTM/MotoGP System Interface Ready.");
+}
+
+// --- MAIN LOOP ---
+void loop() {
+    // 1. Automatic Balancing System
+    if (imu.testConnection()) {
+        Input = imu.getRotationX(); // Get current lean angle (e.g., pitch or roll)
+        BalancePID.Compute();
+        applyBalanceCorrection(Output);
+    }
+
+    // 2. Throttle Override Management
+    // This sends the current power limit signal (PWM or CAN message abstraction)
+    // A simplified digital signal to the main ECU is used here:
+    if (currentThrottleLimit == EXTRA_FULL_THROTTLE) {
+        digitalWrite(THROTTLE_OVERRIDE_PIN, HIGH);
+    } else {
+        digitalWrite(THROTTLE_OVERRIDE_PIN, LOW);
+    }
+
+    // 3. Digital Speedometer Update
+    updateSpeedometer();
+
+    // 4. Update digital display (not coded, assumes I2C/SPI to an LCD)
+    // display.print(currentSpeedKPH);
+    
+    delay(10); // Loop delay
+}
+
+// --- FEATURE FUNCTIONS ---
+
+// ** 1. Automatic Balancing (Control Actuator) **
+void applyBalanceCorrection(double correction) {
+    // Correction ranges from -255 to 255
+    if (abs(correction) > 10) { 
+        // A real system would use a reaction wheel, counterweights, or steer-by-wire.
+        // This is a simple motor control abstraction:
+        analogWrite(BALANCE_MOTOR_PWM_PIN, abs(correction));
+        // Direction logic (e.g., control two pins for forward/reverse) goes here
+    } else {
+        analogWrite(BALANCE_MOTOR_PWM_PIN, 0); // Stop the motor
+    }
+}
+
+// ** 2. New Digital Speedometer **
+void IRAM_ATTR countSpeedPulse() {
+    speedPulses++;
+}
+
+void updateSpeedometer() {
+    unsigned long currentTime = millis();
+    unsigned long timeDelta = currentTime - lastSpeedCheckTime;
+
+    if (timeDelta >= 500) { // Calculate speed every 500ms
+        // Temporarily disable interrupts for safe reading
+        noInterrupts();
+        unsigned long pulses = speedPulses;
+        speedPulses = 0;
+        interrupts();
+
+        lastSpeedCheckTime = currentTime;
+
+        // Constants: Pulses per revolution (PPR) = 5. Wheel Circumference (Meters) = 2.0
+        // Speed (m/s) = (Pulses / PPR) * Circumference / (timeDelta / 1000)
+        float speedMPS = (float)pulses / 5.0 * 2.0 / ((float)timeDelta / 1000.0);
+        currentSpeedKPH = speedMPS * 3.6; // Convert m/s to km/h
+    }
+}
+
+// ** 3. BLE - Secret Solar Windshield and Full Throttle **
+class BLE_Callback_Handler : public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+        std::string uuid = pCharacteristic->getUUID().toString();
+        std::string value = pCharacteristic->getValue();
+
+        if (uuid.compare(THROTTLE_CHAR_UUID) == 0) {
+            handleBLEThrottleWrite(value);
+        } else if (uuid.compare(WINDSHIELD_CHAR_UUID) == 0) {
+            handleBLEWindshieldWrite(value);
+        }
+    }
+};
+
+void handleBLEThrottleWrite(std::string value) {
+    if (value.compare("KTM_ULTRA_BOOST") == 0) {
+        currentThrottleLimit = EXTRA_FULL_THROTTLE;
+        Serial.println("EXTRA FULL THROTTLE UNLOCKED!");
+    } else if (value.compare("STANDARD_RACE") == 0) {
+        currentThrottleLimit = STANDARD_THROTTLE_LIMIT;
+        Serial.println("Throttle limit reset to Standard Race Mode.");
+    }
+}
+
+void handleBLEWindshieldWrite(std::string value) {
+    // Check for a specific 'secret' command
+    if (value.compare("OPAC_STEALTH") == 0) {
+        digitalWrite(SOLAR_WINDSHIELD_PIN, HIGH); // Apply voltage/signal for opaque mode
+        Serial.println("Windshield set to OPAQUE (Secret) Mode.");
+    } else {
+        digitalWrite(SOLAR_WINDSHIELD_PIN, LOW);  // Transparent/Default
+        Serial.println("Windshield set to Transparent Mode.");
+    }
+}
+
+void setupBLE() {
+    BLEDevice::init("KTM_RC16_Phantom");
+    BLEServer *pServer = BLEDevice::createServer();
+    pServer->setCallbacks(new BLEServerCallbacks());
+    BLEService *pService = pServer->createService(SERVICE_UUID);
+
+    // Throttle Characteristic
+    BLECharacteristic *pThrottleChar = pService->createCharacteristic(
+                                        THROTTLE_CHAR_UUID,
+                                        BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_READ
+                                      );
+    pThrottleChar->setCallbacks(new BLE_Callback_Handler());
+    pThrottleChar->setValue(std::to_string(currentThrottleLimit));
+
+    // Windshield Characteristic
+    BLECharacteristic *pWindshieldChar = pService->createCharacteristic(
+                                        WINDSHIELD_CHAR_UUID,
+                                        BLECharacteristic::PROPERTY_WRITE
+                                      );
+    pWindshieldChar->setCallbacks(new BLE_Callback_Handler());
+
+    pService->start();
+    BLEAdvertising *pAdvertising = pServer->getAdvertising();
+    pAdvertising->start();
+}
+
+
+
+// --- KTM_Race_Config.h ---
+
+// PIN DEFINITIONS
+#define THROTTLE_ACTUATOR_PWM 25 // Controls the effective throttle position (simulated)
+#define SOLAR_WINDSHIELD_PWM  26 // Controls the tinting (0=Clear, 255=Opaque)
+#define BALANCE_MOTOR_EN_PWM  27 // PWM for Reaction Wheel Motor
+#define IMU_SDA_PIN 21           // I2C Data (Simulating a high-end IMU like BNO055)
+#define IMU_SCL_PIN 22           // I2C Clock
+#define FRONT_SPEED_PIN 34       // Input for Front Wheel Speed Sensor
+#define REAR_SPEED_PIN 35        // Input for Rear Wheel Speed Sensor
+
+// BLE UUIDs
+const char* SERVICE_UUID        = "4B719DA5-B62C-40E9-9C64-4CE19D30BEEF";
+const char* THROTTLE_CHAR_UUID  = "B26D4D6B-255B-4C92-A62E-2A479F63C44C"; 
+const char* WINDSHIELD_CHAR_UUID= "78D32A00-4C2C-42F7-A77E-F0E84D0A47B4"; 
+
+// Throttle States for the Finite State Machine (FSM)
+enum ThrottleState {
+    STANDARD_RACE = 0, // Governed by standard MotoGP electronics
+    EXTRA_FULL_THROTTLE = 1 // Secret, ungoverned power mode
+};
+
+// GLOBAL STATES
+ThrottleState currentThrottleState = STANDARD_RACE;
+float MAX_SLIP_PERCENT = 0.05; // 5% maximum wheel slip tolerance in STANDARD_RACE mode
+
+// PID Constants for Auto-Balancing (Requires tuning)
+const double Kp_Balance = 150.0;
+const double Ki_Balance = 1.2;
+const double Kd_Balance = 15.0;
+const double SETPOINT_ANGLE = 0.0; // Upright target
+
+
+
+// --- KTM_Main_Code.ino ---
+
+#include "KTM_Race_Config.h"
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+// Libraries for advanced IMU and PID would be included here
+
+// --- Global Objects ---
+// PID implementation abstraction
+// PID BalancePID(&Input, &Output, &SETPOINT_ANGLE, Kp_Balance, Ki_Balance, Kd_Balance, DIRECT);
+
+// Speedometer
+volatile unsigned long frontPulses = 0;
+volatile unsigned long rearPulses = 0;
+unsigned long lastSpeedCheckTime = 0;
+float currentSpeedKPH = 0.0;
+float slipRatio = 0.0;
+
+// --- Function Prototypes ---
+void setupBLE();
+void IRAM_ATTR countFrontPulse();
+void IRAM_ATTR countRearPulse();
+float calculateSlipRatio(float frontV, float rearV);
+void applyBalancingTorque(float leanAngle);
+
+// --- SETUP ---
+void setup() {
+    Serial.begin(115200);
+    
+    // 1. Pin Setup
+    pinMode(THROTTLE_ACTUATOR_PWM, OUTPUT);
+    pinMode(SOLAR_WINDSHIELD_PWM, OUTPUT);
+    pinMode(BALANCE_MOTOR_EN_PWM, OUTPUT);
+
+    // 2. Speed Sensor Interrupts
+    attachInterrupt(digitalPinToInterrupt(FRONT_SPEED_PIN), countFrontPulse, FALLING);
+    attachInterrupt(digitalPinToInterrupt(REAR_SPEED_PIN), countRearPulse, FALLING);
+
+    // 3. IMU Initialization (Abstraction)
+    // imu.initialize(); 
+    // BalancePID.SetMode(AUTOMATIC);
+
+    // 4. BLE Initialization
+    setupBLE();
+
+    Serial.println("KTM ADVANCED RACE SYSTEM ACTIVE");
+}
+
+// --- MAIN LOOP ---
+void loop() {
+    // Read the rider's physical throttle input (0-1023)
+    int riderThrottleInput = analogRead(A0); // Simulating physical throttle
+
+    // --- 1. Automatic Balancing System ---
+    // Read high-frequency lean angle from IMU
+    // float leanAngle = imu.getLeanAngle(); 
+    // applyBalancingTorque(leanAngle); 
+
+    // --- 2. MotoGP Level Slip/Speed Management ---
+    updateSpeedAndSlip();
+    
+    // Determine the FINAL throttle command
+    int finalThrottleCommand = riderThrottleInput; // Start with raw input
+    
+    // Finite State Machine (FSM) for Throttle
+    if (currentThrottleState == STANDARD_RACE) {
+        // In STANDARD_RACE mode, apply the MotoGP-style safety controls (simulated)
+        if (slipRatio > MAX_SLIP_PERCENT) {
+            // MotoGP-style intervention: Reduce torque by retarding ignition/closing throttle
+            finalThrottleCommand *= (1.0 - (slipRatio - MAX_SLIP_PERCENT) * 20.0); // Aggressive reduction
+            finalThrottleCommand = max(0, finalThrottleCommand);
+            Serial.println("TC INTERVENE! Slip Reduction Active.");
+        }
+    } else if (currentThrottleState == EXTRA_FULL_THROTTLE) {
+        // In EXTRA_FULL_THROTTLE mode, no safety net. Full power to the motor.
+        finalThrottleCommand = 1023; // Maximize signal (255 PWM or 1023 ADC)
+        Serial.println("!! DANGER: EXTRA FULL THROTTLE ACTIVE. NO SLIP CONTROL !!");
+    }
+
+    // Output the final, controlled throttle to the motor
+    analogWrite(THROTTLE_ACTUATOR_PWM, map(finalThrottleCommand, 0, 1023, 0, 255));
+
+    // --- 3. Secret Solar Windshield ---
+    // The control for the windshield is handled via BLE in the callback functions
+    
+    delay(5); // Fast loop for control systems
+}
+
+// --- FEATURE IMPLEMENTATIONS ---
+
+// ** SPEED AND SLIP CALCULATION **
+void IRAM_ATTR countFrontPulse() { frontPulses++; }
+void IRAM_ATTR countRearPulse() { rearPulses++; }
+
+void updateSpeedAndSlip() {
+    unsigned long currentTime = millis();
+    unsigned long timeDelta = currentTime - lastSpeedCheckTime;
+
+    if (timeDelta >= 100) { // Calculate speed and slip frequently (100ms)
+        noInterrupts();
+        unsigned long fp = frontPulses;
+        unsigned long rp = rearPulses;
+        frontPulses = 0;
+        rearPulses = 0;
+        interrupts();
+
+        lastSpeedCheckTime = currentTime;
+
+        // Convert pulses to rotational speed (simplified)
+        // Assume 5 pulses per revolution (PPR) for wheel sensors
+        float frontRPM = (float)fp / 5.0 * (60000.0 / timeDelta); 
+        float rearRPM = (float)rp / 5.0 * (60000.0 / timeDelta);
+
+        // Convert to linear speed (m/s) (Assume 2.0m wheel circumference)
+        float frontVel = frontRPM * 2.0 / 60.0;
+        float rearVel = rearRPM * 2.0 / 60.0;
+        
+        // Final Speed for Digital Speedometer (use the slower front wheel speed)
+        currentSpeedKPH = frontVel * 3.6;
+
+        // Calculate Slip Ratio (Essential for MotoGP Traction Control)
+        if (frontVel > 0.1) {
+            slipRatio = (rearVel - frontVel) / frontVel;
+        } else {
+            slipRatio = 0.0;
+        }
+        
+        // Display on Digital Dash (Abstraction)
+        // Serial.printf("Speed: %.1f KPH | Slip: %.2f%%\n", currentSpeedKPH, slipRatio * 100.0);
+    }
+}
+
+// ** AUTOMATIC BALANCING (Simplified Reaction Wheel Control) **
+void applyBalancingTorque(float leanAngle) {
+    // Lean Angle is passed into the PID controller
+    // Input = leanAngle;
+    // BalancePID.Compute();
+    // float correction = Output;
+
+    // Simplified control: Use a linear function near the setpoint (0 degrees)
+    float correction = leanAngle * 20.0; // Proportional Control for example
+
+    int motorPWM = constrain(correction, -255, 255);
+
+    if (abs(motorPWM) > 5) {
+        // Control the BLDC/Reaction Wheel motor
+        analogWrite(BALANCE_MOTOR_EN_PWM, abs(motorPWM));
+        // Direction logic goes here...
+    } else {
+        analogWrite(BALANCE_MOTOR_EN_PWM, 0);
+    }
+}
+
+// ** BLE - SECRET CONTROLS **
+class BLE_Callback_Handler : public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+        std::string uuid = pCharacteristic->getUUID().toString();
+        std::string value = pCharacteristic->getValue();
+
+        // 1. THROTTLE FSM Control
+        if (uuid.compare(THROTTLE_CHAR_UUID) == 0) {
+            if (value.compare("KONIG_POWER_33") == 0) { // The Secret Code
+                currentThrottleState = EXTRA_FULL_THROTTLE;
+                // Optional: Flash the digital dash red
+            } else if (value.compare("KTM_RACE_STD") == 0) {
+                currentThrottleState = STANDARD_RACE;
+            }
+        // 2. SOLAR WINDSHIELD Control
+        } else if (uuid.compare(WINDSHIELD_CHAR_UUID) == 0) {
+            if (value.compare("STEALTH_OPAC") == 0) {
+                // Set the PWM duty cycle for maximum tint
+                analogWrite(SOLAR_WINDSHIELD_PWM, 255); 
+            } else {
+                // Set the PWM duty cycle for clear view
+                analogWrite(SOLAR_WINDSHIELD_PWM, 0); 
+            }
+        }
+    }
+};
+
+void setupBLE() {
+    BLEDevice::init("KTM_Phantom_RCE");
+    BLEServer *pServer = BLEDevice::createServer();
+    BLEService *pService = pServer->createService(SERVICE_UUID);
+
+    // Throttle Characteristic: Receives the secret code to change FSM state
+    BLECharacteristic *pThrottleChar = pService->createCharacteristic(
+                                        THROTTLE_CHAR_UUID,
+                                        BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_READ
+                                      );
+    pThrottleChar->setCallbacks(new BLE_Callback_Handler());
+    pThrottleChar->setValue("KTM_RACE_STD");
+
+    // Windshield Characteristic: Receives the command to tint
+    BLECharacteristic *pWindshieldChar = pService->createCharacteristic(
+                                        WINDSHIELD_CHAR_UUID,
+                                        BLECharacteristic::PROPERTY_WRITE
+                                      );
+    pWindshieldChar->setCallbacks(new BLE_Callback_Handler());
+
+    pService->start();
+    BLEAdvertising *pAdvertising = pServer->getAdvertising();
+    pAdvertising->start();
+}
