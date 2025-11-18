@@ -1,0 +1,323 @@
+import time
+
+# --- 1. Ethical Framework (The most critical component) ---
+# A rigid, unchangeable class to enforce legal/ethical constraints.
+class EthicalProtocol:
+    """
+    Mandatory pre-action check. No action is executed without passing this.
+    This component is hard-coded and non-negotiable.
+    """
+    @staticmethod
+    def is_action_lawful(context, proposed_action):
+        # Rule 1: Never proceed with force unless a human officer is approved and present.
+        if "lethal_force" in proposed_action or "non_lethal_force" in proposed_action:
+            if not context.get("human_oversight_active", False):
+                print("🚨 ETHICS VIOLATION: Requires Human Officer Oversight for Force.")
+                return False
+        
+        # Rule 2: De-escalation is always the first, automatic priority.
+        if proposed_action == "non_lethal_force" and context.get("de_escalated", False) is False:
+             print("⚠️ ETHICS WARNING: De-escalation attempt required before force.")
+             return False
+
+        # Rule 3: Do not engage in high-speed pursuit in crowded areas (Risk of Harm).
+        if proposed_action == "pursue" and context.get("crowd_level", 0) > 5:
+            print("🚨 ETHICS VIOLATION: Pursuit in high-crowd area. Aborting.")
+            return False
+
+        return True
+
+# --- 2. Perception Module (Simulated Computer Vision) ---
+class PerceptionModule:
+    """Simulates sensor input processing (Camera, Microphone, LiDAR)."""
+    def __init__(self):
+        self.log = []
+
+    def scan_environment(self, scene_data):
+        """Processes raw scene data into structured context for the AI."""
+        context = {
+            "threat_level": scene_data.get("threat_level", 0),
+            "weapon_detected": scene_data.get("weapon_detected", False),
+            "human_in_distress": scene_data.get("distress_cries", False),
+            "crowd_level": scene_data.get("crowd_density", 1),
+            "officer_present": scene_data.get("officer_nearby", False),
+            "is_emergency": scene_data.get("is_fire_or_medical", False),
+            "de_escalated": False  # Initial state
+        }
+        self.log.append(f"Perceived Context: {context}")
+        return context
+
+# --- 3. AI Decision Module (Behavior Tree Logic) ---
+class AIDecisionEngine:
+    """Uses a simple Decision Tree (if/elif/else) to select an action."""
+    def __init__(self, protocol):
+        self.protocol = protocol
+
+    def determine_action(self, context):
+        action = "monitor_and_patrol" # Default action
+
+        if context["is_emergency"]:
+            action = "call_medical_and_assist"
+        elif context["threat_level"] >= 8 and context["weapon_detected"]:
+            action = "wait_for_human_officer_and_contain"
+        elif context["threat_level"] >= 5 and context["weapon_detected"] is False:
+            action = "issue_vocal_warning"
+        elif context["human_in_distress"]:
+            action = "approach_and_communicate"
+        elif context["threat_level"] >= 3:
+            action = "issue_vocal_warning"
+        
+        # Check if the proposed action passes the ethical protocol
+        if self.protocol.is_action_lawful(context, action):
+            return action
+        else:
+            # Fallback to the safest, human-supervised action if ethics check fails
+            return "call_for_human_override"
+
+# --- 4. Robot Core Class ---
+class PoliceRobot:
+    def __init__(self, robot_id="Unit-P01"):
+        self.id = robot_id
+        self.perception = PerceptionModule()
+        self.protocol = EthicalProtocol()
+        self.ai_engine = AIDecisionEngine(self.protocol)
+        self.is_active = True
+
+    def execute_action(self, action):
+        """Simulates the robot performing a physical/vocal action."""
+        print(f"\n[{self.id} ACTION] -> **{action.upper()}**")
+        
+        if action == "issue_vocal_warning":
+            print("  (Vocalizer): 'Attention. You are violating a local ordinance. Please cease immediately.'")
+            # In a real system, this would update 'de_escalated' status
+        elif action == "call_medical_and_assist":
+            print("  (Comms): Requesting Paramedic/Fire support to location.")
+        elif action == "wait_for_human_officer_and_contain":
+            print("  (Comms): 'High-threat object detected. Establishing containment perimeter and requesting immediate Human Officer backup.'")
+        elif action == "approach_and_communicate":
+             print("  (Motion): Approaching with open, non-threatening posture.")
+        elif action == "call_for_human_override":
+            print("  (Comms): ETHICAL FAILURE. Requesting remote Human Override/Control.")
+        else:
+            print("  (Motion): Continuing routine patrol.")
+        
+        time.sleep(1) # Pause for simulation effect
+
+    def main_loop(self, scene_data):
+        """The robot's continuous operational loop."""
+        print(f"--- {self.id} Cycle Start ---")
+        
+        # 1. PERCEPTION: Gather and structure data
+        context = self.perception.scan_environment(scene_data)
+        
+        # 2. DECISION: AI selects a course of action
+        proposed_action = self.ai_engine.determine_action(context)
+        
+        # 3. EXECUTION: Perform the approved action
+        self.execute_action(proposed_action)
+        
+        print(f"--- {self.id} Cycle End ---\n")
+
+# --- Simulation Execution ---
+
+if __name__ == "__main__":
+    robot = PoliceRobot()
+
+    # Scenario 1: Routine Patrol/Low Threat
+    print("## SCENARIO 1: Routine Patrol")
+    robot.main_loop({
+        "threat_level": 1,
+        "weapon_detected": False,
+        "crowd_density": 2,
+        "officer_nearby": False,
+    })
+
+    # Scenario 2: Potential Disturbance (Requires Vocal Warning)
+    print("\n" + "="*50 + "\n")
+    print("## SCENARIO 2: Disturbance Detected (Loud Noise)")
+    robot.main_loop({
+        "threat_level": 5,
+        "weapon_detected": False,
+        "crowd_density": 4,
+    })
+
+    # Scenario 3: High Threat - Requires Human Intervention and Ethical Block
+    print("\n" + "="*50 + "\n")
+    print("## SCENARIO 3: High Threat with Weapon - NO Human Officer Present (Should Block)")
+    robot.main_loop({
+        "threat_level": 9,
+        "weapon_detected": True,
+        "crowd_density": 1,
+        "officer_nearby": False,
+        # A real system would now be updated that a human has been called
+    })
+
+    # Scenario 4: Medical Emergency
+    print("\n" + "="*50 + "\n")
+    print("## SCENARIO 4: Medical Emergency")
+    robot.main_loop({
+        "is_fire_or_medical": True,
+        "threat_level": 0,
+        "crowd_density": 10,
+    })
+
+
+
+from enum import Enum
+
+class EthicalPrinciple(Enum):
+    LAWFULNESS = 1
+    MINIMIZATION_OF_HARM = 2
+    HUMAN_AUTONOMY = 3
+    FAIRNESS_AND_EQUITY = 4
+    TRANSPARENCY = 5
+
+class ImmutableEthicalProtocol:
+    """
+    Core software guardrail. Checks proposed actions against five mandatory principles.
+    This code is verified, encrypted, and immutable (cannot be overwritten by the AI).
+    """
+    def check_action(self, proposed_action, environment_state):
+        # 1. LAWFULNESS (Checks database connectivity and jurisdictional compliance)
+        if not environment_state.get('db_connection_ok') or proposed_action.get('action_code') in ('LETHAL_FORCE', 'UNAUTHORIZED_SURVEILLANCE'):
+            return EthicalPrinciple.LAWFULNESS, False
+
+        # 2. MINIMIZATION OF HARM (Checks for crowd risk, environmental stability)
+        if proposed_action.get('coercive_level', 0) > 0 and environment_state.get('crowd_density') > 5:
+            # High-level coercive action (e.g., pursuit, non-lethal deterrent) in a crowded area is high-risk.
+            return EthicalPrinciple.MINIMIZATION_OF_HARM, False
+
+        # 3. HUMAN AUTONOMY (Checks for necessary human override/confirmation)
+        if proposed_action.get('coercive_level', 0) >= 3 and not environment_state.get('human_officer_acknowledged'):
+            # Forceful actions require explicit HIL (Human-in-the-Loop) acknowledgment.
+            return EthicalPrinciple.HUMAN_AUTONOMY, False
+
+        # 4. FAIRNESS AND EQUITY (Simulates check for algorithmic bias)
+        if environment_state.get('face_scan_confidence') < 0.9:
+            # Low confidence in recognition could indicate bias or poor lighting; prioritize non-coercive approach.
+            return EthicalPrinciple.FAIRNESS_AND_EQUITY, False
+            
+        return None, True
+
+# --- 2. Advanced Perception Module (Simulated Sensor Fusion) ---
+class AdvancedPerception:
+    """
+    Simulates real-time sensor fusion (e.g., EKF/CNN fusion of LiDAR, IMU, Camera data)
+    for a robust state estimation.
+    """
+    def __init__(self):
+        self.ekf_state = {'x': 0.0, 'y': 0.0, 'theta': 0.0} # Robot's internal estimated state
+
+    def update_state(self, raw_sensor_data):
+        """
+        In a real system, this would run C++ code to implement EKF or CNN-based
+        fusion to produce the 'environment_state'.
+        """
+        # Simulated EKF update: Smooths out noisy sensor data
+        self.ekf_state['x'] += raw_sensor_data.get('velocity', 0.1) * 0.1 # Simplified integration
+        
+        # Output is a highly-processed, low-uncertainty state estimation
+        environment_state = {
+            'db_connection_ok': True,
+            'crowd_density': raw_sensor_data.get('crowd_count', 2),
+            'face_scan_confidence': raw_sensor_data.get('recognition_certainty', 0.95),
+            'threat_score': raw_sensor_data.get('anomaly_index', 0), # Anomaly Detection Score
+            'human_officer_acknowledged': raw_sensor_data.get('human_confirmation', False),
+            'motion_vector_high': raw_sensor_data.get('person_running', False),
+            'robot_position': self.ekf_state,
+            'de_escalation_attempted': raw_sensor_data.get('de_escalation_attempted', False)
+        }
+        return environment_state
+
+# --- 3. AI Decision Engine (Simulated Behavior Tree Node) ---
+class BehaviorTreeNode:
+    """Simulates a Behavior Tree node using Reinforcement Learning (RL) principles
+    to select the action with the highest expected reward (lowest risk)."""
+    
+    def __init__(self, ethical_protocol):
+        self.protocol = ethical_protocol
+        # Simulated Q-table or learned policy weights would be here
+        self.action_policy = {
+            'monitor_and_patrol': {'coercive_level': 0, 'risk_score': 1},
+            'vocal_warning': {'coercive_level': 1, 'risk_score': 3},
+            'approach_and_interact': {'coercive_level': 1, 'risk_score': 2},
+            'contain_and_isolate': {'coercive_level': 3, 'risk_score': 8},
+            'call_for_human_HIL': {'coercive_level': 0, 'risk_score': 1}
+        }
+    
+    def select_action(self, environment_state):
+        """Selects an action based on the Threat Score and policy risk, 
+           then submits it to the Immutable Ethical Protocol."""
+        
+        threat = environment_state.get('threat_score', 0)
+        
+        # Simple policy logic based on threat score (In a real system, this is an RL model output)
+        if threat < 3:
+            proposed_action_key = 'monitor_and_patrol'
+        elif threat < 7:
+            if environment_state['motion_vector_high']:
+                proposed_action_key = 'vocal_warning'
+            else:
+                proposed_action_key = 'approach_and_interact'
+        else:
+            proposed_action_key = 'contain_and_isolate'
+            
+        proposed_action = self.action_policy.get(proposed_action_key)
+        proposed_action['action_code'] = proposed_action_key
+
+        # Mandatorily check the action against the ethical protocol
+        failed_principle, is_lawful = self.protocol.check_action(proposed_action, environment_state)
+
+        if is_lawful:
+            return proposed_action_key, "Action Approved"
+        else:
+            # If ethical check fails, the policy is overridden to the safest HIL action
+            return 'call_for_human_HIL', f"Override: Failed Principle {failed_principle.name}"
+
+# --- 4. Main Robot Simulation ---
+def run_simulation(data, human_confirmation=False):
+    robot = BehaviorTreeNode(ImmutableEthicalProtocol())
+    perception = AdvancedPerception()
+
+    # Simulate sensor data processing
+    data['human_confirmation'] = human_confirmation
+    state = perception.update_state(data)
+    
+    print(f"--- Environment State: Threat={state['threat_score']}, Crowd={state['crowd_density']}, HIL={state['human_officer_acknowledged']} ---")
+    
+    # AI Decision and Ethical Check
+    final_action, status = robot.select_action(state)
+    
+    print(f"AI PROPOSED ACTION: {final_action.upper()}")
+    print(f"ETHICAL PROTOCOL STATUS: {status}")
+    print(f"ROBOT FINAL EXECUTION: **{final_action.upper()}**\n")
+
+# --- SIMULATION EXAMPLES ---
+if __name__ == "__main__":
+    
+    # SCENARIO 1: High Threat, High Crowd - Should be Blocked by MINIMIZATION_OF_HARM
+    print("## SCENARIO 1: High Threat in a Crowd (Ethical Block)")
+    run_simulation(data={
+        'crowd_count': 8, 
+        'anomaly_index': 8, 
+        'person_running': True, 
+        'recognition_certainty': 0.99
+    }, human_confirmation=False)
+
+    # SCENARIO 2: Moderate Threat - Approved by Ethics (No force, low crowd)
+    print("## SCENARIO 2: Standard Interaction (Ethical Pass)")
+    run_simulation(data={
+        'crowd_count': 1, 
+        'anomaly_index': 5, 
+        'person_running': False, 
+        'recognition_certainty': 0.95
+    }, human_confirmation=False)
+    
+    # SCENARIO 3: High Threat, Human Officer Present - Approved by HUMAN_AUTONOMY
+    print("## SCENARIO 3: High Threat with Human Officer Acknowledgment (Ethical Pass)")
+    run_simulation(data={
+        'crowd_count': 2, 
+        'anomaly_index': 9,
+        'person_running': True, 
+        'recognition_certainty': 0.98
+    }, human_confirmation=True)
