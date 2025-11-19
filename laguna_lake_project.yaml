@@ -1,0 +1,268 @@
+import datetime
+
+class LagunaPasigMonitor:
+    """
+    Conceptual model for monitoring the Laguna Lake and Pasig River 
+    Interconnectivity Project, focusing on World Bank funding and KPIs.
+    """
+    def __init__(self, total_budget_usd, wb_funding_usd, project_start_date):
+        # Project Identification
+        self.project_name = "Laguna Lake & Pasig River Interconnectivity Development"
+        self.project_id = "PH-LLPRIDP-WB-001"
+        self.status = "Pre-Implementation"
+        
+        # Financial Metrics (in USD for standardization with World Bank reporting)
+        self.total_budget = total_budget_usd
+        self.wb_commitment = wb_funding_usd
+        self.wb_disbursed = 0.0
+        self.wb_disbursement_rate = 0.0
+        
+        # Timeline and Progress
+        self.start_date = datetime.datetime.strptime(project_start_date, '%Y-%m-%d').date()
+        self.project_duration_months = 60 # Example: 5 years
+        self.physical_progress_pct = 0.0
+
+    def update_wb_disbursement(self, amount_usd):
+        """Updates the amount disbursed by the World Bank."""
+        if amount_usd > 0 and self.wb_disbursed + amount_usd <= self.wb_commitment:
+            self.wb_disbursed += amount_usd
+            self._calculate_disbursement_rate()
+            print(f"✅ Success: World Bank disbursement updated by ${amount_usd:,.2f}.")
+        else:
+            print(f"⚠️ Error: Disbursement amount ${amount_usd:,.2f} is invalid or exceeds the commitment limit.")
+    
+    def update_physical_progress(self, percentage):
+        """Updates the physical progress of the project (e.g., % of dredging completed)."""
+        if 0 <= percentage <= 100:
+            self.physical_progress_pct = percentage
+            print(f"✅ Success: Physical progress updated to {percentage:.2f}%.")
+        else:
+            print("⚠️ Error: Physical progress must be between 0 and 100.")
+
+    def _calculate_disbursement_rate(self):
+        """Calculates the WB disbursement rate (Disbursed / Commitment)."""
+        if self.wb_commitment > 0:
+            self.wb_disbursement_rate = (self.wb_disbursed / self.wb_commitment) * 100
+        else:
+            self.wb_disbursement_rate = 0.0
+
+    def generate_monitoring_report(self):
+        """Generates a summary report for the project status and funding."""
+        print("-" * 50)
+        print(f"**PROJECT MONITORING REPORT: {self.project_name}**")
+        print("-" * 50)
+        
+        # Project Overview
+        print(f"Project ID: {self.project_id}")
+        print(f"Start Date: {self.start_date}")
+        print(f"Current Status: {self.status}")
+        print(f"Physical Progress: **{self.physical_progress_pct:.2f}%**")
+        
+        # Financial Snapshot (World Bank Focus)
+        print("\n--- World Bank Funding Status ---")
+        print(f"Total Project Budget: **${self.total_budget:,.2f}**")
+        print(f"WB Commitment Amount: **${self.wb_commitment:,.2f}**")
+        print(f"WB Amount Disbursed: **${self.wb_disbursed:,.2f}**")
+        print(f"WB Disbursement Rate: **{self.wb_disbursement_rate:.2f}%**")
+
+        # Basic Alert System
+        if self.physical_progress_pct > 50 and self.wb_disbursement_rate < 30:
+            print("\n🚨 **ALERT: Low Disbursement Rate vs. Physical Progress.**")
+            print("Action Required: Expedite disbursement requests and procurement processes.")
+        elif self.wb_disbursed == self.wb_commitment and self.physical_progress_pct < 95:
+             print("\n⚠️ **WARNING: Funding Fully Disbursed but Project Not Complete.**")
+             print("Action Required: Review budget extension or co-financing needs.")
+        else:
+            print("\nStatus Note: Financial and physical progress appear aligned.")
+        print("-" * 50)
+
+
+
+
+# 1. Initialize the project with conceptual figures
+# Assuming a total budget of $500M, with $300M committed by the World Bank
+PROJECT = LagunaPasigMonitor(
+    total_budget_usd=500000000.00,
+    wb_funding_usd=300000000.00,
+    project_start_date='2024-01-01'
+)
+
+# 2. Simulate initial implementation phase updates
+PROJECT.status = "Implementation - Phase 1: Planning & Initial Dredging"
+
+# 3. Simulate World Bank disbursements
+PROJECT.update_wb_disbursement(15000000.00) # Initial mobilization fund ($15M)
+PROJECT.update_wb_disbursement(30000000.00) # First major tranche ($30M)
+
+# 4. Simulate physical progress update
+PROJECT.update_physical_progress(25.5) # Project is a quarter complete
+
+# 5. Generate the final monitoring report
+PROJECT.generate_monitoring_report()
+
+
+
+import pandas as pd
+from typing import List, Dict, Any
+
+# 1. Class to model an individual project activity
+class ProjectActivity:
+    """Represents a single component of the Laguna-Pasig Project."""
+    def __init__(self, name: str, weight_pct: float, total_cost_usd: float, wb_funded_usd: float):
+        self.name = name
+        self.weight_pct = weight_pct / 100.0  # Project weight (for weighted progress calculation)
+        self.total_cost = total_cost_usd
+        self.wb_funded = wb_funded_usd
+        self.physical_completion_pct = 0.0
+        self.wb_disbursed = 0.0
+
+    def update_status(self, physical_pct: float, wb_disbursement: float):
+        """Updates physical completion and World Bank funds disbursed for this activity."""
+        self.physical_completion_pct = min(100.0, max(0.0, physical_pct))
+        # Disbursement cannot exceed the WB-funded allocation for the activity
+        self.wb_disbursed = min(self.wb_funded, self.wb_disbursed + wb_disbursement)
+        
+        # Recalculate physical completion based on disbursement for financial alignment check
+        financial_completion_pct = (self.wb_disbursed / self.wb_funded) * 100 if self.wb_funded > 0 else 0
+        
+        # Flag if physical completion significantly lags financial completion (or vice-versa)
+        if abs(self.physical_completion_pct - financial_completion_pct) > 15.0:
+            return f"⚠️ **Variance Alert for {self.name}:** Physical completion ({self.physical_completion_pct:.1f}%) and Financial completion ({financial_completion_pct:.1f}%) are misaligned."
+        return f"✅ {self.name} status updated. Physical: {self.physical_completion_pct:.1f}%, WB Disbursed: ${self.wb_disbursed:,.0f}"
+
+# 2. Main Project Monitoring Class
+class AdvancedProjectMonitor:
+    """Manages the entire project portfolio, World Bank funding, and EPIs."""
+    def __init__(self, activities: List[ProjectActivity], total_wb_commitment: float):
+        self.activities: Dict[str, ProjectActivity] = {a.name: a for a in activities}
+        self.total_wb_commitment = total_wb_commitment
+        self.current_bod_level_mg_l = 85.0  # Initial BOD (Biochemical Oxygen Demand) level (e.g., highly polluted)
+        self.target_bod_level_mg_l = 40.0   # Target BOD for the Pasig River interconnectivity goal
+        self.last_update = pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    def calculate_weighted_progress(self):
+        """Calculates the overall project Weighted Physical Progress and Total Financial Disbursement."""
+        total_weighted_progress = 0.0
+        total_wb_disbursed = 0.0
+        
+        for activity in self.activities.values():
+            # Weighted Physical Progress = Activity Weight * Activity Physical Completion
+            total_weighted_progress += (activity.weight_pct * activity.physical_completion_pct)
+            total_wb_disbursed += activity.wb_disbursed
+
+        total_wb_disbursement_rate = (total_wb_disbursed / self.total_wb_commitment) * 100
+        
+        return total_weighted_progress, total_wb_disbursed, total_wb_disbursement_rate
+
+    def simulate_environmental_kpi(self, total_weighted_progress: float):
+        """
+        Simulates the environmental outcome (BOD reduction) based on physical progress.
+        (EPIs are crucial for WB projects like this).
+        """
+        # Linear reduction model: (Initial - Target) * Progress + Target
+        # The change in BOD is proportional to the overall project completion.
+        
+        progress_ratio = total_weighted_progress / 100.0
+        bod_reduction_potential = self.current_bod_level_mg_l - self.target_bod_level_mg_l
+        
+        current_simulated_bod = self.current_bod_level_mg_l - (bod_reduction_potential * progress_ratio)
+        
+        return max(self.target_bod_level_mg_l, current_simulated_bod) # BOD can't go below target
+
+    def generate_advanced_report(self):
+        """Generates the comprehensive report with all key metrics."""
+        
+        weighted_progress, total_disbursed, disbursement_rate = self.calculate_weighted_progress()
+        simulated_bod = self.simulate_environmental_kpi(weighted_progress)
+        
+        print("\n" + "="*80)
+        print(f"🌉 **LAGUNA-PASIG INTERCONNECTIVITY PROJECT: ADVANCED M&E REPORT**")
+        print(f"Generated On: {self.last_update}")
+        print("="*80)
+        
+        # --- 3. Overall Performance Dashboard ---
+        print("\n### 📈 Overall Performance Dashboard (Integrated KPIs)")
+        print(f"| Metric | Value | Status Indicator |")
+        print(f"| :--- | :--- | :--- |")
+        print(f"| **Weighted Physical Progress** | **{weighted_progress:.2f}%** | {'🟢 On Track' if weighted_progress > 50 else '🟡 Mid-Phase'}|")
+        print(f"| **WB Disbursement Rate** | **{disbursement_rate:.2f}%** | {'🟢 Aligned' if abs(disbursement_rate - weighted_progress) < 20 else '🔴 Needs Review'}|")
+        print(f"| **Total WB Funds Disbursed** | **${total_disbursed:,.0f}** | - |")
+        print(f"| **Simulated BOD Level** | **{simulated_bod:.2f} mg/L** | {'✅ Meeting Target' if simulated_bod <= 50 else '❌ Exceeding Target'}|")
+
+        # --- 4. Activity Breakdown (Source Data) ---
+        print("\n### 📋 Activity Financial and Physical Breakdown")
+        
+        data = []
+        for activity in self.activities.values():
+            data.append({
+                'Activity': activity.name,
+                'Weight (%)': activity.weight_pct * 100,
+                'Total Cost (USD)': f"${activity.total_cost:,.0f}",
+                'WB Funded (USD)': f"${activity.wb_funded:,.0f}",
+                'Physical (%)': f"{activity.physical_completion_pct:.1f}%",
+                'Disbursed (%)': f"{ (activity.wb_disbursed / activity.wb_funded * 100) if activity.wb_funded > 0 else 0:.1f}%"
+            })
+        
+        df = pd.DataFrame(data)
+        print(df.to_markdown(index=False))
+        print("="*80)
+
+# --- EXECUTION / SIMULATION ---
+
+# 1. Define Project Components with their budget and weight (e.g., based on the P32.8B MAPALLAF project cost)
+activities = [
+    ProjectActivity(
+        name="1. Dredging & River Widening",
+        weight_pct=40,
+        total_cost_usd=200_000_000,
+        wb_funded_usd=150_000_000 # WB funding for environmental compliance/flood control
+    ),
+    ProjectActivity(
+        name="2. Ferry Terminal Construction",
+        weight_pct=35,
+        total_cost_usd=150_000_000,
+        wb_funded_usd=50_000_000 # WB funding for PPP technical assistance/safeguards
+    ),
+    ProjectActivity(
+        name="3. Electric Ferry Procurement",
+        weight_pct=20,
+        total_cost_usd=100_000_000,
+        wb_funded_usd=75_000_000 # WB funding for Green Technology (E-Ferries)
+    ),
+    ProjectActivity(
+        name="4. Resettlement & Social Safeguards",
+        weight_pct=5,
+        total_cost_usd=25_000_000,
+        wb_funded_usd=25_000_000 # WB funding for 100% of social component
+    )
+]
+
+# Total World Bank Commitment for the modeled components
+TOTAL_WB_COMMITMENT = sum(a.wb_funded for a in activities) # $300,000,000
+
+# 2. Instantiate the advanced monitor
+monitor = AdvancedProjectMonitor(activities, TOTAL_WB_COMMITMENT)
+
+# 3. Simulate project execution (updates)
+print("--- SIMULATING PROJECT EXECUTION AND M&E UPDATES ---")
+
+# Update 1: Initial mobilization, high disbursement for dredging, low physical progress
+print(monitor.activities['1. Dredging & River Widening'].update_status(
+    physical_pct=10, 
+    wb_disbursement=30_000_000
+))
+
+# Update 2: Ferry Construction starts, small WB disbursement for technical advisory
+print(monitor.activities['2. Ferry Terminal Construction'].update_status(
+    physical_pct=5, 
+    wb_disbursement=5_000_000
+))
+
+# Update 3: Social safeguards complete quickly
+print(monitor.activities['4. Resettlement & Social Safeguards'].update_status(
+    physical_pct=100, 
+    wb_disbursement=25_000_000 # Full disbursement for this component
+))
+
+# 4. Generate the Advanced Monitoring Report
+monitor.generate_advanced_report()
