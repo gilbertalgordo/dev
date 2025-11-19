@@ -1,0 +1,363 @@
+I produced a safe, self-contained simulation that models an imaginary “antigravity” field — suitable for experimentation, visualization, and education, but not instructions for real-world hardware.
+
+What I provided
+• A Python script (run above) that simulates particles under normal gravity plus configurable “antigravity zones” with Gaussian falloff.
+• A Matplotlib animation showing how particles respond to those upward forces, with simple collision handling at floor and walls.
+• Clear parameters you can tune: number of particles, gravity, antigravity zone locations/strengths/radii, damping, world size.
+
+How you can use or extend it
+• Tweak antigravity_zones to add/remove zones or change strength and radius to explore different behaviors.
+• Increase n_particles or steps for longer/more detailed runs (watch performance).
+• Replace particles with rigid bodies or add torque/rotation for more complex dynamics.
+• Export frames to disk or save an MP4 by using anim.save('antigrav.mp4', fps=30) (requires ffmpeg).
+• Integrate into a physics engine (PyBullet, Pymunk) if you want collision/rigid-body realism.
+
+Safety note and clarification
+This is a numerical/visual simulation only. It does not contain instructions to build or operate physical antigravity devices. If you meant something else (e.g., control code for a maglev demo, a research literature summary on gravity-manipulation experiments, or a different kind of simulation), tell me which direction you want and I’ll produce code or a research-oriented summary accordingly. ￼
+
+
+pip install numpy pygame
+pip install numba          # optional, recommended
+pip install pymunk         # optional for rigid bodies
+
+
+# advanced_antigrav_sim.py
+#
+# Advanced, safe antigravity-field simulation platform (purely virtual).
+# Author: generated for user; do not use for physical hardware.
+#
+# Features:
+# - Particle system with Numba acceleration if available
+# - Multiple field falloffs: gaussian, inverse-square, linear, custom
+# - Boundary collisions, damping, and simple floor friction
+# - Optional pymunk rigid-body demo (if pymunk installed)
+# - Interactive Pygame UI to add/remove zones, change strength/radius on the fly
+#
+# Run: python advanced_antigrav_sim.py
+#
+import math
+import sys
+import time
+from dataclasses import dataclass, field
+from typing import List, Tuple, Callable, Optional
+
+import numpy as np
+try:
+    from numba import njit
+    _HAS_NUMBA = True
+except Exception:
+    _HAS_NUMBA = False
+
+import pygame
+
+# Optional rigid-body physics
+try:
+    import pymunk
+    _HAS_PYMUNK = True
+except Exception:
+    _HAS_PYMUNK = False
+
+# -------- Configuration --------
+WIDTH, HEIGHT = 1200, 720
+WORLD_W, WORLD_H = 10.0, 6.0   # meters mapped into screen
+PIXELS_PER_M = WIDTH / WORLD_W
+
+DEFAULT_N_PARTICLES = 2000
+DT = 0.008  # integration timestep (s)
+GRAVITY = 9.81  # m/s^2 downward
+
+# UI colors
+BG = (18, 18, 28)
+PARTICLE_COLOR = (255, 200, 40)
+ZONE_COLOR = (80, 160, 240)
+TEXT_COLOR = (220, 220, 220)
+
+# -------- Data classes and helpers --------
+@dataclass
+class AntigravityZone:
+    x: float
+    y: float
+    strength: float
+    radius: float
+    falloff: str = "gaussian"  # gaussian | inverse_square | linear | custom
+    enable: bool = True
+
+    def field_at(self, px: np.ndarray, py: np.ndarray) -> np.ndarray:
+        # returns upward acceleration (ay) produced by this zone at points px,py
+        dx = px - self.x
+        dy = py - self.y
+        r2 = dx * dx + dy * dy
+        if self.falloff == "gaussian":
+            sigma = self.radius
+            return self.strength * np.exp(-r2 / (2.0 * sigma * sigma))
+        elif self.falloff == "inverse_square":
+            # avoid singularity by clamping minimal r2
+            eps = 1e-4
+            return self.strength / (np.sqrt(r2 + eps) * (r2 + eps))
+        elif self.falloff == "linear":
+            r = np.sqrt(r2)
+            out = np.clip(1.0 - (r / (self.radius + 1e-9)), 0.0, 1.0)
+            return self.strength * out
+        else:
+            # custom fallback: gaussian
+            sigma = self.radius
+            return self.strength * np.exp(-r2 / (2.0 * sigma * sigma))
+
+@dataclass
+class ParticleSystem:
+    n: int = DEFAULT_N_PARTICLES
+    world_w: float = WORLD_W
+    world_h: float = WORLD_H
+    positions: np.ndarray = field(init=False)
+    velocities: np.ndarray = field(init=False)
+    masses: np.ndarray = field(init=False)
+    damping: float = 0.998
+    floor_restitution: float = 0.25
+    zones: List[AntigravityZone] = field(default_factory=list)
+
+    def __post_init__(self):
+        rng = np.random.default_rng(12345)
+        self.positions = np.empty((self.n, 2), dtype=np.float64)
+        self.velocities = np.zeros((self.n, 2), dtype=np.float64)
+        self.masses = rng.uniform(0.7, 1.7, size=(self.n, 1))
+        # initialize uniformly across top half
+        self.positions[:, 0] = rng.uniform(0.1, self.world_w - 0.1, size=self.n)
+        self.positions[:, 1] = rng.uniform(self.world_h * 0.5, self.world_h - 0.1, size=self.n)
+
+    def reset(self):
+        rng = np.random.default_rng(int(time.time()) & 0xFFFF)
+        self.positions[:, 0] = rng.uniform(0.1, self.world_w - 0.1, size=self.n)
+        self.positions[:, 1] = rng.uniform(self.world_h * 0.5, self.world_h - 0.1, size=self.n)
+        self.velocities.fill(0.0)
+
+    def add_zone(self, zone: AntigravityZone):
+        self.zones.append(zone)
+
+    def compute_total_field(self, px: np.ndarray, py: np.ndarray) -> np.ndarray:
+        ay_total = np.zeros_like(px)
+        for z in self.zones:
+            if z.enable:
+                ay_total += z.field_at(px, py)
+        return ay_total
+
+# If Numba is available we compile a fast update loop
+if _HAS_NUMBA:
+    @njit
+    def _numba_step(positions, velocities, masses, ay_field, dt, damping, world_w, world_h, floor_restitution):
+        n = positions.shape[0]
+        for i in range(n):
+            # integrate (semi-implicit)
+            velocities[i, 1] += ay_field[i] * dt
+            # no horizontal forces for now
+            velocities[i, 0] *= damping
+            velocities[i, 1] *= damping
+            positions[i, 0] += velocities[i, 0] * dt
+            positions[i, 1] += velocities[i, 1] * dt
+
+            # boundaries
+            if positions[i, 0] < 0.01:
+                positions[i, 0] = 0.01
+                velocities[i, 0] = -velocities[i, 0] * 0.6
+            if positions[i, 0] > world_w - 0.01:
+                positions[i, 0] = world_w - 0.01
+                velocities[i, 0] = -velocities[i, 0] * 0.6
+            if positions[i, 1] < 0.02:
+                positions[i, 1] = 0.02
+                velocities[i, 1] = -velocities[i, 1] * floor_restitution
+        return positions, velocities
+
+def step_system(system: ParticleSystem, dt: float):
+    # compute downward gravity + antigravity upward field
+    px = system.positions[:, 0]
+    py = system.positions[:, 1]
+    ay_ag = system.compute_total_field(px, py)  # upward accelerations from zones
+    ay_total = -GRAVITY + ay_ag  # net vertical acceleration
+    if _HAS_NUMBA:
+        # call numba loop
+        system.positions, system.velocities = _numba_step(system.positions, system.velocities,
+                                                           system.masses, ay_total, dt,
+                                                           system.damping, system.world_w, system.world_h,
+                                                           system.floor_restitution)
+    else:
+        # numpy vectorized integration
+        system.velocities[:, 1] += ay_total * dt
+        system.velocities *= system.damping
+        system.positions += system.velocities * dt
+        # boundary handling
+        floor = system.positions[:, 1] < 0.02
+        system.positions[floor, 1] = 0.02
+        system.velocities[floor, 1] *= -system.floor_restitution
+        left = system.positions[:, 0] < 0.01
+        system.positions[left, 0] = 0.01
+        system.velocities[left, 0] *= -0.6
+        right = system.positions[:, 0] > system.world_w - 0.01
+        system.positions[right, 0] = system.world_w - 0.01
+        system.velocities[right, 0] *= -0.6
+
+# ------- Utility mapping between world and screen -------
+def world_to_screen(xm, ym):
+    sx = int(xm * PIXELS_PER_M)
+    sy = int(HEIGHT - ym * PIXELS_PER_M)
+    return sx, sy
+
+def screen_to_world(sx, sy):
+    xm = sx / PIXELS_PER_M
+    ym = (HEIGHT - sy) / PIXELS_PER_M
+    return xm, ym
+
+# ------- Pygame interactive UI ----------
+def draw_text(screen, text, pos, size=18, color=TEXT_COLOR):
+    font = pygame.font.SysFont("Sans", size)
+    surf = font.render(text, True, color)
+    screen.blit(surf, pos)
+
+def main():
+    pygame.init()
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption("Advanced Antigravity Simulation — Simulation Only")
+    clock = pygame.time.Clock()
+
+    system = ParticleSystem(n=DEFAULT_N_PARTICLES)
+    # add two sample zones
+    system.add_zone(AntigravityZone(x=system.world_w * 0.42, y=system.world_h * 0.35,
+                                   strength=42.0, radius=1.1, falloff="gaussian"))
+    system.add_zone(AntigravityZone(x=system.world_w * 0.18, y=system.world_h * 0.8,
+                                   strength=24.0, radius=0.9, falloff="gaussian"))
+
+    show_vectors = False
+    paused = False
+
+    # optional pymunk rigid-body example
+    if _HAS_PYMUNK:
+        space = pymunk.Space()
+        space.gravity = (0.0, -GRAVITY * PIXELS_PER_M)  # pymunk uses pixels/sec^2
+        # create a simple box body to demonstrate rigid-body antigrav effect
+        body = pymunk.Body(1, pymunk.moment_for_box(1, 50, 30))
+        body.position = (WIDTH * 0.6, HEIGHT * 0.4)
+        shape = pymunk.Poly.create_box(body, size=(60, 30))
+        shape.friction = 0.5
+        space.add(body, shape)
+
+    fps = 0.0
+    last_time = time.time()
+    running = True
+    while running:
+        t0 = time.time()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_SPACE:
+                    paused = not paused
+                elif event.key == pygame.K_r:
+                    system.reset()
+                elif event.key == pygame.K_v:
+                    show_vectors = not show_vectors
+                elif event.key == pygame.K_z:
+                    # toggle zone enable
+                    if system.zones:
+                        system.zones[0].enable = not system.zones[0].enable
+                elif event.key == pygame.K_q:
+                    running = False
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:
+                    # left click: add a gaussian antigrav zone at mouse with default params
+                    sx, sy = event.pos
+                    xm, ym = screen_to_world(sx, sy)
+                    system.add_zone(AntigravityZone(x=xm, y=ym, strength=36.0, radius=0.9, falloff="gaussian"))
+                elif event.button == 3:
+                    # right click: remove nearest zone
+                    sx, sy = event.pos
+                    xm, ym = screen_to_world(sx, sy)
+                    if system.zones:
+                        dists = [math.hypot(z.x - xm, z.y - ym) for z in system.zones]
+                        idx = int(np.argmin(dists))
+                        if dists[idx] < 1.2:
+                            system.zones.pop(idx)
+
+        if not paused:
+            # perform several small internal steps if dt is large to keep stability
+            substeps = 1
+            for _ in range(substeps):
+                step_system(system, DT)
+            # optional pymunk rigid-body field influence
+            if _HAS_PYMUNK:
+                # convert antigrav field at the rigid body's center and apply as force
+                bx_world_x = body.position.x / PIXELS_PER_M
+                bx_world_y = (HEIGHT - body.position.y) / PIXELS_PER_M
+                # compute upward acceleration at that point (negate mapping)
+                ay = 0.0
+                for z in system.zones:
+                    if z.enable:
+                        # small vectorized call with scalar inputs
+                        dx = bx_world_x - z.x
+                        dy = bx_world_y - z.y
+                        r2 = dx*dx + dy*dy
+                        if z.falloff == "gaussian":
+                            ay += z.strength * math.exp(-r2 / (2.0 * z.radius * z.radius))
+                        elif z.falloff == "inverse_square":
+                            eps = 1e-4
+                            ay += z.strength / (math.sqrt(r2 + eps) * (r2 + eps))
+                        else:
+                            sig = z.radius
+                            ay += z.strength * math.exp(-r2 / (2.0 * sig * sig))
+                # net upward accel: ay - GRAVITY
+                net_ay = ay - GRAVITY
+                # convert to pixels and apply force = m * a
+                force = net_ay * body.mass * PIXELS_PER_M
+                # apply upward force in pymunk coordinates (y increases up in pymunk)
+                body.apply_force_at_local_point((0.0, force), (0, 0))
+                space.step(DT)
+
+        # draw
+        screen.fill(BG)
+        # draw particles
+        pos_px = (system.positions * PIXELS_PER_M)
+        # convert to screen coordinates
+        xs = pos_px[:, 0].astype(np.int32)
+        ys = (HEIGHT - pos_px[:, 1]).astype(np.int32)
+        # draw as batched small circles using pygame.surfarray would be faster, but keep simple
+        for i in range(0, system.n, max(1, system.n // 2000)):  # draw a subsample if many particles
+            pygame.draw.circle(screen, PARTICLE_COLOR, (xs[i], ys[i]), 2)
+
+        # draw antigravity zones
+        for z in system.zones:
+            if not z.enable:
+                continue
+            sx, sy = world_to_screen(z.x, z.y)
+            # radius in pixels
+            rad_px = max(6, int(z.radius * PIXELS_PER_M))
+            surf = pygame.Surface((rad_px*2, rad_px*2), pygame.SRCALPHA)
+            pygame.draw.circle(surf, (ZONE_COLOR[0], ZONE_COLOR[1], ZONE_COLOR[2], 60), (rad_px, rad_px), rad_px)
+            screen.blit(surf, (sx - rad_px, sy - rad_px))
+            # draw center marker
+            pygame.draw.circle(screen, ZONE_COLOR, (sx, sy), 4)
+
+        # draw pymunk rigid body demo
+        if _HAS_PYMUNK:
+            for shape in space.shapes:
+                if isinstance(shape, pymunk.Poly):
+                    verts = [(v.x, v.y) for v in shape.get_vertices()]
+                    pygame_points = verts
+                    pygame.draw.polygon(screen, (180, 90, 40), pygame_points)
+
+        # HUD
+        draw_text(screen, f"Particles: {system.n}", (10, 6))
+        draw_text(screen, f"Zones: {len(system.zones)} (left click add, right click remove)", (10, 28))
+        draw_text(screen, "Space: pause / r: reset / v: toggle vectors / q: quit", (10, 50))
+        draw_text(screen, f"Numba available: {_HAS_NUMBA}", (10, 72))
+        if _HAS_PYMUNK:
+            draw_text(screen, "Pymunk: enabled (rigid-body demo running)", (10, 94))
+        # FPS
+        now = time.time()
+        fps = clock.get_fps()
+        draw_text(screen, f"FPS: {fps:.1f}", (WIDTH - 140, 6))
+
+        pygame.display.flip()
+        clock.tick(60)
+
+    pygame.quit()
+    print("Simulation terminated.")
+
+if __name__ == "__main__":
+    main()
