@@ -1,0 +1,343 @@
+import os
+import io
+from fastapi import FastAPI, File, UploadFile
+from PIL import Image
+import pytesseract
+import cv2
+import numpy as np
+
+# For text classification
+from transformers import pipeline
+
+# For image forensics (very simplified)
+import pyifd  # assume pyIFD library
+
+app = FastAPI()
+
+# Fake-news classifier using HuggingFace — just for demonstration
+classifier = pipeline("text-classification", model="facebook/bart-large-mnli")
+
+# Endpoint to upload screenshot / image
+@app.post("/analyze_image/")
+async def analyze_image(file: UploadFile = File(...)):
+    contents = await file.read()
+    image = Image.open(io.BytesIO(contents)).convert("RGB")
+    # Save raw image
+    os.makedirs("uploads", exist_ok=True)
+    path = os.path.join("uploads", file.filename)
+    image.save(path)
+
+    # 1. OCR to extract any text from image
+    text = pytesseract.image_to_string(image)
+    
+    # 2. Run text through fake-news classifier
+    if text.strip():
+        result = classifier(text)
+    else:
+        result = None
+
+    # 3. Run basic image forgery detection
+    # pyifd: detect tampering / forgery in image
+    # (this is conceptual; actual API may differ)
+    try:
+        detector = pyifd.ImageForgeryDetector()
+        tamper_report = detector.analyze(path)
+    except Exception as e:
+        tamper_report = {"error": str(e)}
+
+    # 4. Build a summary
+    summary = {
+        "ocr_text": text,
+        "text_classification": result,
+        "image_forensics": tamper_report,
+    }
+
+    return summary
+
+
+# Endpoint to upload video (CCTV) — extract key frames
+@app.post("/analyze_video/")
+async def analyze_video(file: UploadFile = File(...)):
+    contents = await file.read()
+    video_path = os.path.join("uploads", file.filename)
+    with open(video_path, "wb") as f:
+        f.write(contents)
+
+    # Use OpenCV to extract frames every N seconds
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    frame_interval = int(fps * 1)  # one frame per second
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    frames = []
+    i = 0
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if i % frame_interval == 0:
+            # convert to PIL for OCR
+            pil_im = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            text = pytesseract.image_to_string(pil_im)
+            frames.append({"frame_index": i, "ocr_text": text})
+        i += 1
+    cap.release()
+
+    # For simplicity – just return OCR results per frame
+    return {"frames": frames}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+    pip install fastapi uvicorn deeptracer pytesseract transformers opencv-python photoholmes aiofiles
+
+
+    information_center/
+  ├── main.py
+  ├── analysis/
+  │     ├── forensics.py
+  │     ├── deepfake.py
+  │     ├── ocr_claims.py
+  │     └── veracity.py
+  ├── storage.py
+  └── models/
+        └── claim_model/   # if you have a custom claim classification model
+
+
+        import os
+import io
+import uuid
+from fastapi import FastAPI, File, UploadFile, Form
+from fastapi.responses import JSONResponse
+import uvicorn
+
+from analysis.deepfake import detect_deepfake
+from analysis.forensics import analyze_forgery
+from analysis.ocr_claims import ocr_and_extract
+from analysis.veracity import assess_veracity
+from storage import save_media, save_report
+
+app = FastAPI()
+
+UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+@app.post("/upload_image/")
+async def upload_image(
+    file: UploadFile = File(...),
+    uploader: str = Form(...),
+    source: str = Form(None),
+):
+    # Save the image
+    media_id = str(uuid.uuid4())
+    filename = f"{media_id}_{file.filename}"
+    path = os.path.join(UPLOAD_DIR, filename)
+    contents = await file.read()
+    with open(path, "wb") as f:
+        f.write(contents)
+
+    # Run OCR + extract claims
+    ocr_text = ocr_and_extract(path)
+
+    # Deepfake detection
+    deepfake_result = detect_deepfake(path)
+
+    # Image forgery analysis
+    forgery_report = analyze_forgery(path)
+
+    # Veracity analysis
+    veracity = assess_veracity(
+        ocr_text=ocr_text,
+        deepfake_score=deepfake_result.get("score"),
+        forgery_report=forgery_report,
+        metadata={"uploader": uploader, "source": source},
+    )
+
+    # Build full report
+    report = {
+        "media_id": media_id,
+        "filename": filename,
+        "ocr_text": ocr_text,
+        "deepfake": deepfake_result,
+        "forgery": forgery_report,
+        "veracity": veracity,
+    }
+
+    # Save report + media metadata
+    save_report(media_id, report)
+
+    return JSONResponse(report)
+
+
+@app.post("/upload_video/")
+async def upload_video(
+    file: UploadFile = File(...),
+    uploader: str = Form(...),
+    source: str = Form(None),
+):
+    media_id = str(uuid.uuid4())
+    filename = f"{media_id}_{file.filename}"
+    path = os.path.join(UPLOAD_DIR, filename)
+    contents = await file.read()
+    with open(path, "wb") as f:
+        f.write(contents)
+
+    # Extract frames
+    import cv2
+    cap = cv2.VideoCapture(path)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25
+    interval = int(fps * 1)  # sample 1 frame per second
+
+    frame_reports = []
+    idx = 0
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if idx % interval == 0:
+            # Save frame to temp file
+            frame_id = f"{media_id}_frame_{idx}.jpg"
+            frame_path = os.path.join(UPLOAD_DIR, frame_id)
+            cv2.imwrite(frame_path, frame)
+
+            # Analyze frame similar to image path
+            ocr_text = ocr_and_extract(frame_path)
+            deepfake_result = detect_deepfake(frame_path)
+            forgery_report = analyze_forgery(frame_path)
+            veracity = assess_veracity(
+                ocr_text=ocr_text,
+                deepfake_score=deepfake_result.get("score"),
+                forgery_report=forgery_report,
+                metadata={"uploader": uploader, "frame": idx, "source": source},
+            )
+
+            frame_reports.append({
+                "frame_index": idx,
+                "ocr_text": ocr_text,
+                "deepfake": deepfake_result,
+                "forgery": forgery_report,
+                "veracity": veracity,
+            })
+        idx += 1
+
+    cap.release()
+
+    report = {"media_id": media_id, "filename": filename, "frames": frame_reports}
+    save_report(media_id, report)
+    return JSONResponse(report)
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+    from PIL import Image
+import pytesseract
+
+def ocr_and_extract(image_path: str) -> str:
+    """Run OCR on image and return extracted text."""
+    img = Image.open(image_path).convert("RGB")
+    text = pytesseract.image_to_string(img)
+    # Optionally: clean text
+    cleaned = text.strip()
+    return cleaned
+
+
+    from deeptracer import DeepFakeDetector
+
+# Initialize detector (you may want to reuse this object)
+detector = DeepFakeDetector()
+
+def detect_deepfake(media_path: str) -> dict:
+    """
+    Detect if a given media (image or video) is deepfake.
+    Returns: dict with label and confidence
+    """
+    try:
+        res = detector.predict_image(media_path)  # for image
+        # If video, you could sample frames and run on each
+    except Exception as e:
+        return {"error": str(e)}
+
+    return {"label": res.get("label"), "confidence": res.get("confidence")}
+
+
+    from photoholmes.methods import MethodFactory
+from photoholmes.metrics import MetricFactory
+from photoholmes import DatasetFactory
+import os
+
+# Example: run a few forgery detection methods from photoholmes
+def analyze_forgery(image_path: str) -> dict:
+    """
+    Run PhotoHolmes forgery detection methods on image.
+    Returns a report of method scores.
+    """
+    report = {}
+    # choose some methods — PhotoHolmes supports many
+    methods = MethodFactory.load(['noise', 'ela', 'clone'])
+    for name, method in methods.items():
+        try:
+            score = method.run(image_path)
+            report[name] = {"score": float(score)}
+        except Exception as e:
+            report[name] = {"error": str(e)}
+
+    return report
+
+
+   def assess_veracity(ocr_text: str, deepfake_score: float, forgery_report: dict, metadata: dict) -> dict:
+    """
+    Basic veracity scoring by combining signals.
+    This is a heuristic / rule-based fusion.
+    In production, replace with ML multimodal model.
+    """
+
+    # Simple scoring weights (you can tune)
+    scores = {
+        "text_presence": 1.0 if ocr_text else 0.5,
+        "deepfake_risk": max(0, 1 - deepfake_score),  # less score => more risk
+        "forgery_risk": 0,
+    }
+
+    # Compute a simple forgery risk: average of method scores (if numeric)
+    method_scores = []
+    for m, rep in forgery_report.items():
+        if "score" in rep:
+            method_scores.append(rep["score"])
+    if method_scores:
+        avg = sum(method_scores) / len(method_scores)
+        # we assume higher score = more likely forged; normalize
+        scores["forgery_risk"] = float(avg)
+
+    # Weighted sum (example)
+    veracity_score = (
+        0.4 * scores["text_presence"] +
+        0.3 * scores["deepfake_risk"] +
+        0.3 * (1 - scores["forgery_risk"])
+    )
+
+    explanation = {
+        "text_presence": scores["text_presence"],
+        "deepfake_risk": scores["deepfake_risk"],
+        "forgery_risk": scores["forgery_risk"],
+    }
+
+    return {"veracity_score": veracity_score, "explanation": explanation, "metadata": metadata}
+
+
+    import json
+import os
+
+REPORT_DIR = "reports"
+os.makedirs(REPORT_DIR, exist_ok=True)
+
+def save_report(media_id: str, report: dict):
+    path = os.path.join(REPORT_DIR, f"{media_id}.json")
+    with open(path, "w") as f:
+        json.dump(report, f, indent=2)
+
+    
