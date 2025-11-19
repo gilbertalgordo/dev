@@ -1,0 +1,1514 @@
+python -m venv venv
+source venv/bin/activate
+pip install flask authlib flask-cors
+
+
+from flask import Flask, request, jsonify, abort
+from authlib.integrations.flask_oauth2 import AuthorizationServer, ResourceProtector
+from authlib.oauth2.rfc6749 import grants
+from authlib.oauth2.rfc6750 import BearerTokenValidator
+from authlib.common.security import generate_token
+from werkzeug.security import gen_salt
+from datetime import datetime, timedelta
+
+# Simple in-memory stores (for demo only)
+CLIENTS = {}
+TOKENS = {}
+
+# Demo client creation (client_id/client_secret)
+def create_demo_client():
+    client_id = "demo-client"
+    client_secret = "demo-secret"
+    CLIENTS[client_id] = {
+        "client_secret": client_secret,
+        "redirect_uris": ["http://localhost:8000/callback"],
+        "grant_types": ["client_credentials"],
+        "scope": "accounts.read"
+    }
+    return client_id, client_secret
+
+class Client:
+    def __init__(self, client_id):
+        data = CLIENTS.get(client_id)
+        if not data:
+            raise ValueError("Unknown client")
+        self.client_id = client_id
+        self.client_secret = data["client_secret"]
+        self.redirect_uris = data["redirect_uris"]
+        self.grant_types = data["grant_types"]
+        self.scope = data["scope"]
+
+    def check_client_secret(self, secret):
+        return secret == self.client_secret
+
+class ClientCredentialsGrant(grants.ClientCredentialsGrant):
+    TOKEN_ENDPOINT_AUTH_METHODS = ['client_secret_basic', 'client_secret_post']
+
+    def authenticate_client(self):
+        auth = self.request.headers.get('Authorization')
+        if auth and auth.startswith('Basic '):
+            import base64
+            decoded = base64.b64decode(auth[6:]).decode()
+            client_id, client_secret = decoded.split(':', 1)
+        else:
+            client_id = self.request.form.get('client_id')
+            client_secret = self.request.form.get('client_secret')
+        try:
+            client = Client(client_id)
+        except ValueError:
+            return None
+        if not client.check_client_secret(client_secret):
+            return None
+        self.request.client = client
+        return client
+
+    def save_token(self, token_data, request):
+        # store token in memory (demo)
+        token = token_data.copy()
+        token['client_id'] = request.client.client_id
+        token['issued_at'] = datetime.utcnow().isoformat()
+        TOKENS[token['access_token']] = token
+
+class SimpleBearerValidator(BearerTokenValidator):
+    def authenticate_token(self, token_string):
+        token = TOKENS.get(token_string)
+        if not token:
+            return None
+        # naive expiry check
+        exp = token.get('expires_at')
+        if exp and datetime.utcnow() > datetime.fromtimestamp(exp):
+            return None
+        return token
+
+    def request_invalid(self, request):
+        return False
+
+    def token_revoked(self, token):
+        return False
+
+app = Flask(__name__)
+authorization = AuthorizationServer(app)
+require_oauth = ResourceProtector()
+
+# Register grant and token validator
+authorization.register_grant(ClientCredentialsGrant)
+require_oauth.register_token_validator(SimpleBearerValidator())
+
+@app.route('/.well-known/demo-client', methods=['GET'])
+def demo_client():
+    # returns the demo client credentials for quick testing
+    client_id, client_secret = create_demo_client()
+    return jsonify({
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "scopes": CLIENTS[client_id]["scope"]
+    })
+
+@app.route('/oauth/token', methods=['POST'])
+def issue_token():
+    return authorization.create_token_response()
+
+@app.route('/accounts', methods=['GET'])
+def accounts():
+    # Protected resource - require bearer token
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return jsonify({"error": "missing_bearer"}), 401
+    token_string = auth.split(" ", 1)[1]
+    token = TOKENS.get(token_string)
+    if not token:
+        return jsonify({"error": "invalid_token"}), 401
+    # Basic scope check
+    if "accounts.read" not in token.get("scope", ""):
+        return jsonify({"error": "insufficient_scope"}), 403
+    # Return fake accounts
+    return jsonify({
+        "accounts": [
+            {"id": "A-1001", "type": "checking", "balance": "16234.50", "currency": "USD"},
+            {"id": "A-2002", "type": "savings", "balance": "5000.00", "currency": "USD"}
+        ]
+    })
+
+if __name__ == '__main__':
+    create_demo_client()
+    # For demo only: configure token generator callback
+    @authorization.token_generator
+    def generate_access_token(client, grant_type, user=None, scope=None, expires_in=3600):
+        access_token = generate_token(48)
+        expires_at = int((datetime.utcnow() + timedelta(seconds=expires_in)).timestamp())
+        token = {
+            "access_token": access_token,
+            "token_type": "Bearer",
+            "expires_in": expires_in,
+            "expires_at": expires_at,
+            "scope": scope or CLIENTS[client.client_id]["scope"]
+        }
+        TOKENS[access_token] = token
+        return token
+
+    app.run(port=9000, debug=True)
+
+
+    import requests
+from requests.auth import HTTPBasicAuth
+
+TOKEN_URL = "http://localhost:9000/oauth/token"
+ACCOUNTS_URL = "http://localhost:9000/accounts"
+
+CLIENT_ID = "demo-client"
+CLIENT_SECRET = "demo-secret"
+
+def get_token():
+    # client_credentials grant
+    data = {"grant_type": "client_credentials", "scope": "accounts.read"}
+    resp = requests.post(TOKEN_URL, auth=HTTPBasicAuth(CLIENT_ID, CLIENT_SECRET), data=data)
+    resp.raise_for_status()
+    return resp.json()
+
+def call_accounts(access_token):
+    headers = {"Authorization": f"Bearer {access_token}"}
+    r = requests.get(ACCOUNTS_URL, headers=headers)
+    r.raise_for_status()
+    return r.json()
+
+if __name__ == "__main__":
+    token = get_token()
+    print("Token response:", token)
+    accounts = call_accounts(token["access_token"])
+    print("Accounts:", accounts)
+
+
+    openapi: 3.0.3
+info:
+  title: Demo Bank API (Sandbox)
+  version: 0.1.0
+servers:
+  - url: https://sandbox.example-bank.com
+paths:
+  /accounts:
+    get:
+      summary: List customer accounts
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Account list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accounts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        type: { type: string }
+                        balance: { type: string }
+                        currency: { type: string }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+
+      bank-api-starter/
+├── docker-compose.yml
+├── api/
+│   ├── app.py
+│   ├── config.py
+│   ├── models.py
+│   ├── auth.py
+│   ├── resources.py
+│   ├── jwks.py
+│   └── requirements.txt
+├── openapi.yaml
+├── client/
+│   └── client_example.py
+└── README.md
+
+
+Flask==2.2.5
+Authlib==1.2.0
+SQLAlchemy==1.4.65
+alembic==1.11.1
+psycopg2-binary==2.9.7
+PyJWT==2.8.0
+cryptography==41.0.0
+python-dotenv==1.0.0
+
+
+import os
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
+
+ENV = os.environ.get("FLASK_ENV", "development")
+DATABASE_URL = os.environ.get("DATABASE_URL", f"sqlite:///{BASE_DIR.parent}/data.sqlite")
+JWT_PRIVATE_KEY_PATH = os.environ.get("JWT_PRIVATE_KEY_PATH", str(BASE_DIR / "keys" / "private.pem"))
+JWT_PUBLIC_KEY_PATH = os.environ.get("JWT_PUBLIC_KEY_PATH", str(BASE_DIR / "keys" / "public.pem"))
+JWT_ISSUER = os.environ.get("JWT_ISSUER", "https://api.example-bank.com")
+ACCESS_TOKEN_EXPIRES = int(os.environ.get("ACCESS_TOKEN_EXPIRES", 3600))
+
+
+from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, create_engine, ForeignKey
+from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+from datetime import datetime
+
+Base = declarative_base()
+
+class OAuthClient(Base):
+    __tablename__ = "oauth_clients"
+    id = Column(Integer, primary_key=True)
+    client_id = Column(String(128), unique=True, nullable=False)
+    client_secret = Column(String(256), nullable=True)  # nullable for public clients (PKCE)
+    redirect_uris = Column(Text)  # newline-separated URIs
+    grant_types = Column(Text)    # e.g. "authorization_code client_credentials"
+    scope = Column(String(256), default="accounts.read")
+    name = Column(String(256))
+    is_confidential = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class Token(Base):
+    __tablename__ = "tokens"
+    id = Column(Integer, primary_key=True)
+    access_token = Column(String(512), unique=True)
+    client_id = Column(String(128))
+    scope = Column(String(256))
+    expires_at = Column(Integer)  # epoch
+    issued_at = Column(Integer)
+
+# Simple account model for demo
+class Account(Base):
+    __tablename__ = "accounts"
+    id = Column(Integer, primary_key=True)
+    account_id = Column(String(64), unique=True, nullable=False)
+    owner_name = Column(String(128))
+    currency = Column(String(8))
+    balance_cents = Column(Integer, default=0)
+
+# DB session helper
+def get_engine(url):
+    return create_engine(url, connect_args={"check_same_thread": False} if url.startswith("sqlite:") else {})
+
+def get_session(engine):
+    Session = sessionmaker(bind=engine)
+    return Session()
+
+
+    from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from pathlib import Path
+import json
+
+KEY_DIR = Path(__file__).resolve().parent / "keys"
+KEY_DIR.mkdir(exist_ok=True)
+
+def ensure_keys():
+    priv = KEY_DIR / "private.pem"
+    pub = KEY_DIR / "public.pem"
+    if not priv.exists() or not pub.exists():
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        priv.write_bytes(key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption()
+        ))
+        pub.write_bytes(key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        ))
+
+def load_private_key():
+    ensure_keys()
+    return (KEY_DIR / "private.pem").read_bytes()
+
+def load_public_key():
+    ensure_keys()
+    return (KEY_DIR / "public.pem").read_bytes()
+
+# For a JWKS endpoint you would convert the public key to JWK format.
+# Use libraries or RFC methods to produce proper JWKs for clients to validate signatures.
+
+
+from authlib.integrations.flask_oauth2 import AuthorizationServer, ResourceProtector
+from authlib.oauth2.rfc6749 import grants
+from authlib.oauth2.rfc6750 import BearerTokenValidator
+from datetime import datetime, timedelta
+import time, jwt
+from .models import Token, OAuthClient
+
+class ClientCredentialsGrant(grants.ClientCredentialsGrant):
+    def authenticate_client(self):
+        # auth handled by AuthorizationServer hooks or HTTPBasic auth
+        return self.request.client
+
+    def save_token(self, token_data, request):
+        expires_at = int(time.time()) + token_data.get("expires_in", 3600)
+        t = Token(
+            access_token=token_data["access_token"],
+            client_id=request.client.client_id,
+            scope=token_data.get("scope", ""),
+            expires_at=expires_at,
+            issued_at=int(time.time())
+        )
+        request.session.add(t)
+        request.session.commit()
+
+# Token signer — create JWTs signed with RSA private key
+def generate_jwt_token(client, scope, private_key_pem, issuer, expires_in):
+    now = int(time.time())
+    payload = {
+        "iss": issuer,
+        "sub": client.client_id,
+        "aud": "api",
+        "iat": now,
+        "exp": now + expires_in,
+        "scope": scope
+    }
+    token = jwt.encode(payload, private_key_pem, algorithm="RS256")
+    return token
+
+class SimpleBearerValidator(BearerTokenValidator):
+    def __init__(self, session):
+        self.session = session
+        super().__init__()
+
+    def authenticate_token(self, token_string):
+        # If using JWTs, optionally decode and verify signature; here we check DB
+        token = self.session.query(Token).filter_by(access_token=token_string).first()
+        if not token:
+            return None
+        if token.expires_at < int(time.time()):
+            return None
+        return token
+
+    def request_invalid(self, request):
+        return False
+
+    def token_revoked(self, token):
+        return False
+
+
+        from flask import Blueprint, jsonify, request, current_app
+from functools import wraps
+import time
+
+bp = Blueprint("resources", __name__)
+
+def require_scope(scope):
+    def decorator(f):
+        @wraps(f)
+        def inner(*args, **kwargs):
+            auth = request.headers.get("Authorization", "")
+            if not auth.startswith("Bearer "):
+                return jsonify({"error":"missing_token"}), 401
+            token = auth.split(" ",1)[1]
+            # In production: verify JWT signature & expiration, or check token DB
+            # For demo, assume token is a JWT and decode with public key
+            try:
+                import jwt, pathlib
+                pub = pathlib.Path(current_app.config["JWT_PUBLIC_KEY_PATH"]).read_text()
+                payload = jwt.decode(token, pub, algorithms=["RS256"], audience="api", issuer=current_app.config["JWT_ISSUER"])
+            except Exception as e:
+                return jsonify({"error":"invalid_token", "detail": str(e)}), 401
+            scopes = payload.get("scope","").split()
+            if scope not in scopes:
+                return jsonify({"error":"insufficient_scope"}), 403
+            request.client = payload.get("sub")
+            return f(*args, **kwargs)
+        return inner
+    return decorator
+
+@bp.route("/accounts", methods=["GET"])
+@require_scope("accounts.read")
+def get_accounts():
+    # Return example accounts for the authorized client / user
+    # In a real implementation you'd look up accounts for the authenticated user or client
+    accounts = [
+        {"id":"A-1001", "type":"checking", "currency":"USD", "balance":"1234.56"},
+        {"id":"A-2002", "type":"savings", "currency":"USD", "balance":"500.00"}
+    ]
+    return jsonify({"accounts": accounts})
+
+@bp.route("/payments", methods=["POST"])
+@require_scope("payments.write")
+def make_payment():
+    body = request.get_json()
+    # validate payment request (amount, source, destination, idempotency key)
+    # process payment through backend ledger
+    return jsonify({"status":"accepted", "payment_id":"P-12345"}), 202
+
+
+    from flask import Flask, jsonify
+from .config import DATABASE_URL, JWT_PRIVATE_KEY_PATH, JWT_PUBLIC_KEY_PATH, JWT_ISSUER, ACCESS_TOKEN_EXPIRES
+from .models import get_engine, get_session, Base
+from .resources import bp as resources_bp
+from .jwks import ensure_keys, load_private_key, load_public_key
+from .auth import AuthorizationServer, ResourceProtector  # note: use actual imports shown earlier
+
+def create_app():
+    app = Flask(__name__)
+    app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL
+    app.config["JWT_PRIVATE_KEY_PATH"] = JWT_PRIVATE_KEY_PATH
+    app.config["JWT_PUBLIC_KEY_PATH"] = JWT_PUBLIC_KEY_PATH
+    app.config["JWT_ISSUER"] = JWT_ISSUER
+    app.config["ACCESS_TOKEN_EXPIRES"] = ACCESS_TOKEN_EXPIRES
+
+    engine = get_engine(DATABASE_URL)
+    Base.metadata.create_all(engine)
+    app.db_engine = engine
+    app.db_session = get_session(engine)
+
+    ensure_keys()  # create keys if absent
+
+    # register resources
+    app.register_blueprint(resources_bp, url_prefix="/v1")
+
+    @app.route("/.well-known/jwks.json")
+    def jwks():
+        # Serve JWKS so clients can validate JWT signatures.
+        # Convert PEM public key to JWK here (use jwcrypto or authlib helper)
+        pub = load_public_key()
+        return jsonify({"keys": []})  # placeholder; implement full JWK conversion in prod
+
+    return app
+
+if __name__ == "__main__":
+    app = create_app()
+    app.run(host="0.0.0.0", port=8000, debug=True)
+
+
+    openapi: 3.0.3
+info:
+  title: Example Bank API
+  version: 1.0.0
+servers:
+  - url: https://api.example-bank.com/v1
+paths:
+  /accounts:
+    get:
+      summary: List accounts
+      security:
+        - bearerAuth: [accounts.read]
+      responses:
+        "200":
+          description: List of accounts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accounts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        type: { type: string }
+                        balance: { type: string }
+                        currency: { type: string }
+  /payments:
+    post:
+      summary: Create payment
+      security:
+        - bearerAuth: [payments.write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                source_account: { type: string }
+                destination_account: { type: string }
+                amount: { type: string }
+      responses:
+        "202":
+          description: Payment accepted
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+
+      import requests
+import jwt, pathlib
+
+TOKEN_URL = "http://localhost:8000/oauth/token"   # In sample, you'd implement this endpoint using AuthorizationServer
+ACCOUNTS_URL = "http://localhost:8000/v1/accounts"
+
+# For client_credentials flow (server-to-server):
+CLIENT_ID = "your-confidential-client-id"
+CLIENT_SECRET = "your-secret"
+
+def get_token():
+    resp = requests.post(TOKEN_URL, data={
+        "grant_type": "client_credentials",
+        "scope": "accounts.read"
+    }, auth=(CLIENT_ID, CLIENT_SECRET))
+    resp.raise_for_status()
+    return resp.json()["access_token"]
+
+def get_accounts(token):
+    r = requests.get(ACCOUNTS_URL, headers={"Authorization": f"Bearer {token}"})
+    r.raise_for_status()
+    return r.json()
+
+if __name__ == "__main__":
+    token = get_token()
+    print("Access token:", token[:40] + "...")
+    print("Accounts:", get_accounts(token))
+
+
+    fastapi
+uvicorn[standard]
+sqlalchemy
+alembic
+psycopg2-binary
+cryptography
+PyJWT
+python-dotenv
+httpx
+passlib[bcrypt]
+slowapi       # rate limiting
+
+
+# crypto_utils.py
+import os
+import json
+import base64
+from cryptography.hazmat.primitives import hashes, hmac, serialization
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives import constant_time
+from cryptography.hazmat.backends import default_backend
+from typing import Tuple
+
+# ---------- Key loading (use KMS/HSM in prod) ----------
+def load_rsa_private(path: str):
+    with open(path, "rb") as f:
+        return serialization.load_pem_private_key(f.read(), password=None, backend=default_backend())
+
+def load_rsa_public(path: str):
+    with open(path, "rb") as f:
+        return serialization.load_pem_public_key(f.read(), backend=default_backend())
+
+# ---------- Envelope encryption ----------
+def generate_data_key() -> bytes:
+    # 32 bytes (256-bit) symmetric key for AES-GCM
+    return AESGCM.generate_key(bit_length=256)
+
+def encrypt_data_with_data_key(data_key: bytes, plaintext: bytes, associated_data: bytes = None) -> Tuple[bytes, bytes]:
+    aesgcm = AESGCM(data_key)
+    nonce = os.urandom(12)
+    ct = aesgcm.encrypt(nonce, plaintext, associated_data)
+    return nonce, ct
+
+def decrypt_data_with_data_key(data_key: bytes, nonce: bytes, ct: bytes, associated_data: bytes = None) -> bytes:
+    aesgcm = AESGCM(data_key)
+    return aesgcm.decrypt(nonce, ct, associated_data)
+
+def wrap_data_key_with_rsa(pubkey, data_key: bytes) -> bytes:
+    # RSA-OAEP with SHA256
+    return pubkey.encrypt(data_key, padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
+
+def unwrap_data_key_with_rsa(privkey, wrapped: bytes) -> bytes:
+    return privkey.decrypt(wrapped, padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
+
+# ---------- Convenience: encrypt payload for storage ----------
+def encrypt_payload_for_storage(pubkey, plaintext: bytes, aad: bytes = None) -> dict:
+    data_key = generate_data_key()
+    nonce, ct = encrypt_data_with_data_key(data_key, plaintext, aad)
+    wrapped = wrap_data_key_with_rsa(pubkey, data_key)
+    return {
+        "wrapped_key": base64.b64encode(wrapped).decode(),
+        "nonce": base64.b64encode(nonce).decode(),
+        "ciphertext": base64.b64encode(ct).decode()
+    }
+
+def decrypt_payload_from_storage(privkey, record: dict, aad: bytes = None) -> bytes:
+    wrapped = base64.b64decode(record["wrapped_key"])
+    nonce = base64.b64decode(record["nonce"])
+    ct = base64.b64decode(record["ciphertext"])
+    data_key = unwrap_data_key_with_rsa(privkey, wrapped)
+    return decrypt_data_with_data_key(data_key, nonce, ct, aad)
+
+# ---------- HMAC chain for tamper-evident logs ----------
+def compute_hmac(key: bytes, message: bytes) -> bytes:
+    h = hmac.HMAC(key, hashes.SHA256(), backend=default_backend())
+    h.update(message)
+    return h.finalize()
+
+
+    # audit_log.py
+import os
+import json
+import time
+from hashlib import sha256
+from crypto_utils import compute_hmac
+from pathlib import Path
+
+AUDIT_FILE = Path(os.environ.get("AUDIT_LOG_PATH", "/var/log/bank_audit.log"))
+HMAC_KEY = os.environ.get("AUDIT_HMAC_KEY", None)  # in prod: fetch from KMS
+
+if HMAC_KEY is None:
+    raise RuntimeError("AUDIT_HMAC_KEY environment variable must be set (use KMS/Vault in prod)")
+
+HMAC_KEY = HMAC_KEY.encode()
+
+def append_audit_entry(entry: dict):
+    """
+    Each line stored as JSON with fields:
+      ts, entry, prev_hash, hmac
+    The HMAC is computed over the JSON line (without hmac) and prev_hash to create a chain.
+    """
+    AUDIT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    prev_hash = None
+    if AUDIT_FILE.exists():
+        with AUDIT_FILE.open("rb") as f:
+            try:
+                f.seek(-4096, os.SEEK_END)
+            except Exception:
+                f.seek(0)
+            last_lines = f.read().splitlines()
+            if last_lines:
+                last = last_lines[-1]
+                try:
+                    prev = json.loads(last.decode())
+                    prev_hash = prev.get("line_hash")
+                except Exception:
+                    prev_hash = None
+
+    payload = {
+        "ts": int(time.time()),
+        "entry": entry,
+        "prev_hash": prev_hash
+    }
+    payload_json = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    line_hash = sha256(payload_json).hexdigest()
+    hmac_value = compute_hmac(HMAC_KEY, payload_json).hex()
+
+    record = {
+        "ts": payload["ts"],
+        "entry": entry,
+        "prev_hash": prev_hash,
+        "line_hash": line_hash,
+        "hmac": hmac_value
+    }
+
+    with AUDIT_FILE.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, separators=(",", ":"), sort_keys=True) + "\n")
+
+
+        # models.py
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import Column, Integer, String, LargeBinary, Text
+from sqlalchemy.types import TypeDecorator, VARCHAR
+import json
+from typing import Any
+from crypto_utils import encrypt_payload_for_storage, decrypt_payload_from_storage, load_rsa_private, load_rsa_public
+import os
+
+Base = declarative_base()
+
+# Load RSA keys (in prod: use KMS/HSM, not local files)
+RSA_PUBLIC_PATH = os.environ.get("RSA_PUBLIC_PATH", "keys/public.pem")
+RSA_PRIVATE_PATH = os.environ.get("RSA_PRIVATE_PATH", "keys/private.pem")
+_pub = load_rsa_public(RSA_PUBLIC_PATH)
+_priv = load_rsa_private(RSA_PRIVATE_PATH)
+
+class EncryptedType(TypeDecorator):
+    impl = VARCHAR
+
+    def process_bind_param(self, value: Any, dialect):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            value = value.encode("utf-8")
+        # associated_data could include table/column ids
+        envelope = encrypt_payload_for_storage(_pub, value, aad=None)
+        return json.dumps(envelope)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        envelope = json.loads(value)
+        plaintext = decrypt_payload_from_storage(_priv, envelope, aad=None)
+        return plaintext.decode("utf-8")
+
+class Account(Base):
+    __tablename__ = "accounts"
+    id = Column(Integer, primary_key=True)
+    account_id = Column(String(64), unique=True, nullable=False)
+    owner_name = Column(String(128))
+    # encrypted sensitive number
+    account_number_enc = Column(EncryptedType(2048))
+    currency = Column(String(8))
+    balance_cents = Column(Integer, default=0)
+
+
+    # auth_jwt.py
+import time
+import jwt
+from pathlib import Path
+import json
+from cryptography.hazmat.primitives import serialization
+
+RSA_PRIVATE_PATH = Path("keys/private.pem")
+RSA_PUBLIC_PATH = Path("keys/public.pem")
+
+def load_private_pem():
+    return RSA_PRIVATE_PATH.read_bytes()
+
+def load_public_pem():
+    return RSA_PUBLIC_PATH.read_bytes()
+
+def sign_access_token(subject: str, scope: str, issuer: str, expires_in: int = 3600, kid="key1"):
+    now = int(time.time())
+    payload = {
+        "iss": issuer,
+        "sub": subject,
+        "aud": "bank_api",
+        "iat": now,
+        "exp": now + expires_in,
+        "scope": scope
+    }
+    private_pem = load_private_pem()
+    headers = {"kid": kid}
+    token = jwt.encode(payload, private_pem, algorithm="RS256", headers=headers)
+    return token
+
+def jwks_from_public_pem():
+    """
+    For production, use a proper conversion to JWK (use jwcrypto or authlib).
+    Here we just return a placeholder JWK object.
+    """
+    pub_pem = load_public_pem().decode()
+    # TODO: convert to modulus/exponent and build JWK
+    return {"keys": [{"kty": "RSA", "use": "sig", "kid": "key1", "alg": "RS256", "n": "", "e": ""}]}
+
+
+    # main.py
+from fastapi import FastAPI, Request, HTTPException, Depends
+from fastapi.responses import JSONResponse
+import os
+from starlette.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from auth_jwt import jwks_from_public_pem, sign_access_token
+from audit_log import append_audit_entry
+import logging, json
+
+app = FastAPI(title="Secure Bank API")
+
+# Rate limiter
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Security headers middleware (example)
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    resp = await call_next(request)
+    resp.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Referrer-Policy"] = "no-referrer"
+    # CSP should be tuned for your front-end
+    resp.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none';"
+    return resp
+
+# Logging config - redact sensitive fields
+logger = logging.getLogger("bank_api")
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+logger.addHandler(handler)
+
+def redact(obj: dict) -> dict:
+    j = dict(obj)
+    for k in list(j.keys()):
+        if "account" in k.lower() or "number" in k.lower() or "ssn" in k.lower():
+            j[k] = "[REDACTED]"
+    return j
+
+@app.get("/.well-known/jwks.json")
+def jwks():
+    return JSONResponse(jwks_from_public_pem())
+
+@app.post("/v1/token")
+async def token_request(request: Request):
+    """
+    Very small example: in prod, use Authorization Server flows (Authlib/Keycloak).
+    This endpoint demonstrates signing a token for a trusted client (client auth omitted).
+    """
+    body = await request.form()
+    client_id = body.get("client_id")
+    # authenticate client_id + secret, enforce mTLS for confidential clients
+    if client_id is None:
+        raise HTTPException(status_code=400, detail="missing client_id")
+    scope = body.get("scope", "accounts.read")
+    token = sign_access_token(subject=client_id, scope=scope, issuer="https://api.example-bank.com", expires_in=900)
+    # Audit
+    append_audit_entry({"action":"issue_token","client":client_id,"scope":scope})
+    return {"access_token": token, "token_type": "Bearer", "expires_in": 900}
+
+def verify_jwt(token: str):
+    # In prod: use jwks, verify signature, use caching, validate 'aud' and 'iss', check revocation via introspection
+    import jwt, pathlib
+    pub = pathlib.Path(os.environ.get("RSA_PUBLIC_PATH","keys/public.pem")).read_text()
+    try:
+        payload = jwt.decode(token, pub, algorithms=["RS256"], audience="bank_api", issuer="https://api.example-bank.com")
+        return payload
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="token_expired")
+    except Exception:
+        raise HTTPException(status_code=401, detail="invalid_token")
+
+@app.get("/v1/accounts")
+@limiter.limit("20/minute")
+async def get_accounts(request: Request):
+    auth = request.headers.get("Authorization")
+    if not auth or not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="missing_token")
+    token = auth.split(" ",1)[1]
+    payload = verify_jwt(token)
+    # Example: fetch accounts for subject; here we return fake data
+    accounts = [
+        {"id":"A-1001","type":"checking","balance":"1250.33","currency":"USD"},
+        {"id":"A-2002","type":"savings","balance":"5000.00","currency":"USD"}
+    ]
+    # Audit (redact any sensitive)
+    append_audit_entry({"action":"list_accounts","subject":payload.get("sub")})
+    logger.info("accounts_list_requested: %s", json.dumps(redact({"subject":payload.get("sub")})))
+    return {"accounts": accounts}
+
+
+    bank-advanced/
+├── api/
+│   ├── app.py
+│   ├── config.py
+│   ├── key_manager.py
+│   ├── crypto.py
+│   ├── token_service.py
+│   ├── audit_log.py
+│   ├── middleware.py
+│   ├── resources.py
+│   └── requirements.txt
+└── README.md
+
+
+Flask==2.2.5
+PyJWT==2.8.0
+cryptography==41.0.0
+sqlalchemy==1.4.65
+psycopg2-binary==2.9.7
+redis==4.5.0
+requests==2.31.0
+python-dotenv==1.0.0
+
+
+import os
+from pathlib import Path
+
+BASE = Path(__file__).resolve().parent
+
+ENV = os.environ.get("FLASK_ENV", "production")
+DATABASE_URL = os.environ.get("DATABASE_URL", f"sqlite:///{BASE.parent}/data.sqlite")
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+
+# JWT / signing
+JWT_ISSUER = os.environ.get("JWT_ISSUER", "https://g.dev/gilbert_algordo")
+JWT_EXP_SECONDS = int(os.environ.get("JWT_EXP_SECONDS", 3600))
+# Key files (for local dev). In prod, use KMS/HSM and do not store private key on disk.
+RSA_PRIVATE_PEM = os.environ.get("RSA_PRIVATE_PEM", str(BASE / "keys" / "private.pem"))
+RSA_PUBLIC_PEM = os.environ.get("RSA_PUBLIC_PEM", str(BASE / "keys" / "public.pem"))
+
+# Field encryption keys (wrap these with KMS in prod)
+DATA_KEY_DIR = Path(os.environ.get("DATA_KEY_DIR", str(BASE / "keys" / "data_keys")))
+DATA_KEY_DIR.mkdir(parents=True, exist_ok=True)
+
+# Audit log
+AUDIT_LOG_PATH = os.environ.get("AUDIT_LOG_PATH", str(BASE.parent / "audit.log"))
+
+# HMAC shared secret for signed webhook-like requests (rotate frequently)
+HMAC_SECRET = os.environ.get("HMAC_SECRET", "dev-hmac-secret")
+
+
+import os
+from pathlib import Path
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+
+from .config import RSA_PRIVATE_PEM, RSA_PUBLIC_PEM, DATA_KEY_DIR
+
+def ensure_rsa_keys(bits: int = 3072):
+    priv = Path(RSA_PRIVATE_PEM)
+    pub = Path(RSA_PUBLIC_PEM)
+    if priv.exists() and pub.exists():
+        return
+    priv.parent.mkdir(parents=True, exist_ok=True)
+    key = rsa.generate_private_key(public_exponent=65537, key_size=bits)
+    priv.write_bytes(key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption()
+    ))
+    pub.write_bytes(key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    ))
+
+def load_private_key_pem() -> bytes:
+    ensure_rsa_keys()
+    return Path(RSA_PRIVATE_PEM).read_bytes()
+
+def load_public_key_pem() -> bytes:
+    ensure_rsa_keys()
+    return Path(RSA_PUBLIC_PEM).read_bytes()
+
+# --- Data key management (symmetric keys for field encryption) ---
+import secrets
+from cryptography.hazmat.primitives import constant_time
+
+def generate_data_key(version: int = None) -> bytes:
+    """Generate a new 256-bit AES key and persist it locally (wrap with KMS in prod)."""
+    if version is None:
+        version = int.from_bytes(secrets.token_bytes(2), "big")
+    key_path = Path(DATA_KEY_DIR) / f"data_key_v{version}.bin"
+    if key_path.exists():
+        return key_path.read_bytes()
+    key = secrets.token_bytes(32)
+    key_path.write_bytes(key)
+    return key
+
+def load_latest_data_key() -> (int, bytes):
+    files = sorted(Path(DATA_KEY_DIR).glob("data_key_v*.bin"))
+    if not files:
+        k = generate_data_key(1)
+        return 1, k
+    latest = files[-1]
+    v = int(latest.name.split("_v")[-1].split(".")[0])
+    return v, latest.read_bytes()
+
+
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from .key_manager import load_latest_data_key, generate_data_key
+import os, base64, json, time
+
+def encrypt_field(plaintext: bytes) -> str:
+    version, key = load_latest_data_key()
+    aesgcm = AESGCM(key)
+    nonce = os.urandom(12)
+    ct = aesgcm.encrypt(nonce, plaintext, None)
+    payload = {
+        "v": version,
+        "n": base64.b64encode(nonce).decode(),
+        "ct": base64.b64encode(ct).decode()
+    }
+    return base64.b64encode(json.dumps(payload).encode()).decode()
+
+def decrypt_field(encoded: str) -> bytes:
+    j = json.loads(base64.b64decode(encoded.encode()))
+    version = int(j["v"])
+    nonce = base64.b64decode(j["n"])
+    ct = base64.b64decode(j["ct"])
+    # load the requested key (support rotated keys)
+    key_path = Path(DATA_KEY_DIR) / f"data_key_v{version}.bin"
+    if not key_path.exists():
+        raise ValueError("missing data key for version")
+    key = key_path.read_bytes()
+    aesgcm = AESGCM(key)
+    return aesgcm.decrypt(nonce, ct, None)
+
+
+    import time, jwt
+from .config import JWT_ISSUER, JWT_EXP_SECONDS, RSA_PRIVATE_PEM, RSA_PUBLIC_PEM
+from .key_manager import load_private_key_pem, load_public_key_pem
+
+def issue_jwt(client_id: str, scope: str):
+    now = int(time.time())
+    payload = {
+        "iss": JWT_ISSUER,
+        "sub": client_id,
+        "aud": "bank-api",
+        "iat": now,
+        "exp": now + JWT_EXP_SECONDS,
+        "scope": scope
+    }
+    private_pem = load_private_key_pem()
+    token = jwt.encode(payload, private_pem, algorithm="RS256")
+    return token
+
+def verify_jwt(token: str):
+    public_pem = load_public_key_pem()
+    payload = jwt.decode(token, public_pem, algorithms=["RS256"], audience="bank-api", issuer=JWT_ISSUER)
+    return payload
+
+
+    import json, hashlib, time
+from .config import AUDIT_LOG_PATH
+from pathlib import Path
+
+LOG_PATH = Path(AUDIT_LOG_PATH)
+LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+def _hash_entry(entry: dict) -> str:
+    # canonical JSON bytes (sorted keys)
+    b = json.dumps(entry, separators=(",", ":"), sort_keys=True).encode()
+    return hashlib.sha256(b).hexdigest()
+
+def append_audit(event_type: str, actor: str, details: dict):
+    prior_hash = None
+    if LOG_PATH.exists():
+        # read last line's hash
+        with LOG_PATH.open("rb") as f:
+            try:
+                f.seek(-4096, 2)
+            except OSError:
+                f.seek(0)
+            last = None
+            for line in f:
+                last = line
+            if last:
+                try:
+                    last_j = json.loads(last.decode())
+                    prior_hash = last_j.get("entry_hash")
+                except Exception:
+                    prior_hash = None
+    entry = {
+        "ts": int(time.time()),
+        "type": event_type,
+        "actor": actor,
+        "details": details,
+        "prev": prior_hash
+    }
+    ehash = _hash_entry(entry)
+    entry["entry_hash"] = ehash
+    # append as JSON line
+    with LOG_PATH.open("a", encoding="utf-8") as fw:
+        fw.write(json.dumps(entry, separators=(",", ":"), sort_keys=True) + "\n")
+    return ehash
+
+def verify_log() -> list:
+    """Return list of (line_no, ok, reason) for the whole log."""
+    results = []
+    prev = None
+    with LOG_PATH.open("r", encoding="utf-8") as fr:
+        for i, line in enumerate(fr, start=1):
+            try:
+                j = json.loads(line)
+            except Exception as e:
+                results.append((i, False, f"json_error:{e}"))
+                prev = None
+                continue
+            prev_field = j.get("prev")
+            computed = _hash_entry({k: j[k] for k in j if k != "entry_hash"})
+            if j.get("entry_hash") != computed:
+                results.append((i, False, "hash_mismatch"))
+            elif prev_field != prev:
+                results.append((i, False, "prev_mismatch"))
+            else:
+                results.append((i, True, "ok"))
+            prev = j.get("entry_hash")
+    return results
+
+
+    from flask import request, jsonify, current_app
+import hmac, hashlib, time
+from .config import HMAC_SECRET
+
+def require_hmac(f):
+    def wrapper(*args, **kwargs):
+        sig = request.headers.get("X-Signature")
+        ts = request.headers.get("X-Timestamp")
+        if not sig or not ts:
+            return jsonify({"error":"missing_signature"}), 401
+        # prevent replay - allow small skew
+        try:
+            t = int(ts)
+            if abs(time.time() - t) > 60:
+                return jsonify({"error":"timestamp_skew"}), 401
+        except:
+            return jsonify({"error":"bad_timestamp"}), 401
+        body = request.get_data() or b""
+        data = ts.encode() + b"." + body
+        computed = hmac.new(HMAC_SECRET.encode(), data, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(computed, sig):
+            return jsonify({"error":"bad_signature"}), 401
+        return f(*args, **kwargs)
+    wrapper.__name__ = f.__name__
+    return wrapper
+
+def require_mtls():
+    # This is a hook — actual mTLS is enforced at the TLS termination (Ingress / LB).
+    # Use this function to check for client cert headers set by your proxy (e.g., nginx or envoy).
+    cert_header = request.environ.get("HTTP_X_SSL_CLIENT_CERT")
+    if not cert_header:
+        return False
+    # Further verify cert details (CN, SAN) against allowed clients.
+    return True
+
+# Rate-limiting: stub for integration with redis
+from redis import Redis
+from .config import REDIS_URL
+redis = Redis.from_url(REDIS_URL)
+
+def rate_limit(key: str, limit: int, window_seconds: int) -> bool:
+    """Return True if allowed, False if limit exceeded."""
+    k = f"rl:{key}"
+    with redis.pipeline() as p:
+        p.incr(k)
+        p.expire(k, window_seconds)
+        count, _ = p.execute()
+    return int(count) <= limit
+
+
+    from flask import Blueprint, request, jsonify, current_app
+from .crypto import encrypt_field, decrypt_field
+from .token_service import verify_jwt, issue_jwt
+from .audit_log import append_audit
+from .middleware import require_hmac, rate_limit
+
+bp = Blueprint("resources", __name__)
+
+# Example in-memory store for demo; use a DB in prod.
+_ACCOUNTS = {
+    "A-1001": {
+        "account_id": "A-1001",
+        "owner_name_enc": None,  # encrypted value
+        "currency": "USD",
+        "balance_cents": 123456
+    }
+}
+
+@bp.route("/v1/register_demo", methods=["POST"])
+def register_demo():
+    # create demo account with encrypted owner_name
+    owner = request.json.get("owner")
+    if not owner:
+        return jsonify({"error":"missing owner"}), 400
+    enc = encrypt_field(owner.encode())
+    acct = {
+        "account_id": "A-1001",
+        "owner_name_enc": enc,
+        "currency": "USD",
+        "balance_cents": 100000
+    }
+    _ACCOUNTS["A-1001"] = acct
+    append_audit("account.create", "system", {"account": "A-1001"})
+    return jsonify({"account_id": "A-1001"}), 201
+
+@bp.route("/v1/accounts/<account_id>", methods=["GET"])
+@require_hmac
+def get_account(account_id):
+    # rate limit per account or per client
+    if not rate_limit(f"acct:{account_id}", 20, 60):
+        return jsonify({"error":"rate_limited"}), 429
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return jsonify({"error":"missing_bearer"}), 401
+    token = auth.split(" ",1)[1]
+    try:
+        payload = verify_jwt(token)
+    except Exception as e:
+        append_audit("auth.failure", "unknown", {"reason": str(e)})
+        return jsonify({"error":"invalid_token"}), 401
+    acct = _ACCOUNTS.get(account_id)
+    if not acct:
+        return jsonify({"error":"not_found"}), 404
+    owner = decrypt_field(acct["owner_name_enc"]).decode()
+    append_audit("account.read", payload.get("sub"), {"account": account_id})
+    return jsonify({
+        "account_id": acct["account_id"],
+        "owner_name": owner,
+        "currency": acct["currency"],
+        "balance": f"{acct['balance_cents']/100:.2f}"
+    })
+
+@bp.route("/v1/token", methods=["POST"])
+def token_endpoint():
+    # For demo: issue client_credentials token when supplied a valid client_id/secret
+    # In prod: use authlib AuthorizationServer with mTLS and client authentication
+    client_id = request.json.get("client_id")
+    # validate client credentials, scope, etc. (omitted for brevity)
+    token = issue_jwt(client_id, "accounts.read")
+    append_audit("token.issue", client_id, {"scope":"accounts.read"})
+    return jsonify({"access_token": token, "token_type":"Bearer", "expires_in": 3600})
+
+
+    from flask import Flask, jsonify
+from .config import DATABASE_URL
+from .key_manager import ensure_rsa_keys
+from .resources import bp as resources_bp
+
+def create_app():
+    app = Flask(__name__)
+    ensure_rsa_keys()
+    app.register_blueprint(resources_bp)
+    @app.route("/.well-known/jwks.json")
+    def jwks():
+        # Convert RSA public PEM to JWKS (use jwcrypto or authlib in prod).
+        from .key_manager import load_public_key_pem
+        pub = load_public_key_pem().decode()
+        # For brevity, return PEM; in prod return proper JWKs.
+        return jsonify({"pem": pub})
+    return app
+
+if __name__ == "__main__":
+    create_app().run(host="0.0.0.0", port=8000, debug=False)
+
+
+    fastapi
+uvicorn[standard]
+sqlalchemy[asyncio]
+psycopg2-binary
+google-cloud-kms
+google-cloud-secret-manager
+google-cloud-storage
+google-auth
+cryptography
+PyJWT
+httpx
+async-exit-stack
+aioredis           # if you want rate limiting in redis
+
+
+# gcp_kms.py
+from google.cloud import kms_v1
+from google.api_core import exceptions
+import base64
+import json
+import hashlib
+
+# Configure these to your resources
+KMS_LOCATION = "global"
+KMS_KEYRING = "bank-keyring"
+KMS_DEK_KEY_NAME = "dek-key"          # symmetric key used to encrypt DEKs (optional)
+KMS_SIGN_KEY_NAME = "jwt-sign-key"    # asymmetric key (RSA_SIGN_PSS_2048_SHA256 or RSA_SIGN_PKCS1_2048_SHA256)
+PROJECT_ID = "your-gcp-project-id"
+
+client = kms_v1.KeyManagementServiceClient()
+
+def _key_path(key_name: str):
+    return client.crypto_key_path(PROJECT_ID, KMS_LOCATION, KMS_KEYRING, key_name)
+
+def _key_version_path(key_name: str, version="1"):
+    return client.crypto_key_version_path(PROJECT_ID, KMS_LOCATION, KMS_KEYRING, key_name, version)
+
+# Envelope: DEK -> wrapped by KMS symmetric key
+def kms_wrap_key(plaintext_key_bytes: bytes, kek_name: str = KMS_DEK_KEY_NAME) -> str:
+    name = _key_path(kek_name)
+    resp = client.encrypt(request={"name": name, "plaintext": plaintext_key_bytes})
+    return base64.b64encode(resp.ciphertext).decode()
+
+def kms_unwrap_key(wrapped_b64: str, kek_name: str = KMS_DEK_KEY_NAME) -> bytes:
+    name = _key_path(kek_name)
+    ciphertext = base64.b64decode(wrapped_b64)
+    resp = client.decrypt(request={"name": name, "ciphertext": ciphertext})
+    return resp.plaintext
+
+# Asymmetric sign using KMS (use this to sign JWTs and to sign audit root hashes)
+def kms_sign(data: bytes, signing_key_name: str = KMS_SIGN_KEY_NAME, version="1") -> bytes:
+    # KMS expects a digest when using asymmetric keys for signing
+    version_name = _key_version_path(signing_key_name, version)
+    digest = hashlib.sha256(data).digest()
+    # Build digest proto
+    digest_proto = {"sha256": digest}
+    resp = client.asymmetric_sign(request={"name": version_name, "digest": digest_proto})
+    return base64.b64decode(resp.signature)
+
+# Export public key to create JWKS (clients will need the public key)
+def kms_get_public_key(signing_key_name: str = KMS_SIGN_KEY_NAME, version="1") -> bytes:
+    version_name = _key_version_path(signing_key_name, version)
+    resp = client.get_public_key(request={"name": version_name})
+    return resp.pem.encode()  # PEM bytes
+
+
+    # crypto_utils.py
+import os, base64, json
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from gcp_kms import kms_wrap_key, kms_unwrap_key
+from secrets import token_bytes
+
+# DEK generation and envelope helpers
+def generate_dek() -> bytes:
+    return token_bytes(32)  # 256-bit AES key
+
+def wrap_dek_with_kms(dek_bytes: bytes, kek_name: str = None) -> str:
+    return kms_wrap_key(dek_bytes, kek_name)
+
+def unwrap_dek_with_kms(wrapped_b64: str, kek_name: str = None) -> bytes:
+    return kms_unwrap_key(wrapped_b64, kek_name)
+
+def encrypt_field_with_wrapped_dek(wrapped_dek_b64: str, plaintext: bytes, aad: bytes = None) -> dict:
+    dek = unwrap_dek_with_kms(wrapped_dek_b64)
+    aesgcm = AESGCM(dek)
+    nonce = os.urandom(12)
+    ct = aesgcm.encrypt(nonce, plaintext, aad)
+    return {"wrapped_dek": wrapped_dek_b64, "nonce": base64.b64encode(nonce).decode(), "ct": base64.b64encode(ct).decode()}
+
+def decrypt_field_from_record(record: dict, aad: bytes = None) -> bytes:
+    wrapped = record["wrapped_dek"]
+    dek = unwrap_dek_with_kms(wrapped)
+    nonce = base64.b64decode(record["nonce"])
+    ct = base64.b64decode(record["ct"])
+    aesgcm = AESGCM(dek)
+    return aesgcm.decrypt(nonce, ct, aad)
+
+
+    # token_service.py
+import time, base64, json
+import hashlib
+from gcp_kms import kms_sign, kms_get_public_key
+
+JWT_ISS = "https://g.dev/gilbert_algordo"
+JWT_AUD = "bank-api"
+
+def _b64url(b: bytes) -> str:
+    return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+
+def kms_sign_jwt(payload: dict, key_name: str = None, key_version="1", kid: str = None):
+    header = {"alg": "RS256", "typ": "JWT"}
+    if kid:
+        header["kid"] = kid
+    header_b = _b64url(json.dumps(header, separators=(",", ":")).encode())
+    payload_b = _b64url(json.dumps(payload, separators=(",", ":")).encode())
+    signing_input = f"{header_b}.{payload_b}".encode()
+    # KMS needs digest
+    sig = kms_sign(signing_input, key_name, version=key_version)
+    # KMS returns signature over the digest; for RSA PKCS1v1.5 (RS256) just attach sig
+    sig_b64 = _b64url(sig)
+    return f"{header_b}.{payload_b}.{sig_b64}"
+
+def issue_access_token(sub: str, scope: str, expires_in: int = 900, key_name: str = None):
+    now = int(time.time())
+    payload = {"iss": JWT_ISS, "sub": sub, "aud": JWT_AUD, "iat": now, "exp": now + expires_in, "scope": scope}
+    # choose kid = fully qualified KMS key resource or stable identifier
+    kid = f"projects/{kms_signing_project()}/locations/{kms_signing_location()}/keyRings/{kms_signing_keyring()}/cryptoKeys/{key_name}/cryptoKeyVersions/1"
+    return kms_sign_jwt(payload, key_name=key_name, key_version="1", kid=kid)
+
+# helper stubs for composition if needed
+def kms_signing_project(): return "your-gcp-project-id"
+def kms_signing_location(): return "global"
+def kms_signing_keyring(): return "bank-keyring"
+
+
+# audit_log.py
+import json, hashlib, time, pathlib
+from google.cloud import storage
+from gcp_kms import kms_sign, kms_get_public_key
+from config import AUDIT_BUCKET_NAME, AUDIT_PREFIX, AUDIT_SIGNING_KEY_NAME  # set in config
+
+LOCAL_AUDIT_DIR = pathlib.Path("/tmp/audit")  # Cloud Run ephemeral FS — upload frequently
+LOCAL_AUDIT_DIR.mkdir(parents=True, exist_ok=True)
+
+def _entry_hash(entry: dict) -> str:
+    b = json.dumps(entry, separators=(",", ":"), sort_keys=True).encode()
+    return hashlib.sha256(b).hexdigest()
+
+def append_local(event_type: str, actor: str, details: dict):
+    # load last prev
+    today = time.strftime("%Y-%m-%d")
+    fpath = LOCAL_AUDIT_DIR / f"audit-{today}.jsonl"
+    prev_hash = None
+    if fpath.exists():
+        with fpath.open("rb") as fr:
+            last = None
+            for line in fr:
+                last = line
+            if last:
+                try:
+                    last_j = json.loads(last.decode())
+                    prev_hash = last_j.get("entry_hash")
+                except Exception:
+                    prev_hash = None
+    entry = {"ts": int(time.time()), "type": event_type, "actor": actor, "details": details, "prev": prev_hash}
+    entry["entry_hash"] = _entry_hash(entry)
+    with fpath.open("a", encoding="utf-8") as fw:
+        fw.write(json.dumps(entry, separators=(",", ":"), sort_keys=True) + "\n")
+    return entry["entry_hash"]
+
+def upload_and_sign_daily():
+    # call this from a cron (Cloud Scheduler -> Cloud Run) or background job. Upload file to GCS and sign root hash.
+    client = storage.Client()
+    bucket = client.bucket(AUDIT_BUCKET_NAME)
+    today = time.strftime("%Y-%m-%d")
+    fpath = LOCAL_AUDIT_DIR / f"audit-{today}.jsonl"
+    if not fpath.exists():
+        return None
+    blob_name = f"{AUDIT_PREFIX}/audit-{today}.jsonl"
+    blob = bucket.blob(blob_name)
+    blob.upload_from_filename(str(fpath), content_type="application/json")
+    # compute root hash (hash of entire file)
+    root_hash = hashlib.sha256(fpath.read_bytes()).hexdigest().encode()
+    # sign root hash with KMS asymmetric signer
+    signature = kms_sign(root_hash, signing_key_name=AUDIT_SIGNING_KEY_NAME, version="1")
+    # store signature artifact
+    meta_blob = bucket.blob(f"{AUDIT_PREFIX}/audit-{today}.signature.json")
+    meta_blob.upload_from_string(json.dumps({"root_hash": root_hash.decode(), "signature_b64": signature.decode()}), content_type="application/json")
+    return {"uploaded": blob_name}
+
+
+    # main.py
+from fastapi import FastAPI, Request, HTTPException, Header
+from pydantic import BaseModel
+import os
+from token_service import issue_access_token, verify_jwt  # verify_jwt to be implemented similarly using kms_get_public_key -> JWK
+from audit_log import append_local
+from crypto_utils import encrypt_field_with_wrapped_dek, decrypt_field_from_record, generate_dek, wrap_dek_with_kms
+
+app = FastAPI(title="GCloud Secure Bank API")
+
+class TokenRequest(BaseModel):
+    client_id: str
+    client_secret: str
+    scope: str = "accounts.read"
+
+@app.post("/v1/token")
+async def token_endpoint(req: TokenRequest):
+    # Authenticate client_id/secret via Secret Manager or DB; omitted for brevity
+    # Validate mTLS / extra checks (enforced at LB)
+    token = issue_access_token(sub=req.client_id, scope=req.scope, key_name=os.environ.get("KMS_SIGN_KEY", "jwt-sign-key"))
+    append_local("token.issue", req.client_id, {"scope": req.scope})
+    return {"access_token": token, "token_type": "Bearer", "expires_in": 900}
+
+@app.get("/v1/accounts/{acct_id}")
+async def get_account(acct_id: str, authorization: str = Header(None), x_signature: str = Header(None), x_timestamp: str = Header(None)):
+    # HMAC / timestamp check (internal) - if required for internal calls
+    if authorization is None or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="missing_bearer")
+    token = authorization.split(" ",1)[1]
+    try:
+        payload = verify_jwt(token)  # implement verify_jwt to decode JWT using KMS public key converted to RS256 verification key
+    except Exception as e:
+        append_local("auth.failure", "unknown", {"err": str(e)})
+        raise HTTPException(status_code=401, detail="invalid_token")
+    # fetch account from DB (omitted) - example encrypted owner name:
+    # record = db.get_account(acct_id)
+    # decrypt fields:
+    # owner = decrypt_field_from_record(record['owner_envelope']).decode()
+    owner = "Demo Owner"
+    append_local("account.read", payload.get("sub"), {"account": acct_id})
+    return {"account_id": acct_id, "owner": owner, "balance": "1234.56"}
+
+# admin endpoint to create an encrypted account (demo)
+class CreateAccount(BaseModel):
+    account_id: str
+    owner_name: str
+
+@app.post("/v1/accounts")
+async def create_account(body: CreateAccount):
+    dek = generate_dek()
+    wrapped = wrap_dek_with_kms(dek)  # store wrapped DEK in the record
+    envelope = encrypt_field_with_wrapped_dek(wrapped, body.owner_name.encode())
+    # store envelope in DB
+    append_local("account.create", "operator", {"account": body.account_id})
+    return {"account_id": body.account_id, "owner_envelope": envelope}
