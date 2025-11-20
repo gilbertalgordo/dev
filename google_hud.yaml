@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Custom Search Results</title>
+    <script async src="https://cse.google.com/cse.js?cx=YOUR_CSE_ENGINE_ID"></script>
+</head>
+<body>
+    
+    <div id="search-box"></div>
+
+    <div id="search-results"></div>
+
+    <script>
+        // 2. JavaScript to render the search elements
+        window.__gcse = {
+            parsetags: 'explicit', // Tell the script to wait for manual rendering
+            callback: function() {
+                // Render the search box
+                google.search.cse.element.render(
+                    {
+                        div: "search-box",
+                        tag: 'searchbox-only',
+                        attributes: {
+                            resultsUrl: 'search.html' // URL where results are displayed
+                        }
+                    }
+                );
+                // Render the search results (if on the results page)
+                google.search.cse.element.render(
+                    {
+                        div: "search-results",
+                        tag: 'searchresults-only'
+                    }
+                );
+            }
+        };
+    </script>
+</body>
+</html>
+
+
+
+<application>
+    <service
+        android:name=".MyInstrumentClusterService"
+        android:exported="true"
+        android:singleUser="true"
+        android:permission="android.permission.BIND_INSTRUMENT_CLUSTER_RENDERING">
+        <intent-filter>
+            <action android:name="android.car.cluster.ClusterRenderingService"/>
+        </intent-filter>
+    </service>
+</application>
+
+
+
+// Example in Kotlin
+class MyInstrumentClusterService : ClusterRenderingService() {
+
+    override fun onCreate() {
+        super.onCreate()
+        // Initialize resources for rendering
+    }
+
+    override fun onBind(intent: Intent?): IBinder? {
+        // Called when a client (like Maps) binds to the service
+        return super.onBind(intent)
+    }
+
+    // You would use methods from ClusterRenderingService 
+    // to manage the display's state and draw content.
+    // For example, managing navigation updates:
+
+    override fun onStartNavigation() {
+        // A navigation session has started. Prepare the HUD/cluster display.
+        Log.d("HUDService", "Navigation started, preparing display...")
+    }
+
+    override fun onStopNavigation() {
+        // Navigation has ended. Clear the HUD/cluster display.
+        Log.d("HUDService", "Navigation stopped, clearing display...")
+    }
+}
+
+
+
+import CarPlay
+
+// 1. Conform to the required delegate protocol
+class SceneDelegate: UIResponder, UIWindowSceneDelegate, CPTemplateApplicationSceneDelegate, 
+                      CPTemplateApplicationInstrumentClusterSceneDelegate {
+    
+    // ... basic UIWindowSceneDelegate methods ...
+    
+    // 2. CarPlay Scene Delegate Method
+    func templateApplicationScene(
+        _ templateApplicationScene: CPTemplateApplicationScene,
+        didConnect session: CPSession,
+        completionHandler: @escaping (CPTemplateApplicationScene.ActivationScope) -> Void
+    ) {
+        // CarPlay session connected.
+        // You would typically set the root template here.
+        completionHandler(.dashboard) 
+    }
+    
+    // 3. Instrument Cluster Delegate Method
+    func templateApplicationInstrumentClusterScene(
+        _ templateApplicationInstrumentClusterScene: CPTemplateApplicationInstrumentClusterScene,
+        didConnect instrumentClusterController: CPInstrumentClusterController
+    ) {
+        // Instrument Cluster/HUD connected.
+        // Use the controller to push data/templates to the cluster display.
+        
+        // Example: Push a simple gauge (conceptual)
+        let gauge = CPGauge(title: "Speed", value: 55, maximumValue: 120)
+        let clusterTemplate = CPInstrumentClusterTemplate(content: gauge)
+        
+        instrumentClusterController.loadTemplate(clusterTemplate) { (success, error) in
+            if success {
+                print("Successfully loaded template to cluster/HUD")
+            } else if let error = error {
+                print("Error loading cluster template: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    // ... other delegate methods ...
+}
+
+
+
+GET https://customsearch.googleapis.com/customsearch/v1?key=YOUR_API_KEY&cx=YOUR_ENGINE_ID&q=gas%20station%20near%20me
+
+
+
+{
+  "items": [
+    {
+      "title": "Shell Gas Station",
+      "snippet": "4.5 stars. Open 24 Hours. Price: $3.50/gal",
+      "link": "https://maps.google.com/...",
+      "displayDistance": "0.8 mi", 
+      "latitude": 34.0522,
+      "longitude": -118.2437
+    },
+    // ... more results
+  ]
+}
+
+
+
+// 1. Service Declaration in AndroidManifest.xml (must be declared as singleUser=true)
+// <service android:name=".MyCarAppService" android:exported="true"> ... </service>
+
+// 2. The main application service
+class MyCarAppService : CarAppService() {
+    override fun onCreateSession(): Session {
+        return SearchSession()
+    }
+}
+
+// 3. The session handling the UI and data
+class SearchSession : Session() {
+
+    override fun onCreateScreen(intent: Intent): Screen {
+        // Start the main screen for search
+        return SearchScreen(carContext)
+    }
+}
+
+// 4. Screen logic to display search results on the HUD
+class SearchScreen(carContext: CarContext) : Screen(carContext) {
+
+    private val focusManager = carContext.getCarService(CarAppFocusManager::class.java)
+
+    fun displaySearchResultOnHUD(searchResult: SearchItem) {
+        // Request navigation focus to trigger the HUD display
+        focusManager.requestFocus(
+            CarAppFocusManager.APP_FOCUS_TYPE_NAVIGATION,
+            object : CarAppFocusManager.On=") {
+                override fun onFocusGranted(appType: Int) {
+                    // Focus granted, now update the car's navigation status
+                    val navStatusManager = carContext.getCarService(CarNavigationStatusManager::class.java)
+
+                    // Convert the search result into a VehicleTurnEvent for the HUD
+                    val turnEvent = VehicleTurnEvent.Builder()
+                        .setDistance(searchResult.displayDistance.toFloat()) // e.g., "0.8 mi"
+                        .setManeuver(VehicleTurnEvent.MANEUVER_TYPE_DESTINATION)
+                        .setTurnAngle(0f) // Not strictly a turn, but marks a critical POI
+                        .setTurnIcon(Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)) // Custom icon for POI
+                        .setJunctionText(searchResult.title) // Display the title on the HUD
+                        .build()
+
+                    // Send the data to the cluster/HUD
+                    navStatusManager.sendTurnEvent(turnEvent)
+                }
+
+                override fun onFocusReleased(appType: Int) { /* Handle release */ }
+            }
+        )
+    }
+    
+    // ... screen lifecycle methods
+}
+
+
+
+import CarPlay
+
+// Conform to the delegate for the Instrument Cluster scene
+class CarPlayInstrumentClusterDelegate: NSObject, CPTemplateApplicationInstrumentClusterSceneDelegate {
+    
+    var instrumentClusterController: CPInstrumentClusterController?
+
+    func templateApplicationInstrumentClusterScene(
+        _ templateApplicationInstrumentClusterScene: CPTemplateApplicationInstrumentClusterScene,
+        didConnect instrumentClusterController: CPInstrumentClusterController
+    ) {
+        self.instrumentClusterController = instrumentClusterController
+    }
+    
+    // Function to render the search result on the HUD
+    func displaySearchResultOnHUD(searchResult: SearchItem) {
+        
+        guard let controller = instrumentClusterController else { return }
+
+        // 1. Create a maneuver object to hold the POI data
+        let maneuver = CPGuidanceManeuver()
+        
+        // Use an image for the POI type (e.g., a gas pump icon)
+        let gasIcon = UIImage(named: "gas_pump_icon")
+        maneuver.instructionImage = gasIcon
+        
+        // 2. Set the distance and description
+        let distance = NSMeasurement(doubleValue: searchResult.displayDistanceValue, unit: UnitLength.miles)
+        let distanceRemaining = CPTravelEstimates(distanceRemaining: distance, timeRemaining: nil)
+        
+        maneuver.initialTravelEstimates = distanceRemaining
+        
+        // Set the instruction text (e.g., "Shell Gas Station")
+        maneuver.instructionVariants = [searchResult.title, "Search Result"] 
+        
+        // 3. Update the cluster with the new template content
+        let clusterTemplate = CPInstrumentClusterTemplate(content: maneuver)
+        
+        controller.loadTemplate(clusterTemplate) { success, error in
+            if let error = error {
+                print("Error updating CarPlay HUD/Cluster: \(error.localizedDescription)")
+            } else if success {
+                print("Successfully displayed search result on CarPlay HUD.")
+            }
+        }
+    }
+}
