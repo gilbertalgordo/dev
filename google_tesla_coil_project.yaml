@@ -1,0 +1,35 @@
+// Dynamic Frequency Generator for Timer1 in Arduino
+#include <avr/io.h>
+#include <avr/interrupt.h>
+
+unsigned long frequency = 1000000; // Example: 1MHz
+
+void setup(){
+  pinMode(9, OUTPUT);
+  pinMode(10, OUTPUT);
+  DFG(frequency);
+}
+
+void loop(){
+  // The coil runs on the timer interrupt, so the loop is empty.
+}
+
+void DFG(unsigned long tempfreq){
+  cli(); // Disable interrupts
+  TCCR1A = 0; // Clear Timer/Counter Control Registers for Timer 1
+  TCCR1B = 0;
+  TCNT1 = 0; // Set counter to zero
+  
+  // Set Timer 1 to Fast PWM mode (WGM12) and toggle OC1A/OC1B on compare (COM1A0/COM1B0)
+  TCCR1A |= _BV(COM1A0) + _BV(COM1B0);
+  TCCR1B |= _BV(WGM12);
+  
+  // Choose prescaler and set Output Compare Register (OCR1A) for desired frequency
+  if(tempfreq > 122 && tempfreq < 1000001){
+    OCR1A = (8000000/tempfreq)-1; // Using /1 prescaler (CS10) for higher frequencies
+    TCCR1B |= _BV(CS10); 
+  } 
+  // ... (additional logic for lower frequencies with different prescalers)
+  
+  sei(); // Enable interrupts
+}
