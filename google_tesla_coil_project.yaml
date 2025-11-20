@@ -33,3 +33,123 @@ void DFG(unsigned long tempfreq){
   
   sei(); // Enable interrupts
 }
+
+
+
+// --- Preamble ---
+// This code is an INTERRUPTER for a Solid State Tesla Coil (SSTC).
+// It converts musical notes (frequencies) into a pulse train
+// to modulate the high-frequency power stage.
+// Pin 9 is used as the interrupter signal output.
+const int interrupterPin = 9;
+
+// --- Musical Note Frequencies (Simplified Example) ---
+// This array maps simplified C Major scale note names to their MIDI frequencies (Hz).
+#define NOTE_C4  262
+#define NOTE_D4  294
+#define NOTE_E4  330
+#define NOTE_F4  349
+#define NOTE_G4  392
+#define NOTE_A4  440
+#define NOTE_B4  494
+#define NOTE_C5  523
+
+// --- Song Structure (Twinkle Twinkle Little Star) ---
+// Note: This only controls the 'spark rate' (BPS), not the high-frequency resonance.
+int melody[] = {
+  NOTE_C4, NOTE_C4, NOTE_G4, NOTE_G4, NOTE_A4, NOTE_A4, NOTE_G4,
+  NOTE_F4, NOTE_F4, NOTE_E4, NOTE_E4, NOTE_D4, NOTE_D4, NOTE_C4
+};
+
+// Note durations (in milliseconds). 4 = quarter note, 8 = eighth note.
+// The interrupter pulse width is also a critical factor (usually a few microseconds).
+int durations[] = {
+  4, 4, 4, 4, 4, 4, 2,
+  4, 4, 4, 4, 4, 4, 2
+};
+
+// --- Setup ---
+void setup() {
+  // Set the interrupter pin to output.
+  pinMode(interrupterPin, OUTPUT);
+  // Set up the timer to generate a square wave (PWM) signal at the desired frequency.
+  // In most SSTC designs, a constant HIGH duty cycle is used, and the *frequency*
+  // of the high/low transition is what changes to create the musical note.
+}
+
+// --- Main Loop ---
+void loop() {
+  for (int thisNote = 0; thisNote < 14; thisNote++) {
+    // Calculate the duration of the note (in ms) based on a tempo (e.g., 1 beat = 1000ms).
+    int noteDuration = 1000 / durations[thisNote];
+
+    // Use the Arduino 'tone' function to generate a square wave signal
+    // on the interrupterPin at the note's frequency.
+    // The "tone" function handles the high/low switching (the interrupter signal).
+    tone(interrupterPin, melody[thisNote], noteDuration);
+
+    // Pause between notes to separate them.
+    int pauseBetweenNotes = noteDuration * 1.30;
+    delay(pauseBetweenNotes);
+
+    // Stop the interrupter signal after the note is played.
+    noTone(interrupterPin);
+  }
+  delay(5000); // Wait 5 seconds before repeating the song.
+}
+
+
+
+// RFT Concept Code (Simplified - assumes Si5351 or similar IC)
+#include <Si5351.h> 
+
+// Pin definitions
+const int currentSensePin = A0; // Analog input to read coil current peak
+const int phaseSensePin = 2;    // Digital input to read phase feedback
+
+// Frequency control object (requires external Si5351 breakout board)
+Si5351 clockgen;
+
+// --- RFT Variables ---
+float currentFrequency = 100000.0; // Start at 100 kHz
+const float frequencyStep = 100.0; // Adjustment step (100 Hz)
+const float maxFrequency = 150000.0; 
+const float minFrequency = 80000.0; 
+float lastMaxCurrent = 0.0;
+
+void setup_RFT() {
+  // Initialize the frequency generator IC
+  if (clockgen.begin(SI5351_CLK0_OUT) != ERROR_NONE) {
+    Serial.println("Si5351 not detected. Check wiring!");
+    while(1);
+  }
+  // Set initial drive frequency on CLK0
+  clockgen.set_freq((long)currentFrequency * 100, SI5351_CLK0); 
+}
+
+// --- CORE RFT LOOP ---
+void run_RFT() {
+  // 1. Read the current peak (simplified to a direct analog read)
+  float currentReading = analogRead(currentSensePin);
+
+  // 2. Simple Gradient Ascent Algorithm to find peak current
+  if (currentReading > lastMaxCurrent) {
+    // Current is increasing, keep going in the same direction
+    // (Actual code would track phase relationship, not just current peak)
+    currentFrequency += frequencyStep;
+  } else {
+    // Current decreased, reverse direction (overshot the peak)
+    currentFrequency -= frequencyStep;
+    // For a simple search, also reduce step size for better resolution
+    // frequencyStep *= 0.8; 
+  }
+  
+  // 3. Clamp frequency to physical limits
+  currentFrequency = constrain(currentFrequency, minFrequency, maxFrequency);
+  
+  // 4. Apply the new frequency
+  clockgen.set_freq((long)currentFrequency * 100, SI5351_CLK0);
+
+  // 5. Update state
+  lastMaxCurrent = currentReading;
+}
