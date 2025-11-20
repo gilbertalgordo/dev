@@ -1,0 +1,409 @@
+# Game.py (Simplified Tic-Tac-Toe Environment)
+import numpy as np
+
+class TicTacToeGame:
+    def __init__(self):
+        # Board is 3x3, represented as a flattened 9-element array
+        # 1 for Player 1, -1 for Player 2, 0 for empty
+        self.board_size = 3
+        self.action_size = self.board_size * self.board_size
+
+    def get_initial_state(self):
+        # Returns a 3x3 array of zeros
+        return np.zeros((self.board_size, self.board_size), dtype=np.int8)
+
+    def get_next_state(self, board, action, player):
+        new_board = np.copy(board)
+        # Action is an index from 0 to 8 (row * 3 + col)
+        row = action // self.board_size
+        col = action % self.board_size
+        
+        # Place the player's piece (1 or -1)
+        new_board[row, col] = player
+        return new_board
+
+    def get_valid_moves(self, board):
+        # Returns a binary mask (9-element array) where 1 means valid move
+        valid_moves = (board.flatten() == 0).astype(np.int8)
+        return valid_moves
+
+    def get_game_ended(self, board, player):
+        # Checks if the game has ended and returns the winner (1, -1, or 0)
+        
+        # 1. Check Rows, Cols, Diagonals for a winner
+        for i in range(self.board_size):
+            # Check rows: sum(1, 1, 1) or sum(-1, -1, -1)
+            if np.abs(board[i, :].sum()) == self.board_size:
+                return board[i, 0] # Returns +1 or -1
+            # Check columns
+            if np.abs(board[:, i].sum()) == self.board_size:
+                return board[0, i]
+
+        # Check main diagonal
+        if np.abs(np.trace(board)) == self.board_size:
+            return board[0, 0]
+        
+        # Check anti-diagonal
+        if np.abs(np.trace(np.fliplr(board))) == self.board_size:
+            return board[0, self.board_size - 1]
+
+        # 2. Check for a Draw (board is full)
+        if (board != 0).all():
+            return 1e-4 # Small non-zero value indicates a draw
+
+        # 3. Game is not ended
+        return 0 
+
+
+
+# NNet.py (Simplified AlphaZero Neural Network using PyTorch)
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class AlphaZeroNet(nn.Module):
+    def __init__(self, game):
+        super().__init__()
+        # Input: 3x3 board state (1 channel) -> Batch x 1 x 3 x 3
+        self.board_size = game.board_size
+        self.action_size = game.action_size
+        
+        # Common Feature Layers (Simplified Convolutional Blocks)
+        self.conv1 = nn.Conv2d(1, 64, kernel_size=3, stride=1, padding=1)
+        self.bn1 = nn.BatchNorm2d(64)
+        
+        # Policy Head (Estimates move probabilities)
+        self.policy_conv = nn.Conv2d(64, 2, kernel_size=1)
+        self.policy_bn = nn.BatchNorm2d(2)
+        self.policy_fc = nn.Linear(2 * self.board_size**2, self.action_size)
+        
+        # Value Head (Estimates game outcome)
+        self.value_conv = nn.Conv2d(64, 1, kernel_size=1)
+        self.value_bn = nn.BatchNorm2d(1)
+        self.value_fc1 = nn.Linear(self.board_size**2, 1)
+        self.value_fc2 = nn.Linear(1, 1)
+
+    def forward(self, x):
+        # Input x is (Batch x 3 x 3). We need (Batch x 1 x 3 x 3)
+        x = x.unsqueeze(1) 
+        
+        # 1. Common Feature Layers
+        s = F.relu(self.bn1(self.conv1(x)))
+        
+        # 2. Policy Head
+        p = F.relu(self.policy_bn(self.policy_conv(s)))
+        p = p.view(-1, 2 * self.board_size**2) # Flatten
+        p = self.policy_fc(p)
+        policy_out = F.log_softmax(p, dim=1) # Log-probabilities
+        
+        # 3. Value Head
+        v = F.relu(self.value_bn(self.value_conv(s)))
+        v = v.view(-1, self.board_size**2) # Flatten
+        v = F.relu(self.value_fc1(v))
+        value_out = torch.tanh(self.value_fc2(v)) # Tanh ensures output is between -1 and 1
+        
+        # Policy is log_softmax, Value is tanh
+        return policy_out, value_out
+
+
+
+# MCTS.py (Simplified MCTS implementation)
+import math
+
+class MCTS:
+    def __init__(self, game, nnet, cpuct=1.0):
+        self.game = game
+        self.nnet = nnet
+        self.cpuct = cpuct # Exploration/Exploitation constant
+        
+        # Q: Mean action value Q[s][a]
+        # N: Visit count N[s][a]
+        # W: Total score W[s][a]
+        # P: Prior policy P[s][a] from the NN
+        # E: Game ended? E[s] = game result
+        self.Qsa = {}  # Stores Q values for s,a (state, action)
+        self.Nsa = {}  # Stores visit counts for s,a
+        self.Ns = {}   # Stores total visit count for s
+        self.Ps = {}   # Stores initial policy from NN for s
+        self.Es = {}   # Stores game outcome for s (1 if win, -1 if loss, 0 if not ended)
+        self.Vs = {}   # Stores valid moves mask for s
+
+    def get_action_probs(self, board, temp=1):
+        # Runs MCTS simulations and returns the resulting policy (move probabilities)
+        # Note: In a real AlphaZero, you run many simulations (e.g., 800) here.
+        # For simplicity, we only run a small number.
+        num_simulations = 50 
+        for _ in range(num_simulations):
+            self.search(board)
+
+        s = board.tobytes()
+        counts = [self.Nsa[(s, a)] if (s, a) in self.Nsa else 0 for a in range(self.game.action_size)]
+        
+        # Apply temperature for exploration during self-play
+        # temp=1 means proportional to visit count (high exploration)
+        # temp=0 means select the move with max visit count (pure exploitation/best move)
+        if temp == 0:
+            best_a = np.argmax(counts)
+            probs = [0] * self.game.action_size
+            probs[best_a] = 1
+            return probs
+        
+        counts = np.array(counts)
+        probs = counts**(1./temp)
+        probs = probs / probs.sum()
+        return probs
+
+    def search(self, board):
+        s = board.tobytes()
+        player = 1 # Always search from the perspective of the current player
+
+        # 1. Game End Check (Terminal Node)
+        if s not in self.Es:
+            self.Es[s] = self.game.get_game_ended(board, player)
+        if self.Es[s] != 0:
+            return -self.Es[s] # Return negative value because it's from the *opponent's* perspective
+
+        # 2. Expansion (Unvisited Node)
+        if s not in self.Ps:
+            # Predict policy and value using the Neural Network
+            board_tensor = torch.from_numpy(board).float()
+            policy_out, value_out = self.nnet(board_tensor)
+            
+            # Policy is log_softmax, so convert to probabilities
+            self.Ps[s] = torch.exp(policy_out).detach().cpu().numpy()[0]
+            valid_moves = self.game.get_valid_moves(board)
+            self.Ps[s] = self.Ps[s] * valid_moves # Mask invalid moves
+            self.Ps[s] /= np.sum(self.Ps[s])     # Re-normalize
+
+            self.Vs[s] = valid_moves
+            self.Ns[s] = 0
+            
+            # Return NN's predicted value (it's between -1 and 1)
+            return -value_out.item() 
+
+        # 3. Selection (Find best action a to explore using PUCT)
+        valid_moves = self.Vs[s]
+        best_u = -float('inf')
+        best_a = -1
+
+        for a in range(self.game.action_size):
+            if valid_moves[a]:
+                # PUCT (Polynomial Upper Confidence Trees) formula
+                if (s, a) in self.Qsa:
+                    Q = self.Qsa[(s, a)]
+                    U = self.cpuct * self.Ps[s][a] * (math.sqrt(self.Ns[s]) / (1 + self.Nsa[(s, a)]))
+                else:
+                    Q = 0
+                    # Encourage exploration of unvisited actions
+                    U = self.cpuct * self.Ps[s][a] * (math.sqrt(self.Ns[s] + 1e-8)) # Initial exploration bonus
+
+                if Q + U > best_u:
+                    best_u = Q + U
+                    best_a = a
+
+        a = best_a
+        next_board = self.game.get_next_state(board, a, player)
+        
+        # Recursive call: result is from the next player's perspective
+        v = self.search(next_board)
+
+        # 4. Backup (Update Q and N)
+        if (s, a) in self.Qsa:
+            self.Nsa[(s, a)] += 1
+            self.Qsa[(s, a)] = (self.Nsa[(s, a)] * self.Qsa[(s, a)] + v) / self.Nsa[(s, a)]
+        else:
+            self.Nsa[(s, a)] = 1
+            self.Qsa[(s, a)] = v
+
+        self.Ns[s] += 1
+        return -v # Return the negated value (back to the current player's perspective)
+
+
+
+# main.py (Simplified AlphaZero Training Loop)
+from Game import TicTacToeGame
+from NNet import AlphaZeroNet
+from MCTS import MCTS
+import numpy as np
+import torch
+import torch.optim as optim
+
+def execute_episode(game, nnet):
+    # Plays one full game using the current network and MCTS
+    board = game.get_initial_state()
+    player = 1
+    episode_history = []
+    
+    # MCTS instance for this episode
+    mcts = MCTS(game, nnet)
+    
+    while game.get_game_ended(board, player) == 0:
+        # Get action probabilities from MCTS after search
+        action_probs = mcts.get_action_probs(board, temp=1) 
+        
+        # Save (State, Policy Target) for training
+        episode_history.append([board, action_probs, player])
+        
+        # Sample move from the MCTS policy
+        action = np.random.choice(game.action_size, p=action_probs)
+        
+        # Transition to the next state
+        board = game.get_next_state(board, action, player)
+        player = -player # Switch player (-1 to 1, or 1 to -1)
+
+    # Game ended, assign the final value (Z) to the history
+    final_result = game.get_game_ended(board, player)
+    training_examples = []
+    for state, policy, current_player in episode_history:
+        # Value Z is the final result, adjusted for the current player's perspective
+        value_z = final_result * current_player
+        training_examples.append((state, policy, value_z))
+        
+    return training_examples
+
+# --- Training Configuration ---
+game = TicTacToeGame()
+nnet = AlphaZeroNet(game)
+optimizer = optim.Adam(nnet.parameters(), lr=0.001)
+num_iterations = 20  # Total training iterations
+episodes_per_iter = 10 # Self-play games per iteration
+batch_size = 32
+
+for i in range(num_iterations):
+    print(f"--- Iteration {i+1} ---")
+    iteration_examples = []
+    
+    # 1. Self-Play (Data Collection)
+    for e in range(episodes_per_iter):
+        iteration_examples.extend(execute_episode(game, nnet))
+    
+    print(f"Collected {len(iteration_examples)} examples.")
+
+    # 2. Training (Learner)
+    # Convert examples to PyTorch Tensors
+    states, policies, values = zip(*iteration_examples)
+    
+    states_tensor = torch.from_numpy(np.array(states)).float()
+    policies_tensor = torch.from_numpy(np.array(policies)).float()
+    values_tensor = torch.from_numpy(np.array(values)).float().unsqueeze(1)
+    
+    # Training Loop
+    nnet.train()
+    for batch_idx in range(0, len(states_tensor), batch_size):
+        batch_states = states_tensor[batch_idx:batch_idx + batch_size]
+        batch_policies = policies_tensor[batch_idx:batch_idx + batch_size]
+        batch_values = values_tensor[batch_idx:batch_idx + batch_size]
+        
+        # Forward pass
+        p_pred, v_pred = nnet(batch_states)
+        
+        # Calculate Loss
+        # Policy Loss (Cross Entropy)
+        policy_loss = -torch.sum(batch_policies * p_pred, dim=1).mean()
+        # Value Loss (Mean Squared Error)
+        value_loss = F.mse_loss(v_pred, batch_values)
+        
+        # Total Loss (weighted sum)
+        total_loss = policy_loss + value_loss
+        
+        # Backward pass and optimize
+        optimizer.zero_grad()
+        total_loss.backward()
+        optimizer.step()
+        
+    print(f"Loss: {total_loss.item():.4f}")
+
+print("\n--- Training Complete ---")
+
+
+
+# --- Advanced ResNet Block Structure ---
+class ResidualBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        # 1. Conv + BN + ReLU
+        self.conv1 = nn.Conv2d(in_channels, out_channels, 3, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        # 2. Conv + BN
+        self.conv2 = nn.Conv2d(out_channels, out_channels, 3, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+
+    def forward(self, x):
+        # Save input for skip connection
+        residual = x
+        
+        # Pass through two convolutional layers
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        
+        # Add the input back (Skip Connection)
+        out += residual
+        
+        # Final ReLU activation
+        out = F.relu(out)
+        return out
+
+class SuperNet(nn.Module):
+    def __init__(self, game, num_blocks=10, num_channels=256):
+        # ... (Setup for policy and value heads) ...
+        
+        # Initial Convolutional Layer
+        self.initial_conv = nn.Conv2d(game.input_channels, num_channels, 3, padding=1)
+        # Stacking Residual Blocks
+        self.res_blocks = nn.ModuleList([
+            ResidualBlock(num_channels, num_channels) for _ in range(num_blocks)
+        ])
+        
+        # ... (Policy and Value Head layers) ...
+
+
+
+# --- Advanced MCTS Logic Snippet (Dirichlet Noise) ---
+import numpy as np
+import math
+
+class AdvancedMCTS(MCTS):
+    def get_action_probs(self, board, temp=1):
+        # 1. Apply Dirichlet Noise to the root node's prior policy
+        s = board.tobytes()
+        if s in self.Ps and board.sum() == 0: # Only apply at the root of a new episode
+            # Add Dirichlet noise weighted by a factor (e.g., 0.3)
+            # Alpha is usually a small constant (e.g., 0.3)
+            noise = np.random.dirichlet(np.ones(self.game.action_size) * 0.3)
+            self.Ps[s] = (0.75 * self.Ps[s]) + (0.25 * noise) 
+            self.Ps[s] /= np.sum(self.Ps[s]) # Re-normalize
+            
+        # 2. Run many simulations
+        for _ in range(1600): # 1600 simulations for competitive play
+             self.search(board)
+
+        # ... (Rest of move selection logic) ...
+
+
+
+# --- Conceptual Training Loop Improvements ---
+def train_network(nnet, examples):
+    # Setup Cyclic Learning Rate
+    optimizer = optim.Adam(nnet.parameters(), lr=0.001, weight_decay=1e-4) # L2 Regularization
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=100)
+    
+    # ... (Standard training loop with batches) ...
+    
+    # scheduler.step() # Update learning rate after each epoch/step
+    
+# --- Conceptual Evaluation Loop ---
+def evaluate_network(Net_new, Net_best, num_games=40):
+    wins = 0
+    # Play 20 games with Net_new as Player 1, 20 as Player 2
+    for _ in range(num_games):
+        # ... Run full game using MCTS with Net_new vs Net_best ...
+        # ... Track result ...
+        pass
+    
+    if wins / num_games > 0.55:
+        # Net_new is approved and becomes the new Net_best
+        print("NEW NETWORK APPROVED! 🚀")
+        return Net_new
+    else:
+        print("New network rejected. Retaining current best.")
+        return Net_best
