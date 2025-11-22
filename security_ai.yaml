@@ -1,0 +1,56 @@
+# WARNING: This is a simplified educational example.
+# Use production-ready, audited libraries like 'pyotp' in a real application.
+import hmac
+import hashlib
+import time
+import struct
+
+def generate_totp_code(secret_key_bytes, time_step=30):
+    # 1. Calculate time counter (T)
+    current_time = int(time.time())
+    counter = int(current_time / time_step)
+    
+    # 2. Convert counter to a 8-byte big-endian structure
+    counter_bytes = struct.pack('>Q', counter)
+    
+    # 3. Calculate HMAC-SHA1 (HOTP)
+    # HMAC = Hash-based Message Authentication Code
+    hmac_result = hmac.new(secret_key_bytes, counter_bytes, hashlib.sha1).digest()
+    
+    # 4. Perform dynamic truncation to get a 6-digit code (This step is complex in reality)
+    # The last 4 bits of the HMAC determine the offset
+    offset = hmac_result[-1] & 0x0F
+    
+    # Get 4 bytes from the offset position
+    truncated_hash = hmac_result[offset:offset + 4]
+    
+    # Convert to a 31-bit integer
+    otp_value = struct.unpack('>I', truncated_hash)[0] & 0x7FFFFFFF
+    
+    # 5. Get the 6-digit code
+    code = str(otp_value % 1000000).zfill(6)
+    return code
+
+# Example usage (a fake key)
+# In a real app, this key would be securely generated and stored
+# The key is usually Base32 encoded in real applications.
+# secret_key = b"MySuperSecretKey" 
+# print(generate_totp_code(secret_key))
+
+
+
+// Placeholder for a production-ready package like 'otp'
+import 'package:otp/otp.dart';
+
+// 1. Retrieve the securely stored key
+String secretKey = await storage.read(key: 'user_totp_key');
+
+// 2. Generate the 6-digit code
+String otpCode = OTP.generateTOTPCode(
+    secretKey, 
+    DateTime.now().millisecondsSinceEpoch,
+    length: 6, // 6 digits
+    interval: 30, // 30 seconds
+    algorithm: Algorithm.SHA1 // The standard algorithm
+);
+// This code is what the user enters for 2FA.
