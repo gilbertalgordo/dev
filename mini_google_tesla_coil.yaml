@@ -1,0 +1,57 @@
+// Define the output pin for the high-frequency pulse (to the Gate Driver)
+const int GATE_PIN = 9;  // Use a PWM-capable pin (e.g., D9 on Nano)
+const int AUDIO_PIN = 10; // Pin for the audio/interrupt signal
+
+// Define the high resonant frequency (simplified example)
+// Actual frequency will be hundreds of kHz (e.g., 200kHz to 500kHz)
+const long RESONANT_FREQ = 400000; // 400 kHz (Hz) - Needs tuning based on coil geometry
+const int DUTY_CYCLE = 128; // 50% duty cycle (0-255 range for 8-bit PWM)
+
+void setup() {
+  pinMode(GATE_PIN, OUTPUT);
+  pinMode(AUDIO_PIN, OUTPUT);
+  Serial.begin(9600);
+
+  // Configure Timer 1 for fast PWM output on GATE_PIN (advanced frequency setup)
+  // This section of code is complex and highly dependent on the microcontroller's datasheet.
+  // It is used to achieve the high resonant frequency (e.g., 400kHz) which is far beyond the standard Arduino 'tone' library.
+  
+  // Example for high-frequency PWM on Timer 1 (pin 9/10):
+  // TCCR1A = _BV(COM1A1) | _BV(WGM11);  // Fast PWM, Non-inverting Mode
+  // TCCR1B = _BV(WGM13) | _BV(WGM12) | _BV(CS10); // Set Prescaler to 1 (full speed)
+  // ICR1 = (F_CPU / (2 * RESONANT_FREQ)) - 1; // Set TOP value for frequency
+  // OCR1A = DUTY_CYCLE; // Set duty cycle
+}
+
+
+
+void loop() {
+  // Example: Play a simple note (Middle C, approx 261 Hz) for 500ms
+  playNote(261, 500);
+  delay(100); 
+  
+  // Play the next note (D, approx 293 Hz)
+  playNote(293, 500);
+  delay(500);
+}
+
+// Function to generate the musical interruptions
+void playNote(int frequency, long duration) {
+  if (frequency > 0) {
+    long delayValue = 1000000 / frequency; // Time for half the cycle in microseconds
+
+    // Play the note for the specified duration
+    for (long i = 0; i < duration * 1000; i += delayValue * 2) {
+      // Turn the high-frequency carrier wave ON (interrupt = high)
+      digitalWrite(AUDIO_PIN, HIGH);
+      delayMicroseconds(delayValue);
+
+      // Turn the high-frequency carrier wave OFF (interrupt = low)
+      digitalWrite(AUDIO_PIN, LOW);
+      delayMicroseconds(delayValue);
+    }
+  } else {
+    // If frequency is 0, rest for the duration
+    delay(duration); 
+  }
+}
