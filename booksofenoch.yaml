@@ -195,3 +195,282 @@ const App = () => {
 
 export default App;
 
+
+
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Menu, X, BookOpen, ChevronRight, ChevronLeft, ScrollText, HeartHandshake, Eye } from 'lucide-react';
+
+// --- Book Data Structure (Summarized/Excerpted for demonstration) ---
+// This structure is ready for the full text to be inserted.
+const BOOK_OF_ENOCH_DATA = [
+  {
+    id: 'b1',
+    title: 'The Book of the Watchers',
+    icon: Eye,
+    chapters: [
+      { id: '1', title: 'The Call and Blessing', text: 'Enoch\'s opening blessing, the descent of the Holy Great One, and the vision of judgment on the sinners of the Earth.', illustration: 'https://placehold.co/1200x600/1E3A8A/ffffff?text=The+Descent+of+Judgment' },
+      { id: '2', title: 'The Observation of Cosmic Order', text: 'Reflection on the unchanging order of nature—how the sun, moon, and seasons obey the Divine command—contrasting with human transgression.', illustration: 'https://placehold.co/1200x600/374151/ffffff?text=Cosmic+Laws+and+Divine+Order' },
+      { id: '3', title: 'The Fall of the Watchers', text: 'The story of the two hundred Watchers, led by Semyaza, descending upon Mount Hermon, binding themselves by an oath to take wives from mankind.', illustration: 'https://placehold.co/1200x600/6B21A8/ffffff?text=The+Oath+on+Mount+Hermon' },
+      { id: '4', title: 'The Forbidden Arts and the Nephilim', text: 'The Watchers teach humanity forbidden knowledge: charms, enchantments, astrology, and the making of weapons. Their offspring, the Nephilim, devour mankind.', illustration: 'https://placehold.co/1200x600/D97706/ffffff?text=The+Teaching+of+Forbidden+Arts' },
+    ]
+  },
+  {
+    id: 'b2',
+    title: 'The Book of Parables',
+    icon: ScrollText,
+    chapters: [
+      { id: '5', title: 'The Chambers of the Righteous', text: 'A vision detailing the dwelling places prepared for the righteous and the Elect One (the Son of Man), who will execute judgment.', illustration: 'https://placehold.co/1200x600/059669/ffffff?text=The+Vision+of+the+Elect+One' },
+      { id: '6', title: 'Judgment on the Kings and the Mighty', text: 'Prophecies concerning the inevitable downfall and punishment of the wicked kings and potentates of the earth.', illustration: 'https://placehold.co/1200x600/7C3AED/ffffff?text=The+Overthrow+of+Rulers' },
+    ]
+  },
+];
+
+// Utility to find the initial chapter (Chapter 1)
+const getAllChapters = () => BOOK_OF_ENOCH_DATA.flatMap(book => book.chapters);
+const ALL_CHAPTERS = getAllChapters();
+
+// Utility to find the index of a chapter
+const findChapterIndex = (chapterId) => ALL_CHAPTERS.findIndex(c => c.id === chapterId);
+
+// --- App Component ---
+
+const App = () => {
+  const [currentChapterIndex, setCurrentChapterIndex] = useState(0);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [readingProgress, setReadingProgress] = useState(0);
+  const contentRef = useRef(null);
+
+  const currentChapter = ALL_CHAPTERS[currentChapterIndex];
+  const currentBook = BOOK_OF_ENOCH_DATA.find(book => book.chapters.some(c => c.id === currentChapter.id));
+
+  // 1. Progress Tracking (Scroll Listener)
+  const handleScroll = useCallback(() => {
+    if (contentRef.current) {
+      const element = contentRef.current;
+      const scrollHeight = element.scrollHeight - element.clientHeight;
+      const scrollTop = element.scrollTop;
+      let progress = 0;
+      if (scrollHeight > 0) {
+        progress = Math.min(100, Math.round((scrollTop / scrollHeight) * 100));
+      }
+      setReadingProgress(progress);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Reset scroll and title when chapter changes
+    if (contentRef.current) {
+      contentRef.current.scrollTo(0, 0);
+    }
+    document.title = `${currentChapter.title} | Book of Enoch`;
+    setReadingProgress(0);
+    
+    // Set up scroll listener
+    const contentElement = contentRef.current;
+    if (contentElement) {
+      contentElement.addEventListener('scroll', handleScroll);
+      // Clean up the listener when the component unmounts or chapter changes
+      return () => {
+        contentElement.removeEventListener('scroll', handleScroll);
+      };
+    }
+  }, [currentChapterIndex, currentChapter.title, handleScroll]);
+
+
+  // 2. Navigation Handlers (Previous/Next)
+  const navigateChapter = useCallback((direction) => {
+    const newIndex = currentChapterIndex + direction;
+    if (newIndex >= 0 && newIndex < ALL_CHAPTERS.length) {
+      setCurrentChapterIndex(newIndex);
+    }
+  }, [currentChapterIndex]);
+
+  const handleChapterSelect = useCallback((chapterId) => {
+    const index = findChapterIndex(chapterId);
+    if (index !== -1) {
+      setCurrentChapterIndex(index);
+      setIsMenuOpen(false); // Close menu on mobile
+    }
+  }, []);
+
+  // --- Utility Components ---
+
+  const Sidebar = () => (
+    <aside className={`fixed md:sticky top-0 left-0 h-full w-64 md:w-80 bg-gray-900 border-r border-gray-800 p-4 z-40 transform transition-transform duration-300 ease-in-out
+      ${isMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
+      // Click handler on mobile overlay (opacity-0 space) closes menu
+      onClick={(e) => {
+        if (window.innerWidth < 768 && e.target.closest('nav, button') === null) {
+          setIsMenuOpen(false);
+        }
+      }}
+    >
+      <div className="sticky top-4">
+          <h2 className="text-3xl font-black text-yellow-400 mb-6 flex items-center">
+              <BookOpen className="w-8 h-8 mr-2" />
+              The Book of Enoch
+          </h2>
+          <nav className="space-y-3 overflow-y-auto h-[calc(100vh-80px)] pr-2">
+              {BOOK_OF_ENOCH_DATA.map(book => (
+                <CollapsibleBook key={book.id} book={book} onChapterSelect={handleChapterSelect} currentChapterId={currentChapter.id} />
+              ))}
+          </nav>
+      </div>
+    </aside>
+  );
+
+  const CollapsibleBook = ({ book, onChapterSelect, currentChapterId }) => {
+    const [isOpen, setIsOpen] = useState(book.id === currentBook.id);
+
+    return (
+      <div className="rounded-lg bg-gray-800 shadow-xl overflow-hidden">
+        <button
+          className="flex justify-between items-center w-full px-4 py-3 text-lg font-semibold text-left text-gray-200 hover:bg-gray-700 transition-colors duration-200"
+          onClick={() => setIsOpen(!isOpen)}
+        >
+          <span className="flex items-center">
+            <book.icon className="w-5 h-5 mr-3 text-blue-400" />
+            {book.title}
+          </span>
+          {isOpen ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
+        </button>
+        
+        {isOpen && (
+          <div className="p-2 border-t border-gray-700">
+            {book.chapters.map((chapter) => (
+              <button
+                key={chapter.id}
+                onClick={() => onChapterSelect(chapter.id)}
+                className={`w-full text-left py-2 px-3 my-0.5 transition-all duration-200 rounded-md text-sm truncate 
+                  ${currentChapterId === chapter.id 
+                    ? 'bg-blue-600 text-white font-medium shadow-md' 
+                    : 'text-gray-300 hover:bg-gray-700'
+                  }`}
+              >
+                <span className="font-mono text-xs mr-2 opacity-70">Ch. {chapter.id}:</span>
+                {chapter.title}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const ChapterView = ({ chapter, bookTitle }) => (
+    <div className="p-4 md:p-8 space-y-8 max-w-4xl mx-auto pb-24">
+      {/* Illustration */}
+      <div className="bg-gray-800 rounded-xl overflow-hidden shadow-2xl">
+        <img
+          src={chapter.illustration}
+          alt={`Illustration for ${chapter.title}`}
+          className="w-full object-cover rounded-xl transition-transform duration-500 ease-in-out"
+          onError={(e) => {
+            e.target.onerror = null; // Prevents infinite loop
+            e.target.src = "https://placehold.co/1200x600/1F2937/9CA3AF?text=Thematic+Illustration+Loading+Failed";
+          }}
+          loading="lazy"
+        />
+        <p className="p-4 text-center text-sm italic text-gray-400">
+          Visual concept for: {chapter.title}
+        </p>
+      </div>
+
+      {/* Text Content */}
+      <div className="text-lg leading-relaxed text-gray-200 bg-gray-800 p-6 rounded-xl shadow-inner border border-gray-700">
+        <p className="font-serif italic text-yellow-400 mb-4 text-xl border-b border-gray-700 pb-3">
+          — The Text of Chapter {chapter.id} —
+        </p>
+        <p className="indent-8 first-letter:text-6xl first-letter:font-bold first-letter:text-blue-500 first-letter:mr-2 first-letter:float-left">
+          {chapter.text}
+        </p>
+        <p className="mt-8 text-sm text-gray-500 italic border-t border-gray-700 pt-4">
+          This is an excerpt/summary. Insert the full, canonical text of the Book of Enoch here for a complete experience.
+        </p>
+      </div>
+    </div>
+  );
+
+  // --- Main Render ---
+
+  return (
+    <div className="h-screen bg-gray-950 text-white font-sans flex antialiased overflow-hidden">
+      
+      {/* Sidebar (TOC) */}
+      <Sidebar />
+      
+      {/* Mobile Menu Button & Overlay */}
+      <button 
+        className="md:hidden fixed top-4 left-4 z-50 p-3 bg-blue-600 rounded-full shadow-xl transition-transform hover:scale-105"
+        onClick={() => setIsMenuOpen(!isMenuOpen)}
+        aria-label="Toggle Table of Contents"
+      >
+        {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
+      </button>
+      {isMenuOpen && (
+        <div className="md:hidden fixed inset-0 bg-black opacity-50 z-30" onClick={() => setIsMenuOpen(false)}></div>
+      )}
+
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        
+        {/* Sticky Header (HUD) */}
+        <header className="sticky top-0 z-20 bg-gray-950/95 backdrop-blur-sm border-b border-gray-800 shadow-lg p-4">
+          <div className="max-w-4xl mx-auto flex flex-col space-y-2">
+            <h1 className="text-2xl md:text-3xl font-bold text-blue-400 truncate">
+              {currentChapter.title}
+            </h1>
+            <p className="text-sm text-gray-400">
+              {currentBook.title}
+              <span className="mx-2 text-gray-600">|</span>
+              Chapter {currentChapter.id}
+            </p>
+            
+            {/* Progress Bar */}
+            <div className="w-full bg-gray-700 rounded-full h-2.5">
+              <div 
+                className="bg-yellow-500 h-2.5 rounded-full transition-all duration-300" 
+                style={{ width: `${readingProgress}%` }}
+                aria-valuenow={readingProgress}
+                aria-valuemin="0"
+                aria-valuemax="100"
+              ></div>
+            </div>
+          </div>
+        </header>
+
+        {/* Scrollable Content */}
+        <main ref={contentRef} className="flex-1 overflow-y-auto custom-scrollbar">
+          <ChapterView chapter={currentChapter} bookTitle={currentBook.title} />
+        </main>
+        
+        {/* Fixed Navigation Bar (Footer) */}
+        <footer className="sticky bottom-0 z-30 bg-gray-900 border-t border-gray-800 p-3 shadow-2xl">
+          <div className="flex justify-between max-w-4xl mx-auto">
+            <button
+              onClick={() => navigateChapter(-1)}
+              disabled={currentChapterIndex === 0}
+              className="flex items-center text-sm px-4 py-2 rounded-full bg-gray-700 text-gray-300 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-600 hover:text-white"
+            >
+              <ChevronLeft size={16} className="mr-1" />
+              Previous
+            </button>
+
+            <button
+              onClick={() => navigateChapter(1)}
+              disabled={currentChapterIndex === ALL_CHAPTERS.length - 1}
+              className="flex items-center text-sm px-4 py-2 rounded-full bg-blue-600 text-white transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-blue-700"
+            >
+              Next
+              <ChevronRight size={16} className="ml-1" />
+            </button>
+          </div>
+        </footer>
+      </div>
+
+    </div>
+  );
+};
+
+export default App;
+
