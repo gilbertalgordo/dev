@@ -1,0 +1,377 @@
+/**
+ * Client-Side JavaScript for Chunked File Upload with State Tracking
+ * Uses browser's localStorage for simple persistence of in-progress transfers.
+ * NOTE: In a real app, the last state should be retrieved from a secure server endpoint.
+ */
+
+const CHUNK_SIZE = 1024 * 1024 * 5; // 5MB chunk size
+const STATE_KEY = 'upload_state_';
+
+async function startUpload(file) {
+    const fileId = file.name + '-' + file.lastModified; // Simple unique ID
+    let lastState = loadLastState(fileId);
+    let startByte = lastState.uploadedBytes;
+    let totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+
+    console.log(`Starting upload for: ${file.name}`);
+    console.log(`Total Size: ${file.size} bytes. Resuming from: ${startByte} bytes`);
+
+    document.getElementById('status').textContent = `Resuming upload from ${((startByte / file.size) * 100).toFixed(2)}%...`;
+
+    try {
+        for (let i = startByte / CHUNK_SIZE; i < totalChunks; i++) {
+            const chunkStart = i * CHUNK_SIZE;
+            const chunkEnd = Math.min(file.size, chunkStart + CHUNK_SIZE);
+            const chunk = file.slice(chunkStart, chunkEnd);
+
+            const formData = new FormData();
+            formData.append('fileId', fileId);
+            formData.append('fileName', file.name);
+            formData.append('chunk', chunk);
+            formData.append('chunkIndex', i);
+            formData.append('totalChunks', totalChunks);
+
+            const response = await fetch('/api/upload', {
+                method: 'POST',
+                body: formData,
+            });
+
+            if (!response.ok) {
+                // Server-side failure, trigger rollback or cleanup
+                throw new Error(`Chunk ${i} failed with status: ${response.status}`);
+            }
+
+            // Update state ONLY after successful chunk transfer
+            startByte = chunkEnd;
+            saveLastState(fileId, startByte);
+            updateProgress(startByte, file.size);
+        }
+
+        // Finalize upload and clear state on success
+        await finalizeUpload(fileId);
+        removeLastState(fileId);
+        document.getElementById('status').textContent = `✅ Upload complete for ${file.name}!`;
+
+    } catch (error) {
+        console.error('Upload interrupted or failed:', error);
+        document.getElementById('status').textContent = `❌ Upload interrupted. Last saved state: ${startByte} bytes. Rollback process initiated on server.`;
+        // In a real application, you would log this error and allow the user to retry.
+    }
+}
+
+function loadLastState(fileId) {
+    const state = localStorage.getItem(STATE_KEY + fileId);
+    return state ? JSON.parse(state) : { uploadedBytes: 0 };
+}
+
+function saveLastState(fileId, uploadedBytes) {
+    localStorage.setItem(STATE_KEY + fileId, JSON.stringify({ uploadedBytes }));
+}
+
+function removeLastState(fileId) {
+    localStorage.removeItem(STATE_KEY + fileId);
+}
+
+function updateProgress(uploaded, total) {
+    const percent = (uploaded / total) * 100;
+    const progressBar = document.getElementById('progress-bar');
+    progressBar.style.width = percent.toFixed(2) + '%';
+    progressBar.textContent = percent.toFixed(2) + '%';
+}
+
+async function finalizeUpload(fileId) {
+    // Call server to confirm all chunks are present and assemble the file
+    const response = await fetch('/api/finalize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileId }),
+    });
+    if (!response.ok) {
+        throw new Error('Finalization failed');
+    }
+}
+
+// --- Event Listener to start the process ---
+document.getElementById('file-input').addEventListener('change', (event) => {
+    const file = event.target.files[0];
+    if (file) {
+        startUpload(file);
+    }
+});
+
+
+
+/**
+ * Server-Side Pseudocode/Mock Logic (e.g., Node.js/Express)
+ * Uses a simple map for in-memory state, which should be replaced by a robust DB/Storage in production.
+ */
+
+const UPLOAD_STATES = {}; // In-memory map: fileId -> { fileName, chunksReceived: [] }
+
+// --- File Upload Endpoint ---
+app.post('/api/upload', (req, res) => {
+    const { fileId, fileName, chunkIndex, totalChunks } = req.body;
+    const chunkData = req.files.chunk; // Assuming middleware processes chunk
+
+    // 1. Interruption Last States Checker
+    // A more robust check would verify the integrity of the received chunk (e.g., hash check)
+    if (!UPLOAD_STATES[fileId]) {
+        // New or resumed upload
+        UPLOAD_STATES[fileId] = { fileName, chunksReceived: new Array(parseInt(totalChunks)).fill(null) };
+    }
+
+    const state = UPLOAD_STATES[fileId];
+
+    if (state.chunksReceived[chunkIndex] !== null) {
+        // This chunk was already received. Skip and report success for Idempotence.
+        console.log(`Chunk ${chunkIndex} for ${fileId} already exists. Skipping.`);
+        return res.status(200).send({ success: true, message: 'Chunk already processed.' });
+    }
+
+    // 2. Process and Store the Chunk
+    // In a real app, this would write the chunk to temporary storage (e.g., /temp/fileId/chunkIndex)
+    state.chunksReceived[chunkIndex] = 'stored'; // Mark as received
+
+    // Simulate an error on the 5th chunk for rollback test
+    if (parseInt(chunkIndex) === 4 && process.env.FAIL_UPLOAD === 'true') {
+        console.error(`Simulated critical error on chunk 4 for ${fileId}`);
+        // CRITICAL ERROR: **Rollback Trigger**
+        // In this case, the client will catch the 500 and trigger the notification.
+        // We do *not* automatically call cleanup/rollback here, as a client retry may follow.
+        // The rollback is handled by a separate cleanup process or when a transfer is explicitly abandoned.
+        return res.status(500).send({ success: false, message: 'Simulated chunk write failure.' });
+    }
+
+    res.status(200).send({ success: true, nextChunk: parseInt(chunkIndex) + 1 });
+});
+
+// --- Finalization Endpoint ---
+app.post('/api/finalize', (req, res) => {
+    const { fileId } = req.body;
+    const state = UPLOAD_STATES[fileId];
+
+    if (!state || state.chunksReceived.includes(null)) {
+        // Rollback condition: missing chunks!
+        console.error(`Finalization failed for ${fileId}: Missing chunks. Triggering cleanup.`);
+        rollbackFileTransfer(fileId);
+        return res.status(400).send({ success: false, message: 'Incomplete file, cleanup initiated.' });
+    }
+
+    // All chunks present: Assemble file and move from temp to permanent storage
+    // assembleChunks(fileId, state.fileName);
+    delete UPLOAD_STATES[fileId]; // Clear state
+    res.status(200).send({ success: true, message: 'File assembled and saved.' });
+});
+
+// --- Rollback Logic (Core of the feature) ---
+function rollbackFileTransfer(fileId) {
+    console.log(`\n--- ROLLBACK INITIATED for File ID: ${fileId} ---`);
+    // 1. Delete all temporary chunk files from storage
+    // deleteChunkFiles(`/temp/${fileId}/*`); 
+
+    // 2. Remove the state from the database
+    delete UPLOAD_STATES[fileId];
+
+    console.log(`Rollback complete. State and temp files for ${fileId} have been removed.`);
+    console.log('---------------------------------------------------\n');
+}
+
+
+
+const UPLOAD_ENDPOINT = '/api/v2/upload/resume';
+const FILE_METADATA_ENDPOINT = '/api/v2/upload/state';
+
+async function startResumableUpload(file) {
+    const fileId = generateFileHash(file); // Unique, deterministic ID
+    let offset = 0; // Default start byte
+
+    // --- Interruption Last States Checker (Step 1: Check Server State) ---
+    try {
+        const response = await fetch(`${FILE_METADATA_ENDPOINT}?fileId=${fileId}&fileName=${file.name}`);
+        if (response.ok) {
+            const state = await response.json();
+            offset = state.last_byte_written || 0;
+            console.log(`Resuming upload for ${file.name} from byte: ${offset}`);
+        }
+    } catch (e) {
+        console.warn('Could not retrieve last state. Starting from byte 0.');
+    }
+
+    const CHUNK_SIZE = 1024 * 1024 * 5; // 5MB
+    let currentByte = offset;
+
+    try {
+        while (currentByte < file.size) {
+            const endByte = Math.min(currentByte + CHUNK_SIZE, file.size);
+            const chunk = file.slice(currentByte, endByte);
+            
+            // --- Transfer Chunk ---
+            const result = await uploadChunk(fileId, file.name, chunk, currentByte, file.size);
+            
+            if (result.status === 200) {
+                currentByte = endByte; // Update current byte on success
+                updateHUD(currentByte, file.size); // Update user HUD
+            } else {
+                 // Trigger Rollback notification/logic on failure
+                throw new Error(`Upload failed at byte ${currentByte}. Server status: ${result.status}`);
+            }
+        }
+        console.log(`Upload complete for ${file.name}! Finalizing...`);
+        // Finalize (e.g., merge chunks, trigger server-side completion)
+
+    } catch (error) {
+        console.error('CRITICAL UPLOAD FAILURE:', error);
+        // Client-side Rollback Action: Notify user & prepare for retry
+        updateHUD(-1, file.size, true); // Update HUD to show failed/rollback state
+    }
+}
+
+async function uploadChunk(fileId, fileName, chunk, startByte, totalSize) {
+    const formData = new FormData();
+    formData.append('chunk', chunk);
+    
+    // Use Content-Range header for scientific accuracy in state tracking
+    const rangeHeader = `bytes ${startByte}-${startByte + chunk.size - 1}/${totalSize}`;
+
+    const response = await fetch(UPLOAD_ENDPOINT, {
+        method: 'POST',
+        headers: {
+            'X-File-ID': fileId,
+            'X-File-Name': fileName,
+            'Content-Range': rangeHeader,
+        },
+        body: formData,
+    });
+    return response;
+}
+
+function updateHUD(uploaded, total, isError = false) {
+    const hudElement = document.getElementById('transfer-hud');
+    if (isError) {
+        hudElement.textContent = '❌ Upload Failed. Rollback State Recorded. Click to Resume.';
+        hudElement.className = 'hud error';
+    } else {
+        const percent = (uploaded / total) * 100;
+        hudElement.textContent = `File: ${file.name} | Progress: ${percent.toFixed(2)}% (${uploaded} / ${total} bytes)`;
+        hudElement.className = 'hud active';
+    }
+}
+// Example of a deterministic file ID generator
+function generateFileHash(file) {
+    return btoa(`${file.name}-${file.size}-${file.lastModified}`);
+}
+
+
+
+// Database/State Store Mock
+const TRANSFER_DB = {}; // { fileId: { last_byte_written: 1048576, chunks: [...] } }
+
+// --- Upload API Endpoint ---
+app.post('/api/v2/upload/resume', async (req, res) => {
+    const fileId = req.headers['x-file-id'];
+    const range = req.headers['content-range']; // e.g., 'bytes 0-5242879/10485760'
+    const [startByte, endByte, totalSize] = parseRangeHeader(range);
+
+    if (!isRangeValid(fileId, startByte)) {
+        // Rollback condition: Client sent an unexpected chunk.
+        // This is a sign of state mismatch or corruption.
+        console.error(`Invalid chunk sequence for ${fileId}. Triggering server-side rollback.`);
+        rollbackUpload(fileId);
+        return res.status(409).send({ error: 'Conflict: Invalid chunk sequence. Rollback performed.' });
+    }
+
+    // 1. Write the chunk to temporary storage
+    const success = await writeChunkToTempStorage(fileId, startByte, req.body.chunk);
+
+    if (success) {
+        // 2. **Atomic State Update (Last States Checker)**
+        // Only update the last_byte_written *after* the chunk is persisted.
+        TRANSFER_DB[fileId].last_byte_written = endByte + 1; 
+        return res.sendStatus(200);
+    } else {
+        // Disk write failure or other server error
+        return res.status(500).send({ error: 'Failed to write chunk.' });
+    }
+});
+
+// --- Rollback Implementation ---
+function rollbackUpload(fileId) {
+    console.log(`\n### UPLOAD ROLLBACK: Deleting incomplete transfer ${fileId} ###`);
+    
+    // 1. Delete all temporary chunk files from the storage layer (e.g., S3 or disk)
+    // deleteFiles(`/temp/uploads/${fileId}/*`); 
+
+    // 2. Delete the state record from the database
+    delete TRANSFER_DB[fileId]; 
+
+    console.log(`Rollback completed successfully.`);
+}
+
+function isRangeValid(fileId, startByte) {
+    const state = TRANSFER_DB[fileId];
+    if (!state) return true; // First chunk is always valid
+    return state.last_byte_written === startByte;
+}
+
+
+
+// --- Service Worker Installation ---
+self.addEventListener('fetch', (event) => {
+    const url = new URL(event.request.url);
+    const downloadId = url.searchParams.get('downloadId');
+
+    // Only intercept specific download API calls
+    if (url.pathname === '/api/v2/download' && downloadId) {
+        event.respondWith(handleResumableDownload(event.request, downloadId));
+    }
+});
+
+async function handleResumableDownload(request, downloadId) {
+    // 1. Interruption Last States Checker (Check local storage for state)
+    const localState = await getLocalDownloadState(downloadId); // Get from IndexedDB
+    let startByte = localState.last_byte_downloaded || 0;
+    
+    const headers = new Headers(request.headers);
+    let originalRequest = request;
+
+    if (startByte > 0) {
+        // Append Range header for resumption
+        headers.set('Range', `bytes=${startByte}-`);
+        originalRequest = new Request(request, { headers });
+        console.log(`Resuming download for ${downloadId} from byte: ${startByte}`);
+    }
+
+    try {
+        const response = await fetch(originalRequest);
+
+        if (response.status === 206 || response.status === 200) {
+            // 206 Partial Content means the server honored the Range header.
+            await saveDownloadChunk(downloadId, startByte, response);
+            // After successful save, update the state in IndexedDB
+            // updateLocalDownloadState(downloadId, new_last_byte);
+            
+            // Reconstruct the response to send back to the main thread
+            return new Response(/* final assembled blob or stream */); 
+        } else if (response.status === 416) {
+             // 416 Range Not Satisfiable: The local state is likely invalid. 
+             // **Rollback Trigger**
+             console.error(`Download Range Error (416). Triggering local rollback for ${downloadId}.`);
+             await rollbackLocalDownload(downloadId);
+             return fetch(request); // Restart download from scratch
+        }
+        return response; // Handle other statuses normally
+        
+    } catch (e) {
+        // Network failure, the chunk was not saved. State remains at last successful byte.
+        console.error(`Download interruption for ${downloadId}. State preserved at byte ${startByte}.`);
+        // The Service Worker keeps the partial data in IndexedDB for the next retry.
+        return new Response('Download Interrupted', { status: 503 });
+    }
+}
+
+// --- Local Rollback (Cleanup) ---
+async function rollbackLocalDownload(downloadId) {
+    // 1. Delete the partial file data from IndexedDB
+    // 2. Clear the state tracking record
+    console.log(`Local Rollback for ${downloadId} completed.`);
+}
