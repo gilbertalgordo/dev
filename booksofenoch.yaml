@@ -1,0 +1,197 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { Menu, X, BookOpen, ChevronRight, ChevronDown, Feather } from 'lucide-react';
+
+// --- Book Data Structure (Summarized/Excerpted for demonstration) ---
+// This data structure provides the content and associated placeholder images.
+const BOOK_OF_ENOCH_DATA = [
+  {
+    id: 'b1',
+    title: 'The Book of the Watchers',
+    chapters: [
+      { id: '1-5', title: 'The Divine Judgment & Initial Vision', 
+        text: 'Enoch\'s opening blessing and the vision of God\'s descent to Earth for judgment. Description of the Watchers (Angels) descending and taking wives from among the daughters of men, leading to the birth of the Nephilim.',
+        illustration: 'https://placehold.co/1000x500/1E3A8A/ffffff?text=The+Descent+of+the+Watchers'
+      },
+      { id: '6-11', title: 'The Fallen Angels and Their Teachings', 
+        text: 'Samyaza and the two hundred Watchers introduce forbidden knowledge to humanity, including metallurgy, cosmetics, and warfare, causing immense corruption. The resulting chaos and violence bring a cry for divine intervention.',
+        illustration: 'https://placehold.co/1000x500/374151/ffffff?text=Forbidden+Knowledge+and+Corruption'
+      },
+      { id: '12-16', title: 'Enoch\'s Mission and Intercession', 
+        text: 'Enoch acts as a scribe, taking the Watchers\' petition for mercy to God. God rejects their plea and commissions Enoch to pronounce their final judgment, including being bound in the depths of the earth.',
+        illustration: 'https://placehold.co/1000x500/6B21A8/ffffff?text=Enoch+the+Scribe+and+Messenger'
+      },
+    ]
+  },
+  {
+    id: 'b2',
+    title: 'The Book of Parables (The Similitudes)',
+    chapters: [
+      { id: '37-44', title: 'Visions of the Elect One and the Righteous', 
+        text: 'A series of parables detailing the Messiah (the Son of Man or the Elect One). Visions focus on the chambers of the righteous, the secrets of the heavenly host, and the dwelling place of the spirits.',
+        illustration: 'https://placehold.co/1000x500/059669/ffffff?text=The+Son+of+Man+and+the+Resurrection'
+      },
+      { id: '45-57', title: 'The Judgment of the Kings and Mighty', 
+        text: 'Prophecies concerning the judgment of the wicked kings and powerful of the earth. Description of the valleys of punishment and the fate of those who reject the Lord of Spirits.',
+        illustration: 'https://placehold.co/1000x500/D97706/ffffff?text=Great+Judgment+of+the+Earthly+Rulers'
+      },
+    ]
+  },
+  {
+    id: 'b3',
+    title: 'The Astronomical Book',
+    chapters: [
+      { id: '72-82', title: 'Laws of the Luminaries', 
+        text: 'Detailed explanation of the movements of the Sun and Moon, the calendar, and the laws governing the stars, given to Enoch by the Angel Uriel. This section focuses on a solar calendar of 364 days.',
+        illustration: 'https://placehold.co/1000x500/7C3AED/ffffff?text=Uriel\'s+Lessons+on+Celestial+Mechanics'
+      },
+    ]
+  },
+];
+
+// Utility function to find the first chapter to display on load
+const getInitialChapter = () => {
+  return BOOK_OF_ENOCH_DATA[0].chapters[0];
+};
+
+const App = () => {
+  const [currentChapter, setCurrentChapter] = useState(getInitialChapter());
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [openBookId, setOpenBookId] = useState(BOOK_OF_ENOCH_DATA[0].id);
+
+  // Use the effect to update the document title
+  useEffect(() => {
+    document.title = currentChapter.title + " | Book of Enoch Reader";
+  }, [currentChapter]);
+
+  const handleChapterSelect = useCallback((chapter) => {
+    setCurrentChapter(chapter);
+    setIsMenuOpen(false); // Close menu on mobile after selection
+  }, []);
+
+  const handleBookToggle = (bookId) => {
+    setOpenBookId(openBookId === bookId ? null : bookId);
+  };
+
+  // --- Components ---
+
+  const TOCItem = ({ book }) => (
+    <div key={book.id}>
+      <button
+        className="flex justify-between items-center w-full px-4 py-3 text-lg font-semibold text-left transition-colors duration-200 bg-gray-900 hover:bg-gray-700 rounded-lg shadow-md mb-1"
+        onClick={() => handleBookToggle(book.id)}
+      >
+        <span>{book.title}</span>
+        {openBookId === book.id ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
+      </button>
+      
+      {openBookId === book.id && (
+        <div className="pl-4 border-l border-gray-700 mt-2 ml-2">
+          {book.chapters.map((chapter) => (
+            <button
+              key={chapter.id}
+              onClick={() => handleChapterSelect(chapter)}
+              className={`w-full text-left py-2 px-3 my-1 transition-all duration-200 rounded-md text-sm truncate 
+                ${currentChapter.id === chapter.id 
+                  ? 'bg-blue-600 text-white font-medium shadow-lg' 
+                  : 'text-gray-300 hover:bg-gray-700'
+                }`}
+            >
+              <span className="font-mono text-xs mr-2 opacity-70">Ch. {chapter.id}</span>
+              {chapter.title}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  const ChapterView = ({ chapter }) => (
+    <div className="p-4 md:p-8 space-y-8 max-w-4xl mx-auto">
+      <h1 className="text-4xl font-extrabold text-blue-400 leading-tight">
+        {chapter.title}
+      </h1>
+      <div className="flex items-center text-lg text-gray-400 border-b border-gray-700 pb-4">
+        <BookOpen className="w-5 h-5 mr-2" />
+        <span className="font-mono text-sm">Chapter Segment: {chapter.id}</span>
+      </div>
+
+      {/* Illustration */}
+      <div className="bg-gray-800 rounded-xl overflow-hidden shadow-2xl">
+        <img
+          src={chapter.illustration}
+          alt={`Illustration for ${chapter.title}`}
+          className="w-full object-cover rounded-xl transition-transform duration-500 ease-in-out hover:scale-[1.01]"
+          onError={(e) => {
+            e.target.onerror = null; // Prevents infinite loop
+            e.target.src = "https://placehold.co/1000x500/1F2937/9CA3AF?text=Illustration+Unavailable";
+            e.target.alt = "Placeholder image for a chapter illustration";
+          }}
+          loading="lazy"
+        />
+        <p className="p-4 text-center text-sm italic text-gray-400">
+          Visual concept: {chapter.title}
+        </p>
+      </div>
+
+      {/* Text Content */}
+      <div className="text-lg leading-relaxed text-gray-200 bg-gray-800 p-6 rounded-xl shadow-inner">
+        <p className="font-serif italic text-yellow-400 mb-4">
+          — Excerpt/Summary of the Text —
+        </p>
+        <p className="indent-8 first-letter:text-6xl first-letter:font-bold first-letter:text-blue-500 first-letter:mr-2 first-letter:float-left">
+          {chapter.text}
+        </p>
+        <p className="mt-6 text-sm text-gray-500">
+          Note: This content is a summary/excerpt to demonstrate the app's functionality. The full canonical text can be inserted here.
+        </p>
+      </div>
+
+    </div>
+  );
+
+  // --- Main Render ---
+
+  return (
+    <div className="min-h-screen bg-gray-950 text-white font-sans flex antialiased">
+      {/* Mobile Menu Button */}
+      <button 
+        className="md:hidden fixed top-4 left-4 z-50 p-2 bg-blue-600 rounded-full shadow-lg"
+        onClick={() => setIsMenuOpen(!isMenuOpen)}
+        aria-label="Toggle Table of Contents"
+      >
+        {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
+      </button>
+
+      {/* Table of Contents (Sidebar) */}
+      <aside className={`fixed md:sticky top-0 left-0 h-full w-64 md:w-80 bg-gray-900 border-r border-gray-800 p-4 z-40 transform transition-transform duration-300 ease-in-out
+        ${isMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
+        onClick={() => isMenuOpen && setIsMenuOpen(false)} // Close menu if clicking outside on mobile
+      >
+        <div className="sticky top-4">
+            <h2 className="text-3xl font-black text-yellow-400 mb-6 flex items-center">
+                <Feather className="w-8 h-8 mr-2" />
+                The Books of Enoch
+            </h2>
+            <nav className="space-y-4 overflow-y-auto h-[calc(100vh-80px)] pr-2">
+                {BOOK_OF_ENOCH_DATA.map(book => (
+                    <TOCItem key={book.id} book={book} />
+                ))}
+            </nav>
+        </div>
+      </aside>
+
+      {/* Main Content Area */}
+      <main className="flex-1 overflow-y-auto pt-16 md:pt-0">
+        <ChapterView chapter={currentChapter} />
+      </main>
+
+       {/* Mobile Overlay */}
+       {isMenuOpen && (
+        <div className="md:hidden fixed inset-0 bg-black opacity-50 z-30" onClick={() => setIsMenuOpen(false)}></div>
+       )}
+    </div>
+  );
+};
+
+export default App;
+
