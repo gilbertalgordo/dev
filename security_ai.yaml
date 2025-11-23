@@ -54,3 +54,50 @@ String otpCode = OTP.generateTOTPCode(
     algorithm: Algorithm.SHA1 // The standard algorithm
 );
 // This code is what the user enters for 2FA.
+
+
+
+// **NOTE:** This assumes a library like 'otp' is installed and imported.
+
+import 'package:otp/otp.dart';
+
+/// Generates a 6-digit Time-based One-Time Password.
+/// This function simulates the core logic of Google Authenticator.
+String generateSecureOtp(String secretKey) {
+  // The TOTP algorithm is executed by the library:
+  // K (secretKey) + T (current time) -> 6-digit code
+  String code = OTP.generateTOTPCode(
+      secretKey, 
+      DateTime.now().millisecondsSinceEpoch,
+      length: 6, 
+      interval: 30, // Code changes every 30 seconds
+      algorithm: Algorithm.SHA1 // Standard algorithm
+  );
+  
+  // This code is what is displayed on the screen for the user
+  return code; 
+}
+
+// Example of a secret key (this key should be securely stored!)
+// String mySecretKey = 'JBSWY3DPEHPK3PXP';
+// print('Generated Code: ${generateSecureOtp(mySecretKey)}');
+
+
+
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+// Create storage instance (preferred instance)
+final _secureStorage = const FlutterSecureStorage();
+
+// Function to securely save the secret key
+Future<void> saveSecretKey(String key) async {
+  // This encrypts the key and saves it to iOS Keychain or Android KeyStore
+  await _secureStorage.write(key: 'totp_secret', value: key);
+  print('Secret key successfully and securely saved.');
+}
+
+// Function to securely retrieve the secret key
+Future<String?> getSecretKey() async {
+  // This decrypts and retrieves the key
+  return await _secureStorage.read(key: 'totp_secret');
+}
