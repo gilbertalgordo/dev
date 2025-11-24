@@ -1,0 +1,495 @@
+# mock_wallet.py
+# Simple mock wallet API for development/testing only.
+# DOES NOT CONNECT TO REAL PAYMENT NETWORKS.
+# Usage: python mock_wallet.py
+from flask import Flask, request, jsonify, abort
+from uuid import uuid4
+from datetime import datetime
+from decimal import Decimal, ROUND_DOWN, getcontext
+
+getcontext().prec = 28
+
+app = Flask(__name__)
+
+# In-memory stores (for testing only)
+ACCOUNTS = {}       # account_id -> {id, name, balance (Decimal), created_at}
+TRANSACTIONS = []   # list of transaction dicts (audit log)
+
+# Helpers
+def now_iso():
+    return datetime.utcnow().isoformat() + 'Z'
+
+def to_decimal(value):
+    try:
+        return Decimal(value).quantize(Decimal('0.01'), rounding=ROUND_DOWN)
+    except Exception:
+        raise ValueError("Invalid numeric value")
+
+def audit(tx_type, account_from, account_to, amount, metadata=None):
+    TRANSACTIONS.append({
+        "id": str(uuid4()),
+        "timestamp": now_iso(),
+        "type": tx_type,
+        "from": account_from,
+        "to": account_to,
+        "amount": str(amount),
+        "metadata": metadata or {}
+    })
+
+# Routes
+@app.route("/accounts", methods=["POST"])
+def create_account():
+    data = request.get_json() or {}
+    name = data.get("name") or "Unnamed"
+    initial = to_decimal(data.get("initial", "0.00"))
+    account_id = str(uuid4())
+    ACCOUNTS[account_id] = {
+        "id": account_id,
+        "name": name,
+        "balance": initial,
+        "created_at": now_iso()
+    }
+    if initial > 0:
+        audit("deposit", None, account_id, initial, {"note": "initial"})
+    return jsonify({"account": account_summary(account_id)}), 201
+
+@app.route("/accounts/<account_id>", methods=["GET"])
+def get_account(account_id):
+    if account_id not in ACCOUNTS:
+        abort(404)
+    return jsonify({"account": account_summary(account_id)})
+
+def account_summary(account_id):
+    acc = ACCOUNTS[account_id]
+    return {
+        "id": acc["id"],
+        "name": acc["name"],
+        "balance": str(acc["balance"]),
+        "created_at": acc["created_at"]
+    }
+
+@app.route("/accounts/<account_id>/deposit", methods=["POST"])
+def deposit(account_id):
+    if account_id not in ACCOUNTS:
+        abort(404)
+    data = request.get_json() or {}
+    amount = to_decimal(data.get("amount", "0.00"))
+    if amount <= 0:
+        return jsonify({"error": "amount must be > 0"}), 400
+    ACCOUNTS[account_id]["balance"] += amount
+    audit("deposit", None, account_id, amount, data.get("metadata"))
+    return jsonify({"account": account_summary(account_id)}), 200
+
+@app.route("/accounts/<account_id>/withdraw", methods=["POST"])
+def withdraw(account_id):
+    if account_id not in ACCOUNTS:
+        abort(404)
+    data = request.get_json() or {}
+    amount = to_decimal(data.get("amount", "0.00"))
+    if amount <= 0:
+        return jsonify({"error": "amount must be > 0"}), 400
+    if ACCOUNTS[account_id]["balance"] < amount:
+        return jsonify({"error": "insufficient_funds"}), 402
+    ACCOUNTS[account_id]["balance"] -= amount
+    audit("withdraw", account_id, None, amount, data.get("metadata"))
+    return jsonify({"account": account_summary(account_id)}), 200
+
+@app.route("/transfer", methods=["POST"])
+def transfer():
+    data = request.get_json() or {}
+    from_id = data.get("from")
+    to_id = data.get("to")
+    amount = to_decimal(data.get("amount", "0.00"))
+    if not from_id or not to_id:
+        return jsonify({"error": "from and to account IDs required"}), 400
+    if from_id not in ACCOUNTS or to_id not in ACCOUNTS:
+        return jsonify({"error": "account_not_found"}), 404
+    if amount <= 0:
+        return jsonify({"error": "amount must be > 0"}), 400
+    if ACCOUNTS[from_id]["balance"] < amount:
+        return jsonify({"error": "insufficient_funds"}), 402
+    # Apply transfer
+    ACCOUNTS[from_id]["balance"] -= amount
+    ACCOUNTS[to_id]["balance"] += amount
+    audit("transfer", from_id, to_id, amount, data.get("metadata"))
+    return jsonify({
+        "from": account_summary(from_id),
+        "to": account_summary(to_id)
+    }), 200
+
+@app.route("/transactions", methods=["GET"])
+def list_transactions():
+    # Return last N transactions (safe for dev)
+    limit = int(request.args.get("limit", "100"))
+    return jsonify({"transactions": TRANSACTIONS[-limit:]}), 200
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok", "now": now_iso()}), 200
+
+if __name__ == "__main__":
+    # For development only. Use a proper WSGI server in production.
+    app.run(host="127.0.0.1", port=5000, debug=True)
+
+
+    python -m venv venv
+source venv/bin/activate    # or venv\Scripts\activate on Windows
+pip install flask sqlalchemy flask_sqlalchemy pyjwt requests flask_limiter
+
+
+# advanced_mock_wallet.py
+# Development-only mock wallet and ledger for testing integrations.
+# NOT for production use with real money.
+
+import hmac
+import hashlib
+import uuid
+import time
+import threading
+from datetime import datetime, timedelta, timezone
+
+from flask import Flask, request, jsonify, abort
+from flask_sqlalchemy import SQLAlchemy
+import jwt
+import requests
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+
+# --- Configuration ---
+SECRET_KEY = "dev-very-secret-change-me"            # used for JWT signing (dev only)
+WEBHOOK_HMAC_KEY = b"dev-webhook-key"               # used to sign outgoing webhooks
+JWT_ALGO = "HS256"
+DATABASE = "sqlite:///mock_wallet.db"
+WEBHOOK_SENDER_TIMEOUT = 5
+
+# --- App & extensions ---
+app = Flask(__name__)
+app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+db = SQLAlchemy(app)
+limiter = Limiter(app, key_func=get_remote_address, default_limits=["200 per minute"])
+
+# --- Models ---
+class Account(db.Model):
+    id = db.Column(db.String, primary_key=True)
+    name = db.Column(db.String, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+class LedgerEntry(db.Model):
+    # Double-entry ledger: each logical transaction creates two or more ledger entries
+    id = db.Column(db.String, primary_key=True)
+    timestamp = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    account_id = db.Column(db.String, db.ForeignKey("account.id"), nullable=False)
+    amount = db.Column(db.Integer, nullable=False)  # amount in cents (integer) to avoid floating issues
+    currency = db.Column(db.String, nullable=False, default="PHP")
+    meta = db.Column(db.JSON, nullable=True)
+
+class Transaction(db.Model):
+    # High-level transaction record (for idempotency tracking and audit)
+    id = db.Column(db.String, primary_key=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    type = db.Column(db.String, nullable=False)  # deposit/withdraw/transfer
+    status = db.Column(db.String, nullable=False, default="completed")
+    amount = db.Column(db.Integer, nullable=False)
+    currency = db.Column(db.String, nullable=False, default="PHP")
+    from_account = db.Column(db.String, nullable=True)
+    to_account = db.Column(db.String, nullable=True)
+    metadata = db.Column(db.JSON, nullable=True)
+    idempotency_key = db.Column(db.String, nullable=True, index=True)
+
+class IdempotencyKey(db.Model):
+    key = db.Column(db.String, primary_key=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    response_code = db.Column(db.Integer, nullable=True)
+    response_body = db.Column(db.JSON, nullable=True)
+
+class WebhookSubscription(db.Model):
+    id = db.Column(db.String, primary_key=True)
+    url = db.Column(db.String, nullable=False)
+    secret = db.Column(db.String, nullable=False)  # per-sub secret for HMAC verification
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+# --- Utility helpers ---
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+def cents_from_str(amount_str):
+    # Accepts "12.34" or numeric; returns integer cents
+    try:
+        return int(round(float(amount_str) * 100))
+    except Exception:
+        raise ValueError("invalid amount")
+
+def format_money(cents):
+    return f"{cents/100:.2f}"
+
+def ledger_balance(account_id, currency="PHP"):
+    rows = LedgerEntry.query.filter_by(account_id=account_id, currency=currency).all()
+    return sum(r.amount for r in rows)
+
+def require_jwt():
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        abort(401, "missing bearer token")
+    token = auth.split(None, 1)[1]
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[JWT_ALGO])
+        return payload
+    except jwt.PyJWTError:
+        abort(401, "invalid token")
+
+def create_jwt(client_id: str, expires_minutes: int = 60 * 24 * 365):
+    payload = {"sub": client_id, "exp": datetime.utcnow() + timedelta(minutes=expires_minutes)}
+    return jwt.encode(payload, SECRET_KEY, algorithm=JWT_ALGO)
+
+def save_idempotency(key, response_code, response_body):
+    obj = IdempotencyKey(key=key, response_code=response_code, response_body=response_body)
+    db.session.merge(obj)
+    db.session.commit()
+
+def get_idempotent_response(key):
+    return IdempotencyKey.query.get(key)
+
+def sign_webhook(payload_bytes: bytes, secret_bytes: bytes):
+    mac = hmac.new(secret_bytes, payload_bytes, hashlib.sha256).hexdigest()
+    return mac
+
+def send_webhook_async(event_type: str, payload: dict):
+    # send in background thread to all subscribers
+    def sender():
+        subs = WebhookSubscription.query.all()
+        for s in subs:
+            try:
+                body = {"type": event_type, "data": payload, "sent_at": now_iso()}
+                encoded = str(body).encode("utf-8")
+                sig = sign_webhook(encoded, s.secret.encode("utf-8"))
+                headers = {"Content-Type": "application/json", "X-Mock-Signature": sig}
+                requests.post(s.url, json=body, headers=headers, timeout=WEBHOOK_SENDER_TIMEOUT)
+            except Exception:
+                # fail silently in dev
+                pass
+    threading.Thread(target=sender, daemon=True).start()
+
+# --- Routes ---
+@app.route("/admin/init", methods=["POST"])
+def admin_init():
+    # Create DB tables (idempotent)
+    db.create_all()
+    return jsonify({"status": "ok", "now": now_iso()})
+
+@app.route("/admin/create_api_key", methods=["POST"])
+def admin_create_api_key():
+    data = request.get_json() or {}
+    client_id = data.get("client_id") or str(uuid.uuid4())
+    token = create_jwt(client_id)
+    return jsonify({"client_id": client_id, "jwt": token})
+
+@app.route("/accounts", methods=["POST"])
+@limiter.limit("20 per minute")
+def create_account():
+    data = request.get_json() or {}
+    name = data.get("name") or "Unnamed"
+    account_id = str(uuid.uuid4())
+    acc = Account(id=account_id, name=name)
+    db.session.add(acc)
+    db.session.commit()
+    return jsonify({"account": {"id": account_id, "name": name, "created_at": acc.created_at.isoformat()}}), 201
+
+@app.route("/accounts/<account_id>", methods=["GET"])
+def get_account(account_id):
+    acc = Account.query.get(account_id)
+    if not acc:
+        abort(404)
+    bal = ledger_balance(account_id)
+    return jsonify({"id": acc.id, "name": acc.name, "balance_cents": bal, "balance": format_money(bal), "created_at": acc.created_at.isoformat()})
+
+@app.route("/deposit", methods=["POST"])
+@limiter.limit("60 per minute")
+def deposit():
+    # Idempotency support
+    idemp = request.headers.get("Idempotency-Key")
+    if idemp:
+        prev = get_idempotent_response(idemp)
+        if prev:
+            return (prev.response_body, prev.response_code)
+
+    data = request.get_json() or {}
+    to_id = data.get("to")
+    amt = data.get("amount")
+    if not to_id or amt is None:
+        return jsonify({"error": "to and amount required"}), 400
+    try:
+        cents = cents_from_str(amt)
+    except ValueError:
+        return jsonify({"error": "invalid amount format"}), 400
+    acc = Account.query.get(to_id)
+    if not acc:
+        return jsonify({"error": "account_not_found"}), 404
+
+    # create ledger entry (credit account)
+    lid = str(uuid.uuid4())
+    entry = LedgerEntry(id=lid, account_id=to_id, amount=cents, currency="PHP", meta={"type": "deposit"})
+    db.session.add(entry)
+
+    tx = Transaction(id=str(uuid.uuid4()), type="deposit", amount=cents, to_account=to_id, status="completed", idempotency_key=idemp)
+    db.session.add(tx)
+    db.session.commit()
+
+    resp = {"transaction_id": tx.id, "to": to_id, "amount": cents, "balance": ledger_balance(to_id)}
+    if idemp:
+        save_idempotency(idemp, 200, resp)
+    send_webhook_async("deposit.created", resp)
+    return jsonify(resp), 200
+
+@app.route("/withdraw", methods=["POST"])
+@limiter.limit("60 per minute")
+def withdraw():
+    idemp = request.headers.get("Idempotency-Key")
+    if idemp:
+        prev = get_idempotent_response(idemp)
+        if prev:
+            return (prev.response_body, prev.response_code)
+
+    data = request.get_json() or {}
+    from_id = data.get("from")
+    amt = data.get("amount")
+    if not from_id or amt is None:
+        return jsonify({"error": "from and amount required"}), 400
+    try:
+        cents = cents_from_str(amt)
+    except ValueError:
+        return jsonify({"error": "invalid amount format"}), 400
+    acc = Account.query.get(from_id)
+    if not acc:
+        return jsonify({"error": "account_not_found"}), 404
+
+    bal = ledger_balance(from_id)
+    if bal < cents:
+        return jsonify({"error": "insufficient_funds", "balance": bal}), 402
+
+    lid = str(uuid.uuid4())
+    entry = LedgerEntry(id=lid, account_id=from_id, amount=-cents, currency="PHP", meta={"type": "withdraw"})
+    db.session.add(entry)
+    tx = Transaction(id=str(uuid.uuid4()), type="withdraw", amount=cents, from_account=from_id, status="completed", idempotency_key=idemp)
+    db.session.add(tx)
+    db.session.commit()
+
+    resp = {"transaction_id": tx.id, "from": from_id, "amount": cents, "balance": ledger_balance(from_id)}
+    if idemp:
+        save_idempotency(idemp, 200, resp)
+    send_webhook_async("withdraw.created", resp)
+    return jsonify(resp), 200
+
+@app.route("/transfer", methods=["POST"])
+@limiter.limit("100 per minute")
+def transfer():
+    idemp = request.headers.get("Idempotency-Key")
+    if idemp:
+        prev = get_idempotent_response(idemp)
+        if prev:
+            return (prev.response_body, prev.response_code)
+
+    data = request.get_json() or {}
+    from_id = data.get("from")
+    to_id = data.get("to")
+    amt = data.get("amount")
+    if not from_id or not to_id or amt is None:
+        return jsonify({"error": "from, to and amount required"}), 400
+    if from_id == to_id:
+        return jsonify({"error": "from and to cannot be same"}), 400
+    try:
+        cents = cents_from_str(amt)
+    except ValueError:
+        return jsonify({"error": "invalid amount format"}), 400
+
+    acc_from = Account.query.get(from_id)
+    acc_to = Account.query.get(to_id)
+    if not acc_from or not acc_to:
+        return jsonify({"error": "account_not_found"}), 404
+
+    if ledger_balance(from_id) < cents:
+        return jsonify({"error": "insufficient_funds", "balance": ledger_balance(from_id)}), 402
+
+    # Create two ledger entries: debit from_from (-amount), credit to_to (+amount)
+    e1 = LedgerEntry(id=str(uuid.uuid4()), account_id=from_id, amount=-cents, currency="PHP", meta={"type": "transfer", "counterparty": to_id})
+    e2 = LedgerEntry(id=str(uuid.uuid4()), account_id=to_id, amount=+cents, currency="PHP", meta={"type": "transfer", "counterparty": from_id})
+    db.session.add_all([e1, e2])
+
+    tx = Transaction(id=str(uuid.uuid4()), type="transfer", amount=cents, from_account=from_id, to_account=to_id, status="completed", idempotency_key=idemp)
+    db.session.add(tx)
+    db.session.commit()
+
+    resp = {"transaction_id": tx.id, "from": from_id, "to": to_id, "amount": cents, "balance_from": ledger_balance(from_id), "balance_to": ledger_balance(to_id)}
+    if idemp:
+        save_idempotency(idemp, 200, resp)
+    send_webhook_async("transfer.completed", resp)
+    return jsonify(resp), 200
+
+@app.route("/transactions", methods=["GET"])
+def list_transactions():
+    q = Transaction.query.order_by(Transaction.created_at.desc()).limit(200).all()
+    out = []
+    for t in q:
+        out.append({
+            "id": t.id,
+            "type": t.type,
+            "amount": t.amount,
+            "currency": t.currency,
+            "from": t.from_account,
+            "to": t.to_account,
+            "created_at": t.created_at.isoformat(),
+            "idempotency_key": t.idempotency_key
+        })
+    return jsonify({"transactions": out})
+
+# Webhook endpoints
+@app.route("/webhooks/subscribe", methods=["POST"])
+def webhook_subscribe():
+    data = request.get_json() or {}
+    url = data.get("url")
+    if not url:
+        return jsonify({"error": "url required"}), 400
+    sub = WebhookSubscription(id=str(uuid.uuid4()), url=url, secret=str(uuid.uuid4()))
+    db.session.add(sub)
+    db.session.commit()
+    return jsonify({"id": sub.id, "url": sub.url, "secret": sub.secret}), 201
+
+@app.route("/webhooks/subscriptions", methods=["GET"])
+def list_webhook_subs():
+    subs = WebhookSubscription.query.all()
+    return jsonify([{"id": s.id, "url": s.url, "created_at": s.created_at.isoformat()} for s in subs])
+
+# Reconciliation / accounting helpers
+@app.route("/admin/accounting/export/<account_id>", methods=["GET"])
+def export_account_ledger(account_id):
+    # Return ledger entries for account
+    entries = LedgerEntry.query.filter_by(account_id=account_id).order_by(LedgerEntry.timestamp.asc()).all()
+    out = []
+    for e in entries:
+        out.append({"id": e.id, "timestamp": e.timestamp.isoformat(), "amount_cents": e.amount, "amount": format_money(e.amount), "meta": e.meta})
+    return jsonify({"account_id": account_id, "entries": out})
+
+@app.route("/admin/health", methods=["GET"])
+def admin_health():
+    return jsonify({"status": "ok", "now": now_iso(), "db": "sqlite", "ledger_count": LedgerEntry.query.count()})
+
+# Simple webhook receiver for testing (you may call this in your dev environment)
+@app.route("/dev/receiver/echo", methods=["POST"])
+def dev_receiver_echo():
+    sig = request.headers.get("X-Mock-Signature")
+    body = request.get_data()
+    # do naive verification if present
+    verified = False
+    if sig:
+        # try verify with our shared WEBHOOK_HMAC_KEY
+        try:
+            if hmac.compare_digest(sign_webhook(body, WEBHOOK_HMAC_KEY), sig):
+                verified = True
+        except Exception:
+            verified = False
+    return jsonify({"received": True, "verified": verified, "headers": dict(request.headers), "body": request.get_json(silent=True)})
+
+if __name__ == "__main__":
+    db.create_all()
+    app.run(host="127.0.0.1", port=5000, debug=True)
+    
