@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StreamHub - Ad-Free Player</title>
+    <style>
+        body { font-family: sans-serif; background-color: #181818; color: white; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        #video-container { width: 80%; max-width: 1280px; background: black; box-shadow: 0 0 20px rgba(0, 0, 0, 0.5); }
+        #video-player { width: 100%; height: auto; display: block; }
+        .hud { padding: 10px; text-align: center; }
+    </style>
+</head>
+<body>
+
+<div id="video-container">
+    <video id="video-player" controls preload="auto" poster="placeholder.jpg">
+        <source src="YOUR_VIDEO_URL.mp4" type="video/mp4">
+        <p>Your browser does not support the video tag.</p>
+    </video>
+    
+    <div class="hud">
+        <h2>Ad-Free Streaming Instance</h2>
+        <p id="status">Loading stream...</p>
+    </div>
+</div>
+
+<script>
+    // Get instances of DOM elements
+    const videoPlayer = document.getElementById('video-player');
+    const statusText = document.getElementById('status');
+    
+    // Check if the browser can play the video
+    videoPlayer.addEventListener('loadeddata', () => {
+        statusText.textContent = 'Video loaded. Ready to play.';
+        console.log('Video dimensions:', videoPlayer.videoWidth, 'x', videoPlayer.videoHeight);
+    });
+
+    videoPlayer.addEventListener('error', (e) => {
+        statusText.textContent = 'Error loading video. Check URL.';
+        console.error('Video Error:', e);
+    });
+
+    // Optional: Auto-play the video when possible (may be blocked by browser policies)
+    videoPlayer.play().catch(error => {
+        // User must interact to play the video instance
+        console.log('Autoplay prevented:', error.name);
+        statusText.textContent = 'Click to play the video.';
+    });
+</script>
+
+</body>
+</html>
+
+
+
+import SwiftUI
+import AVKit
+
+// MARK: - Video Player Instance
+struct AdFreeVideoPlayer: View {
+    // 1. Define the video source URL
+    let videoURL = URL(string: "YOUR_HLS_OR_MP4_STREAM_URL")!
+    
+    // 2. Create an AVPlayer instance
+    private let player: AVPlayer
+    
+    // Initializer to create the AVPlayer instance once
+    init() {
+        self.player = AVPlayer(url: videoURL)
+    }
+
+    var body: some View {
+        VStack {
+            // Player HUD: Title and Status
+            Text("Ad-Free Stream Instance")
+                .font(.title2)
+                .padding(.top)
+            
+            // 3. Use VideoPlayer (iOS 14+) to display the stream
+            // This is a high-performance, system-level component for clear video.
+            VideoPlayer(player: player)
+                .frame(minHeight: 300)
+                .onAppear {
+                    // Automatically start playback
+                    player.play()
+                }
+            
+            Spacer()
+        }
+    }
+}
+
+// MARK: - App Entry Point Instance
+@main
+struct StreamingApp: App {
+    var body: some Scene {
+        WindowGroup {
+            AdFreeVideoPlayer()
+        }
+    }
+}
+
+
+
+package com.example.adfreeapp
+
+import android.os.Bundle
+import androidx.appcompat.app.AppCompatActivity
+import com.google.android.exoplayer2.ExoPlayer
+import com.google.android.exoplayer2.MediaItem
+import com.google.android.exoplayer2.ui.PlayerView
+import com.google.android.exoplayer2.util.Util
+
+// The main Activity instance for the Android app
+class MainActivity : AppCompatActivity() {
+
+    private var player: ExoPlayer? = null
+    private lateinit var playerView: PlayerView
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main) 
+        // Assuming activity_main.xml contains a PlayerView with ID 'player_view'
+        playerView = findViewById(R.id.player_view)
+    }
+
+    // Initialize the ExoPlayer instance
+    private fun initializePlayer() {
+        // Create an ExoPlayer instance
+        player = ExoPlayer.Builder(this).build()
+        playerView.player = player
+
+        // Define the media item instance (replace with your clear video URL)
+        val mediaItem = MediaItem.fromUri("YOUR_HLS_OR_MP4_STREAM_URL")
+        
+        // Prepare the player
+        player?.setMediaItem(mediaItem)
+        player?.playWhenReady = true // Start playback automatically
+        player?.prepare()
+    }
+
+    // Release the player instance when the activity is stopped
+    private fun releasePlayer() {
+        player?.let {
+            it.release()
+            player = null
+        }
+    }
+
+    // Lifecycle management for the player instance
+    override fun onStart() {
+        super.onStart()
+        // Use 'Util.SDK_INT >= 24' for devices running Nougat or newer
+        if (Util.SDK_INT >= 24 || player == null) {
+            initializePlayer()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (Util.SDK_INT < 24 || player == null) {
+            initializePlayer()
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (Util.SDK_INT < 24) {
+            releasePlayer()
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (Util.SDK_INT >= 24) {
+            releasePlayer()
+        }
+    }
+}
+
+
+
+import React, { useEffect, useRef, useState } from 'react';
+import Hls from 'hls.js';
+
+// Define a clear streaming instance component
+const AdvancedStreamPlayer = ({ streamUrl }) => {
+    const videoRef = useRef(null);
+    const [status, setStatus] = useState('Initializing...');
+    const [abrQuality, setAbrQuality] = useState('N/A');
+
+    useEffect(() => {
+        const video = videoRef.current;
+        if (!video) return;
+
+        // Check for HLS support in the current instance (browser)
+        if (Hls.isSupported()) {
+            const hls = new Hls({ 
+                // Advanced config for fast initial load and low latency
+                maxLoadingDelay: 2000, 
+                maxBufferLength: 30, // seconds
+            });
+
+            hls.loadSource(streamUrl);
+            hls.attachMedia(video);
+
+            hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                setStatus('Manifest loaded. Ready to play.');
+                video.play().catch(e => setStatus(`Waiting for user interaction. Autoplay blocked: ${e.name}`));
+            });
+
+            hls.on(Hls.Events.FRAG_CHANGED, (event, data) => {
+                // HUD logic: display the current streaming quality chosen by ABR
+                const level = hls.levels.find(l => l.id === data.frag.level);
+                if (level) {
+                    setAbrQuality(`${level.height}p @ ${Math.round(level.bitrate / 1000)}kbps`);
+                }
+            });
+
+            hls.on(Hls.Events.ERROR, (event, data) => {
+                if (data.fatal) {
+                    setStatus(`FATAL Error: ${data.details}. Retrying...`);
+                    // Advanced ABR error recovery logic would go here
+                    hls.recoverMediaError();
+                }
+            });
+
+            return () => {
+                hls.destroy();
+            };
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            // Native HLS support (iOS Safari)
+            video.src = streamUrl;
+            setStatus('Using native HLS support.');
+        } else {
+            setStatus('Your browser does not support HLS streaming.');
+        }
+    }, [streamUrl]);
+
+    return (
+        <div className="player-instance-container">
+            <video ref={videoRef} controls className="video-player-instance" />
+            
+            {/* Custom HUD Instance */}
+            <div className="player-hud">
+                <p>Status: <strong>{status}</strong></p>
+                <p>Current ABR Quality: <strong>{abrQuality}</strong></p>
+            </div>
+        </div>
+    );
+};
+
+// Example Usage (Root Instance)
+const App = () => {
+    // This is the URL for the HLS manifest (.m3u8) from your own ad-free server
+    const YOUR_STREAMING_SERVER_URL = "https://your-server.com/stream/manifest.m3u8"; 
+    
+    return (
+        <div className="app-root-instance">
+            <h1>Advanced Ad-Free Stream</h1>
+            <AdvancedStreamPlayer streamUrl={YOUR_STREAMING_SERVER_URL} />
+        </div>
+    );
+};
+
+export default App;
+
+
+
+import SwiftUI
+import AVKit
+import Combine
+
+// MARK: - View Model Instance for HUD and State
+class PlayerViewModel: ObservableObject {
+    @Published var status: String = "Loading..."
+    @Published var time: String = "00:00"
+    @Published var currentBitrate: String = "0 Mbps"
+    
+    private var player: AVPlayer?
+    private var timeObserver: AnyCancellable?
+    private var cancellables: Set<AnyCancellable> = []
+    
+    // Function to attach observers for HUD updates
+    func attachPlayer(_ player: AVPlayer) {
+        self.player = player
+        
+        // Observe playback time for the HUD instance
+        timeObserver = player.publisher(for: \.currentTime)
+            .sink { [weak self] newTime in
+                let seconds = CMTimeGetSeconds(newTime)
+                self?.time = String(format: "%02d:%02d", Int(seconds) / 60, Int(seconds) % 60)
+            }
+            .store(in: &cancellables)
+            
+        // Observe AVPlayerItem status changes (for accurate scientific reasoning on load)
+        player.currentItem?.publisher(for: \.status)
+            .sink { [weak self] newStatus in
+                if newStatus == .readyToPlay {
+                    self?.status = "Ready to Play."
+                } else if newStatus == .failed {
+                    self?.status = "Load Failed."
+                }
+            }
+            .store(in: &cancellables)
+            
+        // Observe access log for bitrate (advanced HUD element)
+        NotificationCenter.default.publisher(for: .AVPlayerItemNewAccessLogEntry, object: player.currentItem)
+            .compactMap { $0.object as? AVPlayerItem }
+            .compactMap { $0.accessLog()?.events.last }
+            .sink { [weak self] event in
+                // Uses the observed Max Segment Bitrate for an instance of current quality
+                let bitrate = event.indicatedBitrate / 1_000_000.0 // Convert bps to Mbps
+                self?.currentBitrate = String(format: "%.2f Mbps", bitrate)
+            }
+            .store(in: &cancellables)
+    }
+}
+
+// MARK: - SwiftUI View Instance
+struct AdvancedIOSPlayerView: View {
+    @StateObject private var viewModel = PlayerViewModel()
+    let player: AVPlayer
+
+    init(streamUrl: URL) {
+        // Initialize AVPlayer Instance
+        self.player = AVPlayer(url: streamUrl)
+    }
+
+    var body: some View {
+        VStack {
+            // Native Player Instance
+            VideoPlayer(player: player)
+                .frame(height: 300)
+                .onAppear {
+                    // Attach observers to the player instance for the HUD
+                    viewModel.attachPlayer(player) 
+                    player.play()
+                }
+            
+            // Custom HUD (Heads-Up Display)
+            VStack(alignment: .leading) {
+                Text("🎬 Stream Instance Status: \(viewModel.status)")
+                Text("🕒 Time Elapsed: \(viewModel.time)")
+                Text("⚡️ Network Rate (ABR): \(viewModel.currentBitrate)")
+            }
+            .padding()
+            .background(Color.black.opacity(0.7))
+            .foregroundColor(.white)
+            .cornerRadius(8)
+            
+            Spacer()
+        }
+    }
+}
+
+
+
+package com.example.advancedstreamer
+
+import android.os.Bundle
+import androidx.appcompat.app.AppCompatActivity
+import com.google.android.exoplayer2.*
+import com.google.android.exoplayer2.trackselection.DefaultTrackSelector
+import com.google.android.exoplayer2.ui.PlayerView
+import com.google.android.exoplayer2.video.VideoSize
+import android.widget.TextView
+
+// Main Activity Instance
+class AdvancedAndroidPlayerActivity : AppCompatActivity() {
+
+    private var player: ExoPlayer? = null
+    private lateinit var playerView: PlayerView
+    private lateinit var hudTextView: TextView
+    private val STREAM_URL = "https://your-server.com/dash/manifest.mpd" // Use MPEG-DASH
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main) 
+        
+        // Get view instances
+        playerView = findViewById(R.id.player_view)
+        hudTextView = findViewById(R.id.hud_text_view)
+    }
+
+    private fun initializePlayer() {
+        // 1. Advanced TrackSelector Instance for ABR quality control
+        val trackSelector = DefaultTrackSelector(this).apply {
+            // Enforce a higher quality stream start for perceived "high speed"
+            val parameters = buildUponParameters()
+                .setMaxVideoBitrate(20000000) // Set a high max (e.g., 20 Mbps)
+                .setForceHighestSupportedBitrate(true) // Start high
+                .build()
+            setParameters(parameters)
+        }
+
+        // 2. ExoPlayer Instance creation
+        player = ExoPlayer.Builder(this)
+            .setTrackSelector(trackSelector)
+            .setSeekBackIncrementMs(10000) // 10s seek back
+            .setSeekForwardIncrementMs(10000) // 10s seek forward
+            .build()
+            
+        playerView.player = player
+
+        // 3. Media Item (DASH/HLS)
+        val mediaItem = MediaItem.fromUri(STREAM_URL)
+        player?.setMediaItem(mediaItem)
+        player?.playWhenReady = true
+        player?.prepare()
+
+        // 4. Player Listener Instance for HUD updates (clear voices/status)
+        player?.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                val stateText = when (playbackState) {
+                    ExoPlayer.STATE_BUFFERING -> "BUFFERING"
+                    ExoPlayer.STATE_READY -> "READY"
+                    ExoPlayer.STATE_ENDED -> "ENDED"
+                    else -> "IDLE"
+                }
+                hudTextView.text = "Status: $stateText | Quality: ${player?.videoSize?.height}p"
+            }
+            
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                // Update HUD with current video resolution for accuracy
+                hudTextView.text = "Status: READY | Quality: ${videoSize.height}p"
+            }
+            
+            // Further network and error listeners would go here for robust code
+        })
+    }
+
+    override fun onStart() {
+        super.onStart()
+        initializePlayer()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        player?.release()
+        player = null
+    }
+}
+
