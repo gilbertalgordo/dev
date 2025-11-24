@@ -1,0 +1,174 @@
+// Function to fetch data from a Weather or AQ API
+async function fetchAirQualityData(lat, lon, time, pollutant) {
+    // 1. Construct the API endpoint URL (e.g., for OpenWeatherMap Air Pollution API)
+    const apiUrl = `https://api.openweathermap.org/data/2.5/air_pollution/forecast?lat=${lat}&lon=${lon}&appid=YOUR_API_KEY`;
+    
+    try {
+        const response = await fetch(apiUrl);
+        const data = await response.json();
+        
+        // 2. Process data to get the relevant reading
+        // This is simplified: a real controller would filter by time/pollutant.
+        const currentAQI = data.list[0].main.aqi;
+        document.getElementById('aqi-display').innerText = `Current AQI: ${currentAQI}`;
+        
+        // 3. Update the controller/UI based on the data
+        updateAirQualityController(data.list, pollutant); 
+        
+    } catch (error) {
+        console.error("Error fetching air quality data:", error);
+    }
+}
+
+function updateAirQualityController(data, currentPollutant) {
+    // This is where you'd update a chart or a forecast slider
+    console.log(`Updating chart for pollutant: ${currentPollutant}`);
+    // Code to render a forecast chart (e.g., using Chart.js)
+    // Code to update the map with an AQI overlay (if using a map service that supports it)
+    
+    // The "controller" elements (e.g., pollutant selection buttons)
+    // would call this function with a new 'currentPollutant' value.
+}
+
+// Example of a Map/Wind Integration concept
+function initializeMapWithWind() {
+    // ... Map initialization code (from section 2) ...
+    
+    // This is where you'd load the wind data and render the particle layer
+    // This often involves a third-party JS library like Wind-JS or a Maps SDK's custom layer.
+    // Example: addWindLayer(map, windDataUrl); 
+}
+
+// Main execution block
+document.addEventListener('DOMContentLoaded', () => {
+    initializeMapWithWind();
+    fetchAirQualityData(34.0522, -118.2437, 'now', 'PM2.5'); // Example for Los Angeles
+});
+
+
+
+// useWeatherApi.js - Handles data fetching from proxy server
+import { useState, useEffect } => 'react';
+
+// Fetches data from YOUR secure backend API proxy
+export function useWeatherApi(lat, lon, preferredApi) {
+    const [data, setData] = useState(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        if (!lat || !lon) return;
+
+        async function fetchData() {
+            setLoading(true);
+            try {
+                // The backend API handles the logic of calling either
+                // Google Weather API or Apple WeatherKit REST API securely.
+                const response = await fetch(`/api/weather?lat=${lat}&lon=${lon}&source=${preferredApi}`);
+                const result = await response.json();
+                
+                // You would need to normalize the 'result' structure 
+                // so the frontend components can read it consistently.
+                setData(result); 
+            } catch (error) {
+                console.error("Failed to fetch weather data:", error);
+            } finally {
+                setLoading(false);
+            }
+        }
+        fetchData();
+    }, [lat, lon, preferredApi]);
+
+    return { data, loading };
+}
+
+
+
+
+// WindFlowMap.jsx - Uses React-Leaflet and a custom wind layer
+import { MapContainer, TileLayer, useMap } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+// You would need to install and import a library like 'leaflet-velocity' or 'wind-js' adaptation
+// import { WindLayer } from './WindLayer'; // Custom component for wind visualization
+
+function MapController({ center, zoom }) {
+    // This hook allows the component to access the Leaflet map instance
+    const map = useMap(); 
+    map.setView(center, zoom);
+    return null;
+}
+
+export default function WindFlowMap({ lat, lon, windDataUrl }) {
+    const initialPosition = [lat, lon];
+
+    // NOTE: Wind data must be fetched separately in a specific format (e.g., GRIB or geoJSON)
+    return (
+        <MapContainer 
+            id="map-container" 
+            center={initialPosition} 
+            zoom={10} 
+            scrollWheelZoom={true} 
+            style={{ height: '60vh', width: '100%' }}
+        >
+            <TileLayer
+                attribution='&copy; <a href="http://osm.org/copyright">OpenStreetMap</a>'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
+            <MapController center={initialPosition} zoom={10} />
+            
+            {/* Wind Flow Viewer Live */}
+            {/* The WindLayer component fetches data from windDataUrl and renders a canvas layer over the map */}
+            {/* <WindLayer dataUrl={windDataUrl} mapInstance={useMap()} /> */}
+        </MapContainer>
+    );
+}
+
+
+
+// AirQualityController.jsx - Fetches AQ data and provides a timeline control
+import { useState, useEffect } => 'react';
+// Charting library for the forecast graph (e.g., import { Line } from 'react-chartjs-2';)
+
+export default function AirQualityController({ lat, lon }) {
+    const [aqData, setAqData] = useState(null);
+    const [currentTimeIndex, setCurrentTimeIndex] = useState(0);
+
+    useEffect(() => {
+        async function fetchAQ() {
+            // Fetches data from a dedicated AQ API (e.g., Google Air Quality API)
+            const response = await fetch(`/api/airquality?lat=${lat}&lon=${lon}`);
+            const data = await response.json();
+            setAqData(data.forecast); // Assuming 'forecast' is an array of hourly readings
+        }
+        fetchAQ();
+    }, [lat, lon]);
+
+    if (!aqData) return <div>Loading Advanced Air Quality...</div>;
+
+    const currentReading = aqData[currentTimeIndex];
+    
+    return (
+        <div className="aq-controller-hud"> {/* User requested to see HUD */}
+            <h3 style={{ color: currentReading.color }}>Air Quality Index: {currentReading.aqi}</h3>
+            
+            {/* Advanced Pollutant Instances */}
+            <div className="pollutants">
+                <p>PM2.5: **{currentReading.pm2_5}** µg/m³</p>
+                <p>NO2: **{currentReading.no2}** ppb</p>
+                <p>O3: **{currentReading.o3}** ppb</p>
+            </div>
+            
+            {/* Controller: Timeline Slider */}
+            <input
+                type="range"
+                min="0"
+                max={aqData.length - 1}
+                value={currentTimeIndex}
+                onChange={(e) => setCurrentTimeIndex(parseInt(e.target.value))}
+            />
+            <p>Forecast Time: **{new Date(currentReading.timestamp).toLocaleTimeString()}**</p>
+            
+            {/* Chart Instance for Forecast */}
+            {/* <AirQualityChart data={aqData} /> */}
+        </div>
+    );
+}
