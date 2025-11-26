@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>HUD 8-Ball</title>
+    <style>
+        :root {
+            --hud-primary: #00ffcc;
+            --hud-bg: #050505;
+            --hud-dim: rgba(0, 255, 204, 0.1);
+        }
+
+        body {
+            background-color: var(--hud-bg);
+            color: var(--hud-primary);
+            font-family: 'Courier New', monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        .hud-container {
+            border: 2px solid var(--hud-primary);
+            padding: 2rem;
+            text-align: center;
+            box-shadow: 0 0 15px var(--hud-dim);
+            position: relative;
+            max-width: 300px;
+        }
+
+        .hud-corner {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            border: 2px solid var(--hud-primary);
+        }
+        .top-left { top: -2px; left: -2px; border-bottom: 0; border-right: 0; }
+        .bottom-right { bottom: -2px; right: -2px; border-top: 0; border-left: 0; }
+
+        #answer-display {
+            font-size: 1.2rem;
+            margin: 20px 0;
+            min-height: 3rem;
+            text-transform: uppercase;
+            font-weight: bold;
+        }
+
+        .hud-btn {
+            background: transparent;
+            border: 1px solid var(--hud-primary);
+            color: var(--hud-primary);
+            padding: 10px 20px;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            transition: all 0.3s;
+            margin-top: 10px;
+            display: block;
+            width: 100%;
+        }
+
+        .hud-btn:hover {
+            background: var(--hud-primary);
+            color: var(--hud-bg);
+            box-shadow: 0 0 10px var(--hud-primary);
+        }
+
+        .quick-look {
+            font-size: 0.8rem;
+            border-style: dashed;
+            display: none; /* Hidden until an answer exists */
+        }
+    </style>
+</head>
+<body>
+
+<div class="hud-container">
+    <div class="hud-corner top-left"></div>
+    <div class="hud-corner bottom-right"></div>
+    
+    <h3>>> SYSTEM_READY</h3>
+    <div id="answer-display">[AWAITING_INPUT]</div>
+    
+    <button class="hud-btn" onclick="generateAnswer()">Initialize Query</button>
+    <button class="hud-btn quick-look" id="search-btn" onclick="quickLook()">Google Context</button>
+</div>
+
+<script>
+    const answers = [
+        "It is certain", "It is decidedly so", "Without a doubt", "Yes definitely",
+        "You may rely on it", "As I see it, yes", "Most likely", "Outlook good",
+        "Yes", "Signs point to yes", "Reply hazy, try again", "Ask again later",
+        "Better not tell you now", "Cannot predict now", "Concentrate and ask again",
+        "Don't count on it", "My reply is no", "My sources say no",
+        "Outlook not so good", "Very doubtful"
+    ];
+
+    let currentAnswer = "";
+
+    function generateAnswer() {
+        const randomIndex = Math.floor(Math.random() * answers.length);
+        currentAnswer = answers[randomIndex];
+        document.getElementById("answer-display").innerText = ">> " + currentAnswer;
+        document.getElementById("search-btn").style.display = "block";
+    }
+
+    function quickLook() {
+        if (!currentAnswer) return;
+        // Searches the answer context or standard 8ball meaning
+        const query = encodeURIComponent(`Magic 8 ball says ${currentAnswer} meaning`);
+        window.open(`https://www.google.com/search?q=${query}`, '_blank');
+    }
+</script>
+
+</body>
+</html>
+
+
+
+import android.app.SearchManager
+import android.content.Intent
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
+import kotlin.random.Random
+
+// Color Palette for HUD
+val HUD_Green = Color(0xFF00FFCC)
+val HUD_Black = Color(0xFF050505)
+
+class MagicBallActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            MagicBallScreen()
+        }
+    }
+}
+
+@Composable
+fun MagicBallScreen() {
+    val context = LocalContext.current
+    var answer by remember { mutableStateOf(">> AWAITING INPUT") }
+    var showSearch by remember { mutableStateOf(false) }
+
+    val answers = listOf(
+        "It is certain", "Without a doubt", "Yes definitely", "Most likely", "Outlook good",
+        "Yes", "Signs point to yes", "Reply hazy, try again", "Ask again later",
+        "Better not tell you now", "Cannot predict now", "Concentrate and ask again",
+        "Don't count on it", "My reply is no", "My sources say no", "Outlook not so good", "Very doubtful"
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(HUD_Black)
+            .padding(30.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        // HUD Display Box
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(BorderStroke(2.dp, HUD_Green))
+                .padding(20.dp)
+        ) {
+            Text(
+                text = answer,
+                color = HUD_Green,
+                fontFamily = FontFamily.Monospace,
+                style = MaterialTheme.typography.headlineSmall
+            )
+        }
+
+        Spacer(modifier = Modifier.height(30.dp))
+
+        // Generate Button
+        Button(
+            onClick = {
+                answer = ">> " + answers[Random.nextInt(answers.size)]
+                showSearch = true
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+            border = BorderStroke(1.dp, HUD_Green),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("INITIALIZE", color = HUD_Green, fontFamily = FontFamily.Monospace)
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Quick Look Google Search Button
+        if (showSearch) {
+            Button(
+                onClick = {
+                    val query = "Magic 8 ball meaning $answer"
+                    val intent = Intent(Intent.ACTION_WEB_SEARCH).apply {
+                        putExtra(SearchManager.QUERY, query)
+                    }
+                    context.startActivity(intent)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = HUD_Green.copy(alpha = 0.2f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("QUICK LOOK [GOOGLE]", color = HUD_Green, fontFamily = FontFamily.Monospace)
+            }
+        }
+    }
+}
+
+
+
+import SwiftUI
+
+struct ContentView: View {
+    // State properties
+    @State private var answer: String = ">> SYSTEM READY"
+    @State private var isAnswerGenerated: Bool = false
+    
+    // Data Source
+    let answers = [
+        "It is certain", "Without a doubt", "Yes definitely", "Most likely", "Outlook good",
+        "Yes", "Signs point to yes", "Reply hazy, try again", "Ask again later",
+        "Better not tell you now", "Cannot predict now", "Concentrate and ask again",
+        "Don't count on it", "My reply is no", "My sources say no", "Outlook not so good", "Very doubtful"
+    ]
+    
+    // HUD Colors
+    let hudGreen = Color(red: 0/255, green: 255/255, blue: 204/255)
+    let hudBlack = Color(red: 5/255, green: 5/255, blue: 5/255)
+    
+    var body: some View {
+        ZStack {
+            hudBlack.edgesIgnoringSafeArea(.all)
+            
+            VStack(spacing: 20) {
+                
+                // HUD Display Area
+                ZStack {
+                    Rectangle()
+                        .stroke(hudGreen, lineWidth: 2)
+                        .frame(height: 150)
+                        .shadow(color: hudGreen.opacity(0.5), radius: 10, x: 0, y: 0)
+                    
+                    Text(answer)
+                        .font(.system(.title2, design: .monospaced))
+                        .fontWeight(.bold)
+                        .foregroundColor(hudGreen)
+                        .multilineTextAlignment(.center)
+                        .padding()
+                }
+                .padding(.horizontal)
+                
+                // Primary Trigger
+                Button(action: {
+                    generatePrediction()
+                }) {
+                    Text("EXECUTE QUERY")
+                        .font(.system(.body, design: .monospaced))
+                        .fontWeight(.bold)
+                        .padding()
+                        .frame(maxWidth: .infinity)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 0)
+                                .stroke(hudGreen, lineWidth: 1)
+                        )
+                        .foregroundColor(hudGreen)
+                }
+                .padding(.horizontal)
+                
+                // Quick Look Feature
+                if isAnswerGenerated {
+                    let query = "Meaning of \(answer)".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+                    let googleURL = URL(string: "https://www.google.com/search?q=\(query)")!
+                    
+                    Link(destination: googleURL) {
+                        HStack {
+                            Image(systemName: "magnifyingglass")
+                            Text("QUICK LOOK DATA")
+                        }
+                        .font(.system(.caption, design: .monospaced))
+                        .padding()
+                        .frame(maxWidth: .infinity)
+                        .background(hudGreen.opacity(0.15))
+                        .foregroundColor(hudGreen)
+                    }
+                    .padding(.horizontal)
+                }
+            }
+        }
+    }
+    
+    func generatePrediction() {
+        // Logic: Random element selection
+        if let newAnswer = answers.randomElement() {
+            answer = ">> \(newAnswer.uppercased())"
+            isAnswerGenerated = true
+            
+            // Optional: Add haptic feedback here for "feel"
+            let generator = UIImpactFeedbackGenerator(style: .medium)
+            generator.impactOccurred()
+        }
+    }
+}
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>OMNI-8 HUD</title>
+    <style>
+        :root {
+            --neon: #00f3ff;
+            --dark: #020b14;
+            --glass: rgba(0, 243, 255, 0.05);
+        }
+        body {
+            background: var(--dark);
+            font-family: 'Courier New', monospace;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            perspective: 1000px; /* Essential for 3D effect */
+        }
+        .hud-interface {
+            width: 320px;
+            padding: 20px;
+            border: 1px solid var(--neon);
+            background: var(--glass);
+            box-shadow: 0 0 20px rgba(0, 243, 255, 0.1);
+            text-align: center;
+            position: relative;
+        }
+        /* 3D Flip Container */
+        .answer-box {
+            height: 100px;
+            margin: 20px 0;
+            transform-style: preserve-3d;
+            transition: transform 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .answer-box.flip { transform: rotateX(360deg); }
+        
+        .answer-text {
+            color: var(--neon);
+            font-size: 1.2rem;
+            font-weight: bold;
+            line-height: 100px;
+            text-shadow: 0 0 10px var(--neon);
+        }
+        
+        button {
+            background: transparent;
+            border: 1px solid var(--neon);
+            color: var(--neon);
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: all 0.2s;
+        }
+        button:hover { background: var(--neon); color: var(--dark); }
+        
+        /* Grid Overlay */
+        .grid-bg {
+            position: absolute; top:0; left:0; width:100%; height:100%;
+            background-image: linear-gradient(var(--neon) 1px, transparent 1px),
+            linear-gradient(90deg, var(--neon) 1px, transparent 1px);
+            background-size: 20px 20px;
+            opacity: 0.05;
+            z-index: -1;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+<div class="hud-interface">
+    <div class="grid-bg"></div>
+    <div style="font-size: 0.8rem; opacity: 0.7;">>> MODULE: PRECOGNITION</div>
+    
+    <div class="answer-box" id="answerBox">
+        <div class="answer-text" id="answerText">READY</div>
+    </div>
+
+    <button onclick="activateVoice()">[ MIC INPUT ]</button>
+    <button onclick="runSimulation()">[ EXECUTE ]</button>
+    <button id="quickLookBtn" style="display:none;" onclick="quickLook()">[ DATA_CONTEXT ]</button>
+</div>
+
+<script>
+    const synth = window.speechSynthesis;
+    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+    
+    // Standard 20 Answers
+    const dataSet = [
+        "It is certain", "It is decidedly so", "Without a doubt", "Yes definitely",
+        "You may rely on it", "As I see it, yes", "Most likely", "Outlook good",
+        "Yes", "Signs point to yes", "Reply hazy, try again", "Ask again later",
+        "Better not tell you now", "Cannot predict now", "Concentrate and ask again",
+        "Don't count on it", "My reply is no", "My sources say no",
+        "Outlook not so good", "Very doubtful"
+    ];
+
+    let currentResult = "";
+
+    function runSimulation() {
+        // 3D Animation Trigger
+        const box = document.getElementById('answerBox');
+        box.classList.remove('flip');
+        void box.offsetWidth; // Force reflow for restart
+        box.classList.add('flip');
+
+        // Scientific Randomness (Crypto API)
+        const array = new Uint32Array(1);
+        window.crypto.getRandomValues(array);
+        const index = array[0] % dataSet.length;
+        currentResult = dataSet[index];
+
+        setTimeout(() => {
+            document.getElementById('answerText').innerText = currentResult;
+            document.getElementById('quickLookBtn').style.display = 'inline-block';
+            speak(currentResult);
+        }, 300); // Sync text change with mid-flip
+    }
+
+    function speak(text) {
+        if (synth.speaking) synth.cancel();
+        const utter = new SpeechSynthesisUtterance(text);
+        utter.pitch = 0.8; // Lower pitch for robotic feel
+        utter.rate = 1.1;
+        synth.speak(utter);
+    }
+
+    function activateVoice() {
+        document.getElementById('answerText').innerText = "LISTENING...";
+        recognition.start();
+    }
+
+    recognition.onresult = (event) => {
+        const query = event.results[0][0].transcript;
+        runSimulation();
+    };
+
+    function quickLook() {
+        // Advanced: Opens a specific popup size to act like a floating HUD window
+        const q = encodeURIComponent(`"Magic 8 Ball" meaning "${currentResult}"`);
+        window.open(`https://www.google.com/search?q=${q}`, 'HUD_Search', 'width=500,height=600,top=100,left=100,scrollbars=yes');
+    }
+</script>
+</body>
+</html>
+
+
+
+implementation 'androidx.browser:browser:1.5.0' // Chrome Custom Tabs
+implementation 'androidx.constraintlayout:constraintlayout:2.1.4' // MotionLayout
+
+
+
+import android.net.Uri
+import android.os.Bundle
+import android.speech.tts.TextToSpeech
+import androidx.appcompat.app.AppCompatActivity
+import androidx.browser.customtabs.CustomTabsIntent
+import androidx.constraintlayout.motion.widget.MotionLayout
+import android.widget.TextView
+import java.security.SecureRandom
+import java.util.Locale
+
+class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
+
+    private lateinit var tts: TextToSpeech
+    private lateinit var motionLayout: MotionLayout
+    private lateinit var answerText: TextView
+    
+    // SecureRandom is cryptographically stronger than Random()
+    private val random = SecureRandom()
+    private val answers = arrayOf("It is certain", "Yes definitely", "My reply is no", "Outlook good", "Very doubtful") // (Add full list)
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main) // Assume layout has MotionLayout root
+
+        tts = TextToSpeech(this, this)
+        motionLayout = findViewById(R.id.motionLayout)
+        answerText = findViewById(R.id.answerText)
+
+        findViewById<TextView>(R.id.btnExecute).setOnClickListener {
+            runSimulation()
+        }
+    }
+
+    private fun runSimulation() {
+        // Trigger XML Animation
+        motionLayout.transitionToEnd()
+        
+        val index = random.nextInt(answers.size)
+        val result = answers[index]
+
+        // Delay text update to match animation peak
+        answerText.postDelayed({
+            answerText.text = result
+            speakOut(result)
+            setupQuickLook(result)
+            motionLayout.transitionToStart() // Reset animation
+        }, 500)
+    }
+
+    private fun setupQuickLook(result: String) {
+        findViewById<TextView>(R.id.btnQuickLook).setOnClickListener {
+            val url = "https://www.google.com/search?q=magic+8+ball+meaning+$result"
+            val builder = CustomTabsIntent.Builder()
+            
+            // HUD Styling for Browser
+            builder.setToolbarColor(0xFF050505.toInt()) 
+            builder.setShowTitle(true)
+            
+            val customTabsIntent = builder.build()
+            customTabsIntent.launchUrl(this, Uri.parse(url))
+        }
+    }
+
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            tts.language = Locale.US
+            tts.setPitch(0.7f) // Robotic Depth
+        }
+    }
+
+    private fun speakOut(text: String) {
+        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "")
+    }
+}
+
+
+
+import SwiftUI
+import SafariServices
+import AVFoundation
+
+struct ContentView: View {
+    @State private var angle: Double = 0
+    @State private var answer = "SYSTEM READY"
+    @State private var showSafari = false
+    @State private var searchURL: URL?
+    
+    let synthesizer = AVSpeechSynthesizer()
+    let answers = ["It is certain", "Yes definitely", "My reply is no", "Outlook good", "Very doubtful"]
+    
+    // HUD Theme Colors
+    let neon = Color(red: 0, green: 1, blue: 0.8)
+    let dark = Color.black
+
+    var body: some View {
+        ZStack {
+            dark.ignoresSafeArea()
+            
+            // Background Grid (HUD aesthetic)
+            VStack {
+                ForEach(0..<20) { _ in
+                    Divider().background(neon.opacity(0.1))
+                    Spacer()
+                }
+            }
+            
+            VStack(spacing: 40) {
+                Text(">> OMNI-8 TERMINAL")
+                    .font(.custom("Courier New", size: 14))
+                    .foregroundColor(neon.opacity(0.7))
+                
+                // 3D Rotating Answer Box
+                ZStack {
+                    RoundedRectangle(cornerRadius: 15)
+                        .stroke(neon, lineWidth: 2)
+                        .background(neon.opacity(0.05))
+                        .frame(height: 150)
+                    
+                    Text(answer)
+                        .font(.custom("Courier New", size: 24))
+                        .fontWeight(.heavy)
+                        .foregroundColor(neon)
+                        .multilineTextAlignment(.center)
+                        .padding()
+                }
+                .rotation3DEffect(.degrees(angle), axis: (x: 1, y: 0, z: 0))
+                .padding()
+
+                // Controls
+                HStack(spacing: 20) {
+                    Button(action: runSimulation) {
+                        Label("EXECUTE", systemImage: "cpu")
+                            .font(.custom("Courier New", size: 16))
+                            .padding()
+                            .border(neon, width: 1)
+                            .foregroundColor(neon)
+                    }
+                    
+                    if searchURL != nil {
+                        Button(action: { showSafari = true }) {
+                            Label("CONTEXT", systemImage: "magnifyingglass")
+                                .font(.custom("Courier New", size: 16))
+                                .padding()
+                                .background(neon.opacity(0.2))
+                                .foregroundColor(neon)
+                        }
+                    }
+                }
+            }
+        }
+        // In-App Browser Sheet
+        .sheet(isPresented: $showSafari) {
+            if let url = searchURL {
+                SafariView(url: url)
+            }
+        }
+    }
+    
+    func runSimulation() {
+        // 1. Scientific Randomness using SystemRandomNumberGenerator
+        var generator = SystemRandomNumberGenerator()
+        let randomIndex = Int(generator.next(upperBound: UInt64(answers.count)))
+        let newAnswer = answers[randomIndex]
+        
+        // 2. 3D Animation (Flip 360 degrees)
+        withAnimation(.interpolatingSpring(stiffness: 100, damping: 10)) {
+            angle += 360
+        }
+        
+        // 3. Audio & Data Update (Delayed to match flip)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            self.answer = newAnswer.uppercased()
+            self.generateHaptic()
+            self.speak(newAnswer)
+            
+            // Prepare Quick Look URL
+            let query = "meaning of magic 8 ball saying \(newAnswer)".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!
+            self.searchURL = URL(string: "https://www.google.com/search?q=\(query)")
+        }
+    }
+    
+    func speak(_ text: String) {
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        utterance.rate = 0.5
+        utterance.pitchMultiplier = 0.8
+        synthesizer.speak(utterance)
+    }
+    
+    func generateHaptic() {
+        let impact = UIImpactFeedbackGenerator(style: .heavy)
+        impact.impactOccurred()
+    }
+}
+
+// Wrapper for SFSafariViewController
+struct SafariView: UIViewControllerRepresentable {
+    let url: URL
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        let config = SFSafariViewController.Configuration()
+        config.barCollapsingEnabled = false
+        return SFSafariViewController(url: url, configuration: config)
+    }
+    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
+}
+
