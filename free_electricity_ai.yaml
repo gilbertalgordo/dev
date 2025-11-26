@@ -1,0 +1,219 @@
+import psutil
+import time
+import numpy as np
+
+class SmartEnergyAI:
+    def __init__(self):
+        self.usage_history = []
+
+    def read_power_usage(self):
+        # Simulated watt consumption using CPU load as input
+        cpu = psutil.cpu_percent()
+        watts = 50 + cpu * 5     # mock formula for demonstration
+        return watts
+
+    def predict_peak(self):
+        if len(self.usage_history) < 12:
+            return None
+        data = np.array(self.usage_history[-12:])
+        return float(np.mean(data) + np.std(data) * 1.5)
+
+    def advise(self, current):
+        peak = self.predict_peak()
+        if peak and current > peak:
+            return "High usage detected. Consider disabling non-essential appliances."
+        return "Usage is normal."
+
+    def run(self):
+        while True:
+            watts = self.read_power_usage()
+            self.usage_history.append(watts)
+
+            advice = self.advise(watts)
+            print(f"Current Load: {watts:.2f}W — {advice}")
+
+            time.sleep(5)
+
+if __name__ == "__main__":
+    ai = SmartEnergyAI()
+    ai.run()
+
+
+    """
+Advanced Home Energy Optimization Prototype
+- Minimizes grid import cost over a 24-hour horizon using LP (PuLP)
+- Inputs: base_load (hourly), flexible loads (tasks with windows and energy), solar_forecast (hourly),
+          battery specs, hourly price (TOU)
+- Outputs: schedule for flexible loads, battery actions, expected grid import and cost
+
+This is a simulation/optimizer for legal energy management and efficiency.
+"""
+
+import numpy as np
+import pandas as pd
+import pulp
+from dataclasses import dataclass, field
+from typing import List, Dict, Tuple
+
+HORIZON = 24  # hours
+
+@dataclass
+class BatterySpec:
+    capacity_kwh: float
+    max_charge_kw: float
+    max_discharge_kw: float
+    eff_charge: float = 0.95
+    eff_discharge: float = 0.95
+    soc_init: float = 0.5  # fraction of capacity
+    soc_min: float = 0.1
+    soc_max: float = 0.9
+
+@dataclass
+class FlexibleLoad:
+    name: str
+    energy_kwh: float  # total energy required
+    earliest_start: int  # inclusive hour index 0..23
+    latest_end: int      # exclusive hour index 1..24
+    max_power_kw: float  # maximum power when running
+    must_run_hours: int = None  # if the appliance runs contiguous hours; None => divisible
+    # If must_run_hours not None, this is a scheduling-as-block problem (simplified below as divisible)
+
+def optimize_day(
+    base_load_kw: np.ndarray,         # shape (24,)
+    solar_kw: np.ndarray,            # shape (24,)
+    price_ph: np.ndarray,            # shape (24,) price per kWh
+    battery: BatterySpec,
+    flex_loads: List[FlexibleLoad]
+) -> Dict:
+    assert base_load_kw.shape[0] == HORIZON
+    assert solar_kw.shape[0] == HORIZON
+    assert price_ph.shape[0] == HORIZON
+
+    prob = pulp.LpProblem("energy_opt", pulp.LpMinimize)
+
+    # Decision variables
+    grid_import = pulp.LpVariable.dicts("grid_import", range(HORIZON), lowBound=0, cat='Continuous')  # kW (hour average)
+    bat_charge = pulp.LpVariable.dicts("bat_charge", range(HORIZON), lowBound=0, upBound=battery.max_charge_kw, cat='Continuous')
+    bat_discharge = pulp.LpVariable.dicts("bat_discharge", range(HORIZON), lowBound=0, upBound=battery.max_discharge_kw, cat='Continuous')
+    soc = pulp.LpVariable.dicts("soc", range(HORIZON+1), lowBound=battery.soc_min*battery.capacity_kwh, upBound=battery.soc_max*battery.capacity_kwh, cat='Continuous')
+    # flexible load power per hour for each flex appliance (divisible)
+    flex_p = {}
+    for i, fl in enumerate(flex_loads):
+        flex_p[i] = pulp.LpVariable.dicts(f"flex_{i}_p", range(HORIZON), lowBound=0, upBound=fl.max_power_kw, cat='Continuous')
+
+    # Objective: minimize sum(price * grid_import_kwh)
+    prob += pulp.lpSum([price_ph[t] * grid_import[t] for t in range(HORIZON)])
+
+    # Constraints: energy balance per hour
+    for t in range(HORIZON):
+        # total flexible loads at t
+        flex_sum = pulp.lpSum([flex_p[i][t] for i in range(len(flex_loads))])
+        # net load after solar and battery
+        # grid_import + bat_charge - bat_discharge == base_load + flex_sum - solar
+        prob += grid_import[t] + bat_charge[t] - bat_discharge[t] == base_load_kw[t] + flex_sum - solar_kw[t], f"power_balance_{t}"
+
+    # Battery SOC dynamics (work in kWh): soc[t+1] = soc[t] + charge*eff - discharge/eff
+    # We assume each hour variables are average kW over the hour -> kWh = kW * 1h
+    prob += soc[0] == battery.soc_init * battery.capacity_kwh, "soc_init"
+    for t in range(HORIZON):
+        prob += soc[t+1] == soc[t] + bat_charge[t] * battery.eff_charge - bat_discharge[t] / battery.eff_discharge, f"soc_evolution_{t}"
+
+    # Battery charge/discharge cannot both be non-zero efficiently; encourage no simultaneous by small penalty if desired
+    # Here we'll add big-M approximate constraint: bat_charge[t] * bat_discharge[t] == 0 is non-linear; instead add soft penalty by raising objective slightly.
+    # Simpler: restrict combined power <= max(max_charge,max_discharge) to discourage simultaneous use:
+    for t in range(HORIZON):
+        prob += bat_charge[t] + bat_discharge[t] <= max(battery.max_charge_kw, battery.max_discharge_kw), f"charge_discharge_limit_{t}"
+
+    # Flexible load energy requirements & time windows
+    for i, fl in enumerate(flex_loads):
+        # Enforce time window: zero outside earliest..latest-1
+        for t in range(HORIZON):
+            if t < fl.earliest_start or t >= fl.latest_end:
+                prob += flex_p[i][t] == 0, f"{fl.name}_window_{t}"
+        # Total energy delivered equals required energy (kWh)
+        prob += pulp.lpSum([flex_p[i][t] for t in range(HORIZON)]) == fl.energy_kwh, f"{fl.name}_energy"
+        # If appliance must be contiguous hours (must_run_hours), this LP does not enforce contiguity.
+        # Advanced model would require integer variables. For now, this is a divisible approximation.
+
+    # Optional constraints: grid_import can't sell back to grid (if your tariff disallows export)
+    for t in range(HORIZON):
+        # If you can export and get credit, allow negative grid_import or add a feed-in tariff.
+        # Here we disallow export (grid_import >= 0 already enforced).
+        pass
+
+    # Solve
+    solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=30)
+    prob.solve(solver)
+
+    # Gather results
+    grid_import_v = np.array([pulp.value(grid_import[t]) for t in range(HORIZON)])
+    bat_charge_v = np.array([pulp.value(bat_charge[t]) for t in range(HORIZON)])
+    bat_discharge_v = np.array([pulp.value(bat_discharge[t]) for t in range(HORIZON)])
+    soc_v = np.array([pulp.value(soc[t]) for t in range(HORIZON+1)])
+    flex_v = {flex_loads[i].name: np.array([pulp.value(flex_p[i][t]) for t in range(HORIZON)]) for i in range(len(flex_loads))}
+
+    total_cost = float(sum(price_ph[t] * grid_import_v[t] for t in range(HORIZON)))
+    total_grid_kwh = float(grid_import_v.sum())
+
+    return {
+        "grid_import_kwh": grid_import_v,
+        "battery_charge_kw": bat_charge_v,
+        "battery_discharge_kw": bat_discharge_v,
+        "soc_kwh": soc_v,
+        "flex_schedules_kw": flex_v,
+        "total_cost": total_cost,
+        "total_grid_kwh": total_grid_kwh,
+        "status": pulp.LpStatus[prob.status]
+    }
+
+# Example usage / demo
+if __name__ == "__main__":
+    # Example synthetic inputs
+    hours = np.arange(HORIZON)
+    base_load = 0.6 + 0.3 * np.sin((hours - 6) * np.pi/12)  # base load shape, kW
+    base_load = np.clip(base_load, 0.2, None) * 1.5  # scale to household-ish loads
+
+    # Simulate solar generation: peak midday
+    solar = np.maximum(0, 2.5 * np.sin((hours - 6) * np.pi/12))  # kW
+
+    # Time-of-use price: cheap at night, expensive peak afternoon
+    price = np.array([0.08]*24)
+    price[7:10] = 0.20
+    price[17:21] = 0.35
+    price[10:16] = 0.12
+
+    batt = BatterySpec(
+        capacity_kwh=10.0,
+        max_charge_kw=3.0,
+        max_discharge_kw=3.0,
+        eff_charge=0.95,
+        eff_discharge=0.95,
+        soc_init=0.3,
+        soc_min=0.1,
+        soc_max=0.95
+    )
+
+    flex = [
+        FlexibleLoad(name="EV_charge", energy_kwh=8.0, earliest_start=0, latest_end=8, max_power_kw=3.3),
+        FlexibleLoad(name="Washer", energy_kwh=1.0, earliest_start=8, latest_end=20, max_power_kw=1.0),
+        FlexibleLoad(name="Pool_pump", energy_kwh=2.0, earliest_start=0, latest_end=24, max_power_kw=0.5),
+    ]
+
+    res = optimize_day(base_load, solar, price, batt, flex)
+
+    df = pd.DataFrame({
+        "hour": hours,
+        "base_load_kW": base_load,
+        "solar_kW": solar,
+        "grid_import_kW": res["grid_import_kwh"],
+        "bat_charge_kW": res["battery_charge_kw"],
+        "bat_discharge_kW": res["battery_discharge_kw"],
+        "soc_kWh": res["soc_kwh"][:-1]  # SOC at start of each hour
+    })
+    for name, schedule in res["flex_schedules_kw"].items():
+        df[f"{name}_kW"] = schedule
+
+    print("Optimization status:", res["status"])
+    print("Total grid kWh:", round(res["total_grid_kwh"], 3))
+    print("Estimated daily cost (USD): $", round(res["total_cost"], 2))
+    print(df.to_string(index=False))
