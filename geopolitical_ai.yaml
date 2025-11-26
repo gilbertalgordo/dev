@@ -1,0 +1,366 @@
+import face_recognition
+import numpy as np
+from typing import List, Dict, Tuple
+
+# --- 1. DATA AND MODEL SETUP (Conceptual) ---
+
+# In a real application, these images and rankings would be loaded
+# from a database and a trained model/external API, respectively.
+
+# Define the known leaders and their ranking data (example placeholders)
+KNOWN_LEADERS_DATA = {
+    "Queen Elizabeth II": {
+        "title": "Monarch of the UK", 
+        "country": "United Kingdom", 
+        "ranking_score": 95, # Example score (e.g., stability/influence)
+        "image_path": "images/leader_a.jpg"
+    },
+    "President Biden": {
+        "title": "President of the USA", 
+        "country": "United States", 
+        "ranking_score": 88, # Example score (e.g., news sentiment/policy impact)
+        "image_path": "images/leader_b.jpg"
+    }
+    # ... add more leaders
+}
+
+def load_known_encodings(leaders_data: Dict) -> Tuple[List[np.ndarray], List[str]]:
+    """Loads face encodings and names for known leaders."""
+    known_face_encodings = []
+    known_face_names = []
+    
+    print("Loading known leader images and generating embeddings...")
+    for name, data in leaders_data.items():
+        try:
+            # Load the image and compute the 128-dimension face encoding
+            image = face_recognition.load_image_file(data["image_path"])
+            # Assuming there is exactly one face in the training image
+            encoding = face_recognition.face_encodings(image)[0] 
+            known_face_encodings.append(encoding)
+            known_face_names.append(name)
+        except IndexError:
+            # Handle cases where no face is found in the training image
+            print(f"Warning: No face found in image for {name}. Skipping.")
+        except FileNotFoundError:
+            print(f"Error: Image file not found for {name} at {data['image_path']}. Skipping.")
+    
+    return known_face_encodings, known_face_names
+
+# Initialize known faces and names
+KNOWN_FACE_ENCODINGS, KNOWN_FACE_NAMES = load_known_encodings(KNOWN_LEADERS_DATA)
+
+# --- 2. CORE AI FUNCTIONS ---
+
+def identify_leader(image_path: str, known_encodings: List[np.ndarray], known_names: List[str]) -> List[Dict]:
+    """
+    Identifies faces in a new image against the known leaders database.
+    
+    Args:
+        image_path: Path to the image to analyze.
+        known_encodings: List of face embeddings for known leaders.
+        known_names: List of names corresponding to the known embeddings.
+        
+    Returns:
+        A list of dictionaries containing identification details for each detected face.
+    """
+    try:
+        # Load the image to check
+        unknown_image = face_recognition.load_image_file(image_path)
+    except FileNotFoundError:
+        return [{"error": "Input image file not found."}]
+
+    # Find all face locations and encodings in the unknown image
+    face_locations = face_recognition.face_locations(unknown_image)
+    face_encodings = face_recognition.face_encodings(unknown_image, face_locations)
+
+    results = []
+
+    for face_encoding, face_location in zip(face_encodings, face_locations):
+        # Compare the unknown face with the known faces
+        # tolerance is how much distance between faces to consider a match. Lower is stricter.
+        matches = face_recognition.compare_faces(known_encodings, face_encoding, tolerance=0.5) 
+        name = "Unknown Leader"
+
+        # Use the known face with the smallest distance (best match)
+        face_distances = face_recognition.face_distance(known_encodings, face_encoding)
+        best_match_index = np.argmin(face_distances)
+
+        if matches[best_match_index]:
+            name = known_names[best_match_index]
+            
+        # Get location coordinates (top, right, bottom, left)
+        top, right, bottom, left = face_location 
+
+        results.append({
+            "name": name,
+            "location": (top, right, bottom, left),
+            "distance_to_best_match": face_distances[best_match_index]
+        })
+
+    return results
+
+def get_leader_ranking(leader_name: str, leaders_data: Dict) -> Dict:
+    """Retrieves detailed information and ranking for a known leader."""
+    if leader_name in leaders_data:
+        data = leaders_data[leader_name]
+        return {
+            "name": leader_name,
+            "title": data.get("title"),
+            "country": data.get("country"),
+            "ranking_score": data.get("ranking_score"),
+            "ranking_description": f"Overall Influence Score: {data.get('ranking_score')}/100"
+        }
+    else:
+        return {"name": leader_name, "message": "Ranking data not available for this individual."}
+
+
+# --- 3. EXECUTION (Simulated) ---
+
+if __name__ == "__main__":
+    # NOTE: You must have actual images named 'images/leader_a.jpg', 'images/leader_b.jpg', 
+    # and 'images/test_image.jpg' in your local setup for this to run correctly.
+    TEST_IMAGE_PATH = "images/test_image.jpg"
+    
+    # Check if we have any encodings to compare against
+    if not KNOWN_FACE_ENCODINGS:
+        print("\n*** ERROR: No known leader encodings were loaded. Cannot run identification. ***")
+    else:
+        print("\nStarting Leader Identification...")
+        
+        # Step 1: Identify the faces in the test image
+        identified_faces = identify_leader(TEST_IMAGE_PATH, KNOWN_FACE_ENCODINGS, KNOWN_FACE_NAMES)
+
+        print(f"\n✅ Identified {len(identified_faces)} face(s) in {TEST_IMAGE_PATH}:")
+        
+        final_report = []
+        for face in identified_faces:
+            if face.get("error"):
+                 print(f"Error: {face['error']}")
+                 continue
+                 
+            # Step 2: Retrieve ranking and official information for identified leaders
+            leader_name = face["name"]
+            
+            # Only attempt to rank known figures
+            if leader_name != "Unknown Leader":
+                ranking_info = get_leader_ranking(leader_name, KNOWN_LEADERS_DATA)
+                
+                # Combine identification and ranking data
+                report_entry = {
+                    "Name": leader_name,
+                    "Official Title": ranking_info.get("title", "N/A"),
+                    "Country": ranking_info.get("country", "N/A"),
+                    "Ranking Score": ranking_info.get("ranking_score", "N/A"),
+                    "Ranking Detail": ranking_info.get("ranking_description", "N/A")
+                }
+            else:
+                 report_entry = {
+                    "Name": leader_name,
+                    "Official Title": "N/A",
+                    "Country": "N/A",
+                    "Ranking Score": "N/A",
+                    "Ranking Detail": "No ranking available."
+                }
+                
+            final_report.append(report_entry)
+            
+        print("\n--- FINAL LEADERSHIP REPORT ---")
+        for entry in final_report:
+            print(f"  Person: **{entry['Name']}**")
+            print(f"  Title: {entry['Official Title']}")
+            print(f"  Country: {entry['Country']}")
+            print(f"  Score: {entry['Ranking Score']}")
+            print(f"  Detail: {entry['Ranking Detail']}")
+            print("---")
+
+
+            import torch
+from torchvision import models, transforms
+from PIL import Image
+import numpy as np
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+from fastapi import FastAPI
+from typing import Dict, Any, List
+
+# --- 1. CONFIGURATION AND INITIALIZATION ---
+# Using the CPU for demonstration. For production, change to 'cuda' or 'mps'
+DEVICE = "cpu" 
+FACE_DB_PATH = "data/leader_embeddings.pt"
+RANKING_MODEL_PATH = "models/geopolitical_score_bert"
+GEOPOLITICAL_NEWS_API_KEY = "YOUR_API_KEY" # Placeholder for a real-time data source
+
+# FastAPI initialization for a web API interface
+app = FastAPI(title="Global Leader Identification and Ranking AI")
+
+# --- 2. DEEP FACE IDENTIFICATION MODULE (Metric Learning/CNN) ---
+
+class FaceIDModel(torch.nn.Module):
+    """
+    Advanced Face Recognition Model based on a pre-trained backbone (e.g., ResNet) 
+    and fine-tuned using Metric Learning (e.g., ArcFace, Triplet Loss).
+    This generates a high-dimensional, highly discriminative face embedding (e.g., 512D).
+    """
+    def __init__(self, embedding_dim=512):
+        super().__init__()
+        # Use a robust CNN backbone (e.g., ResNet50)
+        self.backbone = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
+        # Replace the final classification layer with an embedding layer
+        self.backbone.fc = torch.nn.Linear(self.backbone.fc.in_features, embedding_dim)
+        
+        # Preprocessing transforms (normalization and resizing for ResNet)
+        self.preprocess = transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
+
+    def forward(self, x):
+        return self.backbone(x)
+
+# Load the ID model and database
+ID_MODEL = FaceIDModel().to(DEVICE)
+ID_MODEL.eval()
+
+# Load the known leader embeddings (Conceptual: a Dict mapping Name -> 512D Tensor)
+# In production, this would be a high-performance vector database (e.g., Faiss, Pinecone)
+KNOWN_EMBEDDINGS: Dict[str, torch.Tensor] = {}
+try:
+    # Example structure: {"Name_A": tensor([0.1, 0.2, ...]), "Name_B": tensor([0.5, 0.4, ...])}
+    KNOWN_EMBEDDINGS = torch.load(FACE_DB_PATH) 
+except FileNotFoundError:
+    print(f"Warning: {FACE_DB_PATH} not found. Running with an empty database.")
+
+def get_face_embedding(image_path: str) -> torch.Tensor:
+    """Computes the 512D face embedding for a single face."""
+    try:
+        img = Image.open(image_path).convert("RGB")
+        img_tensor = ID_MODEL.preprocess(img).unsqueeze(0).to(DEVICE)
+        
+        with torch.no_grad():
+            embedding = ID_MODEL(img_tensor)
+        return embedding.squeeze().cpu()
+    except Exception as e:
+        print(f"Error processing image: {e}")
+        return None
+
+def identify_leader_from_embedding(candidate_embedding: torch.Tensor) -> str:
+    """Performs Cosine Similarity search against the known database."""
+    if not KNOWN_EMBEDDINGS:
+        return "Unknown Leader (Database Empty)"
+        
+    best_match_name = "Unknown Leader"
+    min_distance = float('inf')
+    
+    # Cosine distance measures similarity: dist = 1 - CosineSimilarity(A, B)
+    for name, known_emb in KNOWN_EMBEDDINGS.items():
+        # Using Euclidean distance (L2 norm) is common in face recognition, 
+        # but cosine similarity is also widely used for normalized embeddings.
+        distance = torch.norm(candidate_embedding - known_emb).item() 
+        
+        if distance < min_distance:
+            min_distance = distance
+            best_match_name = name
+
+    # Set a strict threshold for identification (e.g., a distance < 0.6)
+    THRESHOLD = 0.6 
+    if min_distance < THRESHOLD:
+        return best_match_name
+    else:
+        return "Unknown Leader"
+
+# --- 3. CONTEXTUAL RANKING MODULE (BERT/NLP) ---
+
+# Load the pre-trained/fine-tuned BERT model and tokenizer for regression
+try:
+    RANKING_TOKENIZER = AutoTokenizer.from_pretrained(RANKING_MODEL_PATH)
+    RANKING_MODEL = AutoModelForSequenceClassification.from_pretrained(RANKING_MODEL_PATH, num_labels=1) # num_labels=1 for regression
+    RANKING_MODEL.to(DEVICE).eval()
+except Exception:
+    print(f"Warning: Could not load Ranking Model from {RANKING_MODEL_PATH}. Using mock function.")
+    RANKING_TOKENIZER = None
+    RANKING_MODEL = None
+
+
+def fetch_geopolitical_context(leader_name: str) -> str:
+    """
+    Conceptual function to simulate fetching real-time data.
+    In reality, this would query news sentiment APIs (e.g., GDELT, Google News)
+    for the last 24-72 hours.
+    """
+    # Placeholder for a REST API call using GEOPOLITICAL_NEWS_API_KEY
+    if "Queen" in leader_name:
+        return "Recent news sentiment: Very high public approval score, few policy changes, focused on ceremonial duties."
+    elif "President" in leader_name:
+        return "Recent news sentiment: High political polarization, major policy speech on climate change, moderate global support."
+    else:
+        return "Recent news: Limited recent coverage in major global indices."
+
+def calculate_influence_score(leader_name: str) -> Dict[str, Any]:
+    """
+    Uses the fine-tuned BERT model to predict a score based on context.
+    The output is a regression value (Influence Score: 0-100).
+    """
+    context = fetch_geopolitical_context(leader_name)
+    
+    if RANKING_MODEL and RANKING_TOKENIZER:
+        # The model is trained to read the context and output a score
+        inputs = RANKING_TOKENIZER(context, return_tensors="pt", truncation=True, padding=True).to(DEVICE)
+        
+        with torch.no_grad():
+            output = RANKING_MODEL(**inputs)
+            # The output logit is the predicted regression score
+            score = torch.sigmoid(output.logits).item() * 100 # Scale the output to 0-100 range
+            
+        return {
+            "score": round(score, 2),
+            "method": "BERT-based Geopolitical Regression",
+            "context_summary": context
+        }
+    else:
+        # Mock calculation if model failed to load
+        base_score = 50 
+        if "Queen" in leader_name: base_score = 95
+        if "President" in leader_name: base_score = 88
+        return {
+            "score": base_score,
+            "method": "MOCK Data Lookup",
+            "context_summary": context
+        }
+
+# --- 4. API ENDPOINT (For Demonstrating Instance Interaction) ---
+
+@app.post("/analyze_leader")
+def analyze_leader(image_path: str, leader_name: str = None) -> Dict[str, Any]:
+    """
+    Processes an image, identifies the leader, and returns their ranking details.
+    """
+    # 1. Image to Embedding (ID)
+    candidate_embedding = get_face_embedding(image_path)
+    if candidate_embedding is None:
+        return {"status": "error", "message": "Failed to generate face embedding from image."}
+        
+    # 2. Identification
+    identified_name = identify_leader_from_embedding(candidate_embedding)
+    
+    if identified_name == "Unknown Leader":
+        return {
+            "status": "success",
+            "identification": "Unknown Leader",
+            "message": "The face could not be matched to any entry in the database."
+        }
+        
+    # 3. Ranking
+    ranking_details = calculate_influence_score(identified_name)
+    
+    return {
+        "status": "success",
+        "leader_name": identified_name,
+        "identification_method": "Metric Learning (L2 Distance)",
+        "ranking_data": ranking_details
+    }
+
+# Example to run the FastAPI app (requires 'uvicorn' installed):
+# if __name__ == "__main__":
+#     import uvicorn
+#     uvicorn.run(app, host="0.0.0.0", port=8000)
