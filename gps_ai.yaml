@@ -1,0 +1,178 @@
+pip install pandas numpy scikit-learn folium
+
+
+
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import IsolationForest
+from sklearn.linear_model import LinearRegression
+import folium
+import time
+import math
+from datetime import datetime
+
+class GPS_AI_Core:
+    def __init__(self):
+        self.data_buffer = []
+        # AI Model for Anomaly Detection (Unsupervised)
+        self.anomaly_detector = IsolationForest(contamination=0.1, random_state=42)
+        self.is_model_trained = False
+    
+    def ingest_data(self, lat, lon, timestamp):
+        """
+        Ingests a new GPS data point.
+        """
+        self.data_buffer.append({
+            'lat': lat,
+            'lon': lon,
+            'timestamp': timestamp
+        })
+
+    def calculate_speed(self, p1, p2):
+        """
+        Calculates speed between two points (m/s) using Haversine distance.
+        """
+        R = 6371000  # Radius of Earth in meters
+        phi1, phi2 = math.radians(p1['lat']), math.radians(p2['lat'])
+        dphi = math.radians(p2['lat'] - p1['lat'])
+        dlambda = math.radians(p2['lon'] - p1['lon'])
+        
+        a = math.sin(dphi/2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda/2)**2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+        distance = R * c
+        
+        time_diff = (p2['timestamp'] - p1['timestamp']).total_seconds()
+        if time_diff == 0: return 0
+        return distance / time_diff
+
+    def train_anomaly_model(self):
+        """
+        Trains the AI model on historical speed/location data to learn 'normal' behavior.
+        """
+        if len(self.data_buffer) < 10:
+            print("[System] Not enough data to train AI model.")
+            return
+
+        df = pd.DataFrame(self.data_buffer)
+        # Feature Engineering: Use Latitude and Longitude for clustering logic
+        X = df[['lat', 'lon']].values
+        self.anomaly_detector.fit(X)
+        self.is_model_trained = True
+        print("[System] AI Anomaly Model Trained Successfully.")
+
+    def predict_next_location(self):
+        """
+        Uses Linear Regression to predict the next likely coordinate based on recent trajectory.
+        """
+        if len(self.data_buffer) < 5: return None
+        
+        df = pd.DataFrame(self.data_buffer[-5:]) # Look at last 5 points
+        df['time_delta'] = (df['timestamp'] - df['timestamp'].min()).dt.total_seconds()
+        
+        X = df[['time_delta']].values
+        y_lat = df['lat'].values
+        y_lon = df['lon'].values
+        
+        # Train simple regressors for Lat and Lon separately
+        reg_lat = LinearRegression().fit(X, y_lat)
+        reg_lon = LinearRegression().fit(X, y_lon)
+        
+        next_time = X[-1][0] + 10 # Predict 10 seconds into future
+        pred_lat = reg_lat.predict([[next_time]])[0]
+        pred_lon = reg_lon.predict([[next_time]])[0]
+        
+        return (pred_lat, pred_lon)
+
+class HUD_Display:
+    def __init__(self):
+        self.header = "=== GPS AI TACTICAL HUD ==="
+    
+    def render(self, current_pos, speed, anomaly_score, predicted_pos):
+        """
+        Simulates a Heads-Up Display output in the console.
+        """
+        status = "NORMAL" if anomaly_score == 1 else "WARNING: ANOMALY DETECTED"
+        color_code = "\033[92m" if status == "NORMAL" else "\033[91m" # Green vs Red ANSI
+        reset_code = "\033[0m"
+        
+        print("\n" + "="*30)
+        print(f"{self.header}")
+        print(f"LOC : {current_pos['lat']:.5f}, {current_pos['lon']:.5f}")
+        print(f"SPD : {speed:.2f} m/s")
+        print(f"PRED: {predicted_pos[0]:.5f}, {predicted_pos[1]:.5f} (t+10s)")
+        print(f"STAT: {color_code}{status}{reset_code}")
+        print("="*30 + "\n")
+
+# --- EXECUTION INSTANCE ---
+
+# 1. Initialize Systems
+gps_system = GPS_AI_Core()
+hud = HUD_Display()
+
+# 2. Simulate GPS Data Stream (Walking path with one GPS glitch)
+simulated_path = [
+    (34.0522, -118.2437), (34.0523, -118.2438), (34.0524, -118.2439), 
+    (34.0525, -118.2440), (34.0526, -118.2441), 
+    (34.0900, -118.2900), # <--- ANOMALY (GPS Teleport Glitch)
+    (34.0527, -118.2442)
+]
+
+start_time = datetime.now()
+
+print("Initializing Mission...")
+
+# 3. Processing Loop
+for i, (lat, lon) in enumerate(simulated_path):
+    # Create timestamp
+    timestamp = start_time + pd.Timedelta(seconds=i*10)
+    
+    # Ingest
+    gps_system.ingest_data(lat, lon, timestamp)
+    
+    # Train AI after first few points
+    if i == 4:
+        gps_system.train_anomaly_model()
+    
+    # Calculate Metrics
+    current_point = {'lat': lat, 'lon': lon, 'timestamp': timestamp}
+    speed = 0
+    if i > 0:
+        prev_point = gps_system.data_buffer[-2]
+        speed = gps_system.calculate_speed(prev_point, current_point)
+    
+    # AI Analysis
+    anomaly_status = 1 # Default to Normal
+    if gps_system.is_model_trained:
+        # Scikit-learn IsolationForest returns -1 for anomaly, 1 for normal
+        anomaly_status = gps_system.anomaly_detector.predict([[lat, lon]])[0]
+    
+    # Prediction
+    prediction = gps_system.predict_next_location()
+    if not prediction: prediction = (0.0, 0.0)
+    
+    # Render HUD
+    hud.render(current_point, speed, anomaly_status, prediction)
+    
+    time.sleep(0.5) # Fast forward simulation
+
+# 4. Generate Post-Mission Map
+print("[System] Generating Tactical Map...")
+m = folium.Map(location=[34.0522, -118.2437], zoom_start=15)
+
+# Plot actual path
+path_coords = [(p['lat'], p['lon']) for p in gps_system.data_buffer]
+folium.PolyLine(path_coords, color="blue", weight=2.5, opacity=1).add_to(m)
+
+# Highlight anomalies
+for i, point in enumerate(gps_system.data_buffer):
+    if i > 4: # Only check after training
+         score = gps_system.anomaly_detector.predict([[point['lat'], point['lon']]])[0]
+         if score == -1:
+             folium.Marker(
+                 [point['lat'], point['lon']], 
+                 popup="Anomaly Detected", 
+                 icon=folium.Icon(color='red', icon='warning-sign')
+             ).add_to(m)
+
+m.save("tactical_gps_map.html")
+print("[System] Map saved to 'tactical_gps_map.html'")
