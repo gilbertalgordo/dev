@@ -1,0 +1,1768 @@
+-- migrations.sql
+CREATE TABLE users (
+  id UUID PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE,
+  name TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+CREATE TABLE slas (
+  id UUID PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  threshold_seconds BIGINT NOT NULL, -- time allowed from created_at
+  penalty_rate_per_second NUMERIC(18,6) NOT NULL, -- currency units per second
+  min_penalty NUMERIC(18,2) DEFAULT 0,
+  max_penalty NUMERIC(18,2),
+  grace_seconds BIGINT DEFAULT 0,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+CREATE TABLE tasks (
+  id UUID PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT,
+  owner_id UUID REFERENCES users(id),
+  sla_id UUID REFERENCES slas(id),
+  status TEXT NOT NULL DEFAULT 'open', -- open | in_progress | completed | cancelled
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  completed_at TIMESTAMP WITH TIME ZONE,
+  metadata JSONB DEFAULT '{}'::jsonb
+);
+
+CREATE TABLE penalties (
+  id UUID PRIMARY KEY,
+  task_id UUID REFERENCES tasks(id),
+  sla_id UUID REFERENCES slas(id),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  computed_until TIMESTAMP WITH TIME ZONE NOT NULL,
+  amount NUMERIC(18,2) NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  settled BOOLEAN DEFAULT false,
+  reason TEXT,
+  metadata JSONB DEFAULT '{}'::jsonb
+);
+
+CREATE TABLE audit_logs (
+  id UUID PRIMARY KEY,
+  entity_type TEXT NOT NULL,
+  entity_id UUID,
+  action TEXT NOT NULL,
+  details JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+
+# main.py
+import uuid
+import decimal
+from datetime import datetime, timezone, timedelta
+
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+from pydantic import BaseModel, Field, EmailStr
+from typing import Optional, List
+import databases
+import sqlalchemy
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+from apscheduler.schedulers.background import BackgroundScheduler
+import smtplib
+import json
+import os
+import requests
+
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:password@db:5432/antiredtape")
+
+database = databases.Database(DATABASE_URL)
+metadata = sqlalchemy.MetaData()
+
+users = sqlalchemy.Table(
+    "users", metadata,
+    sqlalchemy.Column("id", UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
+    sqlalchemy.Column("email", sqlalchemy.String, nullable=False, unique=True),
+    sqlalchemy.Column("name", sqlalchemy.String),
+    sqlalchemy.Column("created_at", sqlalchemy.DateTime(timezone=True), server_default=sqlalchemy.func.now())
+)
+
+slas = sqlalchemy.Table(
+    "slas", metadata,
+    sqlalchemy.Column("id", UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
+    sqlalchemy.Column("name", sqlalchemy.String, nullable=False),
+    sqlalchemy.Column("description", sqlalchemy.Text),
+    sqlalchemy.Column("threshold_seconds", sqlalchemy.BigInteger, nullable=False),
+    sqlalchemy.Column("penalty_rate_per_second", sqlalchemy.Numeric(18,6), nullable=False),
+    sqlalchemy.Column("min_penalty", sqlalchemy.Numeric(18,2), default=0),
+    sqlalchemy.Column("max_penalty", sqlalchemy.Numeric(18,2)),
+    sqlalchemy.Column("grace_seconds", sqlalchemy.BigInteger, default=0),
+    sqlalchemy.Column("created_at", sqlalchemy.DateTime(timezone=True), server_default=sqlalchemy.func.now())
+)
+
+tasks = sqlalchemy.Table(
+    "tasks", metadata,
+    sqlalchemy.Column("id", UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
+    sqlalchemy.Column("title", sqlalchemy.String, nullable=False),
+    sqlalchemy.Column("description", sqlalchemy.Text),
+    sqlalchemy.Column("owner_id", UUID(as_uuid=True), sqlalchemy.ForeignKey("users.id")),
+    sqlalchemy.Column("sla_id", UUID(as_uuid=True), sqlalchemy.ForeignKey("slas.id")),
+    sqlalchemy.Column("status", sqlalchemy.String, nullable=False, default="open"),
+    sqlalchemy.Column("created_at", sqlalchemy.DateTime(timezone=True), server_default=sqlalchemy.func.now()),
+    sqlalchemy.Column("completed_at", sqlalchemy.DateTime(timezone=True), nullable=True),
+    sqlalchemy.Column("metadata", JSONB, default={})
+)
+
+penalties = sqlalchemy.Table(
+    "penalties", metadata,
+    sqlalchemy.Column("id", UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
+    sqlalchemy.Column("task_id", UUID(as_uuid=True), sqlalchemy.ForeignKey("tasks.id")),
+    sqlalchemy.Column("sla_id", UUID(as_uuid=True), sqlalchemy.ForeignKey("slas.id")),
+    sqlalchemy.Column("created_at", sqlalchemy.DateTime(timezone=True), server_default=sqlalchemy.func.now()),
+    sqlalchemy.Column("computed_until", sqlalchemy.DateTime(timezone=True), nullable=False),
+    sqlalchemy.Column("amount", sqlalchemy.Numeric(18,2), nullable=False),
+    sqlalchemy.Column("currency", sqlalchemy.String, nullable=False, default="USD"),
+    sqlalchemy.Column("settled", sqlalchemy.Boolean, default=False),
+    sqlalchemy.Column("reason", sqlalchemy.Text),
+    sqlalchemy.Column("metadata", JSONB, default={})
+)
+
+audit_logs = sqlalchemy.Table(
+    "audit_logs", metadata,
+    sqlalchemy.Column("id", UUID(as_uuid=True), primary_key=True, default=uuid.uuid4),
+    sqlalchemy.Column("entity_type", sqlalchemy.String, nullable=False),
+    sqlalchemy.Column("entity_id", UUID(as_uuid=True), nullable=True),
+    sqlalchemy.Column("action", sqlalchemy.String, nullable=False),
+    sqlalchemy.Column("details", JSONB, default={}),
+    sqlalchemy.Column("created_at", sqlalchemy.DateTime(timezone=True), server_default=sqlalchemy.func.now())
+)
+
+engine = sqlalchemy.create_engine(DATABASE_URL)
+metadata.create_all(engine)
+
+app = FastAPI(title="Anti-Red-Tape Service")
+
+# ---------- Pydantic models ----------
+class UserCreate(BaseModel):
+    email: EmailStr
+    name: Optional[str]
+
+class SLACreate(BaseModel):
+    name: str
+    threshold_seconds: int
+    penalty_rate_per_second: decimal.Decimal = Field(..., description="Currency units per second")
+    min_penalty: Optional[decimal.Decimal] = decimal.Decimal("0.00")
+    max_penalty: Optional[decimal.Decimal]
+    grace_seconds: Optional[int] = 0
+
+class TaskCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    owner_id: Optional[uuid.UUID] = None
+    sla_id: Optional[uuid.UUID] = None
+    metadata: Optional[dict] = {}
+
+# ---------- Utility functions ----------
+async def log_audit(entity_type: str, entity_id, action: str, details: dict):
+    query = audit_logs.insert().values(
+        id=uuid.uuid4(),
+        entity_type=entity_type,
+        entity_id=entity_id,
+        action=action,
+        details=details
+    )
+    await database.execute(query)
+
+def calculate_penalty_amount(now: datetime, created_at: datetime, sla_row) -> decimal.Decimal:
+    # sla_row: dict or RowProxy
+    threshold = timedelta(seconds=int(sla_row["threshold_seconds"]))
+    grace = timedelta(seconds=int(sla_row.get("grace_seconds", 0)))
+    allowed_until = created_at + threshold + grace
+    if now <= allowed_until:
+        return decimal.Decimal("0.00")
+    over_seconds = (now - allowed_until).total_seconds()
+    rate = decimal.Decimal(sla_row["penalty_rate_per_second"])
+    raw = (decimal.Decimal(over_seconds) * rate).quantize(decimal.Decimal("0.01"))
+    if sla_row.get("min_penalty") is not None:
+        raw = max(raw, decimal.Decimal(str(sla_row.get("min_penalty"))))
+    if sla_row.get("max_penalty") is not None:
+        raw = min(raw, decimal.Decimal(str(sla_row.get("max_penalty"))))
+    return raw
+
+# Notification placeholders (implement your own system)
+def send_email(to_email: str, subject: str, body: str):
+    # Placeholder SMTP. Replace with transactional email provider.
+    smtp_host = os.getenv("SMTP_HOST")
+    if not smtp_host:
+        # log only
+        print(f"[email disabled] to={to_email} subject={subject} body={body}")
+        return
+    s = smtplib.SMTP(smtp_host)
+    s.sendmail("no-reply@antiredtape.local", [to_email], f"Subject: {subject}\n\n{body}")
+    s.quit()
+
+def call_payment_webhook(penalty_id: uuid.UUID, amount: decimal.Decimal, currency: str, webhook_url: str):
+    payload = {
+        "penalty_id": str(penalty_id),
+        "amount": str(amount),
+        "currency": currency
+    }
+    # This must be a legal, secured endpoint that has prior authorization to accept settlement requests
+    resp = requests.post(webhook_url, json=payload, timeout=10)
+    return resp.status_code, resp.text
+
+# ---------- Penalty scanner job ----------
+async def scan_and_issue_penalties():
+    now = datetime.now(timezone.utc)
+    # Find open tasks that may be overdue and that don't have a penalty for the current computed_until
+    # Simpler: for each open/in_progress task with SLA, compute penalty; if amount > 0 and no penalty record with computed_until >= now (idempotency), insert penalty
+    query = sqlalchemy.select([
+        tasks.c.id, tasks.c.created_at, tasks.c.status, tasks.c.owner_id, tasks.c.sla_id
+    ]).where(
+        sqlalchemy.and_(
+            tasks.c.sla_id.isnot(None),
+            tasks.c.status.in_(["open", "in_progress"])
+        )
+    )
+    rows = await database.fetch_all(query)
+    for r in rows:
+        sla_row = await database.fetch_one(sqlalchemy.select([slas]).where(slas.c.id == r["sla_id"]))
+        if sla_row is None:
+            continue
+        amount = calculate_penalty_amount(now, r["created_at"], sla_row)
+        if amount <= decimal.Decimal("0.00"):
+            continue
+        # idempotent creation: has there been a penalty created for this task with computed_until >= now?
+        exists_q = sqlalchemy.select([penalties.c.id]).where(
+            sqlalchemy.and_(
+                penalties.c.task_id == r["id"],
+                penalties.c.computed_until >= now
+            )
+        ).limit(1)
+        exists = await database.fetch_one(exists_q)
+        if exists:
+            # already issued for this interval
+            continue
+        # create penalty
+        insert = penalties.insert().values(
+            id=uuid.uuid4(),
+            task_id=r["id"],
+            sla_id=r["sla_id"],
+            computed_until=now,
+            amount=amount,
+            currency="USD",
+            settled=False,
+            reason=f"Overdue by SLA: {sla_row['name']}",
+            metadata={"snapshot": {"task_created_at": r["created_at"].isoformat()}}
+        )
+        await database.execute(insert)
+        await log_audit("penalty", None, "created", {"task_id": str(r["id"]), "amount": str(amount)})
+        # notify owner
+        if r["owner_id"]:
+            owner = await database.fetch_one(sqlalchemy.select([users]).where(users.c.id == r["owner_id"]))
+            if owner and owner["email"]:
+                send_email(owner["email"],
+                           "Penalty issued: task overdue",
+                           f"Task {r['id']} has incurred penalty {amount} USD. Reason: {sla_row['name']}.")
+        # optionally call payment webhook if configured in SLA metadata
+        # SLA metadata might contain 'payment_webhook' in real systems; here we look for SLA-specific webhook
+        sla_metadata = sla_row.get("metadata") if "metadata" in sla_row else None
+        webhook_url = None
+        if sla_metadata and isinstance(sla_metadata, dict):
+            webhook_url = sla_metadata.get("payment_webhook")
+        if webhook_url:
+            try:
+                status, text = call_payment_webhook(insert.parameters["id"], amount, "USD", webhook_url)
+                await log_audit("penalty", None, "webhook_called", {"status": status, "resp": text})
+            except Exception as exc:
+                await log_audit("penalty", None, "webhook_failed", {"error": str(exc)})
+
+# Scheduler setup
+scheduler = BackgroundScheduler()
+scheduler.add_job(lambda: database._loop.create_task(scan_and_issue_penalties()), 'interval', seconds=30, id='penalty_scanner')
+
+@app.on_event("startup")
+async def startup():
+    await database.connect()
+    scheduler.start()
+
+@app.on_event("shutdown")
+async def shutdown():
+    scheduler.shutdown(wait=False)
+    await database.disconnect()
+
+# ---------- API endpoints ----------
+@app.post("/users", response_model=dict)
+async def create_user(payload: UserCreate):
+    uid = uuid.uuid4()
+    query = users.insert().values(id=uid, email=payload.email, name=payload.name)
+    try:
+        await database.execute(query)
+    except Exception as e:
+        raise HTTPException(400, str(e))
+    await log_audit("user", uid, "created", {"email": payload.email})
+    return {"id": str(uid)}
+
+@app.post("/slas", response_model=dict)
+async def create_sla(payload: SLACreate):
+    sid = uuid.uuid4()
+    query = slas.insert().values(
+        id=sid,
+        name=payload.name,
+        threshold_seconds=payload.threshold_seconds,
+        penalty_rate_per_second=str(payload.penalty_rate_per_second),
+        min_penalty=str(payload.min_penalty) if payload.min_penalty is not None else None,
+        max_penalty=str(payload.max_penalty) if payload.max_penalty is not None else None,
+        grace_seconds=payload.grace_seconds
+    )
+    await database.execute(query)
+    await log_audit("sla", sid, "created", payload.dict())
+    return {"id": str(sid)}
+
+@app.post("/tasks", response_model=dict)
+async def create_task(payload: TaskCreate):
+    tid = uuid.uuid4()
+    query = tasks.insert().values(
+        id=tid,
+        title=payload.title,
+        description=payload.description,
+        owner_id=payload.owner_id,
+        sla_id=payload.sla_id,
+        metadata=payload.metadata
+    )
+    await database.execute(query)
+    await log_audit("task", tid, "created", payload.dict())
+    return {"id": str(tid)}
+
+@app.post("/tasks/{task_id}/complete")
+async def complete_task(task_id: uuid.UUID, background: BackgroundTasks):
+    q = tasks.update().where(tasks.c.id == task_id).values(status="completed", completed_at=datetime.now(timezone.utc))
+    r = await database.execute(q)
+    await log_audit("task", task_id, "completed", {"completed_at": datetime.now(timezone.utc).isoformat()})
+    # optionally create final penalty snapshot if overdue
+    await database.fetch_all()  # no-op to keep things consistent
+    return {"ok": True}
+
+@app.get("/penalties/unsettled", response_model=List[dict])
+async def list_unsettled_penalties():
+    q = sqlalchemy.select([penalties]).where(penalties.c.settled == False)
+    rows = await database.fetch_all(q)
+    return [dict(r) for r in rows]
+
+# endpoint to settle a penalty (must be called by authorized financial service)
+class SettlePayload(BaseModel):
+    penalty_id: uuid.UUID
+    settled: bool = True
+    settled_by: Optional[str] = None
+    note: Optional[str] = None
+
+@app.post("/penalties/settle")
+async def settle_penalty(payload: SettlePayload):
+    q = penalties.update().where(penalties.c.id == payload.penalty_id).values(settled=payload.settled, metadata=sqlalchemy.func.jsonb_set(penalties.c.metadata, '{settled_by}', f'"{payload.settled_by}"', True))
+    await database.execute(q)
+    await log_audit("penalty", payload.penalty_id, "settled" if payload.settled else "unsettled", {"by": payload.settled_by, "note": payload.note})
+    return {"ok": True}
+
+
+    # docker-compose.yml
+version: '3.8'
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: antiredtape
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+  app:
+    build: .
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      DATABASE_URL: postgresql://postgres:password@db:5432/antiredtape
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+volumes:
+  pgdata:
+
+
+  {
+  "name": "Standard 72-hour SLA",
+  "threshold_seconds": 259200,
+  "grace_seconds": 3600,
+  "penalty_rate_per_second": "0.0015",
+  "min_penalty": "5.00",
+  "max_penalty": "500.00"
+}
+
+
+# antiredtape.py
+"""
+Anti-Red-Tape service (single-file reference implementation)
+Run: uvicorn antiredtape:app --reload
+"""
+import uuid
+import decimal
+from datetime import datetime, timezone, timedelta
+from typing import Optional, List, Dict, Any
+
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+from pydantic import BaseModel, Field, EmailStr
+import sqlalchemy
+from sqlalchemy import create_engine, MetaData, Table, Column, String, \
+    DateTime, Boolean, Numeric, Integer, Text, JSON
+from sqlalchemy.dialects.sqlite import DATETIME as SQLITE_DATETIME
+from sqlalchemy.sql import select, and_
+import databases
+import os
+import json
+import requests
+
+# ---------------------------
+# Config (swap DB URL in production)
+# ---------------------------
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./antiredtape.db")
+NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL")  # placeholder
+APP_CURRENCY = "USD"
+
+# ---------------------------
+# Database / schema (simple)
+# ---------------------------
+database = databases.Database(DATABASE_URL)
+metadata = MetaData()
+
+users = Table(
+    "users", metadata,
+    Column("id", String, primary_key=True),
+    Column("email", String, nullable=False, unique=True),
+    Column("name", String, nullable=True),
+    Column("created_at", DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+)
+
+slas = Table(
+    "slas", metadata,
+    Column("id", String, primary_key=True),
+    Column("name", String, nullable=False),
+    Column("description", Text, nullable=True),
+    Column("threshold_seconds", Integer, nullable=False),
+    Column("strategy", String, nullable=False, default="linear"),  # 'linear' | 'step'
+    Column("strategy_params", JSON, nullable=True),  # JSON with strategy-specific parameters
+    Column("grace_seconds", Integer, nullable=False, default=0),
+    Column("created_at", DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+)
+
+tasks = Table(
+    "tasks", metadata,
+    Column("id", String, primary_key=True),
+    Column("title", String, nullable=False),
+    Column("description", Text, nullable=True),
+    Column("owner_id", String, nullable=True),
+    Column("sla_id", String, nullable=True),
+    Column("status", String, nullable=False, default="open"),  # open|in_progress|completed|cancelled
+    Column("created_at", DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)),
+    Column("completed_at", DateTime(timezone=True), nullable=True),
+    Column("metadata", JSON, nullable=True, default={})
+)
+
+penalties = Table(
+    "penalties", metadata,
+    Column("id", String, primary_key=True),
+    Column("task_id", String, nullable=False),
+    Column("sla_id", String, nullable=False),
+    Column("created_at", DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)),
+    Column("computed_until", DateTime(timezone=True), nullable=False),
+    Column("amount", Numeric(18, 2), nullable=False),
+    Column("currency", String, nullable=False, default=APP_CURRENCY),
+    Column("settled", Boolean, nullable=False, default=False),
+    Column("reason", Text, nullable=True),
+    Column("metadata", JSON, nullable=True, default={})
+)
+
+audit_logs = Table(
+    "audit_logs", metadata,
+    Column("id", String, primary_key=True),
+    Column("entity_type", String, nullable=False),
+    Column("entity_id", String, nullable=True),
+    Column("action", String, nullable=False),
+    Column("details", JSON, nullable=True, default={}),
+    Column("created_at", DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+)
+
+# Create engine and tables (synchronous SQLAlchemy for DDL)
+engine = create_engine(str(DATABASE_URL).replace("+aiosqlite", ""), connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {})
+metadata.create_all(engine)
+
+# ---------------------------
+# FastAPI app
+# ---------------------------
+app = FastAPI(title="Anti-Red-Tape Service")
+
+# ---------------------------
+# Pydantic models (API)
+# ---------------------------
+class UserCreate(BaseModel):
+    email: EmailStr
+    name: Optional[str] = None
+
+class SLACreate(BaseModel):
+    name: str
+    threshold_seconds: int
+    strategy: Optional[str] = "linear"  # 'linear' or 'step'
+    strategy_params: Optional[dict] = {}
+    grace_seconds: Optional[int] = 0
+
+class TaskCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    owner_id: Optional[str] = None
+    sla_id: Optional[str] = None
+    metadata: Optional[dict] = {}
+
+# ---------------------------
+# Utilities: audit & notification stubs
+# ---------------------------
+async def log_audit(entity_type: str, entity_id: Optional[str], action: str, details: Dict[str, Any]):
+    q = audit_logs.insert().values(
+        id=str(uuid.uuid4()), entity_type=entity_type, entity_id=entity_id,
+        action=action, details=details, created_at=datetime.now(timezone.utc)
+    )
+    await database.execute(q)
+
+def send_email(to_email: str, subject: str, body: str):
+    # Placeholder: print or integrate with real email provider
+    if not to_email:
+        print("[notify] no recipient configured")
+        return
+    print(f"[email] to={to_email} subject={subject}\n{body}")
+
+def call_webhook(url: str, payload: dict):
+    # Simple synchronous call; protect in production with retries/auth
+    try:
+        resp = requests.post(url, json=payload, timeout=8)
+        return resp.status_code, resp.text
+    except Exception as e:
+        return None, str(e)
+
+# ---------------------------
+# Penalty strategies
+# ---------------------------
+# Each strategy receives: now (datetime), created_at (datetime), sla_row (dict), strategy_params (dict)
+# returns Decimal amount
+def strategy_linear(now: datetime, created_at: datetime, sla_row: dict, params: dict) -> decimal.Decimal:
+    threshold = timedelta(seconds=int(sla_row["threshold_seconds"]))
+    grace = timedelta(seconds=int(sla_row.get("grace_seconds", 0)))
+    allowed_until = created_at + threshold + grace
+    if now <= allowed_until:
+        return decimal.Decimal("0.00")
+    over_seconds = (now - allowed_until).total_seconds()
+    rate = decimal.Decimal(str(params.get("rate_per_second", "0.001")))  # default fallback
+    raw = (decimal.Decimal(over_seconds) * rate).quantize(decimal.Decimal("0.01"))
+    min_pen = decimal.Decimal(str(params.get("min_penalty", "0.00")))
+    max_pen = params.get("max_penalty")
+    if max_pen is not None:
+        max_pen = decimal.Decimal(str(max_pen))
+        raw = min(raw, max_pen)
+    raw = max(raw, min_pen)
+    return raw
+
+def strategy_step(now: datetime, created_at: datetime, sla_row: dict, params: dict) -> decimal.Decimal:
+    """
+    params example:
+    {
+      "stages": [
+         {"after_seconds": 0, "charge": "50.00"},     # immediate fixed when overdue
+         {"after_seconds": 86400, "charge": "25.00"}, # additional per-day after 1 day
+      ],
+      "per_period_seconds": 86400  # if a stage is per-period, how long is the period
+    }
+    Interpretation: sum applicable charges based on how long overdue; supports per-period charges.
+    """
+    threshold = timedelta(seconds=int(sla_row["threshold_seconds"]))
+    grace = timedelta(seconds=int(sla_row.get("grace_seconds", 0)))
+    allowed_until = created_at + threshold + grace
+    if now <= allowed_until:
+        return decimal.Decimal("0.00")
+    overdue_seconds = int((now - allowed_until).total_seconds())
+    total = decimal.Decimal("0.00")
+    stages = params.get("stages", [])
+    per_period = params.get("per_period_seconds", 86400)
+    for s in stages:
+        after = int(s.get("after_seconds", 0))
+        charge = decimal.Decimal(str(s.get("charge", "0.00")))
+        mode = s.get("mode", "oneoff")  # 'oneoff' or 'per_period'
+        if overdue_seconds >= after:
+            if mode == "oneoff":
+                total += charge
+            elif mode == "per_period":
+                # how many periods since after
+                seconds_since_stage = overdue_seconds - after
+                periods = (seconds_since_stage // per_period) + 1
+                total += charge * decimal.Decimal(periods)
+    # min/max clamps
+    min_pen = decimal.Decimal(str(params.get("min_penalty", "0.00")))
+    max_pen = params.get("max_penalty")
+    if max_pen is not None:
+        max_pen = decimal.Decimal(str(max_pen))
+        total = min(total, max_pen)
+    total = max(total, min_pen)
+    return total.quantize(decimal.Decimal("0.01"))
+
+STRATEGIES = {
+    "linear": strategy_linear,
+    "step": strategy_step
+}
+
+# ---------------------------
+# Core calculation & scanner
+# ---------------------------
+
+async def calculate_penalty_for_task(task_row):
+    """
+    Returns Decimal penalty amount (0.00 if none) and reason string.
+    """
+    now = datetime.now(timezone.utc)
+    sla_row = await database.fetch_one(select([slas]).where(slas.c.id == task_row["sla_id"]))
+    if not sla_row:
+        return decimal.Decimal("0.00"), "No SLA"
+
+    strategy_name = sla_row["strategy"] or "linear"
+    strategy_fn = STRATEGIES.get(strategy_name)
+    if not strategy_fn:
+        return decimal.Decimal("0.00"), f"Unknown strategy {strategy_name}"
+
+    # Merge SLA strategy params: SLA row store plus default
+    strategy_params = sla_row.get("strategy_params") or {}
+    amount = strategy_fn(now, task_row["created_at"], dict(sla_row), strategy_params)
+    return amount, f"Strategy={strategy_name}"
+
+async def scan_and_issue_penalties(run_once: bool = True) -> Dict[str, Any]:
+    """
+    Scan open tasks and issue penalty records if required.
+    Idempotency: we will not create a penalty if there exists a penalty record
+    with computed_until >= now for the task (prevents duplicate inserts for same moment).
+    Returns summary dict.
+    """
+    now = datetime.now(timezone.utc)
+    summary = {"scanned": 0, "issued": 0, "skipped": 0}
+    q = select([tasks]).where(and_(tasks.c.sla_id.isnot(None), tasks.c.status.in_(["open", "in_progress"])))
+    rows = await database.fetch_all(q)
+    summary["scanned"] = len(rows)
+    for r in rows:
+        amount, reason = await calculate_penalty_for_task(r)
+        if amount <= decimal.Decimal("0.00"):
+            summary["skipped"] += 1
+            continue
+        # idempotency check: any penalty for this task with computed_until >= now?
+        exists_q = select([penalties.c.id]).where(and_(penalties.c.task_id == r["id"], penalties.c.computed_until >= now)).limit(1)
+        exists = await database.fetch_one(exists_q)
+        if exists:
+            summary["skipped"] += 1
+            continue
+        # create penalty
+        pid = str(uuid.uuid4())
+        insert = penalties.insert().values(
+            id=pid,
+            task_id=r["id"],
+            sla_id=r["sla_id"],
+            created_at=now,
+            computed_until=now,
+            amount=amount,
+            currency=APP_CURRENCY,
+            settled=False,
+            reason=reason,
+            metadata={"snapshot": {"task_created_at": r["created_at"].isoformat()}}
+        )
+        await database.execute(insert)
+        await log_audit("penalty", pid, "created", {"task_id": r["id"], "amount": str(amount), "reason": reason})
+        # notify owner (best-effort)
+        owner = None
+        if r.get("owner_id"):
+            owner = await database.fetch_one(select([users]).where(users.c.id == r["owner_id"]))
+        if owner and owner.get("email"):
+            send_email(owner["email"], "Penalty issued (task overdue)", f"Task {r['id']} incurred {amount} {APP_CURRENCY}. Reason: {reason}")
+        # optional SLA webhook: if SLA.strategy_params contains 'payment_webhook' we call it (do NOT settle automatically)
+        sla_row = await database.fetch_one(select([slas]).where(slas.c.id == r["sla_id"]))
+        webhook = None
+        try:
+            webhook = (sla_row.get("strategy_params") or {}).get("payment_webhook")
+        except Exception:
+            webhook = None
+        if webhook:
+            payload = {"penalty_id": pid, "task_id": r["id"], "amount": str(amount), "currency": APP_CURRENCY}
+            status, resp = call_webhook(webhook, payload)
+            await log_audit("penalty", pid, "webhook_called", {"url": webhook, "status": status, "resp": resp})
+        summary["issued"] += 1
+    return summary
+
+# ---------------------------
+# API endpoints
+# ---------------------------
+
+@app.on_event("startup")
+async def startup():
+    await database.connect()
+
+@app.on_event("shutdown")
+async def shutdown():
+    await database.disconnect()
+
+@app.post("/users", response_model=dict)
+async def create_user(u: UserCreate):
+    uid = str(uuid.uuid4())
+    q = users.insert().values(id=uid, email=u.email, name=u.name, created_at=datetime.now(timezone.utc))
+    try:
+        await database.execute(q)
+    except Exception as e:
+        raise HTTPException(400, str(e))
+    await log_audit("user", uid, "created", {"email": u.email})
+    return {"id": uid}
+
+@app.post("/slas", response_model=dict)
+async def create_sla(s: SLACreate):
+    sid = str(uuid.uuid4())
+    q = slas.insert().values(
+        id=sid, name=s.name, description=None,
+        threshold_seconds=s.threshold_seconds,
+        strategy=s.strategy,
+        strategy_params=s.strategy_params or {},
+        grace_seconds=s.grace_seconds,
+        created_at=datetime.now(timezone.utc)
+    )
+    await database.execute(q)
+    await log_audit("sla", sid, "created", {"payload": s.dict()})
+    return {"id": sid}
+
+@app.post("/tasks", response_model=dict)
+async def create_task(t: TaskCreate):
+    tid = str(uuid.uuid4())
+    q = tasks.insert().values(
+        id=tid, title=t.title, description=t.description,
+        owner_id=t.owner_id, sla_id=t.sla_id, status="open",
+        created_at=datetime.now(timezone.utc), metadata=t.metadata or {}
+    )
+    await database.execute(q)
+    await log_audit("task", tid, "created", {"payload": t.dict()})
+    return {"id": tid}
+
+@app.post("/tasks/{task_id}/complete", response_model=dict)
+async def complete_task(task_id: str):
+    upd = tasks.update().where(tasks.c.id == task_id).values(status="completed", completed_at=datetime.now(timezone.utc))
+    await database.execute(upd)
+    await log_audit("task", task_id, "completed", {"completed_at": datetime.now(timezone.utc).isoformat()})
+    return {"ok": True}
+
+@app.get("/penalties/unsettled", response_model=List[dict])
+async def list_unsettled_penalties():
+    rows = await database.fetch_all(select([penalties]).where(penalties.c.settled == False))
+    return [dict(r) for r in rows]
+
+class SettlePayload(BaseModel):
+    penalty_id: str
+    settled_by: Optional[str] = None
+    note: Optional[str] = None
+
+@app.post("/penalties/settle", response_model=dict)
+async def settle_penalty(p: SettlePayload):
+    # This endpoint should be protected in production (RBAC, auth, audit)
+    upd = penalties.update().where(penalties.c.id == p.penalty_id).values(settled=True, metadata={"settled_by": p.settled_by, "note": p.note})
+    await database.execute(upd)
+    await log_audit("penalty", p.penalty_id, "settled", {"by": p.settled_by, "note": p.note})
+    return {"ok": True}
+
+@app.post("/scanner/run", response_model=dict)
+async def run_scanner(background: BackgroundTasks = None):
+    """
+    Run the scanner immediately. Use this as a worker webhook or cron target.
+    For production, run this from a scheduled job / dedicated worker process.
+    """
+    # We run the scan synchronously here and return the result.
+    res = await scan_and_issue_penalties()
+    return res
+
+# ---------------------------
+# Example usage notes (not executed)
+# ---------------------------
+"""
+Examples:
+
+1) Create an SLA (linear)
+POST /slas
+{
+  "name":"Standard 72hr",
+  "threshold_seconds":259200,
+  "strategy":"linear",
+  "strategy_params": {"rate_per_second":"0.0015", "min_penalty":"5.00", "max_penalty":"500.00"},
+  "grace_seconds":3600
+}
+
+2) Create a Task with sla_id returned above.
+
+3) Call POST /scanner/run periodically (cron, kubernetes cronjob, or a worker process).
+   The scanner will create an auditable penalty record when overdue.
+
+Security & production:
+- Protect endpoints (OAuth2 / API keys / RBAC).
+- Replace email/webhook placeholders with robust providers and signed webhooks.
+- Use Postgres and true migrations for production.
+- Provide dispute UI / manual review before settlement.
+"""
+
+
+# antiredtape_refined.py
+"""
+Anti–Red-Tape Service (single-file reference)
+Run: uvicorn antiredtape_refined:app --reload
+Notes:
+ - Replace placeholder notify/webhook code with your providers (SES/SendGrid, Stripe/Bank API) and secure webhooks.
+ - Protect all sensitive endpoints in production (OAuth2/JWT + RBAC).
+ - Use Postgres in production; this example defaults to SQLite for convenience.
+"""
+
+import os
+import uuid
+import decimal
+import time
+import json
+from typing import Optional, Dict, Any, List
+from datetime import datetime, timezone, timedelta
+
+import requests
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from pydantic import BaseModel, Field, EmailStr
+import sqlalchemy
+from sqlalchemy import (
+    Table, Column, String, Integer, Numeric, Boolean, DateTime, Text, JSON, create_engine, MetaData
+)
+import databases
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+# ---------- Config ----------
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./antiredtape.db")
+APP_CURRENCY = os.getenv("APP_CURRENCY", "USD")
+SCANNER_INTERVAL_SECONDS = int(os.getenv("SCANNER_INTERVAL_SECONDS", "60"))  # runs every minute by default
+NOTIFY_ENABLED = os.getenv("NOTIFY_ENABLED", "false").lower() == "true"
+# webhook retry configuration
+WEBHOOK_RETRIES = int(os.getenv("WEBHOOK_RETRIES", "3"))
+WEBHOOK_RETRY_DELAY = int(os.getenv("WEBHOOK_RETRY_DELAY", "5"))  # seconds
+
+# ---------- Database / Schema ----------
+database = databases.Database(DATABASE_URL)
+metadata = MetaData()
+
+users = Table(
+    "users", metadata,
+    Column("id", String, primary_key=True),
+    Column("email", String, nullable=False, unique=True),
+    Column("name", String, nullable=True),
+    Column("created_at", DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+)
+
+slas = Table(
+    "slas", metadata,
+    Column("id", String, primary_key=True),
+    Column("name", String, nullable=False),
+    Column("description", Text, nullable=True),
+    Column("threshold_seconds", Integer, nullable=False),
+    Column("strategy", String, nullable=False, default="linear"),  # 'linear' | 'step' | 'capped_daily'
+    Column("strategy_params", JSON, nullable=True, default={}),
+    Column("grace_seconds", Integer, nullable=False, default=0),
+    Column("created_at", DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+)
+
+tasks = Table(
+    "tasks", metadata,
+    Column("id", String, primary_key=True),
+    Column("title", String, nullable=False),
+    Column("description", Text, nullable=True),
+    Column("owner_id", String, nullable=True),
+    Column("sla_id", String, nullable=True),
+    Column("status", String, nullable=False, default="open"),  # open, in_progress, completed, cancelled
+    Column("created_at", DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)),
+    Column("completed_at", DateTime(timezone=True), nullable=True),
+    Column("metadata", JSON, nullable=True, default={})
+)
+
+penalties = Table(
+    "penalties", metadata,
+    Column("id", String, primary_key=True),
+    Column("task_id", String, nullable=False),
+    Column("sla_id", String, nullable=False),
+    Column("created_at", DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)),
+    Column("computed_until", DateTime(timezone=True), nullable=False),
+    Column("amount", Numeric(18, 2), nullable=False),
+    Column("currency", String, nullable=False, default=APP_CURRENCY),
+    Column("settled", Boolean, nullable=False, default=False),
+    Column("disputed", Boolean, nullable=False, default=False),
+    Column("reason", Text, nullable=True),
+    Column("metadata", JSON, nullable=True, default={})
+)
+
+audit_logs = Table(
+    "audit_logs", metadata,
+    Column("id", String, primary_key=True),
+    Column("entity_type", String, nullable=False),
+    Column("entity_id", String, nullable=True),
+    Column("action", String, nullable=False),
+    Column("details", JSON, nullable=True, default={}),
+    Column("created_at", DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+)
+
+# Create tables for quick demo (use alembic in production)
+engine = create_engine(str(DATABASE_URL).replace("+aiosqlite", ""), connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {})
+metadata.create_all(engine)
+
+# ---------- FastAPI ----------
+app = FastAPI(title="Anti-Red-Tape Service — Refined")
+
+# ---------- Pydantic models ----------
+class UserCreate(BaseModel):
+    email: EmailStr
+    name: Optional[str] = None
+
+class SLACreate(BaseModel):
+    name: str
+    threshold_seconds: int
+    strategy: Optional[str] = "linear"
+    strategy_params: Optional[dict] = {}
+    grace_seconds: Optional[int] = 0
+
+class TaskCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    owner_id: Optional[str] = None
+    sla_id: Optional[str] = None
+    metadata: Optional[dict] = {}
+
+class SettlePayload(BaseModel):
+    penalty_id: str
+    settled_by: Optional[str] = None
+    note: Optional[str] = None
+
+class DisputePayload(BaseModel):
+    penalty_id: str
+    reason: str
+    evidence: Optional[dict] = {}
+
+# ---------- Utilities ----------
+async def log_audit(entity_type: str, entity_id: Optional[str], action: str, details: Dict[str, Any]):
+    q = audit_logs.insert().values(
+        id=str(uuid.uuid4()), entity_type=entity_type, entity_id=entity_id,
+        action=action, details=details, created_at=datetime.now(timezone.utc)
+    )
+    await database.execute(q)
+
+def _send_email_stub(to: str, subject: str, body: str):
+    # Replace with real provider (SES/SendGrid). This is a best-effort no-op or print.
+    if NOTIFY_ENABLED:
+        # integrate provider here
+        print(f"[EMAIL] to={to} subject={subject}\n{body}")
+    else:
+        # debug/log only
+        print(f"[EMAIL-DEBUG] to={to} subject={subject} (notifications disabled)")
+
+def _post_webhook_with_retries(url: str, payload: dict) -> Dict[str, Any]:
+    last_resp = {"status": None, "text": None, "error": None}
+    for attempt in range(1, WEBHOOK_RETRIES + 1):
+        try:
+            resp = requests.post(url, json=payload, timeout=10)
+            last_resp["status"] = resp.status_code
+            last_resp["text"] = resp.text
+            if 200 <= resp.status_code < 300:
+                return last_resp
+        except Exception as ex:
+            last_resp["error"] = str(ex)
+        time.sleep(WEBHOOK_RETRY_DELAY)
+    return last_resp
+
+# ---------- Penalty strategies ----------
+def _to_decimal(x) -> decimal.Decimal:
+    return decimal.Decimal(str(x))
+
+def strategy_linear(now: datetime, created_at: datetime, sla_row: dict, params: dict) -> decimal.Decimal:
+    threshold = timedelta(seconds=int(sla_row["threshold_seconds"]))
+    grace = timedelta(seconds=int(sla_row.get("grace_seconds", 0)))
+    allowed_until = created_at + threshold + grace
+    if now <= allowed_until:
+        return decimal.Decimal("0.00")
+    over_seconds = (now - allowed_until).total_seconds()
+    rate = _to_decimal(params.get("rate_per_second", "0.001"))
+    raw = (_to_decimal(over_seconds) * rate).quantize(decimal.Decimal("0.01"))
+    min_pen = _to_decimal(params.get("min_penalty", "0.00"))
+    max_pen = params.get("max_penalty")
+    if max_pen is not None:
+        raw = min(raw, _to_decimal(max_pen))
+    raw = max(raw, min_pen)
+    return raw
+
+def strategy_step(now: datetime, created_at: datetime, sla_row: dict, params: dict) -> decimal.Decimal:
+    """
+    params = {
+      "stages": [
+        {"after_seconds": 0, "charge": "50.00", "mode":"oneoff"},
+        {"after_seconds": 86400, "charge": "25.00", "mode":"per_period"}
+      ],
+      "per_period_seconds": 86400
+    }
+    """
+    threshold = timedelta(seconds=int(sla_row["threshold_seconds"]))
+    grace = timedelta(seconds=int(sla_row.get("grace_seconds", 0)))
+    allowed_until = created_at + threshold + grace
+    if now <= allowed_until:
+        return decimal.Decimal("0.00")
+    overdue_seconds = int((now - allowed_until).total_seconds())
+    stages = params.get("stages", [])
+    per_period = int(params.get("per_period_seconds", 86400))
+    total = decimal.Decimal("0.00")
+    for s in stages:
+        after = int(s.get("after_seconds", 0))
+        charge = _to_decimal(s.get("charge", "0.00"))
+        mode = s.get("mode", "oneoff")
+        if overdue_seconds >= after:
+            if mode == "oneoff":
+                total += charge
+            elif mode == "per_period":
+                seconds_since = overdue_seconds - after
+                periods = (seconds_since // per_period) + 1
+                total += charge * _to_decimal(periods)
+    min_pen = _to_decimal(params.get("min_penalty", "0.00"))
+    max_pen = params.get("max_penalty")
+    if max_pen is not None:
+        total = min(total, _to_decimal(max_pen))
+    total = max(total, min_pen)
+    return total.quantize(decimal.Decimal("0.01"))
+
+def strategy_capped_daily(now: datetime, created_at: datetime, sla_row: dict, params: dict) -> decimal.Decimal:
+    """
+    Charge per-day up to a cap:
+    params = {"daily_rate": "10.00", "daily_cap": "100.00", "max_penalty":"500.00"}
+    """
+    threshold = timedelta(seconds=int(sla_row["threshold_seconds"]))
+    grace = timedelta(seconds=int(sla_row.get("grace_seconds", 0)))
+    allowed_until = created_at + threshold + grace
+    if now <= allowed_until:
+        return decimal.Decimal("0.00")
+    days_over = int((now - allowed_until).days) + 1
+    daily_rate = _to_decimal(params.get("daily_rate", "10.00"))
+    daily_cap = _to_decimal(params.get("daily_cap", "9999999.00"))
+    raw = daily_rate * _to_decimal(days_over)
+    raw = min(raw, daily_cap)
+    max_pen = params.get("max_penalty")
+    if max_pen is not None:
+        raw = min(raw, _to_decimal(max_pen))
+    min_pen = _to_decimal(params.get("min_penalty", "0.00"))
+    raw = max(raw, min_pen)
+    return raw.quantize(decimal.Decimal("0.01"))
+
+STRATEGIES = {
+    "linear": strategy_linear,
+    "step": strategy_step,
+    "capped_daily": strategy_capped_daily
+}
+
+# ---------- Core scanner & calculation ----------
+async def calculate_penalty_for_task(task_row: Dict[str, Any]) -> (decimal.Decimal, str):
+    now = datetime.now(timezone.utc)
+    sla_row = await database.fetch_one(slа := slas.select().where(slas.c.id == task_row["sla_id"])) if task_row.get("sla_id") else None
+    # Slight backward-compatibility: use dict() conversion to allow attribute access
+    if not sla_row:
+        return decimal.Decimal("0.00"), "No SLA"
+    sla = dict(sla_row)
+    strategy_name = sla.get("strategy") or "linear"
+    strategy_fn = STRATEGIES.get(strategy_name)
+    if not strategy_fn:
+        return decimal.Decimal("0.00"), f"Unknown strategy: {strategy_name}"
+    params = sla.get("strategy_params") or {}
+    amount = strategy_fn(datetime.now(timezone.utc), task_row["created_at"], sla, params)
+    return amount, f"strategy={strategy_name}"
+
+async def scan_and_issue_penalties() -> Dict[str, int]:
+    now = datetime.now(timezone.utc)
+    summary = {"scanned": 0, "issued": 0, "skipped": 0}
+    q = tasks.select().where(sqlalchemy.and_(tasks.c.sla_id.isnot(None), tasks.c.status.in_(["open", "in_progress"])))
+    rows = await database.fetch_all(q)
+    summary["scanned"] = len(rows)
+    for r in rows:
+        amount, reason = await calculate_penalty_for_task(dict(r))
+        if amount <= decimal.Decimal("0.00"):
+            summary["skipped"] += 1
+            continue
+        # idempotency: skip if penalty exists with computed_until >= now
+        exists_q = penalties.select().where(sqlalchemy.and_(penalties.c.task_id == r["id"], penalties.c.computed_until >= now)).limit(1)
+        exists = await database.fetch_one(exists_q)
+        if exists:
+            summary["skipped"] += 1
+            continue
+        pid = str(uuid.uuid4())
+        insert = penalties.insert().values(
+            id=pid,
+            task_id=r["id"],
+            sla_id=r["sla_id"],
+            created_at=now,
+            computed_until=now,
+            amount=amount,
+            currency=APP_CURRENCY,
+            settled=False,
+            disputed=False,
+            reason=reason,
+            metadata={"task_snapshot": {"created_at": r["created_at"].isoformat(), "task_status": r["status"]}}
+        )
+        await database.execute(insert)
+        await log_audit("penalty", pid, "created", {"task_id": r["id"], "amount": str(amount), "reason": reason})
+        # notify owner (best-effort)
+        owner = None
+        if r.get("owner_id"):
+            owner = await database.fetch_one(users.select().where(users.c.id == r["owner_id"]))
+        if owner and owner.get("email"):
+            _send_email_stub(owner["email"], "Penalty issued: task overdue", f"Task {r['id']} incurred penalty {amount} {APP_CURRENCY}. Reason: {reason}")
+        # optional webhook
+        sla_row = await database.fetch_one(slа := slas.select().where(slas.c.id == r["sla_id"])) if r.get("sla_id") else None
+        webhook_url = None
+        if sla_row:
+            try:
+                webhook_url = (sla_row.get("strategy_params") or {}).get("payment_webhook")
+            except Exception:
+                webhook_url = None
+        if webhook_url:
+            payload = {"penalty_id": pid, "task_id": r["id"], "amount": str(amount), "currency": APP_CURRENCY}
+            resp = _post_webhook_with_retries(webhook_url, payload)
+            await log_audit("penalty", pid, "webhook_called", {"url": webhook_url, "resp": resp})
+        summary["issued"] += 1
+    return summary
+
+# ---------- Scheduler ----------
+scheduler = AsyncIOScheduler()
+scheduler.add_job(lambda: asyncio_run(scan_and_issue_penalties()), "interval", seconds=SCANNER_INTERVAL_SECONDS, id="penalty-scanner")
+
+# small helper to run async function from scheduler
+import asyncio
+def asyncio_run(coro):
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return asyncio.ensure_future(coro, loop=loop)
+
+# ---------- API endpoints ----------
+@app.on_event("startup")
+async def startup():
+    await database.connect()
+    # start scheduler
+    if not scheduler.running:
+        scheduler.start()
+
+@app.on_event("shutdown")
+async def shutdown():
+    await database.disconnect()
+    try:
+        scheduler.shutdown(wait=False)
+    except Exception:
+        pass
+
+@app.post("/users", response_model=dict)
+async def create_user(u: UserCreate):
+    uid = str(uuid.uuid4())
+    q = users.insert().values(id=uid, email=u.email, name=u.name, created_at=datetime.now(timezone.utc))
+    try:
+        await database.execute(q)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await log_audit("user", uid, "created", {"email": u.email})
+    return {"id": uid}
+
+@app.post("/slas", response_model=dict)
+async def create_sla(s: SLACreate):
+    sid = str(uuid.uuid4())
+    q = slas.insert().values(
+        id=sid, name=s.name, description=None,
+        threshold_seconds=s.threshold_seconds, strategy=s.strategy,
+        strategy_params=s.strategy_params or {}, grace_seconds=s.grace_seconds,
+        created_at=datetime.now(timezone.utc)
+    )
+    await database.execute(q)
+    await log_audit("sla", sid, "created", {"payload": s.dict()})
+    return {"id": sid}
+
+@app.post("/tasks", response_model=dict)
+async def create_task(t: TaskCreate):
+    tid = str(uuid.uuid4())
+    q = tasks.insert().values(
+        id=tid, title=t.title, description=t.description,
+        owner_id=t.owner_id, sla_id=t.sla_id, status="open",
+        created_at=datetime.now(timezone.utc), metadata=t.metadata or {}
+    )
+    await database.execute(q)
+    await log_audit("task", tid, "created", {"payload": t.dict()})
+    return {"id": tid}
+
+@app.post("/tasks/{task_id}/complete", response_model=dict)
+async def complete_task(task_id: str):
+    upd = tasks.update().where(tasks.c.id == task_id).values(status="completed", completed_at=datetime.now(timezone.utc))
+    await database.execute(upd)
+    await log_audit("task", task_id, "completed", {"completed_at": datetime.now(timezone.utc).isoformat()})
+    return {"ok": True}
+
+@app.get("/penalties/unsettled", response_model=List[Dict[str, Any]])
+async def list_unsettled_penalties():
+    rows = await database.fetch_all(penalties.select().where(penalties.c.settled == False))
+    return [dict(r) for r in rows]
+
+@app.post("/penalties/settle", response_model=dict)
+async def settle_penalty(p: SettlePayload):
+    # Protect in prod (RBAC). This marks penalty as settled and logs settlement info.
+    upd = penalties.update().where(penalties.c.id == p.penalty_id).values(settled=True, metadata={"settled_by": p.settled_by, "note": p.note})
+    await database.execute(upd)
+    await log_audit("penalty", p.penalty_id, "settled", {"by": p.settled_by, "note": p.note})
+    return {"ok": True}
+
+@app.post("/penalties/dispute", response_model=dict)
+async def dispute_penalty(d: DisputePayload):
+    upd = penalties.update().where(penalties.c.id == d.penalty_id).values(disputed=True, metadata={"dispute_reason": d.reason, "evidence": d.evidence})
+    await database.execute(upd)
+    await log_audit("penalty", d.penalty_id, "disputed", {"reason": d.reason, "evidence": d.evidence})
+    # notify admins (placeholder)
+    print(f"[DISPUTE] penalty {d.penalty_id} disputed: {d.reason}")
+    return {"ok": True}
+
+@app.post("/scanner/run", response_model=dict)
+async def run_scanner():
+    res = await scan_and_issue_penalties()
+    return res
+
+# ---------- Minimal admin helpers (not production secure) ----------
+@app.get("/health", response_model=dict)
+async def health():
+    return {"ok": True, "time": datetime.now(timezone.utc).isoformat()}
+
+# ---------- End of file ----------
+
+
+antiredtape-advanced/
+├─ app/
+│  ├─ __init__.py
+│  ├─ main.py
+│  ├─ config.py
+│  ├─ db.py
+│  ├─ models.py
+│  ├─ schemas.py
+│  ├─ crud.py
+│  ├─ auth.py
+│  ├─ strategies.py
+│  ├─ scanner.py
+│  ├─ tasks.py        # Celery tasks
+│  └─ notifications.py
+├─ alembic/
+│  └─ (alembic env & versions)
+├─ tests/
+│  ├─ test_strategies.py
+│  └─ test_scanner.py
+├─ Dockerfile
+├─ worker.Dockerfile
+├─ docker-compose.yml
+├─ pyproject.toml or requirements.txt
+└─ README.md
+
+
+fastapi==0.96.1
+uvicorn[standard]==0.22.0
+sqlalchemy==1.4.52
+asyncpg==0.28.0
+alembic==1.12.0
+pydantic==1.10.11
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+celery[redis]==5.3.1
+redis==4.5.5
+httpx==0.24.1
+pytest==7.4.0
+pytest-asyncio==0.21.0
+python-dotenv==1.0.0
+
+
+# app/config.py
+from pydantic import BaseSettings, AnyUrl
+
+class Settings(BaseSettings):
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:password@db:5432/antiredtape"
+    REDIS_URL: str = "redis://redis:6379/0"
+    SECRET_KEY: str = "CHANGE_THIS_SECRET_IN_PROD"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60*24
+    ALGORITHM: str = "HS256"
+    SMTP_URL: str | None = None
+    NOTIFY_ENABLED: bool = False
+    PAYMENT_WEBHOOK_RETRIES: int = 3
+    PAYMENT_WEBHOOK_RETRY_DELAY: int = 5
+
+    class Config:
+        env_file = ".env"
+
+settings = Settings()
+
+
+# app/db.py
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker
+from .config import settings
+
+engine = create_async_engine(settings.DATABASE_URL, future=True, echo=False)
+AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+# app/models.py
+import uuid
+from datetime import datetime
+from sqlalchemy import Column, String, Integer, Text, DateTime, Boolean, Numeric, JSON, ForeignKey
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import declarative_base, relationship
+
+Base = declarative_base()
+
+def gen_id():
+    return str(uuid.uuid4())
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(String, primary_key=True, default=gen_id)
+    email = Column(String, unique=True, nullable=False)
+    hashed_password = Column(String, nullable=True)
+    name = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+class SLA(Base):
+    __tablename__ = "slas"
+    id = Column(String, primary_key=True, default=gen_id)
+    name = Column(String, nullable=False)
+    description = Column(Text)
+    threshold_seconds = Column(Integer, nullable=False)
+    strategy = Column(String, nullable=False, default="linear")
+    strategy_params = Column(JSON, default={})
+    grace_seconds = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+class Task(Base):
+    __tablename__ = "tasks"
+    id = Column(String, primary_key=True, default=gen_id)
+    title = Column(String, nullable=False)
+    description = Column(Text)
+    owner_id = Column(String, ForeignKey("users.id"), nullable=True)
+    sla_id = Column(String, ForeignKey("slas.id"), nullable=True)
+    status = Column(String, default="open")
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    metadata = Column(JSON, default={})
+
+    owner = relationship("User", lazy="joined")
+    sla = relationship("SLA", lazy="joined")
+
+class Penalty(Base):
+    __tablename__ = "penalties"
+    id = Column(String, primary_key=True, default=gen_id)
+    task_id = Column(String, ForeignKey("tasks.id"), nullable=False)
+    sla_id = Column(String, ForeignKey("slas.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    computed_until = Column(DateTime(timezone=True), nullable=False)
+    amount = Column(Numeric(18,2), nullable=False)
+    currency = Column(String, nullable=False, default="USD")
+    settled = Column(Boolean, default=False)
+    disputed = Column(Boolean, default=False)
+    reason = Column(Text, nullable=True)
+    metadata = Column(JSON, default={})
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id = Column(String, primary_key=True, default=gen_id)
+    entity_type = Column(String, nullable=False)
+    entity_id = Column(String, nullable=True)
+    action = Column(String, nullable=False)
+    details = Column(JSON, default={})
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+    # app/schemas.py
+from pydantic import BaseModel, EmailStr
+from typing import Optional, Dict, Any
+from datetime import datetime
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    password: Optional[str]
+    name: Optional[str]
+
+class SLACreate(BaseModel):
+    name: str
+    threshold_seconds: int
+    strategy: Optional[str] = "linear"
+    strategy_params: Optional[Dict[str,Any]] = {}
+    grace_seconds: Optional[int] = 0
+
+class TaskCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    owner_id: Optional[str] = None
+    sla_id: Optional[str] = None
+    metadata: Optional[Dict[str,Any]] = {}
+
+class PenaltyOut(BaseModel):
+    id: str
+    task_id: str
+    sla_id: str
+    created_at: datetime
+    computed_until: datetime
+    amount: float
+    currency: str
+    settled: bool
+    disputed: bool
+    reason: Optional[str]
+
+
+    # app/auth.py
+from datetime import datetime, timedelta
+from jose import jwt
+from passlib.context import CryptContext
+from .config import settings
+
+pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def verify_password(plain, hashed):
+    return pwd_ctx.verify(plain, hashed)
+
+def get_password_hash(p):
+    return pwd_ctx.hash(p)
+
+def create_access_token(subject: str, expires_delta: timedelta | None = None):
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
+    data = {"sub": subject, "exp": expire}
+    encoded = jwt.encode(data, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    return encoded
+
+
+    # app/strategies.py
+from datetime import datetime, timedelta
+from decimal import Decimal, ROUND_HALF_UP
+from typing import Dict, Any
+
+def to_decimal(x) -> Decimal:
+    return Decimal(str(x))
+
+class BaseStrategy:
+    def compute(self, now: datetime, created_at: datetime, sla_row: Dict[str,Any]) -> Decimal:
+        raise NotImplementedError()
+
+class LinearStrategy(BaseStrategy):
+    def compute(self, now, created_at, sla_row):
+        threshold = timedelta(seconds=int(sla_row["threshold_seconds"]))
+        grace = timedelta(seconds=int(sla_row.get("grace_seconds", 0)))
+        allowed_until = created_at + threshold + grace
+        if now <= allowed_until:
+            return to_decimal("0.00")
+        over = (now - allowed_until).total_seconds()
+        rate = to_decimal(sla_row.get("strategy_params", {}).get("rate_per_second", "0.001"))
+        raw = (to_decimal(over) * rate).quantize(to_decimal("0.01"), rounding=ROUND_HALF_UP)
+        min_pen = to_decimal(sla_row.get("strategy_params", {}).get("min_penalty", "0.00"))
+        max_pen = sla_row.get("strategy_params", {}).get("max_penalty")
+        if max_pen is not None:
+            raw = min(raw, to_decimal(max_pen))
+        raw = max(raw, min_pen)
+        return raw
+
+class StepStrategy(BaseStrategy):
+    def compute(self, now, created_at, sla_row):
+        params = sla_row.get("strategy_params", {})
+        threshold = timedelta(seconds=int(sla_row["threshold_seconds"]))
+        grace = timedelta(seconds=int(sla_row.get("grace_seconds", 0)))
+        allowed = created_at + threshold + grace
+        if now <= allowed:
+            return to_decimal("0.00")
+        overdue = int((now - allowed).total_seconds())
+        stages = params.get("stages", [])
+        per_period = int(params.get("per_period_seconds", 86400))
+        total = to_decimal("0.00")
+        for s in stages:
+            after = int(s.get("after_seconds", 0))
+            charge = to_decimal(s.get("charge", "0.00"))
+            mode = s.get("mode", "oneoff")
+            if overdue >= after:
+                if mode == "oneoff":
+                    total += charge
+                else:  # per_period
+                    periods = (overdue - after) // per_period + 1
+                    total += charge * to_decimal(periods)
+        min_pen = to_decimal(params.get("min_penalty", "0.00"))
+        max_pen = params.get("max_penalty")
+        if max_pen is not None:
+            total = min(total, to_decimal(max_pen))
+        total = max(total, min_pen)
+        return total.quantize(to_decimal("0.01"))
+
+class CappedDailyStrategy(BaseStrategy):
+    def compute(self, now, created_at, sla_row):
+        params = sla_row.get("strategy_params", {})
+        threshold = timedelta(seconds=int(sla_row["threshold_seconds"]))
+        grace = timedelta(seconds=int(sla_row.get("grace_seconds", 0)))
+        allowed = created_at + threshold + grace
+        if now <= allowed:
+            return to_decimal("0.00")
+        days_over = int((now - allowed).days) + 1
+        daily_rate = to_decimal(params.get("daily_rate", "10.00"))
+        daily_cap = to_decimal(params.get("daily_cap", "9999999.00"))
+        raw = daily_rate * to_decimal(days_over)
+        raw = min(raw, daily_cap)
+        max_pen = params.get("max_penalty")
+        if max_pen is not None:
+            raw = min(raw, to_decimal(max_pen))
+        min_pen = to_decimal(params.get("min_penalty", "0.00"))
+        raw = max(raw, min_pen)
+        return raw.quantize(to_decimal("0.01"))
+
+
+        # app/crud.py
+from sqlalchemy import select, and_
+from .models import User, SLA, Task, Penalty, AuditLog
+from .db import AsyncSessionLocal
+from datetime import datetime
+from sqlalchemy.ext.asyncio import AsyncSession
+
+async def create_user(email, hashed_password, name=None):
+    async with AsyncSessionLocal() as s:
+        u = User(email=email, hashed_password=hashed_password, name=name)
+        s.add(u)
+        await s.commit()
+        await s.refresh(u)
+        return u
+
+# Other CRUD: create_sla, create_task, get_open_tasks_with_sla, penalty creation, audit log
+async def create_sla(payload):
+    async with AsyncSessionLocal() as s:
+        sla = SLA(**payload)
+        s.add(sla)
+        await s.commit()
+        await s.refresh(sla)
+        return sla
+
+async def create_task(payload):
+    async with AsyncSessionLocal() as s:
+        task = Task(**payload)
+        s.add(task)
+        await s.commit()
+        await s.refresh(task)
+        return task
+
+async def get_open_tasks_with_sla():
+    async with AsyncSessionLocal() as s:
+        q = select(Task).where(and_(Task.sla_id.isnot(None), Task.status.in_(["open","in_progress"])))
+        res = await s.execute(q)
+        return res.scalars().all()
+
+async def penalty_exists_for_task_at(task_id, timestamp):
+    async with AsyncSessionLocal() as s:
+        q = select(Penalty).where(and_(Penalty.task_id==task_id, Penalty.computed_until >= timestamp))
+        res = await s.execute(q)
+        return res.scalar_one_or_none() is not None
+
+async def create_penalty(task_id, sla_id, computed_until, amount, reason, metadata=None):
+    async with AsyncSessionLocal() as s:
+        p = Penalty(task_id=task_id, sla_id=sla_id, computed_until=computed_until, amount=amount, reason=reason, metadata=metadata or {})
+        s.add(p)
+        await s.commit()
+        await s.refresh(p)
+        return p
+
+async def log_audit(entity_type, entity_id, action, details):
+    async with AsyncSessionLocal() as s:
+        a = AuditLog(entity_type=entity_type, entity_id=entity_id, action=action, details=details)
+        s.add(a)
+        await s.commit()
+
+
+        # app/notifications.py
+import httpx
+from tenacity import retry, stop_after_attempt, wait_fixed
+from .config import settings
+
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
+def post_webhook(url: str, payload: dict, timeout: int = 8):
+    r = httpx.post(url, json=payload, timeout=timeout)
+    r.raise_for_status()
+    return r.status_code, r.text
+
+
+    # app/scanner.py
+from datetime import datetime, timezone
+from .crud import get_open_tasks_with_sla, penalty_exists_for_task_at, create_penalty, log_audit
+from .strategies import LinearStrategy, StepStrategy, CappedDailyStrategy
+from decimal import Decimal
+
+STRATEGY_MAP = {
+    "linear": LinearStrategy(),
+    "step": StepStrategy(),
+    "capped_daily": CappedDailyStrategy(),
+}
+
+async def compute_penalty_for_task(task):
+    now = datetime.now(timezone.utc)
+    sla = task.sla
+    if not sla:
+        return Decimal("0.00"), "No SLA"
+    strategy = STRATEGY_MAP.get(sla.strategy, LinearStrategy())
+    amount = strategy.compute(now, task.created_at, {"threshold_seconds": sla.threshold_seconds, "grace_seconds": sla.grace_seconds, "strategy_params": sla.strategy_params})
+    return amount, f"strategy={sla.strategy}"
+
+async def scan_and_issue():
+    now = datetime.now(timezone.utc)
+    tasks = await get_open_tasks_with_sla()
+    summary = {"scanned": len(tasks), "issued": 0, "skipped": 0}
+    for t in tasks:
+        amount, reason = await compute_penalty_for_task(t)
+        if amount <= 0:
+            summary["skipped"] += 1
+            continue
+        exists = await penalty_exists_for_task_at(t.id, now)
+        if exists:
+            summary["skipped"] += 1
+            continue
+        p = await create_penalty(t.id, t.sla_id, now, amount, reason, metadata={"task_snapshot": {"created_at": t.created_at.isoformat()}})
+        await log_audit("penalty", p.id, "created", {"task_id": t.id, "amount": str(amount)})
+        # optional: publish event / push to celery task to call webhook
+        summary["issued"] += 1
+    return summary
+
+
+    # app/tasks.py
+from celery import Celery
+from .config import settings
+import asyncio
+from .scanner import scan_and_issue
+from .crud import create_penalty, log_audit
+import httpx
+from datetime import datetime, timezone
+
+celery = Celery("antiredtape", broker=settings.REDIS_URL, backend=settings.REDIS_URL)
+celery.conf.task_routes = {"app.tasks.*": {"queue": "penalty"}}
+celery.conf.beat_schedule = {
+    "scan-every-minute": {
+        "task": "app.tasks.run_scan",
+        "schedule": 60.0
+    }
+}
+
+@celery.task(name="app.tasks.run_scan")
+def run_scan():
+    # Celery tasks are sync so we use asyncio to run the coroutine
+    loop = asyncio.get_event_loop()
+    return loop.run_until_complete(scan_and_issue())
+
+@celery.task(bind=True, max_retries=3, default_retry_delay=5, name="app.tasks.call_webhook")
+def call_webhook(self, url, payload):
+    try:
+        r = httpx.post(url, json=payload, timeout=10)
+        r.raise_for_status()
+        return {"status": r.status_code, "text": r.text}
+    except Exception as exc:
+        try:
+            self.retry(exc=exc)
+        except self.MaxRetriesExceededError:
+            return {"error": str(exc)}
+
+
+            # app/main.py
+from fastapi import FastAPI, Depends, HTTPException, status
+from .db import AsyncSessionLocal, engine
+from . import models, schemas, auth, crud
+from .auth import create_access_token, get_password_hash
+from sqlalchemy.ext.asyncio import AsyncSession
+from .scanner import scan_and_issue
+
+app = FastAPI(title="Anti-Red-Tape Advanced")
+
+# Simple dependency to get DB session if you need it
+async def get_db():
+    async with AsyncSessionLocal() as session:
+        yield session
+
+@app.post("/users")
+async def create_user(payload: schemas.UserCreate):
+    hashed = get_password_hash(payload.password) if payload.password else None
+    u = await crud.create_user(payload.email, hashed, payload.name)
+    token = create_access_token(u.id)
+    return {"id": u.id, "access_token": token}
+
+@app.post("/slas")
+async def create_sla(payload: schemas.SLACreate):
+    s = await crud.create_sla(payload.dict())
+    return {"id": s.id}
+
+@app.post("/tasks")
+async def create_task(payload: schemas.TaskCreate):
+    t = await crud.create_task(payload.dict())
+    return {"id": t.id}
+
+@app.post("/scanner/run")
+async def run_scanner():
+    return await scan_and_issue()
+
+
+    version: "3.8"
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_PASSWORD: password
+      POSTGRES_USER: postgres
+      POSTGRES_DB: antiredtape
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:password@db:5432/antiredtape
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=supersecretchange
+    depends_on:
+      - db
+      - redis
+    ports:
+      - "8000:8000"
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker.Dockerfile
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:password@db:5432/antiredtape
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=supersecretchange
+    depends_on:
+      - db
+      - redis
+
+volumes:
+  pgdata:
+
+
+  import pytest
+from datetime import datetime, timedelta, timezone
+from app.strategies import LinearStrategy, StepStrategy, CappedDailyStrategy
+
+def test_linear_zero():
+    s = LinearStrategy()
+    now = datetime.now(timezone.utc)
+    created = now
+    sla = {"threshold_seconds": 3600, "grace_seconds":0, "strategy_params":{"rate_per_second":"0.01"}}
+    assert s.compute(now, created, sla) == 0
+
+def test_linear_overdue():
+    s = LinearStrategy()
+    created = datetime.now(timezone.utc) - timedelta(hours=2)
+    now = datetime.now(timezone.utc)
+    sla = {"threshold_seconds": 3600, "grace_seconds":0, "strategy_params":{"rate_per_second":"0.01"}}
+    amount = s.compute(now, created, sla)
+    assert amount > 0
