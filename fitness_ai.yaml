@@ -1,0 +1,223 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
+
+# --- 1. Simulate Data Acquisition ---
+# In reality, this data would come from a connected device/sensor API.
+data = {
+    'accel_x_mean': [0.1, 0.2, 0.5, 0.1, 0.8],
+    'accel_y_std': [0.05, 0.15, 0.4, 0.08, 0.6],
+    'gyro_z_max': [0.2, 0.5, 1.0, 0.3, 1.5],
+    'activity': ['Resting', 'Walking', 'Running', 'Resting', 'Jumping']
+}
+df = pd.DataFrame(data)
+
+# --- 2. Feature Engineering & Model Training ---
+X = df[['accel_x_mean', 'accel_y_std', 'gyro_z_max']]
+y = df['activity']
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+# Use a Random Forest Classifier for activity classification
+model = RandomForestClassifier(n_estimators=100, random_state=42)
+model.fit(X_train, y_train)
+
+# --- 3. Intelligent Tracking/Prediction ---
+new_data = pd.DataFrame({'accel_x_mean': [0.55], 'accel_y_std': [0.45], 'gyro_z_max': [1.1]})
+prediction = model.predict(new_data)
+
+print(f"Predicted Activity: **{prediction[0]}**")
+print(f"Model Accuracy: {accuracy_score(y_test, model.predict(X_test)):.2f}")
+
+
+
+def adapt_workout_plan(user_id, latest_performance, max_heart_rate, fatigue_score):
+    """Adjusts the next workout intensity based on recent metrics."""
+    # Define an adjustment factor based on AI analysis
+    adjustment_factor = 1.0
+
+    if latest_performance['reps_completed'] < latest_performance['reps_target'] * 0.8:
+        # User struggled, slightly decrease intensity
+        adjustment_factor -= 0.1
+        feedback = "We noticed you struggled with your last set. The next workout will slightly decrease the target reps to manage fatigue."
+    elif fatigue_score > 7: # A high score indicating burnout risk
+        # High fatigue detected, recommend active recovery
+        adjustment_factor = 0.5
+        feedback = "High fatigue detected based on heart rate and sleep data. Recommending an **Active Recovery** session instead of a heavy lift."
+    else:
+        # Good performance and low fatigue, slightly increase intensity
+        adjustment_factor += 0.05
+        feedback = "Great session! We're slightly increasing the weight/duration for your next session to continue challenging your muscles."
+
+    # Logic to update the user's database entry for the next workout plan
+    # db.update_user_plan(user_id, adjustment_factor)
+
+    return feedback, adjustment_factor
+
+# Example Usage
+user_data = {
+    'reps_target': 12,
+    'reps_completed': 11,
+    'max_heart_rate': 185
+}
+# A conceptual 'fatigue_score' derived from sleep, RHR, and exertion metrics
+fatigue = 3
+feedback, factor = adapt_workout_plan('user123', user_data, 185, fatigue)
+print(f"\nAI Feedback: **{feedback}**")
+
+
+
+# Conceptual Server-Side Code (using 'websockets' library in a real environment)
+import asyncio
+import json
+
+async def send_realtime_feedback(websocket, current_rep_count, form_quality):
+    """Simulates sending real-time data to a connected client (e.g., mobile app HUD)."""
+    # 1. AI Core analyzes the latest sensor frame data (e.g., pose estimation)
+    if form_quality < 0.7:
+        correction_message = "**ADJUST POSTURE:** Keep your back straight."
+    else:
+        correction_message = "Form is **GOOD**."
+
+    # 2. Package data for the Head-Up Display (HUD)
+    hud_data = {
+        "type": "WORKOUT_FEEDBACK",
+        "current_reps": current_rep_count,
+        "correction": correction_message,
+        "form_score": form_quality
+    }
+
+    # 3. Send the clear voices/HUD update via WebSocket
+    await websocket.send(json.dumps(hud_data))
+    print(f"Sent HUD Update: {correction_message}")
+
+# In a real app, this would be part of the main WebSocket server loop,
+# running instances for each user/session, as you prefer "instances."
+# await send_realtime_feedback(user_websocket, rep_count_instance, form_score_instance)
+
+
+
+import numpy as np
+
+class RepCounterAI:
+    """
+    An instance-based class for intelligent repetition counting on a single workout stream.
+    """
+    def __init__(self, exercise_name, sensitivity=0.7):
+        # Prefer instances: Each user/workout gets its own instance.
+        self.exercise_name = exercise_name
+        self.sensitivity = sensitivity
+        self.reps = 0
+        self.is_up_phase = False # State flag for rep tracking
+        self.last_value = 0.0
+        self.data_buffer = [] # Buffer to hold recent sensor readings (e.g., z-axis acceleration)
+
+    def process_sensor_data(self, new_accel_z):
+        """Processes a new sensor reading to detect a rep cycle (up-down-up)."""
+        self.data_buffer.append(new_accel_z)
+        if len(self.data_buffer) > 50: # Keep buffer size reasonable
+            self.data_buffer.pop(0)
+
+        # 1. Simple Repetition Logic (Peak Detection)
+        # Assuming a squat/bicep curl where the z-axis (vertical) acceleration changes significantly.
+        
+        # Detect a sharp drop (start of the DOWN phase)
+        if new_accel_z < -self.sensitivity and not self.is_up_phase:
+            self.is_up_phase = True
+            # print(f"DOWN phase started at Z={new_accel_z}")
+
+        # Detect a sharp rise (end of the UP phase)
+        elif new_accel_z > self.sensitivity and self.is_up_phase:
+            self.reps += 1
+            self.is_up_phase = False
+            # print(f"UP phase completed. Reps: {self.reps}")
+            
+        self.last_value = new_accel_z
+        return self.reps
+
+    def analyze_form(self):
+        """Placeholder for advanced form analysis (e.g., using buffer data)."""
+        if len(self.data_buffer) < 50:
+            return "Collecting initial data..."
+
+        # Calculate variance to detect shaky movement (poor form)
+        variance = np.var(self.data_buffer)
+        
+        if variance > 0.5:
+            # Clear voices: Provide clear, actionable feedback
+            return "**WARNING:** Movement is unstable. Focus on core stability."
+        else:
+            return "**GOOD:** Movement is stable and controlled."
+
+
+
+
+from flask import Flask, render_template
+from flask_socketio import SocketIO, emit
+import time
+import random
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'your_secret_key'
+socketio = SocketIO(app, cors_allowed_origins="*")
+
+# Dictionary to store RepCounterAI instances for each connected user
+# Key: User/Session ID, Value: RepCounterAI instance
+user_workout_instances = {}
+
+# --- Connectivity Handlers ---
+
+@socketio.on('connect')
+def handle_connect():
+    # A unique session ID is generated by SocketIO
+    session_id = request.sid
+    # Initialize a new instance for this user
+    user_workout_instances[session_id] = RepCounterAI(exercise_name="Bicep Curl")
+    print(f"User connected. Session ID: {session_id}")
+    emit('status', {'msg': 'Connected to AI Tracker. Start your workout.'})
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    session_id = request.sid
+    if session_id in user_workout_instances:
+        del user_workout_instances[session_id]
+        print(f"User disconnected. Instance cleaned up for: {session_id}")
+
+# --- Intelligent Tracking Data Endpoint ---
+
+@socketio.on('sensor_data')
+def handle_sensor_data(data):
+    """
+    Receives raw sensor data (e.g., from a BLE wearable).
+    Data structure example: {'session_id': 'xyz123', 'accel_z': 0.85}
+    """
+    session_id = request.sid # Use the connection ID for the instance key
+    
+    if session_id in user_workout_instances:
+        ai_instance = user_workout_instances[session_id]
+        
+        # 1. Intelligent Tracking: Process the new data point
+        current_reps = ai_instance.process_sensor_data(data['accel_z'])
+        form_feedback = ai_instance.analyze_form()
+        
+        # 2. Advanced Connectivity: Push real-time HUD update
+        # Ensures clear voices and immediate feedback to the user
+        hud_payload = {
+            'reps': current_reps,
+            'feedback': form_feedback,
+            'timestamp': time.time()
+        }
+        
+        # Emit data back to the *specific* client (the user's HUD)
+        emit('hud_update', hud_payload, room=session_id)
+        
+    else:
+        # Handle case where session ID is missing or invalid
+        emit('error', {'msg': 'Invalid session or workout instance.'})
+
+if __name__ == '__main__':
+    from flask import request
+    # Run the server
+    # socketio.run(app, debug=True, port=5000)
+    pass # Commented out for execution safety
