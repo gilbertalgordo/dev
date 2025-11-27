@@ -1,0 +1,586 @@
+bitcoin_ai/
+│
+├── main.py
+├── config.py
+├── ai/
+│   ├── router.py
+│   ├── risk_engine.py
+│   └── fee_predictor.py
+│
+├── integrations/
+│   ├── bitcoin_node.py
+│   ├── exchange_binance.py
+│   ├── exchange_coinbase.py
+│   ├── bank_openbanking.py
+│   └── rate_oracle.py
+│
+└── services/
+    ├── transaction_manager.py
+    ├── wallet_manager.py
+    └── audit_log.py
+
+
+   import os
+
+class Config:
+    BITCOIN_NODE_URL = os.getenv("BITCOIN_NODE_URL")
+    BITCOIN_NODE_USER = os.getenv("BITCOIN_NODE_USER")
+    BITCOIN_NODE_PASS = os.getenv("BITCOIN_NODE_PASS")
+
+    BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
+    BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
+
+    COINBASE_API_KEY = os.getenv("COINBASE_API_KEY")
+    COINBASE_API_SECRET = os.getenv("COINBASE_API_SECRET")
+
+    OPENBANKING_CLIENT_ID = os.getenv("OPENBANKING_CLIENT_ID")
+    OPENBANKING_CLIENT_SECRET = os.getenv("OPENBANKING_CLIENT_SECRET")
+
+    LOG_PATH = "logs/transactions.log"
+
+
+    import requests
+from config import Config
+
+class BitcoinNode:
+    def __init__(self):
+        self.url = Config.BITCOIN_NODE_URL
+        self.auth = (Config.BITCOIN_NODE_USER, Config.BITCOIN_NODE_PASS)
+
+    def rpc(self, method, params=None):
+        payload = {
+            "jsonrpc": "1.0",
+            "id": "btc-ai",
+            "method": method,
+            "params": params or []
+        }
+        r = requests.post(self.url, json=payload, auth=self.auth)
+        r.raise_for_status()
+        return r.json().get("result")
+
+    def get_balance(self):
+        return self.rpc("getbalance")
+
+    def send_transaction(self, address, amount):
+        return self.rpc("sendtoaddress", [address, amount])
+
+    def estimate_fee(self, blocks=3):
+        return self.rpc("estimatesmartfee", [blocks])
+
+
+        import hmac, hashlib, time, requests
+from config import Config
+
+class BinanceExchange:
+    BASE = "https://api.binance.com"
+
+    def _sign(self, query):
+        return hmac.new(
+            Config.BINANCE_API_SECRET.encode(),
+            query.encode(),
+            hashlib.sha256
+        ).hexdigest()
+
+    def get_price(self, symbol="BTCUSDT"):
+        r = requests.get(f"{self.BASE}/api/v3/ticker/price", params={"symbol": symbol})
+        return float(r.json()["price"])
+
+    def market_buy(self, symbol, quantity):
+        ts = int(time.time() * 1000)
+        query = f"symbol={symbol}&side=BUY&type=MARKET&quantity={quantity}&timestamp={ts}"
+        signature = self._sign(query)
+
+        r = requests.post(
+            f"{self.BASE}/api/v3/order",
+            params={**{k:v for k,v in [p.split("=") for p in query.split("&")]}, "signature": signature},
+            headers={"X-MBX-APIKEY": Config.BINANCE_API_KEY}
+        )
+        return r.json()
+
+
+        class TransactionRouter:
+    def __init__(self, btc, binance, coinbase, bank, risk):
+        self.btc = btc
+        self.binance = binance
+        self.coinbase = coinbase
+        self.bank = bank
+        self.risk = risk
+
+    def route(self, intent):
+        # intent example:
+        # { "type": "transfer", "asset": "BTC", "amount": 0.01, "destination": "wallet" }
+
+        risk_level = self.risk.evaluate(intent)
+        if risk_level > 0.8:
+            raise Exception("High-risk transaction blocked.")
+
+        if intent["asset"] == "BTC":
+            return self._handle_btc(intent)
+
+        if intent["asset"] in ["USD", "EUR"]:
+            return self._handle_fiat(intent)
+
+        raise Exception("Unsupported asset.")
+
+    def _handle_btc(self, intent):
+        if intent["destination"] == "wallet":
+            fee = self.btc.estimate_fee()
+            result = self.btc.send_transaction(intent["address"], intent["amount"])
+            return {"txid": result, "fee_estimate": fee}
+
+        if intent["destination"] == "exchange":
+            price = self.binance.get_price("BTCUSDT")
+            return {"action": "transfer to exchange", "market_price": price}
+
+        raise Exception("Unknown BTC route.")
+
+
+        class RiskEngine:
+    def evaluate(self, intent):
+        score = 0.0
+
+        if intent["amount"] > 5:  # BTC or equivalent
+            score += 0.5
+
+        if intent["destination"] not in ["wallet", "exchange", "bank"]:
+            score += 0.4
+
+        return min(score, 1.0)
+
+
+        import time
+from services.audit_log import AuditLog
+
+class TransactionManager:
+    def __init__(self, router):
+        self.router = router
+        self.audit = AuditLog()
+
+    def process(self, intent):
+        self.audit.log("Received intent", intent)
+        result = self.router.route(intent)
+        self.audit.log("Completed intent", {"result": result})
+        return result
+
+
+        from integrations.bitcoin_node import BitcoinNode
+from integrations.exchange_binance import BinanceExchange
+from ai.router import TransactionRouter
+from ai.risk_engine import RiskEngine
+from services.transaction_manager import TransactionManager
+
+btc = BitcoinNode()
+binance = BinanceExchange()
+risk = RiskEngine()
+
+router = TransactionRouter(
+    btc=btc,
+    binance=binance,
+    coinbase=None,
+    bank=None,
+    risk=risk
+)
+
+manager = TransactionManager(router)
+
+if __name__ == "__main__":
+    sample_intent = {
+        "type": "transfer",
+        "asset": "BTC",
+        "amount": 0.001,
+        "destination": "wallet",
+        "address": "yourbtcaddresshere"
+    }
+
+    print(manager.process(sample_intent))
+
+
+    version: '3.8'
+services:
+  api:
+    build: .
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/bitcoin_ai
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+
+  worker:
+    build: .
+    command: celery -A app.celery_app.celery worker --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/bitcoin_ai
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: bitcoin_ai
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    command: ["redis-server", "--save", "60", "1"]
+
+volumes:
+  pgdata:
+
+
+  from pydantic import BaseSettings, AnyUrl
+
+class Settings(BaseSettings):
+    DATABASE_URL: str
+    REDIS_URL: str
+
+    BITCOIN_RPC_URL: str
+    BITCOIN_RPC_USER: str
+    BITCOIN_RPC_PASS: str
+
+    CCXT_API_KEYS: dict = {}  # loaded from JSON env or mounted file
+    HSM_TYPE: str = "local"  # "local" for dev, "aws_kms"/"cloudhsm" for prod
+
+    AUDIT_LOG_PATH: str = "/data/audit.log"
+    MAX_RISK_SCORE: float = 0.7
+
+    class Config:
+        env_file = ".env"
+        case_sensitive = True
+
+settings = Settings()
+
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
+from app.config import settings
+
+engine = create_engine(settings.DATABASE_URL, future=True)
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+Base = declarative_base()
+
+
+from sqlalchemy import Column, Integer, String, Float, JSON, DateTime, Boolean
+from sqlalchemy.sql import func
+from app.db import Base
+
+class TransactionIntent(Base):
+    __tablename__ = "transaction_intents"
+    id = Column(Integer, primary_key=True)
+    client_id = Column(String, index=True)
+    intent = Column(JSON)
+    status = Column(String, default="pending")
+    result = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    processed = Column(Boolean, default=False)
+
+
+    import logging
+from app.config import settings
+
+logger = logging.getLogger("audit")
+handler = logging.FileHandler(settings.AUDIT_LOG_PATH)
+formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+
+def log(event: str, payload: dict):
+    logger.info("%s %s", event, payload)
+
+
+    import requests
+from requests.auth import HTTPBasicAuth
+from app.config import settings
+
+class BitcoinRPC:
+    def __init__(self):
+        self.url = settings.BITCOIN_RPC_URL
+        self.auth = HTTPBasicAuth(settings.BITCOIN_RPC_USER, settings.BITCOIN_RPC_PASS)
+
+    def rpc(self, method, params=None):
+        payload = {"jsonrpc":"1.0","id":"btc-ai","method":method,"params": params or []}
+        r = requests.post(self.url, json=payload, auth=self.auth, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        if data.get("error"):
+            raise RuntimeError(data["error"])
+        return data["result"]
+
+    def estimate_fee(self, blocks=3):
+        try:
+            res = self.rpc("estimatesmartfee", [blocks])
+            return res.get("feerate")
+        except Exception:
+            # fallback to mempool/heuristic
+            return 0.0001  # BTC/KB fallback
+
+    def create_raw_transaction(self, utxos, outputs):
+        return self.rpc("createrawtransaction", [utxos, outputs])
+
+    def sign_raw_transaction(self, raw_tx_hex):
+        return self.rpc("signrawtransactionwithwallet", [raw_tx_hex])
+    
+    def broadcast(self, signed_hex):
+        return self.rpc("sendrawtransaction", [signed_hex])
+
+
+      import ccxt
+from app.config import settings
+
+class ExchangeAdapter:
+    def __init__(self, exchange_id: str, api_key: str, api_secret: str):
+        ex_class = getattr(ccxt, exchange_id)
+        self.client = ex_class({
+            "apiKey": api_key,
+            "secret": api_secret,
+            "enableRateLimit": True
+        })
+
+    def fetch_price(self, symbol="BTC/USDT"):
+        ticker = self.client.fetch_ticker(symbol)
+        return ticker["last"]
+
+    def create_market_order(self, symbol: str, side: str, amount: float):
+        if side.lower() == "buy":
+            return self.client.create_market_buy_order(symbol, amount)
+        return self.client.create_market_sell_order(symbol, amount)
+
+
+       class BankAdapter:
+    def __init__(self, config: dict):
+        # config contains endpoints, client id, certs for an OpenBanking provider
+        self.config = config
+
+    def initiate_payment(self, amount: float, currency: str, beneficiary: dict):
+        """
+        Implement the provider-specific call (PSD2/OpenBanking/ISO20022).
+        This is a placeholder. Must handle auth, idempotency, callbacks.
+        """
+        # Example result shape:
+        return {"status": "submitted", "bank_reference": "BANK-12345"}
+
+
+       from abc import ABC, abstractmethod
+from app.config import settings
+import binascii
+
+class Signer(ABC):
+    @abstractmethod
+    def sign_transaction(self, raw_tx_hex: str) -> str:
+        pass
+
+class LocalSigner(Signer):
+    def __init__(self, wif_privkey: str):
+        # local only: wif key or serialized private key - dev use only
+        from bitcoinlib.keys import Key
+        self.key = Key(import_key=wif_privkey)
+
+    def sign_transaction(self, raw_tx_hex: str) -> str:
+        # Implementation depends on raw tx formatting; use Bitcoin Core wallet RPC for signing in many setups.
+        raise NotImplementedError("Use bitcoind signrawtransactionwithwallet in dev or HSM in prod")
+
+# Production: AWS KMS / CloudHSM / YubiHSM adapter should implement Signer and perform signing inside HSM.
+
+
+from typing import Dict
+
+class RiskEngine:
+    def evaluate(self, intent: Dict) -> float:
+        """
+        Returns a score 0-1.0 (0 = low risk, 1 = high risk).
+        Simple rules plus hooks for ML models.
+        """
+        score = 0.0
+        amount = float(intent.get("amount", 0))
+        asset = intent.get("asset", "BTC")
+        destination = intent.get("destination", "")
+
+        # basic heuristics
+        if asset.upper() == "BTC" and amount > 1:
+            score += 0.4
+        if destination == "exchange" and amount > 5:
+            score += 0.2
+        if intent.get("country") in ["high_risk_country_code"]:
+            score += 0.3
+
+        # clamp
+        return min(score, 1.0)
+
+
+       from app.integrations.bitcoin_node import BitcoinRPC
+from app.integrations.exchange_adapter import ExchangeAdapter
+from app.integrations.bank_adapter import BankAdapter
+from app.ai.risk_engine import RiskEngine
+from app.audit import log
+
+class Orchestrator:
+    def __init__(self, btc_rpc: BitcoinRPC, exchanges: dict, bank_adapter: BankAdapter, signer, risk: RiskEngine):
+        self.btc = btc_rpc
+        self.exchanges = exchanges
+        self.bank = bank_adapter
+        self.signer = signer
+        self.risk = risk
+
+    def route_intent(self, intent: dict):
+        score = self.risk.evaluate(intent)
+        log("risk_evaluation", {"intent_id": intent.get("id"), "score": score})
+        if score > 0.7:
+            raise PermissionError("High risk - manual review required")
+
+        asset = intent.get("asset", "BTC").upper()
+        if asset == "BTC":
+            return self._handle_btc(intent)
+        elif asset in ["USD", "EUR", "GBP"]:
+            return self._handle_fiat(intent)
+        else:
+            raise NotImplementedError("Asset type not supported")
+
+    def _handle_btc(self, intent: dict):
+        # Use exchange route when user wants to convert or when off-ramp desired
+        if intent.get("destination") == "exchange":
+            exch = self.exchanges.get(intent.get("exchange_id"))
+            if not exch: raise ValueError("Exchange not configured")
+            price = exch.fetch_price("BTC/USDT")
+            res = {"action": "send_to_exchange", "price": price, "note": "client must deposit onchain to exchange deposit addr"}
+            log("route", res)
+            return res
+
+        # Onchain transfer (wallet)
+        # 1. estimate fee
+        fee_rate = self.btc.estimate_fee(blocks=3) or 0.0001
+        # 2. construct, sign via HSM, broadcast (this example uses bitcoind wallet RPC)
+        raw = self.btc.rpc("createrawtransaction", [[], {intent["address"]: intent["amount"]}])
+        signed = self.btc.rpc("signrawtransactionwithwallet", [raw])
+        if not signed.get("complete"):
+            raise RuntimeError("Signing incomplete")
+        txid = self.btc.rpc("sendrawtransaction", [signed["hex"]])
+        log("broadcast", {"txid": txid})
+        return {"txid": txid, "fee_rate": fee_rate}
+
+    def _handle_fiat(self, intent: dict):
+        # Example: bank transfer via adapter
+        res = self.bank.initiate_payment(intent["amount"], intent["asset"], intent["beneficiary"])
+        log("fiat_initiated", res)
+        return res
+
+
+       from celery import Celery
+from app.config import settings
+
+celery = Celery("bitcoin_ai", broker=settings.REDIS_URL, backend=settings.REDIS_URL)
+celery.conf.task_routes = {"app.tasks.process_intent": {"queue": "intents"}}
+
+
+from app.celery_app import celery
+from app.db import SessionLocal
+from app.models import TransactionIntent
+from app.integrations.bitcoin_node import BitcoinRPC
+from app.ai.router import Orchestrator
+from app.ai.risk_engine import RiskEngine
+from app.audit import log
+
+@celery.task(bind=True, max_retries=3, default_retry_delay=10)
+def process_intent(self, intent_id: int):
+    session = SessionLocal()
+    try:
+        intent_obj = session.query(TransactionIntent).get(intent_id)
+        if not intent_obj:
+            log("task", {"msg": "intent not found", "id": intent_id})
+            return
+
+        intent = intent_obj.intent
+        btc = BitcoinRPC()
+        exch = {}  # initialize ExchangeAdapter instances as needed
+        bank = None
+        signer = None
+        orchestrator = Orchestrator(btc_rpc=btc, exchanges=exch, bank_adapter=bank, signer=signer, risk=RiskEngine())
+
+        result = orchestrator.route_intent(intent)
+        intent_obj.status = "completed"
+        intent_obj.result = result
+        intent_obj.processed = True
+        session.commit()
+        log("processed", {"id": intent_id, "result": result})
+        return result
+    except Exception as e:
+        session.rollback()
+        log("process_error", {"id": intent_id, "error": str(e)})
+        raise self.retry(exc=e)
+    finally:
+        session.close()
+
+
+        from fastapi import FastAPI, HTTPException, BackgroundTasks
+from pydantic import BaseModel
+from app.db import SessionLocal, engine
+from app.models import Base, TransactionIntent
+from app.tasks import process_intent
+from app.audit import log
+
+Base.metadata.create_all(bind=engine)
+
+class IntentModel(BaseModel):
+    client_id: str
+    intent: dict
+
+app = FastAPI(title="Bitcoin AI Orchestrator")
+
+@app.post("/intents", status_code=202)
+def submit_intent(payload: IntentModel):
+    db = SessionLocal()
+    try:
+        ti = TransactionIntent(client_id=payload.client_id, intent=payload.intent)
+        db.add(ti)
+        db.commit()
+        db.refresh(ti)
+        log("intent_received", {"id": ti.id, "client": payload.client_id})
+        # enqueue process
+        process_intent.delay(ti.id)
+        return {"id": ti.id, "status": "queued"}
+    finally:
+        db.close()
+
+@app.get("/intents/{intent_id}")
+def get_intent(intent_id: int):
+    db = SessionLocal()
+    try:
+        ti = db.query(TransactionIntent).get(intent_id)
+        if not ti:
+            raise HTTPException(status_code=404, detail="Not found")
+        return {"id": ti.id, "status": ti.status, "result": ti.result}
+    finally:
+        db.close()
+
+
+       DATABASE_URL=postgresql://postgres:postgres@db:5432/bitcoin_ai
+REDIS_URL=redis://redis:6379/0
+
+BITCOIN_RPC_URL=http://bitcoind:8332
+BITCOIN_RPC_USER=rpcuser
+BITCOIN_RPC_PASS=rpcpass
+
+CCXT_API_KEYS={"binance": {"apiKey":"xxx","secret":"yyy"}}
+HSM_TYPE=local
+
+AUDIT_LOG_PATH=/data/audit.log
+
+
+curl -X POST "http://localhost:8000/intents" -H "Content-Type: application/json" -d '{
+  "client_id": "client-123",
+  "intent": {
+    "type": "transfer",
+    "asset": "BTC",
+    "amount": 0.001,
+    "destination": "wallet",
+    "address": "tb1qexampleaddress..."
+  }
+}'
