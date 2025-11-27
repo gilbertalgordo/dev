@@ -1,0 +1,365 @@
+## Python AI Filter Instance (filter_ai_core.py)
+import numpy as np
+from sklearn.ensemble import IsolationForest
+import joblib
+import os
+
+class AIFilterCore:
+    def __init__(self, contamination=0.01):
+        """Initializes and loads/trains the Isolation Forest model."""
+        self.model_path = 'isolation_forest_model.pkl'
+        self.contamination = contamination
+        self.model = None
+        self._load_or_train()
+
+    def _load_or_train(self):
+        # A simple check to load a pre-trained model instance
+        if os.path.exists(self.model_path):
+            self.model = joblib.load(self.model_path)
+            print("Loaded pre-trained Isolation Forest model.")
+        else:
+            # Instance: Generate dummy training data (replace with actual data)
+            X_train = np.random.rand(500, 5) 
+            self.model = IsolationForest(contamination=self.contamination, random_state=42)
+            self.model.fit(X_train)
+            joblib.dump(self.model, self.model_path)
+            print("Trained and saved new Isolation Forest model.")
+
+    def intensify_filtration(self, data_point):
+        """
+        Analyzes a single data point to determine if intensification is needed.
+        Returns True for anomalies (needs intensification), False otherwise.
+        """
+        # Isolation Forest returns -1 for anomalies and 1 for normal data.
+        prediction = self.model.predict([data_point])
+        # Scientific Reasoning: Anomaly detection identifies data points that 
+        # deviate significantly from the learned normal distribution.
+        if prediction[0] == -1:
+            print(f"Anomaly detected: Intensification needed for {data_point}")
+            return True
+        return False
+
+# Example Usage Instance:
+# filter_ai = AIFilterCore()
+# new_data = [0.9, 0.1, 0.8, 0.2, 0.95] # Potentially anomalous data
+# is_intensified = filter_ai.intensify_filtration(new_data)
+# if is_intensified:
+#     # Trigger notification service
+#     pass
+
+
+
+## Python Notification Instance (notification_service.py)
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
+
+# Mock database of user roles and activity.
+# 'ignored' status is defined here for this instance.
+USER_DATABASE = {
+    'alice': {'role': 'developer', 'last_seen': '2025-11-01', 'email': 'alice@corp.com'},
+    'bob': {'role': 'developer', 'last_seen': '2025-11-27', 'email': 'bob@corp.com'},
+    'charlie': {'role': 'manager', 'last_seen': '2025-09-15', 'email': 'charlie@corp.com'},
+}
+
+def get_ignored_programmers(threshold_days=60):
+    """
+    Instance: Targeting Logic based on inactivity (scientific reasoning: thresholding).
+    Identifies 'ignored programmers' based on a defined metric.
+    """
+    ignored_users = []
+    # In a real app, you'd calculate time difference from 'last_seen' to today.
+    # For this instance, we hardcode the logic based on the mock data.
+    for user, data in USER_DATABASE.items():
+        if data['role'] == 'developer' and data['last_seen'] < '2025-11-20':
+            ignored_users.append(user)
+    return ignored_users
+
+def send_notification(user_id, message, method='email'):
+    """
+    Conceptual function to send the actual alert (e.g., via email, SMS, or Web Push).
+    """
+    # [attachment_0](attachment)
+    print(f"--- FAKE NOTIFICATION SENT ---")
+    print(f"To: {user_id} ({method})")
+    print(f"Message: {message}")
+    print("------------------------------")
+
+@app.route('/trigger_notification', methods=['POST'])
+def trigger_notification():
+    """
+    API endpoint called by the AI Core when intensification is triggered.
+    """
+    data = request.get_json()
+    reason = data.get('reason', 'AI intensification event occurred.')
+
+    # 1. Identify targets
+    targets = get_ignored_programmers()
+
+    # 2. Send notifications
+    for programmer in targets:
+        # Instance: Message tailored to the ignored status
+        alert_message = f"Critical Alert: Filtration intensification required. Reason: {reason}. Action needed by {programmer}."
+        send_notification(programmer, alert_message)
+
+    return jsonify({"status": "success", "targets_notified": targets}), 200
+
+# To run this Flask instance:
+# if __name__ == '__main__':
+#     app.run(port=5000)
+
+
+
+// JavaScript Client-Side Instance (notification_client.js)
+
+/**
+ * Checks for notification support and initiates the subscription process 
+ * or logs a browser incompatibility fallback.
+ */
+function handleBrowserNotifications() {
+    // 1. Check for core API support
+    const isNotificationSupported = 'Notification' in window;
+    const isServiceWorkerSupported = 'serviceWorker' in navigator;
+    const isPushManagerSupported = isServiceWorkerSupported && ('pushManager' in window.ServiceWorkerRegistration.prototype);
+
+    // SCIENTIFIC REASONING: Feature Detection is a key principle in resilient 
+    // frontend engineering to handle the heterogeneous environment of web browsers.
+
+    if (isNotificationSupported && isServiceWorkerSupported && isPushManagerSupported) {
+        console.log("Web Push API supported. Proceeding to prompt user for permission.");
+        // 
+        // Ideal Path: Register Service Worker, Request Permission, Subscribe, 
+        // and send subscription object to the backend (to trigger NOTIFICATION SERVICE).
+        
+        // Notification.requestPermission().then(permission => {
+        //     if (permission === 'granted') {
+        //         // Begin subscription logic...
+        //     }
+        // });
+    } else {
+        // 2. Fallback for "Browser Incompatible" scenarios
+        console.warn("Browser incompatibility detected for real-time Web Push.");
+        
+        if (!isNotificationSupported) {
+             console.error("Critical incompatibility: Browser does not support the base Notification API.");
+        } else if (!isPushManagerSupported) {
+             console.error("PushManager is not supported. Cannot send notifications when browser is closed.");
+        }
+        
+        // FALLBACK INSTANCE: Use a simple, universally compatible alternative
+        startPollingForNotifications();
+        displayInAppAlert("⚠️ Critical Alerts will appear as in-app banners due to browser limitations.");
+    }
+}
+
+/**
+ * FALLBACK: Polling instance to check the backend periodically.
+ */
+function startPollingForNotifications() {
+    // In a real application, replace this with a robust AJAX call.
+    const pollInterval = 15000; // Check every 15 seconds (15000 ms)
+
+    // Scientific Reasoning: Polling is a synchronous, less efficient method 
+    // but acts as a reliable fallback when modern asynchronous APIs fail.
+    
+    // setInterval(() => {
+    //     console.log(`Polling backend for new alerts... (Every ${pollInterval / 1000}s)`);
+    //     // fetch('/api/get_pending_alerts_for_user')
+    //     //   .then(response => response.json())
+    //     //   .then(data => { if (data.alerts.length) displayNotification(data.alerts); });
+    // }, pollInterval);
+}
+
+function displayInAppAlert(message) {
+    // Instance of a simple DOM manipulation fallback
+    const alertDiv = document.createElement('div');
+    alertDiv.textContent = message;
+    alertDiv.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; background: red; color: white; padding: 10px; text-align: center; z-index: 10000;';
+    document.body.prepend(alertDiv);
+}
+
+// Execute the main logic when the page loads
+// window.addEventListener('load', handleBrowserNotifications);
+
+
+
+## Python Advanced AI Filter Core (ai_filter_core.py)
+import json
+from datetime import datetime
+
+# Conceptual class representing a continuously updated AI model
+class IncrementalAnomalyModel:
+    def __init__(self):
+        # In a production setting, this would be a loaded PyTorch or TensorFlow model 
+        # trained for Online Learning (e.g., using Stochastic Gradient Descent on streams).
+        self.model_status = "Online"
+        self.anomaly_threshold = 0.95  # Score above this needs 'intensification'
+
+    def get_realtime_score(self, data_point: dict) -> float:
+        """
+        Simulates advanced real-time inference on the data stream.
+        Scientific Reasoning: The model calculates an anomaly probability (score) 
+        based on learned patterns. A higher score signifies greater deviation 
+        from the expected data distribution.
+        """
+        # Placeholder for complex model inference logic
+        feature_vector = data_point.get('features', [0.0])
+        
+        # Example calculation using basic aggregation
+        score = sum(feature_vector) / len(feature_vector) 
+        
+        # We cap the score to simulate a high anomaly probability (0.0 to 1.0)
+        return min(1.0, score) if score > 0.5 else 0.0
+
+# Initialize the persistent model instance
+ai_model = IncrementalAnomalyModel()
+
+# --- Conceptual Stream Processing Logic (Replacing manual function calls) ---
+# Imagine this function is triggered by every new message from the Kafka stream
+
+def process_stream_event(stream_message: str):
+    data = json.loads(stream_message)
+    
+    # 1. Real-Time Inference
+    anomaly_score = ai_model.get_realtime_score(data)
+    
+    # 2. Intensification Trigger
+    if anomaly_score > ai_model.anomaly_threshold:
+        print(f"[{datetime.now().isoformat()}] 🚨 INTENSIFICATION TRIGGERED. Score: {anomaly_score:.2f}")
+        
+        # 3. Asynchronous Notification Hand-off (to Instance 2)
+        # In a real system, this would push a message to a Nofication Gateway queue (e.g., Redis/Celery)
+        trigger_payload = {
+            'anomaly_id': data.get('event_id'),
+            'score': anomaly_score,
+            'reason': 'High anomaly score detected by Incremental AI Model.'
+        }
+        # send_to_notification_queue(trigger_payload)
+        
+    else:
+        print(f"Processed event {data.get('event_id')}. Score: {anomaly_score:.2f} (Normal)")
+
+# Example Stream Data Instance:
+# stream_data = '{"event_id": "001", "features": [0.95, 0.92, 0.88], "user_id": "dev_X"}'
+# process_stream_event(stream_data)
+
+
+## Python Notification Gateway (notification_tasks.py)
+# Requires an asynchronous task queue like Celery or similar framework
+
+from celery import Celery # Conceptual import for task management
+
+# app = Celery('notification_gateway', broker='redis://localhost:6379/0') 
+
+# Mock database check for "Ignored Programmers"
+def get_ignored_programmers_details():
+    """
+    Advanced Logic Instance: Query a dedicated service/database for programmers
+    who meet the 'ignored' criteria (e.g., last code commit > 60 days).
+    """
+    # The 'ignored' status is dynamically checked here
+    return [
+        {'id': 'user_A', 'preference': 'email_fallback', 'email': 'a@dev.com'},
+        {'id': 'user_B', 'preference': 'browser_push', 'endpoint': 'https://push.com/B'}
+    ]
+
+# @app.task
+def send_intensification_notification(payload: dict):
+    """
+    Asynchronous task to manage all notification types.
+    """
+    targets = get_ignored_programmers_details()
+    
+    if not targets:
+        print("No 'ignored programmers' found to notify.")
+        return
+
+    # Process each target based on their notification preference
+    for target in targets:
+        message = f"AI Alert {payload['anomaly_id']}: Intensified filtration needed (Score: {payload['score']:.2f})."
+        
+        # 1. Browser/Web Push Notification
+        if target['preference'] == 'browser_push' and target.get('endpoint'):
+            # This would call a dedicated Web Push API service
+            print(f"✉️ Pushing to {target['id']} via browser endpoint: {message}")
+            # push_notification_service.send(target['endpoint'], message)
+        
+        # 2. Email/SMS (Fallback for incompatible browsers)
+        elif target['preference'] == 'email_fallback' and target.get('email'):
+            # This is the guaranteed delivery method for "browser incompatible" users
+            print(f"📧 Sending EMAIL fallback to {target['id']} ({target['email']}): {message}")
+            # email_service.send(target['email'], message)
+        
+        else:
+            print(f"Skipping notification for {target['id']} due to missing preference/details.")
+
+# Example Task Trigger (from Instance 1):
+# notification_task = {
+#     'anomaly_id': '001', 
+#     'score': 0.98,
+#     'reason': 'High anomaly score detected...'
+# }
+# send_intensification_notification.delay(notification_task) # Non-blocking call
+
+
+
+// JavaScript Advanced Client-Side (notification_handler.js)
+
+function initNotificationHandler(userId) {
+    // 1. Check for Full Web Push API Support
+    const fullPushSupport = 'serviceWorker' in navigator && 'PushManager' in window;
+    
+    if (fullPushSupport) {
+        console.log("Full Web Push support detected. Subscribing for background notifications.");
+        // Standard Web Push subscription logic here...
+        // ... (This handles compatible browsers)
+        
+    } else {
+        // 2. Clear Voice and Scientific Fallback
+        console.warn("⚠️ Browser Incompatibility Detected: Web Push API is missing.");
+        console.log("Scientific Fallback: Using Server-Sent Events (SSE) for real-time updates while the tab is open.");
+
+        // SSE Fallback Instance: More efficient than polling, less complex than WebSockets
+        try {
+            // 
+            const eventSource = new EventSource(`/api/sse/alerts/${userId}`);
+            
+            eventSource.onopen = () => {
+                console.log("SSE connection established. Receiving real-time alerts.");
+            };
+
+            // Listen for a specific event type from the backend
+            eventSource.addEventListener('intensification_alert', (event) => {
+                const alertData = JSON.parse(event.data);
+                displayInAppHUD(alertData); // Use the provided HUD display preference
+            });
+            
+            eventSource.onerror = (error) => {
+                console.error("SSE Error. Falling back to simple polling.", error);
+                eventSource.close();
+                // Final, simple polling can be initialized here as the ultimate fallback
+            };
+            
+        } catch (e) {
+            console.error("Critical: Cannot initialize SSE. The browser is severely incompatible.");
+        }
+    }
+}
+
+/**
+ * Renders the alert using the user's preference for 'hud'.
+ */
+function displayInAppHUD(alertData) {
+    const hudElement = document.getElementById('ai-hud');
+    if (!hudElement) {
+        // Create HUD element if it doesn't exist...
+        console.log("HUD created and displaying notification.");
+    }
+    // Update the HUD display with the real-time alert data
+    hudElement.textContent = `🚨 AI HUD ALERT | Score: ${alertData.score.toFixed(2)} | Reason: ${alertData.reason}`;
+    // Add visual instance here
+    // 
+}
+
+// Example Execution:
+// initNotificationHandler('user_A'); 
