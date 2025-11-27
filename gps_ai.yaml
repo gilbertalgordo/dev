@@ -176,3 +176,222 @@ for i, point in enumerate(gps_system.data_buffer):
 
 m.save("tactical_gps_map.html")
 print("[System] Map saved to 'tactical_gps_map.html'")
+
+
+
+
+pip install pandas numpy scikit-learn filterpy tensorflow folium
+
+
+
+
+import pandas as pd
+import numpy as np
+import time
+import math
+from datetime import datetime
+
+# Advanced Libraries
+from filterpy.kalman import ExtendedKalmanFilter as EKF
+from filterpy.common import Q_discrete_white_noise
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense
+
+# Constants (Earth's radius in meters)
+R_EARTH = 6371000 
+
+def haversine(lat1, lon1, lat2, lon2):
+    """Calculates distance between two GPS points using the Haversine formula."""
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    
+    a = math.sin(dphi/2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda/2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+    return R_EARTH * c
+
+## 1. Extended Kalman Filter (EKF) Tracker
+# State Vector: [lat, lon, velocity_lat, velocity_lon]
+class EKF_Tracker:
+    def __init__(self, lat, lon):
+        # 4x1 state vector: [lat, lon, vel_lat, vel_lon]
+        self.ekf = EKF(dim_x=4, dim_z=2) 
+        
+        # Initial State: [lat, lon, 0, 0]
+        self.ekf.x = np.array([lat, lon, 0., 0.]) 
+        
+        # State Transition Function (f) and its Jacobian (F) must be defined
+        self.ekf.F = np.array([
+            [1., 0., 1., 0.],
+            [0., 1., 0., 1.],
+            [0., 0., 1., 0.],
+            [0., 0., 0., 1.]
+        ])
+        
+        # Measurement Function (h) and its Jacobian (H) - measurement is just [lat, lon]
+        self.ekf.H = np.array([
+            [1., 0., 0., 0.],
+            [0., 1., 0., 0.]
+        ])
+        
+        # Process Noise Covariance (Q) - how much the system changes
+        self.ekf.Q = Q_discrete_white_noise(dim=2, dt=1., var=0.1, block_size=2)
+        
+        # Measurement Noise Covariance (R) - how noisy the GPS sensor is (e.g., 5m deviation)
+        self.ekf.R = np.diag([5.0/R_EARTH, 5.0/R_EARTH]) # Convert meters to degrees approx.
+    
+    def predict(self, dt=1.0):
+        """EKF Prediction step: Project state forward."""
+        self.ekf.F[0, 2] = dt
+        self.ekf.F[1, 3] = dt
+        self.ekf.predict()
+        return self.ekf.x[:2]
+
+    def update(self, measurement):
+        """EKF Update step: Incorporate new GPS measurement."""
+        self.ekf.update(measurement)
+        return self.ekf.x[:2]
+
+## 2. Trajectory LSTM (Deep Learning)
+# A sequence-to-sequence model for prediction or classification
+class Trajectory_LSTM:
+    def __init__(self, seq_len=10, features=4, num_classes=3):
+        self.seq_len = seq_len
+        self.features = features
+        self.num_classes = num_classes
+        self.model = self._build_model()
+        self.is_trained = False
+        
+    def _build_model(self):
+        """Builds an LSTM model for sequence learning."""
+        model = Sequential([
+            LSTM(64, activation='relu', input_shape=(self.seq_len, self.features), return_sequences=False),
+            Dense(32, activation='relu'),
+            Dense(self.num_classes, activation='softmax') # For classification: walking, driving, idling
+        ])
+        model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+        return model
+
+    def train_model(self, X_data, y_labels, epochs=20, batch_size=32):
+        """Train the model with structured sequence data."""
+        print("[LSTM] Training Model...")
+        self.model.fit(X_data, y_labels, epochs=epochs, batch_size=batch_size, verbose=0)
+        self.is_trained = True
+        print("[LSTM] Training Complete.")
+    
+    def classify_trajectory(self, sequence):
+        """Predicts the movement class (e.g., walking, driving) from a sequence."""
+        if not self.is_trained: return "UNTRAINED"
+        sequence = sequence.reshape(1, self.seq_len, self.features)
+        prediction = self.model.predict(sequence, verbose=0)
+        class_index = np.argmax(prediction[0])
+        classes = {0: "WALKING", 1: "DRIVING", 2: "IDLING"}
+        return classes.get(class_index, "UNKNOWN")
+
+## 3. Multipurpose System Orchestrator
+class Multipurpose_System:
+    def __init__(self, initial_lat, initial_lon):
+        self.ekf_tracker = EKF_Tracker(initial_lat, initial_lon)
+        self.lstm_model = Trajectory_LSTM()
+        self.history = []
+        self.SEQ_LEN = 10
+        
+    def process_data_point(self, lat, lon, timestamp):
+        """Process a new GPS data point through EKF and store the filtered state."""
+        
+        # 1. EKF State Estimation
+        measurement = np.array([lat, lon]) / R_EARTH # Normalized measurement
+        
+        # Predict: Use EKF's model to predict the next state
+        self.ekf_tracker.predict()
+        
+        # Update: Correct the prediction with the actual measurement
+        filtered_state = self.ekf_tracker.update(measurement)
+        
+        # Store the current filtered state (lat, lon, vel_lat, vel_lon)
+        self.history.append(self.ekf_tracker.ekf.x)
+        
+        # 2. Deep Learning Classification
+        activity = "N/A (Collecting Data)"
+        if len(self.history) >= self.SEQ_LEN:
+            # Prepare the sequence of states for the LSTM
+            sequence = np.array(self.history[-self.SEQ_LEN:])
+            activity = self.lstm_model.classify_trajectory(sequence)
+        
+        # 3. HUD Output
+        current_state = self.ekf_tracker.ekf.x
+        lat_out, lon_out = current_state[0]*R_EARTH, current_state[1]*R_EARTH
+        vel_lat, vel_lon = current_state[2], current_state[3]
+        
+        self._render_hud(lat_out, lon_out, vel_lat, vel_lon, activity, timestamp)
+        
+    def _render_hud(self, lat, lon, vel_lat, vel_lon, activity, timestamp):
+        """Text-based HUD output."""
+        
+        speed_m_s = np.sqrt(vel_lat**2 + vel_lon**2)
+        
+        print("\n" + "="*40)
+        print("🚀 **ADVANCED GPS AI HUD** 🚀")
+        print(f"Time: {timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
+        print("---")
+        print(f"**FILTERED POS (EKF):** {lat:.6f}, {lon:.6f}")
+        print(f"**FILTERED SPEED:** {speed_m_s:.2f} m/s")
+        print(f"**LSTM ACTIVITY:** \033[96m{activity}\033[0m")
+        print(f"**VEL VECTOR (lat, lon):** {vel_lat:.3f}, {vel_lon:.3f}")
+        print("="*40)
+
+# --- SIMULATION AND MODEL TRAINING ---
+
+# Prepare dummy training data for the LSTM
+def generate_lstm_training_data(seq_len=10):
+    """Generates synthetic data for trajectory classification."""
+    X_train, y_train = [], []
+    
+    # Class 0: WALKING (Low speed, low velocity variance)
+    for _ in range(100):
+        data = np.random.rand(seq_len, 4) * 0.001 # Small changes in state
+        X_train.append(data)
+        y_train.append([1, 0, 0])
+        
+    # Class 1: DRIVING (Higher speed, consistent variance)
+    for _ in range(100):
+        data = np.random.rand(seq_len, 4) * 0.01 + np.array([0, 0, 0.5, 0.5]) # Medium changes, high velocity
+        X_train.append(data)
+        y_train.append([0, 1, 0])
+        
+    # Class 2: IDLING (Almost no movement)
+    for _ in range(100):
+        data = np.random.rand(seq_len, 4) * 0.00001 # Tiny changes
+        X_train.append(data)
+        y_train.append([0, 0, 1])
+        
+    return np.array(X_train), np.array(y_train)
+
+# Start coordinates (near a city center)
+START_LAT, START_LON = 34.0522, -118.2437 
+
+# Initialize and Train
+system = Multipurpose_System(START_LAT, START_LON)
+X_train, y_train = generate_lstm_training_data(system.SEQ_LEN)
+system.lstm_model.train_model(X_train, y_train)
+
+# Simulate a complex trajectory: Start walking, then get in a car (Driving)
+simulated_path = [
+    (34.0522, -118.2437), (34.0523, -118.2438), # Walking
+    (34.0524, -118.2439), (34.0525, -118.2440), # Walking
+    (34.0526, -118.2441), (34.0527, -118.2442), # Walking
+    (34.0528, -118.2443), (34.0529, -118.2444), # Walking
+    (34.0530, -118.2445), (34.0531, -118.2446), # Walking
+    (34.0550, -118.2500), (34.0600, -118.2600), # Driving (Large Jumps)
+    (34.0700, -118.2800), (34.0800, -118.3000)  # Driving (Large Jumps)
+]
+
+start_time = datetime.now()
+
+print("\n\n--- Starting Real-Time Simulation ---")
+# Process the path
+for i, (lat, lon) in enumerate(simulated_path):
+    timestamp = start_time + pd.Timedelta(seconds=i*5)
+    system.process_data_point(lat, lon, timestamp)
+    time.sleep(0.1) 
