@@ -1,0 +1,841 @@
+{
+  "name": "gateway-ai",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node dist/server.js",
+    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.8.0",
+    "jsonwebtoken": "^9.0.0",
+    "bcrypt": "^5.1.0",
+    "better-sqlite3": "^8.4.0",
+    "cookie-parser": "^1.4.6"
+  },
+  "devDependencies": {
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.5.0",
+    "@types/express": "^4.17.20",
+    "@types/jsonwebtoken": "^9.0.2",
+    "@types/bcrypt": "^5.0.0"
+  }
+}
+
+
+npm install
+# dev-run:
+npm run dev
+
+
+JWT_ACCESS_SECRET=replace-with-long-random
+JWT_REFRESH_SECRET=replace-with-different-long-random
+ACCESS_TOKEN_TTL=15m
+REFRESH_TOKEN_TTL=7d
+PORT=4000
+
+
+
+// src/server.ts
+import express from "express";
+import http from "http";
+import { Server as IOServer } from "socket.io";
+import jwt from "jsonwebtoken";
+import bcrypt from "bcrypt";
+import Database from "better-sqlite3";
+import cookieParser from "cookie-parser";
+
+import dotenv from "dotenv";
+dotenv.config();
+
+const PORT = Number(process.env.PORT || 4000);
+const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET!;
+const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET!;
+const ACCESS_TTL = process.env.ACCESS_TOKEN_TTL || "15m";
+const REFRESH_TTL = process.env.REFRESH_TOKEN_TTL || "7d";
+
+if (!ACCESS_SECRET || !REFRESH_SECRET) {
+  throw new Error("JWT secrets required in env");
+}
+
+// ---------- Simple SQLite setup ----------
+const db = new Database("./gateway_ai.db");
+db.exec(`
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  token TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  revoked INTEGER DEFAULT 0,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+CREATE TABLE IF NOT EXISTS histories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  role TEXT NOT NULL, -- e.g. 'user'|'assistant'|'system'
+  content TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+`);
+
+// Prepared statements
+const createUserStmt = db.prepare("INSERT INTO users (username, password_hash) VALUES (?, ?)");
+const getUserByUsernameStmt = db.prepare("SELECT * FROM users WHERE username = ?");
+const getUserByIdStmt = db.prepare("SELECT * FROM users WHERE id = ?");
+const storeRefreshStmt = db.prepare("INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?, ?, ?)");
+const getRefreshStmt = db.prepare("SELECT * FROM refresh_tokens WHERE token = ?");
+const revokeRefreshStmt = db.prepare("UPDATE refresh_tokens SET revoked = 1 WHERE token = ?");
+const storeHistoryStmt = db.prepare("INSERT INTO histories (user_id, role, content, created_at) VALUES (?, ?, ?, ?)");
+const getHistoryStmt = db.prepare("SELECT * FROM histories WHERE user_id = ? ORDER BY created_at ASC LIMIT ?");
+
+// ---------- JWT helpers ----------
+function signAccessToken(payload: object) {
+  return jwt.sign(payload, ACCESS_SECRET, { expiresIn: ACCESS_TTL });
+}
+function signRefreshToken(payload: object) {
+  return jwt.sign(payload, REFRESH_SECRET, { expiresIn: REFRESH_TTL });
+}
+function verifyAccessToken(token: string) {
+  return jwt.verify(token, ACCESS_SECRET);
+}
+function verifyRefreshToken(token: string) {
+  return jwt.verify(token, REFRESH_SECRET);
+}
+
+// ---------- Express app ----------
+const app = express();
+app.use(express.json());
+app.use(cookieParser());
+
+// Register
+app.post("/register", async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).json({ error: "username and password required" });
+
+  const existing = getUserByUsernameStmt.get(username);
+  if (existing) return res.status(409).json({ error: "username already exists" });
+
+  const pwHash = await bcrypt.hash(password, 12);
+  const info = createUserStmt.run(username, pwHash);
+  const userId = info.lastInsertRowid as number;
+  res.status(201).json({ id: userId, username });
+});
+
+// Login -> returns access + refresh tokens (refresh stored server-side)
+app.post("/login", async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).json({ error: "username and password required" });
+
+  const user = getUserByUsernameStmt.get(username);
+  if (!user) return res.status(401).json({ error: "invalid credentials" });
+
+  const ok = await bcrypt.compare(password, user.password_hash);
+  if (!ok) return res.status(401).json({ error: "invalid credentials" });
+
+  const accessToken = signAccessToken({ sub: user.id, username });
+  const refreshToken = signRefreshToken({ sub: user.id });
+
+  const decoded: any = jwt.decode(refreshToken);
+  const expiresAt = Math.floor((decoded?.exp || (Date.now()/1000)) as number);
+
+  storeRefreshStmt.run(user.id, refreshToken, expiresAt);
+  // For security: set refresh token as httpOnly cookie (optional)
+  res.cookie("refreshToken", refreshToken, { httpOnly: true, sameSite: "lax" });
+  res.json({ accessToken, refreshToken });
+});
+
+// Refresh endpoint: accept refresh token in cookie or body
+app.post("/refresh", (req, res) => {
+  const token = req.cookies.refreshToken || req.body.refreshToken;
+  if (!token) return res.status(400).json({ error: "no refresh token" });
+
+  let payload: any;
+  try {
+    payload = verifyRefreshToken(token) as any;
+  } catch (err) {
+    return res.status(401).json({ error: "invalid or expired refresh token" });
+  }
+
+  const stored = getRefreshStmt.get(token);
+  if (!stored || stored.revoked) return res.status(401).json({ error: "refresh token revoked or not found" });
+
+  // rotate refresh token: revoke old, issue new
+  revokeRefreshStmt.run(token);
+  const newRefresh = signRefreshToken({ sub: payload.sub });
+  const decoded: any = jwt.decode(newRefresh);
+  const expiresAt = Math.floor((decoded?.exp || (Date.now()/1000)) as number);
+  storeRefreshStmt.run(payload.sub, newRefresh, expiresAt);
+  res.cookie("refreshToken", newRefresh, { httpOnly: true, sameSite: "lax" });
+
+  const newAccess = signAccessToken({ sub: payload.sub });
+  res.json({ accessToken: newAccess, refreshToken: newRefresh });
+});
+
+// Protected example REST endpoint to retrieve history
+function authMiddleware(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const header = req.headers["authorization"];
+  if (!header) return res.status(401).json({ error: "missing Authorization header" });
+  const parts = header.split(" ");
+  if (parts.length !== 2) return res.status(401).json({ error: "bad Authorization header" });
+  const token = parts[1];
+  try {
+    const payload = jwt.verify(token, ACCESS_SECRET) as any;
+    (req as any).user = { id: payload.sub, username: payload.username };
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: "invalid token" });
+  }
+}
+
+app.get("/me/history", authMiddleware, (req, res) => {
+  const user = (req as any).user;
+  const rows = getHistoryStmt.all(user.id, 1000);
+  res.json(rows);
+});
+
+// ---------- HTTP + Socket.IO server ----------
+const httpServer = http.createServer(app);
+const io = new IOServer(httpServer, {
+  cors: { origin: "*", methods: ["GET", "POST"] }
+});
+
+// Socket.IO handshake middleware (validate JWT on initial handshake)
+io.engine.use((req: any, res: any, next: any) => {
+  // handshake occurs when sid is undefined
+  const isHandshake = req._query && req._query.sid === undefined;
+  if (!isHandshake) return next();
+
+  const header = req.headers["authorization"] || "";
+  // Accept token either from Authorization or query param token
+  const token = header.startsWith("Bearer ") ? header.split(" ")[1] : (req._query?.token || null);
+  if (!token) return next(new Error("no token"));
+
+  try {
+    const payload = jwt.verify(token, ACCESS_SECRET) as any;
+    // Attach user to request so socket can pick it up
+    req.user = { id: payload.sub, username: payload.username };
+    next();
+  } catch (err) {
+    return next(new Error("invalid token"));
+  }
+});
+
+// On socket connection
+io.on("connection", (socket) => {
+  // user info may be in handshake
+  const user = (socket.request as any).user;
+  if (!user) {
+    // safety: disconnect if no user
+    socket.disconnect(true);
+    return;
+  }
+
+  // Load last N history items and send to client
+  const rows = getHistoryStmt.all(user.id, 100);
+  socket.emit("history", rows);
+
+  // Attach helper to save messages
+  socket.on("message", (payload: { role: string; content: string }) => {
+    const now = Math.floor(Date.now() / 1000);
+    storeHistoryStmt.run(user.id, payload.role, payload.content, now);
+
+    // Echo to the client and broadcast if needed
+    socket.emit("message:ack", { status: "ok", content: payload.content, created_at: now });
+  });
+
+  // Example: request to query memory server-side
+  socket.on("query", async (q: { text: string }) => {
+    // Example simple keyword match against history (placeholder for real AI logic)
+    const rows = getHistoryStmt.all(user.id, 50);
+    const matched = rows.filter((r: any) => r.content.includes(q.text)).slice(-10);
+    socket.emit("query:response", { results: matched });
+  });
+});
+
+// Start server
+httpServer.listen(PORT, () => {
+  console.log(`Gateway AI server listening on :${PORT}`);
+});
+
+
+<!-- client.html -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Gateway AI Client</title></head>
+<body>
+<script src="https://cdn.socket.io/4.8.0/socket.io.min.js"></script>
+<script>
+const API = "http://localhost:4000";
+
+let accessToken = null;
+let refreshToken = null;
+let socket = null;
+
+// Simple storage
+function saveTokens(at, rt) {
+  accessToken = at;
+  refreshToken = rt;
+  sessionStorage.setItem("accessToken", at);
+  sessionStorage.setItem("refreshToken", rt);
+}
+
+function loadTokens() {
+  accessToken = sessionStorage.getItem("accessToken");
+  refreshToken = sessionStorage.getItem("refreshToken");
+}
+loadTokens();
+
+async function login(username, password) {
+  const r = await fetch(API + "/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password })
+  });
+  if (!r.ok) {
+    const err = await r.json();
+    throw new Error(err.error || r.statusText);
+  }
+  const j = await r.json();
+  saveTokens(j.accessToken, j.refreshToken);
+  return j;
+}
+
+async function refreshAccess() {
+  // try refresh endpoint (cookie or body)
+  const r = await fetch(API + "/refresh", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refreshToken })
+  });
+  if (!r.ok) throw new Error("refresh failed");
+  const j = await r.json();
+  saveTokens(j.accessToken, j.refreshToken);
+  return j.accessToken;
+}
+
+function connectSocket() {
+  if (!accessToken) return console.warn("no access token; cannot connect");
+  socket = io(API, {
+    auth: { token: accessToken },
+    transports: ["websocket"]
+  });
+
+  socket.on("connect_error", async (err) => {
+    console.warn("connect_error", err.message);
+    if (err && err.message && err.message.includes("invalid token")) {
+      try {
+        const newAccess = await refreshAccess();
+        // retry connect after refresh
+        socket.close();
+        connectSocket();
+      } catch (e) {
+        console.error("refresh failed; please login again", e);
+      }
+    }
+  });
+
+  socket.on("connect", () => {
+    console.log("socket connected", socket.id);
+  });
+
+  socket.on("history", (rows) => {
+    console.log("history loaded", rows);
+  });
+
+  socket.on("message:ack", (m) => {
+    console.log("message ack", m);
+  });
+
+  socket.on("query:response", (m) => {
+    console.log("query response", m);
+  });
+}
+
+// auto-connect if token present
+if (accessToken) connectSocket();
+
+// Example usage from console:
+// login("alice","password").then(()=>connectSocket())
+window.gateway = { login, connectSocket, refreshAccess, socket };
+</script>
+</body>
+</html>
+
+
+gateway-ai/
+├─ package.json
+├─ tsconfig.json
+├─ docker-compose.yml
+├─ Dockerfile
+├─ .env.example
+├─ scripts/init-db.sql
+└─ src/
+   ├─ server.ts
+   ├─ auth.ts
+   ├─ db.ts
+   ├─ memory.ts
+   ├─ ai.ts
+   ├─ socket.ts
+   ├─ worker.ts
+   └─ types.ts
+├─ client.html
+
+
+{
+  "name": "gateway-ai-advanced",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "worker": "ts-node-dev --respawn --transpile-only src/worker.ts"
+  },
+  "dependencies": {
+    "@socket.io/redis-adapter": "^7.1.0",
+    "axios": "^1.4.0",
+    "bcrypt": "^5.1.0",
+    "bullmq": "^2.10.0",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.1.4",
+    "express": "^4.18.2",
+    "express-rate-limit": "^6.7.0",
+    "ioredis": "^5.3.2",
+    "jsonwebtoken": "^9.0.0",
+    "pg": "^8.11.0",
+    "socket.io": "^4.8.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.20",
+    "@types/jsonwebtoken": "^9.0.2",
+    "@types/node": "^20.4.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.5.0"
+  }
+}
+
+
+PORT=4000
+NODE_ENV=development
+
+DATABASE_URL=postgresql://postgres:postgres@postgres:5432/gateway_ai
+REDIS_URL=redis://redis:6379
+
+JWT_ACCESS_SECRET=replace_access_secret_here
+JWT_REFRESH_SECRET=replace_refresh_secret_here
+ACCESS_TOKEN_TTL=15m
+REFRESH_TOKEN_TTL=30d
+
+CORS_ORIGIN=http://localhost:3000
+
+AI_PROVIDER_API_KEY=
+AI_PROVIDER_ENDPOINT=
+EMBEDDING_DIM=1536
+
+
+CREATE TABLE IF NOT EXISTS users (
+  id BIGSERIAL PRIMARY KEY,
+  username TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
+  jti UUID NOT NULL UNIQUE,
+  revoked BOOLEAN DEFAULT false,
+  device_info TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  expires_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS histories (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+-- Optional pgvector + embeddings table (enable pgvector manually)
+-- CREATE EXTENSION IF NOT EXISTS vector;
+-- CREATE TABLE IF NOT EXISTS embeddings (
+--   id BIGSERIAL PRIMARY KEY,
+--   user_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
+--   content TEXT NOT NULL,
+--   embedding vector(1536),
+--   created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+-- );
+
+
+// src/db.ts
+import { Pool } from "pg";
+import Redis from "ioredis";
+import dotenv from "dotenv";
+dotenv.config();
+
+export const pgPool = new Pool({ connectionString: process.env.DATABASE_URL });
+export const redis = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
+
+
+export type User = { id: number; username: string; created_at?: string };
+
+
+// src/auth.ts
+import jwt from "jsonwebtoken";
+import bcrypt from "bcrypt";
+import { v4 as uuidv4 } from "uuid";
+import { pgPool } from "./db";
+import dotenv from "dotenv";
+dotenv.config();
+
+const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET!;
+const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET!;
+const ACCESS_TTL = process.env.ACCESS_TOKEN_TTL || "15m";
+const REFRESH_TTL = process.env.REFRESH_TOKEN_TTL || "30d";
+
+if (!ACCESS_SECRET || !REFRESH_SECRET) throw new Error("JWT secrets required");
+
+function ttlToMs(ttl: string) {
+  const num = parseInt(ttl.slice(0, -1), 10);
+  const unit = ttl.slice(-1);
+  switch (unit) {
+    case "s": return num * 1000;
+    case "m": return num * 60 * 1000;
+    case "h": return num * 60 * 60 * 1000;
+    case "d": return num * 24 * 60 * 60 * 1000;
+    default: return 30 * 24 * 60 * 60 * 1000;
+  }
+}
+
+async function createUser(username: string, password: string) {
+  const hash = await bcrypt.hash(password, 12);
+  const r = await pgPool.query("INSERT INTO users (username, password_hash) VALUES ($1,$2) RETURNING id, username, created_at", [username, hash]);
+  return r.rows[0];
+}
+
+async function findUserByUsername(username: string) {
+  const r = await pgPool.query("SELECT * FROM users WHERE username=$1", [username]);
+  return r.rows[0] || null;
+}
+
+async function verifyPassword(username: string, password: string) {
+  const u = await findUserByUsername(username);
+  if (!u) return null;
+  const ok = await bcrypt.compare(password, u.password_hash);
+  if (!ok) return null;
+  return { id: u.id, username: u.username };
+}
+
+function signAccess(payload: object) {
+  return jwt.sign(payload, ACCESS_SECRET, { expiresIn: ACCESS_TTL });
+}
+
+function signRefresh(payload: object, jti: string) {
+  return jwt.sign({ ...payload, jti }, REFRESH_SECRET, { expiresIn: REFRESH_TTL });
+}
+
+async function issueTokens(userId: number) {
+  const jti = uuidv4();
+  const accessToken = signAccess({ sub: userId });
+  const refreshToken = signRefresh({ sub: userId }, jti);
+  const expiresAt = new Date(Date.now() + ttlToMs(process.env.REFRESH_TOKEN_TTL || REFRESH_TTL));
+  await pgPool.query("INSERT INTO refresh_tokens (user_id, jti, expires_at) VALUES ($1,$2,$3)", [userId, jti, expiresAt]);
+  return { accessToken, refreshToken };
+}
+
+async function rotateRefresh(oldToken: string) {
+  const payload: any = jwt.verify(oldToken, REFRESH_SECRET) as any;
+  if (!payload.jti) throw new Error("invalid refresh (missing jti)");
+  const r = await pgPool.query("SELECT * FROM refresh_tokens WHERE jti=$1", [payload.jti]);
+  if (r.rowCount === 0) throw new Error("refresh not found");
+  if (r.rows[0].revoked) throw new Error("refresh revoked");
+  await pgPool.query("UPDATE refresh_tokens SET revoked=true WHERE jti=$1", [payload.jti]);
+  const newJti = uuidv4();
+  const newRefresh = jwt.sign({ sub: payload.sub, jti: newJti }, REFRESH_SECRET, { expiresIn: REFRESH_TTL });
+  const newAccess = jwt.sign({ sub: payload.sub }, ACCESS_SECRET, { expiresIn: ACCESS_TTL });
+  const expiresAt = new Date(Date.now() + ttlToMs(process.env.REFRESH_TOKEN_TTL || REFRESH_TTL));
+  await pgPool.query("INSERT INTO refresh_tokens (user_id, jti, expires_at) VALUES ($1,$2,$3)", [payload.sub, newJti, expiresAt]);
+  return { accessToken: newAccess, refreshToken: newRefresh };
+}
+
+function authMiddleware(req: any, res: any, next: any) {
+  const header = req.headers["authorization"];
+  if (!header) return res.status(401).json({ error: "missing authorization" });
+  const parts = header.split(" ");
+  if (parts.length !== 2) return res.status(401).json({ error: "bad authorization header" });
+  const token = parts[1];
+  try {
+    const payload: any = jwt.verify(token, ACCESS_SECRET);
+    req.user = { id: payload.sub };
+    return next();
+  } catch {
+    return res.status(401).json({ error: "invalid token" });
+  }
+}
+
+export { createUser as registerUser, verifyPassword, issueTokens, rotateRefresh, authMiddleware };
+
+
+// src/ai.ts
+import axios from "axios";
+import dotenv from "dotenv";
+dotenv.config();
+
+const PROVIDER_ENDPOINT = process.env.AI_PROVIDER_ENDPOINT;
+const PROVIDER_KEY = process.env.AI_PROVIDER_API_KEY;
+const DIM = Number(process.env.EMBEDDING_DIM || 1536);
+
+function fallbackEmbed(text: string) {
+  const vec = new Array(DIM).fill(0).map((_, i) => ((text.charCodeAt(i % text.length) || 0) % 100) / 100);
+  return vec;
+}
+
+export async function embedText(text: string): Promise<number[]> {
+  if (!PROVIDER_ENDPOINT || !PROVIDER_KEY) return fallbackEmbed(text);
+  const r = await axios.post(`${PROVIDER_ENDPOINT}/embeddings`, { input: text }, {
+    headers: { Authorization: `Bearer ${PROVIDER_KEY}` }
+  });
+  return r.data.data[0].embedding;
+}
+
+
+// src/memory.ts
+import { pgPool } from "./db";
+import { embedText } from "./ai";
+
+export async function saveHistory(userId: number, role: string, content: string, metadata = {}) {
+  await pgPool.query("INSERT INTO histories (user_id, role, content, metadata) VALUES ($1,$2,$3,$4)", [userId, role, content, metadata]);
+}
+
+export async function getHistory(userId: number, limit = 200) {
+  const r = await pgPool.query("SELECT id, role, content, metadata, created_at FROM histories WHERE user_id=$1 ORDER BY created_at DESC LIMIT $2", [userId, limit]);
+  return r.rows;
+}
+
+export async function saveEmbedding(userId: number, content: string) {
+  const vec = await embedText(content);
+  await pgPool.query("INSERT INTO embeddings (user_id, content, embedding) VALUES ($1,$2,$3)", [userId, content, vec]);
+}
+
+export async function semanticSearch(userId: number, query: string, k = 5) {
+  const qVec = await embedText(query);
+  const r = await pgPool.query("SELECT id, content, embedding <-> $2 AS distance FROM embeddings WHERE user_id=$1 ORDER BY embedding <-> $2 LIMIT $3", [userId, qVec, k]);
+  return r.rows;
+}
+
+
+// src/socket.ts
+import { Server as IOServer } from "socket.io";
+import { createAdapter } from "@socket.io/redis-adapter";
+import Redis from "ioredis";
+import jwt from "jsonwebtoken";
+import { saveHistory, getHistory, saveEmbedding, semanticSearch } from "./memory";
+
+const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET!;
+
+export function configureSocket(io: IOServer) {
+  if (process.env.REDIS_URL) {
+    const pub = new Redis(process.env.REDIS_URL);
+    const sub = pub.duplicate();
+    io.adapter(createAdapter(pub, sub));
+  }
+
+  io.use((socket, next) => {
+    const auth = socket.handshake.auth || {};
+    const token = auth.token || (socket.handshake.headers["authorization"] ? (socket.handshake.headers["authorization"] as string).split(" ")[1] : null);
+    if (!token) return next(new Error("Authentication token missing"));
+    try {
+      const payload: any = jwt.verify(token, ACCESS_SECRET);
+      socket.data.user = { id: payload.sub };
+      return next();
+    } catch (err) {
+      return next(new Error("Invalid token"));
+    }
+  });
+
+  io.on("connection", (socket) => {
+    const uid = socket.data.user.id as number;
+    (async () => {
+      const hist = await getHistory(uid, 100);
+      socket.emit("history", hist);
+    })();
+
+    socket.on("message", async (payload: { role: string; content: string; metadata?: any }) => {
+      await saveHistory(uid, payload.role, payload.content, payload.metadata || {});
+      // prefer enqueueing embeddings in a worker; direct call for simplicity
+      try { await saveEmbedding(uid, payload.content); } catch (e) { console.warn("embedding failed", e); }
+      socket.emit("message:ack", { ok: true, ts: new Date().toISOString() });
+    });
+
+    socket.on("semantic_query", async (q: { text: string; k?: number }) => {
+      try {
+        const res = await semanticSearch(uid, q.text, q.k || 5);
+        socket.emit("semantic:response", res);
+      } catch (e) {
+        socket.emit("semantic:response", { error: "semantic search error" });
+      }
+    });
+  });
+}
+
+
+// src/server.ts
+import express from "express";
+import http from "http";
+import { Server as IOServer } from "socket.io";
+import cors from "cors";
+import cookieParser from "cookie-parser";
+import rateLimit from "express-rate-limit";
+import dotenv from "dotenv";
+dotenv.config();
+
+import { registerUser, verifyPassword, issueTokens, rotateRefresh, authMiddleware } from "./auth";
+import { configureSocket } from "./socket";
+import { getHistory } from "./memory";
+
+const app = express();
+const PORT = Number(process.env.PORT || 4000);
+
+app.use(cors({ origin: process.env.CORS_ORIGIN || "*", credentials: true }));
+app.use(express.json());
+app.use(cookieParser());
+app.use(rateLimit({ windowMs: 60 * 1000, max: 300 }));
+
+app.post("/register", async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).json({ error: "missing fields" });
+  try {
+    const u = await registerUser(username, password);
+    return res.status(201).json({ id: u.id, username: u.username });
+  } catch (e: any) {
+    if (e.code === "23505") return res.status(409).json({ error: "username exists" });
+    console.error(e);
+    return res.status(500).json({ error: "internal" });
+  }
+});
+
+app.post("/login", async (req, res) => {
+  const { username, password } = req.body;
+  const u = await verifyPassword(username, password);
+  if (!u) return res.status(401).json({ error: "invalid credentials" });
+  const tokens = await issueTokens(u.id);
+  res.cookie("refreshToken", tokens.refreshToken, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production" });
+  return res.json({ accessToken: tokens.accessToken });
+});
+
+app.post("/refresh", async (req, res) => {
+  const token = req.cookies.refreshToken || req.body.refreshToken;
+  if (!token) return res.status(400).json({ error: "missing refresh token" });
+  try {
+    const rotated = await rotateRefresh(token);
+    res.cookie("refreshToken", rotated.refreshToken, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production" });
+    return res.json({ accessToken: rotated.accessToken });
+  } catch (e) {
+    return res.status(401).json({ error: "invalid refresh token" });
+  }
+});
+
+app.get("/me/history", authMiddleware, async (req, res) => {
+  const user = (req as any).user;
+  const h = await getHistory(user.id, 200);
+  res.json(h);
+});
+
+const httpServer = http.createServer(app);
+const io = new IOServer(httpServer, { cors: { origin: process.env.CORS_ORIGIN || "*", credentials: true } });
+
+configureSocket(io);
+
+httpServer.listen(PORT, () => console.log(`Gateway AI listening on :${PORT}`));
+
+
+// src/worker.ts
+import { Worker, Queue } from "bullmq";
+import { redis } from "./db";
+import { saveEmbedding } from "./memory";
+import dotenv from "dotenv";
+dotenv.config();
+
+const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
+const connection = { connection: { host: new URL(redisUrl).hostname } };
+const embedQueue = new Queue("embeddings", connection);
+
+const worker = new Worker("embeddings", async job => {
+  const { userId, content } = job.data;
+  await saveEmbedding(userId, content);
+}, connection);
+
+worker.on("failed", (job, err) => console.error("job failed", job.id, err));
+worker.on("completed", job => console.log("job completed", job.id));
+
+
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Gateway AI Client</title></head>
+<body>
+<script src="https://cdn.socket.io/4.8.0/socket.io.min.js"></script>
+<script>
+const API = "http://localhost:4000";
+let accessToken = sessionStorage.getItem("accessToken");
+let socket = null;
+let backoff = 1000;
+
+async function login(username, password){
+  const r = await fetch(API + "/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username,password}), credentials:"include"});
+  if(!r.ok) throw new Error("login failed");
+  const j = await r.json();
+  accessToken = j.accessToken;
+  sessionStorage.setItem("accessToken", accessToken);
+  connectSocket();
+}
+
+async function refreshAccess(){
+  const r = await fetch(API + "/refresh",{method:"POST",credentials:"include"});
+  if(!r.ok) throw new Error("refresh failed");
+  const j = await r.json();
+  accessToken = j.accessToken;
+  sessionStorage.setItem("accessToken", accessToken);
+  return accessToken;
+}
+
+function connectSocket(){
+  if(!accessToken) return;
+  socket = io(API, { auth: { token: accessToken }, transports: ["websocket"], reconnection:false });
+
+  socket.on("connect", ()=> { console.log("connected", socket.id); backoff=1000; });
+  socket.on("connect_error", async (err) => {
+    console.warn("connect_error", err && err.message);
+    if(err && err.message && (err.message.includes("Invalid token") || err.message.includes("Authentication token missing"))) {
+      try {
+        const newToken = await refreshAccess();
+        socket.auth = { token: newToken };
+        socket.disconnect();
+        connectSocket();
+        return;
+      } catch(e) { console.error("refresh failed", e); }
+    }
+    setTimeout(()=>{ backoff=Math.min(backoff*2,30000); connectSocket(); }, backoff);
+  });
+
+  socket.on("history", rows=> console.log("history", rows));
+  socket.on("message:ack", m=> console.log("ack", m));
+}
+
+if(accessToken) connectSocket();
+window.gateway = { login, connectSocket, refreshAccess };
+</script>
+</body>
+</html>
