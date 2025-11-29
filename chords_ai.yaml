@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chords AI - The Ultimate Musical Instrument App</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for the app's aesthetic and core elements */
+        :root {
+            --primary-color: #3b82f6; /* Blue 500 */
+            --background-color: #1f2937; /* Gray 800 */
+            --card-color: #374151; /* Gray 700 */
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--background-color);
+            color: white;
+            min-height: 100vh;
+        }
+        .card {
+            background-color: var(--card-color);
+            border-radius: 1rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        .tab-button.active {
+            background-color: var(--primary-color);
+            color: white;
+            font-weight: 600;
+        }
+
+        /* TUNER STYLES (Simulated Visuals) */
+        #tuner-needle {
+            transform-origin: 50% 100%;
+            transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+        }
+        
+        /* GUITAR CHORD CHART STYLES */
+        .fretboard-string {
+            stroke: #d1d5db; /* Light gray for strings */
+            stroke-width: 2px;
+        }
+        .fretboard-fret {
+            fill: #6b7280; /* Gray 500 for frets */
+        }
+        .fretboard-nut {
+            stroke: white;
+            stroke-width: 5px;
+        }
+        .fret-dot {
+            fill: #fcd34d; /* Amber dot color */
+        }
+        .fret-number {
+            font-size: 10px;
+            fill: #9ca3af;
+        }
+        .fret-finger {
+            fill: var(--primary-color);
+            stroke: white;
+            stroke-width: 2px;
+            /* Animation pulse for visual flair */
+            animation: pulse-finger 1s infinite alternate;
+        }
+        @keyframes pulse-finger {
+            from { opacity: 1; transform: scale(1); }
+            to { opacity: 0.8; transform: scale(1.1); }
+        }
+
+        /* PIANO KEYBOARD STYLES */
+        .piano-key-white {
+            fill: white;
+            stroke: #1f2937;
+            stroke-width: 1px;
+            transition: fill 0.1s;
+        }
+        .piano-key-black {
+            fill: #374151;
+            stroke: #1f2937;
+            stroke-width: 1px;
+            transition: fill 0.1s;
+        }
+        .piano-key-highlighted {
+            fill: #fca5a5; /* Red 300 for highlighted notes */
+            transition: fill 0.1s;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8 flex justify-center items-start">
+
+    <div class="w-full max-w-4xl space-y-8">
+        
+        <!-- Header -->
+        <header class="text-center">
+            <h1 class="text-4xl font-extrabold text-white">
+                <span class="text-yellow-400">Chords AI</span> App
+            </h1>
+            <p class="text-gray-400 mt-1">Tuning and Chord Visualization for Guitar & Piano</p>
+        </header>
+
+        <!-- Main Tabs -->
+        <div class="card p-2">
+            <div class="flex space-x-2">
+                <button id="tab-tuner" class="tab-button active w-1/2 py-2 rounded-lg text-sm md:text-base" onclick="setActiveTab('tuner')">
+                    Instrument Tuner
+                </button>
+                <button id="tab-chart" class="tab-button w-1/2 py-2 rounded-lg text-sm md:text-base" onclick="setActiveTab('chart')">
+                    Chord Chart
+                </button>
+            </div>
+        </div>
+
+        <!-- TUNER SECTION -->
+        <div id="tuner-tab" class="tab-content space-y-6">
+            <div class="card p-6">
+                <h2 class="text-2xl font-semibold mb-4 text-center">Guitar Tuner (E Standard)</h2>
+                
+                <!-- Tuner Visual (SVG Simulation) -->
+                <div class="flex justify-center items-center h-48 relative">
+                    <div class="absolute w-40 h-40 border-8 border-gray-600 rounded-full flex items-center justify-center">
+                        <div class="w-32 h-32 border-4 border-gray-500 rounded-full"></div>
+                    </div>
+                    
+                    <!-- Needle -->
+                    <svg class="w-48 h-48 absolute" viewBox="0 0 100 100">
+                        <circle cx="50" cy="50" r="45" stroke="#4b5563" stroke-width="2" fill="none"/>
+                        <line x1="50" y1="50" x2="50" y2="10" stroke="#fef08a" stroke-width="2" id="tuner-needle" style="transform: rotate(0deg);"/>
+                        <!-- Green Sweet Spot -->
+                        <path d="M 50 50 L 50 10 A 40 40 0 0 1 50 10 Z" stroke="none" fill="#10b981" transform="rotate(-15 50 50)" opacity="0.4"/>
+                        <path d="M 50 50 L 50 10 A 40 40 0 0 0 50 10 Z" stroke="none" fill="#10b981" transform="rotate(15 50 50)" opacity="0.4"/>
+                    </svg>
+                    
+                    <!-- Text Display -->
+                    <div id="note-display" class="absolute text-5xl font-mono font-bold text-yellow-300">E4</div>
+                    <div id="status-message" class="absolute bottom-0 mt-2 text-lg text-center text-gray-300">Press a button to hear the reference tone.</div>
+                </div>
+
+                <!-- Tuning Buttons -->
+                <div class="mt-6 grid grid-cols-3 md:grid-cols-6 gap-3">
+                    <button class="tuner-btn bg-red-500 hover:bg-red-600 text-white font-bold py-2 rounded-lg transition" data-note="E4">E4 (High)</button>
+                    <button class="tuner-btn bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 rounded-lg transition" data-note="B3">B3</button>
+                    <button class="tuner-btn bg-yellow-500 hover:bg-yellow-600 text-gray-800 font-bold py-2 rounded-lg transition" data-note="G3">G3</button>
+                    <button class="tuner-btn bg-green-500 hover:bg-green-600 text-white font-bold py-2 rounded-lg transition" data-note="D3">D3</button>
+                    <button class="tuner-btn bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 rounded-lg transition" data-note="A2">A2</button>
+                    <button class="tuner-btn bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 rounded-lg transition" data-note="E2">E2 (Low)</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- CHORD CHART SECTION -->
+        <div id="chart-tab" class="tab-content space-y-6 hidden">
+            <div class="card p-6 space-y-6">
+                <h2 class="text-2xl font-semibold text-center">Interactive Chord Chart</h2>
+
+                <!-- Instrument Selector -->
+                <div class="flex justify-center space-x-4">
+                    <button id="inst-guitar" class="w-1/2 py-2 rounded-lg transition text-white bg-blue-600 hover:bg-blue-700 font-medium" onclick="setInstrument('guitar')">
+                        <span class="mr-2">🎸</span> Guitar
+                    </button>
+                    <button id="inst-piano" class="w-1/2 py-2 rounded-lg transition text-white bg-gray-600 hover:bg-gray-700 font-medium" onclick="setInstrument('piano')">
+                        <span class="mr-2">🎹</span> Piano
+                    </button>
+                </div>
+
+                <!-- Controls: Root and Quality -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label for="root-note" class="block text-sm font-medium text-gray-300 mb-1">Root Note</label>
+                        <select id="root-note" class="w-full p-2 rounded-lg bg-gray-600 border border-gray-500 focus:ring-blue-500 focus:border-blue-500 text-white" onchange="drawChord()">
+                            <!-- Options populated by JS -->
+                        </select>
+                    </div>
+                    <div>
+                        <label for="chord-quality" class="block text-sm font-medium text-gray-300 mb-1">Chord Quality</label>
+                        <select id="chord-quality" class="w-full p-2 rounded-lg bg-gray-600 border border-gray-500 focus:ring-blue-500 focus:border-blue-500 text-white" onchange="drawChord()">
+                            <!-- Options populated by JS -->
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Visualization Area -->
+                <div class="flex justify-center mt-6">
+                    <div id="visualization-area" class="w-full max-w-lg">
+                        <!-- SVG chart or piano keys will be rendered here -->
+                        <div id="chart-message" class="text-center text-gray-400 py-10">Select a chord to see the visualization.</div>
+                    </div>
+                </div>
+                
+                <!-- Chord Notes Display -->
+                <div id="chord-notes-display" class="text-center text-xl font-semibold text-yellow-300 p-2 border-t border-gray-600 hidden">
+                    <!-- Notes will be displayed here -->
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script type="module">
+        // Global state and constants
+        let audioContext;
+        let oscillator;
+        let gainNode;
+        let currentInstrument = 'guitar';
+
+        // --- TUNER LOGIC ---
+
+        const NOTES_TO_FREQUENCY = {
+            'E2': 82.41,
+            'A2': 110.00,
+            'D3': 146.83,
+            'G3': 196.00,
+            'B3': 246.94,
+            'E4': 329.63
+        };
+
+        // Initialize AudioContext on first user interaction
+        function initAudio() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                gainNode = audioContext.createGain();
+                gainNode.connect(audioContext.destination);
+                gainNode.gain.setValueAtTime(0, audioContext.currentTime); // Start silent
+            }
+        }
+
+        // Play the reference tone
+        function playTone(frequency) {
+            initAudio();
+
+            if (oscillator) {
+                oscillator.stop();
+                oscillator.disconnect();
+            }
+
+            oscillator = audioContext.createOscillator();
+            oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
+            oscillator.type = 'sine';
+            oscillator.connect(gainNode);
+
+            // Fade in and out smoothly
+            const now = audioContext.currentTime;
+            gainNode.gain.cancelScheduledValues(now);
+            gainNode.gain.setValueAtTime(0, now);
+            gainNode.gain.linearRampToValueAtTime(0.5, now + 0.05); // Fade in
+            oscillator.start(now);
+            
+            // Auto-stop after 3 seconds
+            gainNode.gain.linearRampToValueAtTime(0, now + 3); // Fade out
+            oscillator.stop(now + 3.1);
+        }
+        
+        // Simulates the tuner needle movement
+        function simulateTuning(note) {
+            const needle = document.getElementById('tuner-needle');
+            const noteDisplay = document.getElementById('note-display');
+            const statusMessage = document.getElementById('status-message');
+
+            noteDisplay.textContent = note;
+            
+            // Simulate 'too low' (-20deg to -1deg)
+            const tooLow = Math.floor(Math.random() * 20) + 1;
+            // Simulate 'in tune' (-1deg to +1deg)
+            const inTune = Math.random() * 2 - 1; 
+            // Simulate 'too high' (1deg to 20deg)
+            const tooHigh = Math.floor(Math.random() * 20) + 1;
+
+            const targetAngle = [inTune, -tooLow, tooHigh][Math.floor(Math.random() * 3)];
+            
+            needle.style.transform = `rotate(${targetAngle}deg)`;
+
+            // Update status message based on simulated state
+            if (Math.abs(targetAngle) < 1) {
+                statusMessage.innerHTML = `<span class="text-green-400 font-bold">In Tune!</span> (${note})`;
+            } else if (targetAngle < 0) {
+                statusMessage.innerHTML = `<span class="text-red-400">Too Low</span> - Tune Up!`;
+            } else {
+                statusMessage.innerHTML = `<span class="text-red-400">Too High</span> - Tune Down!`;
+            }
+
+            // Reset status after a delay
+            setTimeout(() => {
+                if (statusMessage.innerHTML.includes(note)) {
+                     statusMessage.innerHTML = `Press a button to hear the reference tone.`;
+                }
+                needle.style.transform = `rotate(0deg)`;
+            }, 3000);
+        }
+
+        document.querySelectorAll('.tuner-btn').forEach(button => {
+            button.addEventListener('click', (e) => {
+                const note = e.currentTarget.getAttribute('data-note');
+                const freq = NOTES_TO_FREQUENCY[note];
+                playTone(freq);
+                simulateTuning(note);
+            });
+        });
+
+
+        // --- CHORD CHART DATA ---
+
+        const ALL_NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+        const QUALITIES = {
+            'Major': { suffix: '', notes: [0, 4, 7], guitar: {
+                'C': [3, 3, 2, 0, 1, 0], 'G': [3, 2, 0, 0, 0, 3], 'D': [X, X, 0, 2, 3, 2],
+                'A': [X, 0, 2, 2, 2, 0], 'E': [0, 2, 2, 1, 0, 0], 'F': [1, 3, 3, 2, 1, 1]
+            }},
+            'Minor': { suffix: 'm', notes: [0, 3, 7], guitar: {
+                'Am': [X, 0, 2, 2, 1, 0], 'Em': [0, 2, 2, 0, 0, 0], 'Dm': [X, X, 0, 2, 3, 1],
+                'Cm': [X, 3, 5, 5, 4, 3], 'Gm': [3, 5, 5, 3, 3, 3], 'Fm': [1, 3, 3, 1, 1, 1]
+            }},
+            'Seventh': { suffix: '7', notes: [0, 4, 7, 10], guitar: {
+                'C7': [X, 3, 2, 3, 1, 0], 'G7': [3, 2, 0, 0, 0, 1], 'D7': [X, X, 0, 2, 1, 2],
+                'A7': [X, 0, 2, 0, 2, 0], 'E7': [0, 2, 0, 1, 0, 0], 'F7': [1, 3, 1, 2, 1, 1]
+            }},
+            'Minor Seventh': { suffix: 'm7', notes: [0, 3, 7, 10], guitar: {
+                'Am7': [X, 0, 2, 0, 1, 0], 'Em7': [0, 2, 0, 0, 0, 0], 'Dm7': [X, X, 0, 2, 1, 1],
+                'Cm7': [X, 3, 5, 3, 4, 3], 'Gm7': [3, 5, 3, 3, 3, 3]
+            }},
+        };
+        
+        // Chord names for piano visualization (mapping integer index to note name)
+        function getChordNotes(rootIndex, qualityData) {
+            return qualityData.notes.map(interval => {
+                const noteIndex = (rootIndex + interval) % 12;
+                return ALL_NOTES[noteIndex];
+            });
+        }
+        
+        // --- UI & TAB LOGIC ---
+        
+        function setActiveTab(tabName) {
+            document.getElementById('tuner-tab').classList.add('hidden');
+            document.getElementById('chart-tab').classList.add('hidden');
+            document.getElementById('tab-tuner').classList.remove('active');
+            document.getElementById('tab-chart').classList.remove('active');
+
+            document.getElementById(`${tabName}-tab`).classList.remove('hidden');
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+        }
+
+        function setInstrument(instrument) {
+            currentInstrument = instrument;
+            const guitarBtn = document.getElementById('inst-guitar');
+            const pianoBtn = document.getElementById('inst-piano');
+            
+            if (instrument === 'guitar') {
+                guitarBtn.classList.remove('bg-gray-600', 'hover:bg-gray-700');
+                guitarBtn.classList.add('bg-blue-600', 'hover:bg-blue-700');
+                pianoBtn.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+                pianoBtn.classList.add('bg-gray-600', 'hover:bg-gray-700');
+            } else {
+                pianoBtn.classList.remove('bg-gray-600', 'hover:bg-gray-700');
+                pianoBtn.classList.add('bg-blue-600', 'hover:bg-blue-700');
+                guitarBtn.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+                guitarBtn.classList.add('bg-gray-600', 'hover:bg-gray-700');
+            }
+            
+            populateControls();
+            drawChord(); // Redraw visualization
+        }
+
+        function populateControls() {
+            const rootSelect = document.getElementById('root-note');
+            const qualitySelect = document.getElementById('chord-quality');
+
+            // 1. Populate Root Notes (always all 12)
+            rootSelect.innerHTML = '';
+            ALL_NOTES.forEach(note => {
+                const option = new Option(note, note);
+                rootSelect.add(option);
+            });
+            rootSelect.value = 'C'; // Default to C
+
+            // 2. Populate Qualities (always the main 4)
+            qualitySelect.innerHTML = '';
+            Object.keys(QUALITIES).forEach(quality => {
+                const option = new Option(quality, quality);
+                qualitySelect.add(option);
+            });
+            qualitySelect.value = 'Major'; // Default to Major
+        }
+
+        function drawChord() {
+            const rootNote = document.getElementById('root-note').value;
+            const qualityName = document.getElementById('chord-quality').value;
+            const visualizationArea = document.getElementById('visualization-area');
+            const notesDisplay = document.getElementById('chord-notes-display');
+            const message = document.getElementById('chart-message');
+            
+            message.classList.add('hidden');
+            notesDisplay.classList.remove('hidden');
+
+            const qualityData = QUALITIES[qualityName];
+            const rootIndex = ALL_NOTES.indexOf(rootNote);
+            const notes = getChordNotes(rootIndex, qualityData);
+            
+            // Display Notes
+            notesDisplay.textContent = `${rootNote}${qualityData.suffix}: ${notes.join(', ')}`;
+
+            if (currentInstrument === 'guitar') {
+                drawGuitarChord(rootNote, qualityData);
+            } else {
+                drawPianoChord(rootNote, qualityData, notes);
+            }
+        }
+
+        // --- VISUALIZATION FUNCTIONS ---
+
+        function drawGuitarChord(rootNote, qualityData) {
+            const visualizationArea = document.getElementById('visualization-area');
+            const chordName = rootNote + qualityData.suffix;
+            let frets = qualityData.guitar[rootNote] || [X, 0, 0, 0, 0, 0]; // Default or fallback
+
+            // If the specific chord is not defined in the quick lookup (e.g. C# Major),
+            // we default to a standard 6-string open position.
+            if (!qualityData.guitar.hasOwnProperty(rootNote)) {
+                 // Simple fallback for notes we don't have stored
+                 frets = [X, X, X, 0, 0, 0];
+            }
+
+
+            const width = 300;
+            const height = 250;
+            const fretCount = 5;
+            const stringCount = 6;
+            const nutThickness = 5;
+            const stringSpacing = width / (stringCount + 1);
+            const fretSpacing = (height - nutThickness) / fretCount;
+
+            // SVG setup
+            let svg = `<svg viewBox="0 0 ${width} ${height}" class="w-full h-auto bg-gray-900 p-4 rounded-lg shadow-xl">`;
+
+            // Draw Frets (horizontal lines)
+            for (let i = 0; i <= fretCount; i++) {
+                const y = (i * fretSpacing) + (i === 0 ? nutThickness : 0);
+                svg += `<rect x="${stringSpacing}" y="${y}" width="${width - 2 * stringSpacing}" height="${i === 0 ? nutThickness : 2}" class="fretboard-fret"/>`;
+            }
+
+            // Draw Nut (thick line at the top)
+            if (frets.some(f => f === 0 || f === 'X')) {
+                 svg += `<line x1="${stringSpacing}" y1="${nutThickness/2}" x2="${width - stringSpacing}" y2="${nutThickness/2}" class="fretboard-nut" />`;
+            }
+
+
+            // Draw Strings (vertical lines)
+            for (let i = 0; i < stringCount; i++) {
+                const x = stringSpacing * (i + 1);
+                svg += `<line x1="${x}" y1="${nutThickness}" x2="${x}" y2="${height - fretSpacing/2}" class="fretboard-string" />`;
+            }
+
+            // Draw Fret Dots (optional markers at 3, 5, 7, 9)
+            [3, 5, 7, 9].forEach(fret => {
+                const y = (fret * fretSpacing) + nutThickness - (fretSpacing / 2);
+                if(fret < fretCount) {
+                    svg += `<circle cx="${width/2}" cy="${y}" r="4" class="fret-dot"/>`;
+                }
+            });
+
+            // Draw Finger positions (dots) and X/O markers
+            frets.forEach((fret, stringIndex) => {
+                const x = stringSpacing * (stringCount - stringIndex); // Reverse index (6th string is first)
+                
+                if (fret === 'X') {
+                    // Muted string (X)
+                    svg += `<text x="${x}" y="${nutThickness - 5}" font-weight="bold" text-anchor="middle" fill="#ef4444" style="font-size: 18px;">X</text>`;
+                } else if (fret === 0) {
+                    // Open string (O)
+                    svg += `<circle cx="${x}" cy="${nutThickness - 10}" r="6" stroke="#10b981" stroke-width="2" fill="none"/>`;
+                } else if (fret > 0 && fret <= fretCount) {
+                    // Fingered fret position
+                    const y = (fret * fretSpacing) + nutThickness - (fretSpacing / 2);
+                    svg += `<circle cx="${x}" cy="${y}" r="8" class="fret-finger" />`;
+                    // Optional: Fret number on the side
+                    if (stringIndex === 0) {
+                        svg += `<text x="${width - stringSpacing/2}" y="${y + 4}" class="fret-number" text-anchor="middle">${fret}</text>`;
+                    }
+                }
+            });
+
+            svg += '</svg>';
+            visualizationArea.innerHTML = svg;
+        }
+
+        function drawPianoChord(rootNote, qualityData, notes) {
+            const visualizationArea = document.getElementById('visualization-area');
+            const numKeys = 18; // Enough keys to show context (e.g., A3 to C5)
+            const whiteKeyWidth = 40;
+            const whiteKeyHeight = 150;
+            const blackKeyWidth = 24;
+            const blackKeyHeight = 90;
+            const startNoteIndex = ALL_NOTES.indexOf('A') + 12*3; // Start from A3
+            
+            // Map ALL_NOTES (0-11) to key coordinates/types
+            const keyMap = [
+                { note: 'C', type: 'W', offset: 0 }, { note: 'C#', type: 'B', offset: 0.7 },
+                { note: 'D', type: 'W', offset: 1 }, { note: 'D#', type: 'B', offset: 1.7 },
+                { note: 'E', type: 'W', offset: 2 },
+                { note: 'F', type: 'W', offset: 3 }, { note: 'F#', type: 'B', offset: 3.7 },
+                { note: 'G', type: 'W', offset: 4 }, { note: 'G#', type: 'B', offset: 4.7 },
+                { note: 'A', type: 'W', offset: 5 }, { note: 'A#', type: 'B', offset: 5.7 },
+                { note: 'B', type: 'W', offset: 6 }
+            ];
+
+            let whiteKeyCount = 0;
+            let keys = [];
+
+            // Generate key data for the visible range (A3 to E5)
+            for (let i = 0; i < numKeys; i++) {
+                const noteIndex = (startNoteIndex + i) % 12;
+                const octave = Math.floor((startNoteIndex + i) / 12);
+                const noteName = ALL_NOTES[noteIndex];
+                const keyInfo = keyMap.find(k => k.note === noteName);
+
+                const isHighlighted = notes.includes(noteName);
+                const fullNoteName = noteName + octave;
+
+                if (keyInfo.type === 'W') {
+                    const x = whiteKeyCount * whiteKeyWidth;
+                    keys.push({
+                        type: 'W', name: fullNoteName, x, y: 0, width: whiteKeyWidth, height: whiteKeyHeight,
+                        isHighlighted, noteLabel: noteName
+                    });
+                    whiteKeyCount++;
+                } else {
+                    const x = ((whiteKeyCount - 1) * whiteKeyWidth) + (whiteKeyWidth - blackKeyWidth / 2);
+                    keys.push({
+                        type: 'B', name: fullNoteName, x, y: 0, width: blackKeyWidth, height: blackKeyHeight,
+                        isHighlighted, noteLabel: noteName
+                    });
+                }
+            }
+            
+            // Calculate SVG width based on the number of white keys
+            const svgWidth = whiteKeyCount * whiteKeyWidth + 1; // +1 for the final stroke
+
+            let svg = `<svg viewBox="0 0 ${svgWidth} ${whiteKeyHeight}" class="w-full h-auto bg-gray-900 p-4 rounded-lg shadow-xl overflow-visible">`;
+            
+            // 1. Draw White Keys first
+            keys.filter(k => k.type === 'W').forEach(k => {
+                const className = k.isHighlighted ? 'piano-key-highlighted' : 'piano-key-white';
+                svg += `<rect x="${k.x}" y="${k.y}" width="${k.width}" height="${k.height}" class="${className}" rx="4" ry="4"/>`;
+                // Add note label at the bottom
+                svg += `<text x="${k.x + k.width / 2}" y="${k.height - 10}" text-anchor="middle" fill="#1f2937" font-size="12">${k.noteLabel}</text>`;
+            });
+
+            // 2. Draw Black Keys (overlay)
+            keys.filter(k => k.type === 'B').forEach(k => {
+                const className = k.isHighlighted ? 'piano-key-highlighted' : 'piano-key-black';
+                svg += `<rect x="${k.x}" y="${k.y}" width="${k.width}" height="${k.height}" class="${className}" rx="4" ry="4"/>`;
+            });
+
+            svg += '</svg>';
+            visualizationArea.innerHTML = svg;
+        }
+
+        // --- INITIALIZATION ---
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            setActiveTab('tuner');
+            populateControls();
+            // Start with a default chord visualization
+            drawChord(); 
+        });
+        
+    </script>
+</body>
+</html>
+
