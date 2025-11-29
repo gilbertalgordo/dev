@@ -1,0 +1,565 @@
+numpy>=1.22
+scipy>=1.7
+sounddevice>=0.4.5
+librosa>=0.9.2
+torch>=1.13
+torchaudio>=0.13
+fastapi>=0.88
+uvicorn[standard]>=0.18
+soundfile>=0.11
+pydantic>=1.10
+
+
+# model.py
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class ConvDenoiser(nn.Module):
+    """
+    Small causal conv1d denoising network.
+    Input: (batch, 1, n_samples)
+    Output: (batch, 1, n_samples) - enhanced waveform residual/estimate
+    """
+    def __init__(self, channels=32, kernel_size=41, stride=1):
+        super().__init__()
+        ks = kernel_size
+        self.enc1 = nn.Conv1d(1, channels, ks, stride, padding=ks//2)
+        self.enc2 = nn.Conv1d(channels, channels*2, ks, stride, padding=ks//2)
+        self.enc3 = nn.Conv1d(channels*2, channels*4, ks, stride, padding=ks//2)
+
+        self.dec3 = nn.ConvTranspose1d(channels*4, channels*2, ks, stride, padding=ks//2)
+        self.dec2 = nn.ConvTranspose1d(channels*2, channels, ks, stride, padding=ks//2)
+        self.dec1 = nn.ConvTranspose1d(channels, 1, ks, stride, padding=ks//2)
+
+        self.act = nn.PReLU()
+
+    def forward(self, x):
+        # x: (B, 1, T)
+        e1 = self.act(self.enc1(x))
+        e2 = self.act(self.enc2(e1))
+        e3 = self.act(self.enc3(e2))
+
+        d3 = self.act(self.dec3(e3)) + e2
+        d2 = self.act(self.dec2(d3)) + e1
+        out = torch.tanh(self.dec1(d2))  # bounded output
+        # optionally residual: enhanced = x + out
+        enhanced = torch.clamp(x + 0.6*out, -1.0, 1.0)
+        return enhanced
+
+def load_model(checkpoint_path=None, device=None):
+    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    model = ConvDenoiser()
+    if checkpoint_path:
+        state = torch.load(checkpoint_path, map_location=device)
+        model.load_state_dict(state)
+    model.to(device).eval()
+    return model
+
+
+    # processing.py
+import numpy as np
+import scipy.signal as sig
+
+def frame_signal(x, frame_size, hop):
+    n = len(x)
+    frames = []
+    i = 0
+    while i + frame_size <= n:
+        frames.append(x[i:i+frame_size].copy())
+        i += hop
+    return np.stack(frames, axis=0)  # (num_frames, frame_size)
+
+def overlap_add(frames, frame_size, hop):
+    n_frames = frames.shape[0]
+    out_len = (n_frames-1)*hop + frame_size
+    out = np.zeros(out_len, dtype=frames.dtype)
+    for i in range(n_frames):
+        out[i*hop:i*hop+frame_size] += frames[i]
+    return out
+
+def simple_agc(frame, target_rms=0.1, max_gain=10.0):
+    eps = 1e-6
+    rms = np.sqrt(np.mean(frame**2) + eps)
+    gain = target_rms / (rms + eps)
+    if gain > max_gain:
+        gain = max_gain
+    return frame * gain
+
+def peaking_eq(band_freq, q, gain_db, fs):
+    """
+    Return b,a for peaking filter (biquad).
+    Implementation uses bilinear transform for analog second order
+    """
+    A = 10**(gain_db/40.0)
+    w0 = 2*np.pi*band_freq/fs
+    alpha = np.sin(w0)/(2*q)
+    cosw0 = np.cos(w0)
+
+    b0 = 1 + alpha*A
+    b1 = -2*cosw0
+    b2 = 1 - alpha*A
+    a0 = 1 + alpha/A
+    a1 = -2*cosw0
+    a2 = 1 - alpha/A
+
+    b = np.array([b0, b1, b2]) / a0
+    a = np.array([1.0, a1/a0, a2/a0])
+    return b, a
+
+def apply_eq(x, fs, eq_settings):
+    """
+    eq_settings: list of dicts: {'freq':Hz, 'q':Q, 'gain_db':dB}
+    """
+    y = x
+    for s in eq_settings:
+        b, a = peaking_eq(s['freq'], s['q'], s['gain_db'], fs)
+        y = sig.lfilter(b, a, y)
+    return y
+
+
+    # realtime.py
+import sounddevice as sd
+import numpy as np
+import torch
+from model import load_model
+from processing import frame_signal, overlap_add, simple_agc, apply_eq
+
+SAMPLE_RATE = 16000
+FRAME_SIZE = 2048          # processing frame
+HOP = 1024                 # 50% overlap
+DEVICE = None
+
+class SoundAIPipeline:
+    def __init__(self, model, sample_rate=SAMPLE_RATE, frame_size=FRAME_SIZE, hop=HOP, device=None):
+        self.model = model
+        self.fs = sample_rate
+        self.frame = frame_size
+        self.hop = hop
+        self.device = device or next(model.parameters()).device
+        self.input_buffer = np.zeros(self.frame, dtype=np.float32)
+        self.window = np.hanning(self.frame).astype(np.float32)
+        # EQ example: mild low-bass boost, gentle high boost
+        self.eq = [
+            {'freq': 100, 'q': 0.8, 'gain_db': 2.0},
+            {'freq': 8000, 'q': 0.8, 'gain_db': 1.5}
+        ]
+
+    def process_block(self, indata):
+        # indata: (n_samples,)
+        # fill buffer
+        self.input_buffer = np.concatenate([self.input_buffer[self.hop:], indata])
+        frame = self.input_buffer * self.window
+        # run model (torch)
+        x = torch.from_numpy(frame).float().unsqueeze(0).unsqueeze(0).to(self.device)  # (1,1,T)
+        with torch.no_grad():
+            y = self.model(x)  # (1,1,T)
+        y = y.squeeze().cpu().numpy()
+        # AGC on the output chunk
+        y = simple_agc(y, target_rms=0.08)
+        # EQ
+        y = apply_eq(y, self.fs, self.eq)
+        # return the newest hop-length portion for playback
+        out = y[self.frame - self.hop : self.frame]
+        return out.astype(np.float32)
+
+def run_realtime(model_ckpt=None, device=None):
+    model = load_model(model_ckpt, device)
+    pipeline = SoundAIPipeline(model, device=device)
+    blocksize = pipeline.hop  # call back receives hop-sized blocks for low latency
+
+    def callback(indata, outdata, frames, time, status):
+        if status:
+            print("Status:", status)
+        # indata shape: (frames, channels) -> take mono by averaging or first channel
+        buf = indata[:,0] if indata.ndim > 1 else indata
+        # resample if needed omitted (assume device sample rate == SAMPLE_RATE)
+        out = pipeline.process_block(buf.copy())
+        outdata[:] = np.expand_dims(out, axis=1)
+
+    print(f"Starting streaming at {SAMPLE_RATE} Hz (block {blocksize})")
+    with sd.Stream(channels=1, samplerate=SAMPLE_RATE, blocksize=blocksize, callback=callback):
+        print("Stream running. Press Ctrl+C to stop.")
+        try:
+            import time
+            while True:
+                time.sleep(1.0)
+        except KeyboardInterrupt:
+            print("Stopping stream.")
+
+if __name__ == "__main__":
+    run_realtime()
+
+
+    # server.py
+from fastapi import FastAPI, File, UploadFile
+import soundfile as sf
+import numpy as np
+import io
+import torch
+from model import load_model
+from processing import simple_agc, apply_eq
+
+app = FastAPI()
+MODEL = load_model(None)  # load default init model; provide checkpoint path for real use
+SAMPLE_RATE = 16000
+
+@app.post("/enhance")
+async def enhance_audio(file: UploadFile = File(...)):
+    data = await file.read()
+    # read with soundfile
+    arr, sr = sf.read(io.BytesIO(data))
+    if arr.ndim > 1:
+        arr = arr.mean(axis=1)  # to mono
+    # resample if sr != SAMPLE_RATE
+    if sr != SAMPLE_RATE:
+        import librosa
+        arr = librosa.resample(arr.astype(np.float32), sr, SAMPLE_RATE)
+        sr = SAMPLE_RATE
+
+    # normalize to -1..1 if necessary
+    maxv = np.max(np.abs(arr)) + 1e-9
+    if maxv > 1.0:
+        arr = arr / maxv
+
+    # chunk processing for long files
+    chunk = MODEL(torch.from_numpy(arr[:MODEL_input_length] if False else arr).float().unsqueeze(0).unsqueeze(0))
+    # For simplicity: process whole array in one shot if it fits. A production server must chunk.
+    with torch.no_grad():
+        x = torch.from_numpy(arr.astype(np.float32)).unsqueeze(0).unsqueeze(0)
+        out = MODEL(x).squeeze().numpy()
+
+    # AGC and EQ final pass
+    out = simple_agc(out, target_rms=0.08)
+    out = apply_eq(out, SAMPLE_RATE, [{'freq':100, 'q':0.8, 'gain_db':2.0}])
+
+    buf = io.BytesIO()
+    sf.write(buf, out, SAMPLE_RATE, format='WAV')
+    buf.seek(0)
+    return {"filename": file.filename, "content": buf.read()}
+
+# run via: uvicorn server:app --host 0.0.0.0 --port 8000
+
+
+# cli.py
+import argparse
+import soundfile as sf
+import numpy as np
+from model import load_model
+import torch
+from processing import simple_agc, apply_eq
+
+SAMPLE_RATE = 16000
+
+def process_file(infile, outfile, ckpt=None):
+    model = load_model(ckpt)
+    data, sr = sf.read(infile)
+    if data.ndim > 1:
+        data = data.mean(axis=1)
+    if sr != SAMPLE_RATE:
+        import librosa
+        data = librosa.resample(data.astype(np.float32), sr, SAMPLE_RATE)
+    x = torch.from_numpy(data.astype(np.float32)).unsqueeze(0).unsqueeze(0)
+    with torch.no_grad():
+        out = model(x).squeeze().numpy()
+    out = simple_agc(out)
+    out = apply_eq(out, SAMPLE_RATE, [{'freq':100, 'q':0.8, 'gain_db':2.0}])
+    sf.write(outfile, out, SAMPLE_RATE)
+    print("Wrote", outfile)
+
+if __name__ == "__main__":
+    p = argparse.ArgumentParser()
+    p.add_argument("input")
+    p.add_argument("output")
+    p.add_argument("--ckpt", default=None)
+    args = p.parse_args()
+    process_file(args.input, args.output, args.ckpt)
+
+
+    python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+
+python realtime.py
+
+
+python cli.py input.wav output_enhanced.wav
+
+
+uvicorn server:app --host 0.0.0.0 --port 8000
+# then POST files to http://localhost:8000/enhance
+
+
+# Install the Google MediaPipe library
+pip install mediapipe
+
+# You will need a pre-trained model for audio classification.
+# For example, a model trained on the ESC-50 dataset (Environmental Sound Classification).
+# Download a TFLite model, e.g., 'yamnet.tflite', and save it locally.
+# (Note: The exact model file must be downloaded separately from a trusted source, 
+# such as the MediaPipe documentation or TensorFlow Hub.)
+
+
+
+import mediapipe as mp
+from mediapipe.tasks import python
+from mediapipe.tasks.python import audio
+import sounddevice as sd
+import numpy as np
+
+# --- Configuration ---
+# Replace with the path to your downloaded TFLite model file
+MODEL_PATH = 'yamnet.tflite' 
+# The duration of audio chunks to process in milliseconds
+CHUNK_DURATION_MS = 975 
+# Audio recording settings (standard for most ML audio models)
+SAMPLE_RATE = 16000 # Hz
+CHANNELS = 1
+
+# --- Callback Function (Handles the AI Result) ---
+# This function is called every time the model processes an audio chunk
+def print_result(result: audio.AudioClassifierResult, timestamp_ms: int):
+    """Processes and prints the classification results."""
+    # Ensure there are classifications to report
+    if result.classifications and result.classifications[0].entries:
+        # The result might contain multiple classification heads (entries)
+        top_category = result.classifications[0].entries[0]
+        
+        # Displaying the result clearly, with a confidence score
+        print(f"Timestamp: {timestamp_ms}ms | Detected: **{top_category.category_name}** (Score: {top_category.score:.2f})")
+    # else:
+    #    print(f"Timestamp: {timestamp_ms}ms | No significant sound detected.")
+
+# --- Setup the Audio Classifier ---
+try:
+    # 1. Create BaseOptions (specifies the model)
+    base_options = mp.tasks.BaseOptions(model_asset_path=MODEL_PATH)
+    
+    # 2. Configure AudioClassifierOptions for streaming/real-time mode
+    # - running_mode: AUDIO_STREAM is for continuous data, great for real-time devices/players
+    # - result_callback: points to the function that processes the AI output
+    options = audio.AudioClassifierOptions(
+        base_options=base_options,
+        running_mode=audio.AudioRunningMode.AUDIO_STREAM,
+        max_results=3, # Show the top 3 most likely sounds
+        result_callback=print_result
+    )
+    
+    # 3. Create the AudioClassifier instance
+    # The 'with' statement ensures the classifier resources are managed correctly
+    with audio.AudioClassifier.create_from_options(options) as classifier:
+        print("--- AI Audio Classifier Initialized ---")
+        print("Listening for sounds. Press Ctrl+C to stop.")
+
+        # --- Setup Real-Time Audio Stream (Using sounddevice for simplicity) ---
+        # The stream reads audio data from the microphone/device input
+        with sd.InputStream(samplerate=SAMPLE_RATE, channels=CHANNELS, dtype='int16') as stream:
+            
+            # Convert chunk duration from milliseconds to number of frames (samples)
+            num_frames_per_chunk = int(CHUNK_DURATION_MS * SAMPLE_RATE / 1000)
+            
+            # Start the main loop to continuously read and process audio
+            while True:
+                # Read a chunk of audio data from the device
+                audio_chunk, overflowed = stream.read(num_frames_per_chunk)
+                
+                # Check for stream overflow (data loss) and print status
+                if overflowed:
+                    print("**Audio Stream Overflow Detected!**", flush=True)
+
+                # Convert the NumPy array chunk into an AudioData object for the classifier
+                audio_data = mp.tasks.audio.AudioData.create_from_array(
+                    audio_chunk.astype(np.float32) / 32768.0, # Convert int16 to float32 (normalized)
+                    SAMPLE_RATE
+                )
+                
+                # Get the current timestamp in milliseconds
+                timestamp_ms = int(stream.time * 1000)
+                
+                # Send the audio data to the AI model for inference
+                classifier.classify_async(audio_data, timestamp_ms)
+
+except Exception as e:
+    print(f"\nAn error occurred: {e}")
+    print("Please ensure you have installed the required libraries (`mediapipe`, `sounddevice`, `numpy`) and downloaded the TFLite model.")
+    
+# 
+
+pip install tensorflow librosa numpy
+
+
+
+import tensorflow as tf
+from tensorflow import keras
+import librosa
+import numpy as np
+import os
+from sklearn.model_selection import train_test_split
+
+# --- ML Configuration Constants ---
+SAMPLE_RATE = 16000     # Standard sample rate for speech/sound AI (Hz)
+DURATION = 3            # Duration of each audio clip (seconds)
+N_MELS = 128            # Number of Mel bands (height of the spectrogram image)
+N_FFT = 2048            # Window size for Fast Fourier Transform
+HOP_LENGTH = 512        # Number of samples between successive frames
+
+# --- 1. Feature Extraction Function ---
+def audio_to_melspectrogram(file_path):
+    """
+    Loads an audio file and converts it into a Mel-Spectrogram feature.
+    This feature is treated as an image for the CNN.
+    """
+    try:
+        # 1. Load the audio file
+        audio_data, sr = librosa.load(file_path, sr=SAMPLE_RATE, duration=DURATION)
+        
+        # Pad or trim the audio to ensure consistent length (scientific rigor)
+        target_length = SAMPLE_RATE * DURATION
+        if len(audio_data) < target_length:
+            audio_data = np.pad(audio_data, (0, target_length - len(audio_data)), 'constant')
+        elif len(audio_data) > target_length:
+            audio_data = audio_data[:target_length]
+
+        # 2. Compute the Mel-Spectrogram
+        mel_spectrogram = librosa.feature.melspectrogram(
+            y=audio_data, 
+            sr=SAMPLE_RATE, 
+            n_fft=N_FFT, 
+            hop_length=HOP_LENGTH, 
+            n_mels=N_MELS
+        )
+        
+        # 3. Convert power spectrogram to dB (decibels) - a common practice
+        mel_spectrogram_db = librosa.power_to_db(mel_spectrogram, ref=np.max)
+
+        # 4. Normalize the feature array (0 to 1)
+        min_val = np.min(mel_spectrogram_db)
+        max_val = np.max(mel_spectrogram_db)
+        normalized_melspec = (mel_spectrogram_db - min_val) / (max_val - min_val)
+        
+        # Add channel dimension (required for CNN, like a grayscale image)
+        return np.expand_dims(normalized_melspec, axis=-1)
+
+    except Exception as e:
+        print(f"Error processing {file_path}: {e}")
+        return None
+
+# --- 2. Advanced CNN Model Definition (Sound Event Detection) ---
+def create_sed_cnn_model(input_shape, num_classes):
+    """
+    Defines a deep Convolutional Neural Network (CNN) architecture.
+    CNNs are highly effective for pattern recognition in image-like data 
+    (Mel-Spectrograms).
+    """
+    model = keras.Sequential([
+        # First Block: Convolution and Pooling
+        keras.layers.Conv2D(32, kernel_size=(3, 3), activation='relu', input_shape=input_shape),
+        keras.layers.MaxPooling2D(pool_size=(2, 2)),
+        keras.layers.BatchNormalization(), # Stabilizes training
+
+        # Second Block
+        keras.layers.Conv2D(64, kernel_size=(3, 3), activation='relu'),
+        keras.layers.MaxPooling2D(pool_size=(2, 2)),
+        keras.layers.Dropout(0.25), # Regularization to prevent overfitting
+
+        # Third Block
+        keras.layers.Conv2D(128, kernel_size=(3, 3), activation='relu'),
+        keras.layers.MaxPooling2D(pool_size=(2, 2)),
+
+        # Classifier Head
+        keras.layers.Flatten(),
+        keras.layers.Dense(256, activation='relu'),
+        keras.layers.Dropout(0.5),
+        keras.layers.Dense(num_classes, activation='softmax') # Output layer for classification
+    ])
+    
+    # Use Adam optimizer and standard classification loss
+    model.compile(optimizer='adam',
+                  loss='categorical_crossentropy',
+                  metrics=['accuracy'])
+    
+    return model
+
+# --- Conceptual Data Loading (Replace with your actual data pipeline) ---
+# Assuming you have a dataset with features (X) and one-hot encoded labels (y)
+# Example of feature shape: (N_SAMPLES, N_MELS, N_FRAMES, 1)
+# N_FRAMES = 1 + int(np.floor( (SAMPLE_RATE * DURATION - N_FFT) / HOP_LENGTH ))
+N_FRAMES = 1 + int(np.floor( (SAMPLE_RATE * DURATION - N_FFT) / HOP_LENGTH ))
+INPUT_SHAPE = (N_MELS, N_FRAMES, 1)
+NUM_CLASSES = 10 # E.g., speech, music, door, engine, alarm, etc.
+
+# X_features and y_labels should be loaded/generated from your dataset
+# For this instance, we use placeholder data
+print(f"--- Scientific Model Parameters ---")
+print(f"Mel-Spectrogram dimensions (H, W): {N_MELS} x {N_FRAMES}")
+print(f"Input shape for CNN: {INPUT_SHAPE}")
+
+# Placeholder for features and labels (replace with your data loading)
+X_placeholder = np.random.rand(50, N_MELS, N_FRAMES, 1).astype(np.float32)
+y_placeholder = tf.keras.utils.to_categorical(np.random.randint(0, NUM_CLASSES, 50), num_classes=NUM_CLASSES)
+
+# Split data for training/validation (standard scientific practice)
+X_train, X_val, y_train, y_val = train_test_split(X_placeholder, y_placeholder, test_size=0.2, random_state=42)
+
+# Create and summarize the model
+sed_model = create_sed_cnn_model(INPUT_SHAPE, NUM_CLASSES)
+# sed_model.summary() # Uncomment to see the network architecture
+
+
+
+# --- 3. Model Training (Conceptual) ---
+print("\n--- Starting Conceptual Model Training ---")
+# Replace epochs and batch_size with values appropriate for your dataset size
+history = sed_model.fit(
+    X_train, y_train,
+    validation_data=(X_val, y_val),
+    epochs=10, 
+    batch_size=32,
+    verbose=0
+)
+print("Training complete. Accuracy (last epoch): {:.4f}".format(history.history['val_accuracy'][-1]))
+
+
+# --- 4. TFLite Conversion for Device Deployment ---
+TFLITE_MODEL_PATH = 'advanced_sound_ai_model.tflite'
+
+# a. Convert the Keras model to a TensorFlow Lite model
+converter = tf.lite.TFLiteConverter.from_keras_model(sed_model)
+
+# b. Optimization (Crucial for devices)
+# This reduces the model size and improves execution speed.
+converter.optimizations = [tf.lite.Optimize.DEFAULT]
+
+# c. Quantization (More advanced optimization - 8-bit inference for faster devices)
+# For full 8-bit quantization, you would need a representative dataset, 
+# but we'll stick to a simpler optimization here.
+# converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+
+tflite_model = converter.convert()
+
+# d. Save the model
+with open(TFLITE_MODEL_PATH, 'wb') as f:
+    f.write(tflite_model)
+
+print(f"\n--- Model Saved for Device Deployment ---")
+print(f"Optimized model file: {TFLITE_MODEL_PATH}")
+print("This TFLite model is ready for integration into your media player using the MediaPipe/TFLite runtime.")
+
+# --- 5. Real-Time Inference with the TFLite Model (Conceptual Steps) ---
+"""
+The resulting 'advanced_sound_ai_model.tflite' can be loaded and run 
+in a media player application using a platform-specific TFLite or MediaPipe 
+inference engine (e.g., in Android/Java, iOS/Swift, or Python like the previous example).
+
+Steps for On-Device Inference:
+1. Load the TFLite model: interpreter = tf.lite.Interpreter(model_path=TFLITE_MODEL_PATH)
+2. Allocate tensors: interpreter.allocate_tensors()
+3. Capture real-time audio (48kHz is common, so resampling to 16kHz might be needed).
+4. Extract the Mel-Spectrogram feature from the audio chunk using the exact same 
+   parameters (SAMPLE_RATE, N_MELS, N_FFT, etc.) used in the training code.
+5. Feed the feature array into the TFLite interpreter input tensor.
+6. Run the inference: interpreter.invoke()
+7. Read the output tensor, which contains the probability scores for each sound class.
+"""
+
