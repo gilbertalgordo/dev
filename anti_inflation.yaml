@@ -1,0 +1,250 @@
+import numpy as np
+from typing import Dict, List, Tuple
+
+## Loan Optimization Agent Class
+class LoanOptimizationAgent:
+    """
+    An agent to calculate loan details and simulate prepayment strategies 
+    to minimize total interest paid.
+    """
+    def __init__(self, principal: float, annual_rate: float, term_years: int):
+        """
+        Initializes the loan with basic parameters.
+        
+        Args:
+            principal (float): The initial loan amount.
+            annual_rate (float): The annual interest rate (e.g., 0.05 for 5%).
+            term_years (int): The original loan term in years.
+        """
+        self.P = principal
+        self.r_annual = annual_rate
+        self.t_years = term_years
+        self.n_payments = term_years * 12 # Total number of monthly payments
+        self.r_monthly = annual_rate / 12
+        
+        # Calculate the original required monthly payment (M)
+        if self.r_monthly == 0:
+            self.M_orig = self.P / self.n_payments
+        else:
+            # Amortization formula for fixed payment
+            self.M_orig = self.P * (self.r_monthly * (1 + self.r_monthly)**self.n_payments) / ((1 + self.r_monthly)**self.n_payments - 1)
+
+    def calculate_total_interest(self) -> float:
+        """Calculates the total interest paid over the original loan term."""
+        total_paid = self.M_orig * self.n_payments
+        total_interest = total_paid - self.P
+        return total_interest
+
+    def simulate_loan(self, extra_monthly_payment: float = 0.0) -> Dict[str, float]:
+        """
+        Simulates the loan with an optional extra monthly payment.
+        
+        Returns a dictionary with 'interest_paid' and 'term_months'.
+        """
+        balance = self.P
+        interest_paid = 0.0
+        payments_made = 0
+        monthly_payment = self.M_orig + extra_monthly_payment
+        
+        while balance > 0 and payments_made < self.n_payments * 5: # Limit simulation to 5x original term
+            
+            # Calculate interest portion of the payment
+            interest_component = balance * self.r_monthly
+            interest_paid += interest_component
+            
+            # Calculate principal portion of the payment
+            principal_component = monthly_payment - interest_component
+            
+            # If the payment is greater than the remaining principal plus interest, 
+            # pay off the rest and stop.
+            if monthly_payment >= balance + interest_component:
+                principal_component = balance
+                balance = 0
+            else:
+                balance -= principal_component
+                
+            payments_made += 1
+            
+            if balance <= 0:
+                break
+                
+        return {
+            "interest_paid": interest_paid,
+            "term_months": payments_made
+        }
+
+    def find_optimal_prepayment(self, max_extra_payment: float, step: float = 50.0) -> Dict[str, float]:
+        """
+        'AI' part: Iteratively tests extra payments to find the best 
+        interest savings within a budget.
+        
+        Args:
+            max_extra_payment (float): The maximum extra amount the user can afford per month.
+            step (float): The increment for testing extra payments.
+            
+        Returns:
+            Dict[str, float]: Best results found.
+        """
+        best_savings = -1.0
+        best_extra_payment = 0.0
+        
+        original_interest = self.calculate_total_interest()
+        
+        # Test extra payments from 0 up to max_extra_payment, in 'step' increments
+        current_extra = 0.0
+        while current_extra <= max_extra_payment:
+            
+            # Run simulation
+            simulation_result = self.simulate_loan(extra_monthly_payment=current_extra)
+            
+            # Calculate savings
+            savings = original_interest - simulation_result['interest_paid']
+            
+            # Check if this strategy is better
+            if savings > best_savings:
+                best_savings = savings
+                best_extra_payment = current_extra
+            
+            current_extra += step
+            
+        return {
+            "best_extra_payment": best_extra_payment,
+            "total_interest_saved": best_savings,
+            "new_term_months": self.simulate_loan(best_extra_payment)['term_months'],
+            "original_interest": original_interest
+        }
+
+# --- Example Usage ---
+# Initial Loan: $200,000, 5% annual rate, 30 years
+principal = 200000
+rate = 0.05
+term = 30
+max_extra_budget = 500 # The user can afford up to $500 extra per month
+
+loan_agent = LoanOptimizationAgent(principal, rate, term)
+
+print(f"💰 Original Monthly Payment: ${loan_agent.M_orig:.2f}")
+print(f"💸 Original Total Interest: ${loan_agent.calculate_total_interest():.2f}")
+print("--- Running Optimization ---")
+
+# The 'AI' explores options
+optimal_strategy = loan_agent.find_optimal_prepayment(max_extra_budget)
+
+print(f"\n✅ Optimal Strategy (within budget of ${max_extra_budget:.2f}):")
+print(f"  - Recommended Extra Payment: ${optimal_strategy['best_extra_payment']:.2f} / month")
+print(f"  - Total Interest Saved: ${optimal_strategy['total_interest_saved']:.2f}")
+print(f"  - New Loan Term: {optimal_strategy['new_term_months']} months ({optimal_strategy['new_term_months']/12:.1f} years)")
+
+
+
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+from typing import Tuple
+
+# --- Conceptual Data Preparation ---
+
+def prepare_data(data: np.ndarray, look_back: int = 12) -> Tuple[np.ndarray, np.ndarray, MinMaxScaler]:
+    """
+    Scales and prepares the time series data for an LSTM model.
+    The data is converted into sequences (X) and next values (y).
+    
+    Args:
+        data (np.ndarray): The time series data (e.g., historical Fed Funds Rate).
+        look_back (int): Number of previous time steps to use as input features.
+        
+    Returns:
+        Tuple[np.ndarray, np.ndarray, MinMaxScaler]: X (sequences), y (targets), and the scaler object.
+    """
+    # 1. Scaling the Data (Crucial for Neural Networks)
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    scaled_data = scaler.fit_transform(data.reshape(-1, 1))
+    
+    # 2. Creating Time-Step Sequences
+    X, y = [], []
+    for i in range(len(scaled_data) - look_back):
+        # Current sequence of 'look_back' previous steps
+        X.append(scaled_data[i:(i + look_back), 0])
+        # The target is the next value after the sequence
+        y.append(scaled_data[i + look_back, 0])
+        
+    # 3. Reshaping for LSTM [samples, time steps, features]
+    X, y = np.array(X), np.array(y)
+    X = np.reshape(X, (X.shape[0], X.shape[1], 1))
+    
+    return X, y, scaler
+
+# --- Model Construction ---
+
+def build_lstm_forecaster(look_back: int) -> Sequential:
+    """
+    Constructs the LSTM model architecture.
+    """
+    model = Sequential()
+    
+    # Layer 1: LSTM layer with 50 units, returns sequences for the next LSTM layer
+    model.add(LSTM(
+        units=50, 
+        return_sequences=True, 
+        input_shape=(look_back, 1) # (time_steps, features)
+    ))
+    # Dropout to prevent overfitting
+    model.add(Dropout(0.2))
+    
+    # Layer 2: Second LSTM layer
+    model.add(LSTM(units=50))
+    model.add(Dropout(0.2))
+    
+    # Output Layer: Dense layer for a single, continuous prediction (the next rate)
+    model.add(Dense(units=1))
+    
+    # Compile the model
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    
+    return model
+
+# --- Conceptual Main Execution ---
+
+if __name__ == '__main__':
+    # 1. CONCEPTUAL DATA (replace with real economic time series data)
+    # 10 years of conceptual monthly interest rate data
+    data_points = 120
+    # Simulate an interest rate trend with some random noise
+    rate_trend = np.sin(np.linspace(0, 10, data_points) * np.pi) * 0.03 + 0.02 
+    historical_rates = rate_trend + np.random.normal(0, 0.005, data_points)
+    
+    LOOK_BACK = 12 # Use the last 12 months to predict the next
+    
+    # Prepare the data
+    X, y, scaler = prepare_data(historical_rates, LOOK_BACK)
+    
+    # Split data for training and testing (80/20 split)
+    train_size = int(len(X) * 0.8)
+    X_train, X_test = X[:train_size], X[train_size:]
+    y_train, y_test = y[:train_size], y[train_size:]
+    
+    # Build and Train the Model
+    lstm_model = build_lstm_forecaster(LOOK_BACK)
+    
+    # The 'AI' Learning phase
+    print("--- Training the LSTM Model ---")
+    lstm_model.fit(X_train, y_train, epochs=20, batch_size=32, verbose=0)
+    print("Training Complete.")
+    
+    # Make Predictions
+    predicted_scaled = lstm_model.predict(X_test)
+    
+    # Invert the scaling to get the actual rate values
+    predicted_rates = scaler.inverse_transform(predicted_scaled)
+    actual_rates = scaler.inverse_transform(y_test.reshape(-1, 1))
+
+    # Output a few predictions
+    print("\n--- Model Evaluation (Last 5 Time Steps) ---")
+    for i in range(1, 6):
+        test_index = len(actual_rates) - i
+        print(f"Actual Rate: {actual_rates[test_index][0]:.4f} | Predicted Rate: {predicted_rates[test_index][0]:.4f}")
+        
+    # This predicted rate is the "anti-interest rate" data used by a second AI
+    # to calculate the optimal financial move (e.g., refinance now or later).
