@@ -1,0 +1,297 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.signal import hilbert # For AM demodulation
+
+# --- Configuration (Instances) ---
+Fs = 100000  # Sampling Frequency (Hz). High enough for good signal representation.
+T = 1.0      # Total time (seconds)
+t = np.linspace(0, T, int(Fs*T), endpoint=False) # Time vector
+
+# Message Signal (Audio) - A simple sine wave
+Fm = 440       # Message frequency (e.g., a musical note)
+Am = 1.0       # Message amplitude
+message_signal = Am * np.sin(2 * np.pi * Fm * t) 
+
+# Carrier Signal (RF Wave)
+Fc = 10000     # Carrier Frequency (Hz). Must be much higher than Fm.
+Ac = 1.0       # Carrier amplitude
+carrier_signal = Ac * np.cos(2 * np.pi * Fc * t)
+
+print("Setup complete. Ready for AM/FM processing.")
+
+
+
+# --- 2.1 AM Modulation (Transmitter Side) ---
+# s(t) = A_c * (1 + k_a * m(t)) * cos(2 * pi * f_c * t)
+modulation_index = 0.8  # k_a (must be < 1.0 for standard AM to avoid over-modulation)
+am_signal = Ac * (1 + modulation_index * message_signal) * carrier_signal
+
+# --- 2.2 AM Demodulation (Receiver Side) ---
+# We use the Hilbert transform for a clean envelope detector simulation.
+
+# 1. Take the absolute value of the Analytic Signal (Hilbert Transform) to get the Envelope
+analytic_signal = hilbert(am_signal)
+envelope = np.abs(analytic_signal)
+
+# 2. Shift and scale the envelope to recover the original message signal
+# The envelope contains the DC bias (Ac) and the scaled message signal.
+recovered_am_signal = (envelope / Ac - 1.0) / modulation_index
+
+# --- Visualization (HUD) ---
+plt.figure(figsize=(12, 8))
+plt.suptitle('Amplitude Modulation (AM) Simulation', fontsize=16)
+
+# Plot Message Signal
+plt.subplot(3, 1, 1)
+plt.plot(t[:500], message_signal[:500])
+plt.title('Original Message Signal (m(t))')
+plt.ylabel('Amplitude')
+
+# Plot AM Signal
+plt.subplot(3, 1, 2)
+plt.plot(t[:500], am_signal[:500])
+plt.plot(t[:500], envelope[:500], 'r--', label='Envelope') # Show the envelope
+plt.title('AM Modulated Signal (s(t))')
+plt.ylabel('Amplitude')
+
+# Plot Recovered Signal
+plt.subplot(3, 1, 3)
+plt.plot(t[:500], recovered_am_signal[:500])
+plt.title('Recovered Message Signal (AM Demodulation)')
+plt.xlabel('Time (s)')
+plt.ylabel('Amplitude')
+
+plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+plt.show()
+
+
+
+# --- 3.1 FM Modulation (Transmitter Side) ---
+# The phase of the FM signal is the integral of the message signal.
+# s(t) = A_c * cos(2 * pi * f_c * t + 2 * pi * k_f * integral(m(tau) dtau))
+
+# Integration of the message signal
+integral_message = np.cumsum(message_signal) / Fs
+
+# Frequency deviation factor (k_f) - controls how much the frequency shifts
+freq_deviation = 500.0  # (Hz/Volt)
+fm_signal = Ac * np.cos(2 * np.pi * Fc * t + 2 * np.pi * freq_deviation * integral_message)
+
+# --- 3.2 FM Demodulation (Receiver Side) ---
+# Demodulation is typically done by calculating the instantaneous frequency (the derivative of the phase).
+
+# 1. Compute the Analytic Signal
+analytic_fm = hilbert(fm_signal)
+
+# 2. Get the instantaneous phase: phase(t) = arctan2(Imag(analytic_fm), Real(analytic_fm))
+instantaneous_phase = np.unwrap(np.angle(analytic_fm))
+
+# 3. Get the instantaneous frequency: freq(t) = (1 / 2*pi) * d/dt(phase(t))
+# We use np.diff for a discrete derivative approximation
+instantaneous_frequency = np.diff(instantaneous_phase) / (2 * np.pi * (t[1] - t[0]))
+
+# 4. Recover the message by removing the carrier frequency (Fc) and scaling
+# The instantaneous frequency is F_c + k_f * m(t)
+recovered_fm_signal = (instantaneous_frequency - Fc) / freq_deviation
+# Note: Since the derivative loses one sample, the recovered signal is one sample shorter than t.
+
+# --- Visualization (HUD) ---
+plt.figure(figsize=(12, 8))
+plt.suptitle('Frequency Modulation (FM) Simulation', fontsize=16)
+
+# Plot Message Signal
+plt.subplot(3, 1, 1)
+plt.plot(t[:500], message_signal[:500])
+plt.title('Original Message Signal (m(t))')
+plt.ylabel('Amplitude')
+
+# Plot FM Signal (zoomed in to show frequency variation)
+plt.subplot(3, 1, 2)
+# The time vector for the FM signal is T
+plt.plot(t[100:300], fm_signal[100:300]) 
+plt.title('FM Modulated Signal (s(t)) - Zoomed')
+plt.ylabel('Amplitude')
+
+# Plot Recovered Signal
+plt.subplot(3, 1, 3)
+# The time vector for the recovered signal is one element shorter
+t_demod = t[:-1] 
+plt.plot(t_demod[:500], recovered_fm_signal[:500])
+plt.title('Recovered Message Signal (FM Demodulation)')
+plt.xlabel('Time (s)')
+plt.ylabel('Amplitude')
+
+plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+plt.show()
+
+
+
+import numpy as np
+import tensorflow as tf
+from tensorflow import keras
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelBinarizer
+
+# --- AI Configuration (Instances) ---
+Fs = 10000.0   # Sampling Frequency (Hz)
+T = 0.05       # Signal duration (seconds)
+N_SAMPLES = int(Fs * T) # Number of samples per signal instance
+Fc = 2000.0    # Carrier Frequency (Hz)
+Fm = 100.0     # Message Frequency (Hz)
+SNR_dB = 10    # Signal-to-Noise Ratio in dB
+
+# --- Core Utility Functions ---
+
+def generate_signal(modulation_type, snr_db, num_signals):
+    """Generates a dataset of I/Q samples for a given modulation and SNR."""
+    X = []
+    y = []
+    t = np.linspace(0, T, N_SAMPLES, endpoint=False)
+    
+    # 1. Message and Carrier
+    message_signal = np.sin(2 * np.pi * Fm * t)
+    carrier_I = np.cos(2 * np.pi * Fc * t)
+    carrier_Q = -np.sin(2 * np.pi * Fc * t) # 90 degree phase shift
+
+    for _ in range(num_signals):
+        # 2. Modulation (Baseband Signal Generation)
+        if modulation_type == 'AM':
+            # Complex baseband: I = (1 + message), Q = 0 (assuming double-sideband)
+            baseband_I = 1.0 + 0.8 * message_signal
+            baseband_Q = np.zeros_like(t)
+        elif modulation_type == 'FM':
+            # FM uses the integral of the message signal for phase
+            integral_message = np.cumsum(message_signal) / Fs
+            freq_deviation = 500.0
+            phase = 2 * np.pi * freq_deviation * integral_message
+            
+            # Complex baseband: I = cos(phase), Q = sin(phase)
+            baseband_I = np.cos(phase)
+            baseband_Q = np.sin(phase)
+        else:
+            raise ValueError("Invalid modulation type")
+
+        # 3. Add Noise (AWGN)
+        # Power of the baseband signal
+        signal_power = np.mean(baseband_I**2 + baseband_Q**2)
+        
+        # Calculate noise power based on SNR (L = 10^(SNR_dB/10))
+        snr_linear = 10**(snr_db / 10.0)
+        noise_power = signal_power / snr_linear
+        
+        # Standard deviation of the complex noise
+        noise_std = np.sqrt(noise_power / 2) # Divide by 2 for I and Q
+        
+        # Generate Complex Noise
+        noise_I = np.random.normal(0, noise_std, N_SAMPLES)
+        noise_Q = np.random.normal(0, noise_std, N_SAMPLES)
+
+        # 4. Final I/Q Samples (Complex Envelope)
+        I_samples = baseband_I + noise_I
+        Q_samples = baseband_Q + noise_Q
+        
+        # Stack I and Q into a 2-channel vector: [N_SAMPLES, 2]
+        IQ_sample = np.stack([I_samples, Q_samples], axis=1)
+
+        X.append(IQ_sample)
+        y.append(modulation_type)
+
+    return np.array(X), np.array(y)
+
+# --- Generate Dataset ---
+N_PER_CLASS = 2000
+X_am, y_am = generate_signal('AM', SNR_dB, N_PER_CLASS)
+X_fm, y_fm = generate_signal('FM', SNR_dB, N_PER_CLASS)
+
+X_data = np.concatenate((X_am, X_fm), axis=0)
+y_data = np.concatenate((y_am, y_fm), axis=0)
+
+# 5. One-Hot Encoding for Labels
+encoder = LabelBinarizer()
+Y_one_hot = encoder.fit_transform(y_data) # AM: [1, 0], FM: [0, 1]
+
+# 6. Split Data for Training and Testing
+X_train, X_test, Y_train, Y_test = train_test_split(
+    X_data, Y_one_hot, test_size=0.2, random_state=42
+)
+
+print(f"Total samples generated: {len(X_data)}")
+print(f"Training data shape: {X_train.shape} (Input: [N_SAMPLES, 2])")
+
+
+
+# --- 7. Define CNN Architecture (Accurate Scientific Reasoning) ---
+def build_cnn_model(input_shape, num_classes):
+    model = keras.Sequential([
+        # Input Layer: (N_SAMPLES, 2)
+        keras.layers.Input(shape=input_shape),
+
+        # Conv Layer 1: Detects primary features (e.g., spectral peaks)
+        keras.layers.Conv1D(
+            filters=64, 
+            kernel_size=7, # Larger kernel captures more context
+            activation='relu', 
+            padding='same'
+        ),
+        keras.layers.BatchNormalization(), # Improves training stability and speed
+        keras.layers.MaxPooling1D(pool_size=2),
+
+        # Conv Layer 2: Combines and refines features
+        keras.layers.Conv1D(
+            filters=128, 
+            kernel_size=5, 
+            activation='relu', 
+            padding='same'
+        ),
+        keras.layers.BatchNormalization(),
+        keras.layers.MaxPooling1D(pool_size=2),
+
+        # Conv Layer 3: Deeper feature extraction
+        keras.layers.Conv1D(
+            filters=256, 
+            kernel_size=3, 
+            activation='relu', 
+            padding='same'
+        ),
+        keras.layers.BatchNormalization(),
+        
+        # Transition to Dense Layers
+        keras.layers.GlobalAveragePooling1D(), # Efficiently reduces dimensionality
+
+        # Dense Layer: High-level classification features
+        keras.layers.Dense(256, activation='relu'),
+        keras.layers.Dropout(0.5), # Regularization to prevent overfitting
+
+        # Output Layer: Softmax for probability distribution over classes
+        keras.layers.Dense(num_classes, activation='softmax')
+    ])
+    
+    # Use Adam optimizer and categorical crossentropy loss for multi-class classification
+    model.compile(
+        optimizer='adam',
+        loss='categorical_crossentropy',
+        metrics=['accuracy']
+    )
+    return model
+
+# --- 8. Build and Train Model ---
+input_shape = (N_SAMPLES, 2)
+num_classes = 2
+model = build_cnn_model(input_shape, num_classes)
+
+print("\n--- Model Summary (HUD) ---")
+model.summary()
+
+# Train the model (Instances/Epochs)
+history = model.fit(
+    X_train, Y_train,
+    epochs=10, # For quick demonstration
+    batch_size=32,
+    validation_data=(X_test, Y_test),
+    verbose=1
+)
+
+# --- 9. Evaluate Model ---
+loss, accuracy = model.evaluate(X_test, Y_test, verbose=0)
+print(f"\n✅ Model Classification Accuracy: {accuracy*100:.2f}%")
+print(f"Modulation Types: {encoder.classes_}")
