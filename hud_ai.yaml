@@ -215,3 +215,242 @@ while cap.isOpened():
 
 cap.release()
 cv2.destroyAllWindows()
+
+
+
+# Install OpenCV and MediaPipe (if not already)
+pip install opencv-python mediapipe numpy pynput
+
+# For YOLOv3 (download files manually, or use a package like ultralytics for newer versions)
+# You'll need to download:
+# 1. yolov3.weights
+# 2. yolov3.cfg
+# 3. coco.names (text file with class names)
+# Place them in the same directory as your Python script.
+
+
+
+import cv2
+import mediapipe as mp
+import numpy as np
+from pynput.keyboard import Key, Controller
+import collections
+import time
+import random # For simulated telemetry
+
+# --- AI & Device Setup (from previous example) ---
+# Initialize MediaPipe Gesture Recognizer (ML Classification)
+# NOTE: Replace 'gesture_recognizer.task' with the actual path
+try:
+    BaseOptions = mp.tasks.BaseOptions
+    GestureRecognizer = mp.tasks.vision.GestureRecognizer
+    GestureRecognizerOptions = mp.tasks.vision.GestureRecognizerOptions
+    VisionRunningMode = mp.tasks.vision.RunningMode
+
+    options = GestureRecognizerOptions(
+        base_options=BaseOptions(model_asset_path='gesture_recognizer.task'),
+        running_mode=VisionRunningMode.LIVE_STREAM,
+        result_callback=lambda result, output_image, timestamp_ms: None # Process in main loop
+    )
+    recognizer = GestureRecognizer.create_from_options(options)
+except Exception as e:
+    print(f"Error loading MediaPipe Gesture Recognizer: {e}")
+    print("Ensure 'gesture_recognizer.task' is downloaded and accessible.")
+    exit()
+
+keyboard = Controller()
+
+# --- Temporal Filtering Setup (for gestures) ---
+TEMPORAL_WINDOW_SIZE_GESTURE = 5
+gesture_history = collections.deque(maxlen=TEMPORAL_WINDOW_SIZE_GESTURE)
+last_action_time = 0
+DEBOUNCE_TIME_S = 0.5
+
+def get_most_frequent_gesture():
+    if not gesture_history: return 'None'
+    return collections.Counter(gesture_history).most_common(1)[0][0]
+
+def execute_media_command(gesture_name):
+    global last_action_time
+    current_time = time.time()
+    if current_time - last_action_time < DEBOUNCE_TIME_S: return
+
+    command_executed = False
+    if gesture_name == 'Open_Palm':
+        keyboard.press(Key.media_play_pause)
+        print("COMMAND: Play/Pause Media")
+        command_executed = True
+    elif gesture_name == 'Closed_Fist':
+        keyboard.press(Key.media_volume_up) # Or simulate accelerator for racing
+        print("COMMAND: Volume Up / Accelerate (simulated)")
+        command_executed = True
+    elif gesture_name == 'Victory':
+        keyboard.press(Key.media_next) # Or simulate brake for racing
+        print("COMMAND: Next Track / Brake (simulated)")
+        command_executed = True
+        
+    if command_executed:
+        last_action_time = current_time
+
+# --- YOLO Object Detection Setup ---
+# Load YOLO
+# Paths to your YOLO files
+YOLO_CFG = 'yolov3.cfg'
+YOLO_WEIGHTS = 'yolov3.weights'
+COCO_NAMES = 'coco.names'
+
+net = cv2.dnn.readNet(YOLO_WEIGHTS, YOLO_CFG)
+net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU) # Or DNN_TARGET_CUDA if you have a GPU
+
+# Load class names
+with open(COCO_NAMES, 'r') as f:
+    classes = [line.strip() for line in f.readlines()]
+
+# Get output layer names
+output_layers = [layer_name for layer_name in net.getUnconnectedOutLayersNames()]
+
+# --- Telemetry Simulation ---
+sim_speed = 0
+sim_rpm = 0
+sim_gear = 1
+sim_lap_time = 0.0
+lap_start_time = time.time()
+
+def update_sim_telemetry(stable_gesture):
+    global sim_speed, sim_rpm, sim_gear, sim_lap_time, lap_start_time
+    
+    # Simulate lap time
+    sim_lap_time = time.time() - lap_start_time
+
+    # Gesture-based control (simplistic)
+    if stable_gesture == 'Open_Palm': # Accelerate
+        sim_speed = min(sim_speed + random.uniform(0.5, 2.0), 250)
+        sim_rpm = min(sim_rpm + random.randint(50, 200), 9000)
+    elif stable_gesture == 'Closed_Fist': # Brake
+        sim_speed = max(sim_speed - random.uniform(1.0, 5.0), 0)
+        sim_rpm = max(sim_rpm - random.randint(100, 300), 1000)
+    else: # Coast
+        sim_speed = max(sim_speed - random.uniform(0.1, 0.5), 0)
+        sim_rpm = max(sim_rpm - random.randint(10, 50), 800)
+    
+    # Simple gear logic
+    if sim_speed > 50 and sim_gear < 6: sim_gear += 1
+    elif sim_speed < 30 and sim_gear > 1: sim_gear -= 1
+    
+    # Reset for new lap (e.g., if a specific object or gesture is detected)
+    # For now, let's reset every 60 seconds for demonstration
+    if sim_lap_time > 60:
+        lap_start_time = time.time()
+        print(f"NEW LAP START! Previous lap: {sim_lap_time:.2f}s")
+
+
+# --- Main Racing HUD Loop ---
+# Use a racing video file or live camera feed
+# cap = cv2.VideoCapture('racing_video.mp4') 
+cap = cv2.VideoCapture(0) # For live camera, if you want to test with gestures
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
+mp_drawing = mp.solutions.drawing_utils
+
+while cap.isOpened():
+    success, frame = cap.read()
+    if not success:
+        print("Failed to read frame or video ended.")
+        break
+
+    h, w, c = frame.shape
+    
+    # --- 1. Gesture Recognition ---
+    # Process for MediaPipe
+    timestamp_ms = int(cv2.getTickCount() * 1000 / cv2.getTickFrequency())
+    mp_image = mp.Image(image_format=mp.ImageFormat.RGB, data=cv2.cvtColor(cv2.flip(frame, 1), cv2.COLOR_BGR2RGB))
+    recognition_result = recognizer.recognize_for_video(mp_image, timestamp_ms)
+
+    current_gesture = 'None'
+    if recognition_result.gestures:
+        top_gesture = recognition_result.gestures[0][0].category_name
+        gesture_history.append(top_gesture)
+        for hand_landmarks in recognition_result.hand_landmarks:
+            # Draw landmarks on the *flipped* frame for display
+            mp_drawing.draw_landmarks(cv2.flip(frame, 1), mp.solutions.hands.HandLandmarks, hand_landmarks, 
+                                      mp_drawing.DrawingSpec(color=(0, 0, 255), thickness=2, circle_radius=4),
+                                      mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2))
+    else:
+        gesture_history.append('None')
+    
+    stable_gesture = get_most_frequent_gesture()
+    execute_media_command(stable_gesture) # Media control
+    update_sim_telemetry(stable_gesture) # Update simulated racing data
+
+    # --- 2. YOLO Object Detection ---
+    blob = cv2.dnn.blobFromImage(frame, 1/255.0, (416, 416), swapRB=True, crop=False)
+    net.setInput(blob)
+    outs = net.forward(output_layers)
+
+    # Process detections
+    class_ids = []
+    confidences = []
+    boxes = []
+    for out in outs:
+        for detection in out:
+            scores = detection[5:]
+            class_id = np.argmax(scores)
+            confidence = scores[class_id]
+            if confidence > 0.5: # Confidence threshold
+                center_x = int(detection[0] * w)
+                center_y = int(detection[1] * h)
+                box_w = int(detection[2] * w)
+                box_h = int(detection[3] * h)
+                x = int(center_x - box_w / 2)
+                y = int(center_y - box_h / 2)
+                boxes.append([x, y, box_w, box_h])
+                confidences.append(float(confidence))
+                class_ids.append(class_id)
+
+    # Non-maximum suppression to remove redundant overlapping boxes
+    indexes = cv2.dnn.NMSBoxes(boxes, confidences, 0.5, 0.4) # NMS threshold
+    
+    # --- 3. Draw Detections and HUD Overlays ---
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    colors = np.random.uniform(0, 255, size=(len(classes), 3))
+
+    if len(indexes) > 0:
+        for i in indexes.flatten():
+            x, y, box_w, box_h = boxes[i]
+            label = str(classes[class_ids[i]])
+            confidence = str(round(confidences[i], 2))
+            color = colors[class_ids[i]]
+            
+            cv2.rectangle(frame, (x, y), (x + box_w, y + box_h), color, 2)
+            cv2.putText(frame, label + " " + confidence, (x, y - 10), font, 0.5, color, 2)
+            
+            # Example: If a 'car' is detected, make it more prominent in the HUD feedback
+            if label == 'car':
+                cv2.putText(frame, "OTHER CAR AHEAD!", (w - 300, 30), font, 0.8, (0, 0, 255), 2)
+
+
+    # --- 4. HUD Telemetry Overlay (Advanced Visuals) ---
+    # Background for telemetry (semi-transparent rectangle)
+    overlay = frame.copy()
+    alpha = 0.4 # Transparency factor
+    cv2.rectangle(overlay, (w - 320, 0), (w, 200), (0, 0, 0), -1) 
+    frame = cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0)
+
+    # Display simulated telemetry
+    cv2.putText(frame, f'SPEED: {int(sim_speed)} km/h', (w - 300, 40), font, 0.7, (0, 255, 255), 2)
+    cv2.putText(frame, f'RPM: {int(sim_rpm)}', (w - 300, 70), font, 0.7, (0, 255, 0), 2)
+    cv2.putText(frame, f'GEAR: {sim_gear}', (w - 300, 100), font, 0.7, (255, 0, 0), 2)
+    cv2.putText(frame, f'LAP: {sim_lap_time:.2f} s', (w - 300, 130), font, 0.7, (255, 255, 255), 2)
+
+    # Display Gesture HUD
+    cv2.putText(frame, f'CMD: {stable_gesture}', (10, h - 30), font, 0.7, (0, 255, 255), 2)
+    
+    cv2.imshow('Advanced Racing AI HUD', frame)
+
+    if cv2.waitKey(1) & 0xFF == ord('q'): # Press 'q' to quit
+        break
+
+cap.release()
+cv2.destroyAllWindows()
