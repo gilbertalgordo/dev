@@ -1,0 +1,217 @@
+import cv2
+import mediapipe as mp
+import pyautogui
+import time
+
+# ⚙️ Configuration
+mp_hands = mp.solutions.hands
+hands = mp_hands.Hands(min_detection_confidence=0.7, min_tracking_confidence=0.5)
+mp_draw = mp.solutions.drawing_utils
+cap = cv2.VideoCapture(0) # Camera/device input stream
+
+def get_finger_up_count(hand_landmarks):
+    # This is a simplified function to count fingers up/down based on y-axis position
+    tip_ids = [4, 8, 12, 16, 20] # Thumb, Index, Middle, Ring, Pinky
+    fingers = []
+    
+    # Logic for thumb (tip x-position relative to MCP x-position) 
+    # and other fingers (tip y-position relative to a lower joint) goes here.
+    # For simplicity in this example, we'll assume a dummy count:
+    # A complete implementation requires accurate landmark comparison.
+    # [attachment_0](attachment)
+    
+    # Placeholder for finger count calculation:
+    return sum(hand_landmarks.landmark[i].y < hand_landmarks.landmark[i-2].y for i in tip_ids[1:]) + \
+           (1 if hand_landmarks.landmark[tip_ids[0]].x < hand_landmarks.landmark[tip_ids[0]-1].x else 0)
+
+
+while cap.isOpened():
+    success, image = cap.read()
+    if not success:
+        continue
+
+    # 1. Detect Hands
+    image = cv2.cvtColor(cv2.flip(image, 1), cv2.COLOR_BGR2RGB)
+    results = hands.process(image)
+    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+
+    if results.multi_hand_landmarks:
+        for hand_landmarks in results.multi_hand_landmarks:
+            mp_draw.draw_landmarks(image, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+            
+            # 2. Recognize Gesture (AI/ML Classification)
+            finger_count = get_finger_up_count(hand_landmarks)
+
+            # 3. Map Gesture to Device/Media Action
+            if finger_count == 2: # Example: Index + Middle finger up
+                # **Action:** Play/Pause media player
+                pyautogui.press('playpause') # Sends system media key
+                print("MEDIA: Play/Pause")
+                time.sleep(1) # Simple debounce
+
+            elif finger_count == 4: # Example: All four fingers up (excluding thumb)
+                # **Action:** Next Track
+                pyautogui.press('nexttrack')
+                print("MEDIA: Next Track")
+                time.sleep(1)
+
+            # --- HUD Visualization (for testing/feedback) ---
+            cv2.putText(image, f'Fingers: {finger_count}', (10, 70), cv2.FONT_HERSHEY_PLAIN, 3, (0, 255, 0), 3)
+
+    # 4. Display the HUD/Video Feedback
+    cv2.imshow('AI HUD Control', image)
+    if cv2.waitKey(5) & 0xFF == 27: # Press ESC to exit
+        break
+
+cap.release()
+cv2.destroyAllWindows()
+
+
+
+# Install the necessary libraries
+pip install opencv-python mediapipe numpy pynput
+
+
+
+import cv2
+import mediapipe as mp
+import numpy as np
+from pynput.keyboard import Key, Controller
+import collections
+import time
+
+# --- 1. AI & Device Setup ---
+
+# Initialize MediaPipe Gesture Recognizer (ML Classification)
+# NOTE: Replace 'gesture_recognizer.task' with the actual path to your downloaded model file
+try:
+    BaseOptions = mp.tasks.BaseOptions
+    GestureRecognizer = mp.tasks.vision.GestureRecognizer
+    GestureRecognizerOptions = mp.tasks.vision.GestureRecognizerOptions
+    VisionRunningMode = mp.tasks.vision.RunningMode
+
+    options = GestureRecognizerOptions(
+        base_options=BaseOptions(model_asset_path='gesture_recognizer.task'),
+        running_mode=VisionRunningMode.LIVE_STREAM,
+        result_callback=lambda result, output_image, timestamp_ms: None # We process results in the main loop
+    )
+    recognizer = GestureRecognizer.create_from_options(options)
+
+except Exception as e:
+    print(f"Error loading MediaPipe Gesture Recognizer: {e}")
+    print("Ensure 'gesture_recognizer.task' is downloaded and accessible.")
+    exit()
+
+# Initialize Keyboard Controller for Device/Media Control
+keyboard = Controller()
+
+# --- 2. Temporal Filtering Setup (Scientific Reasoning) ---
+
+# Define the size of the rolling window for stability (N instances)
+TEMPORAL_WINDOW_SIZE = 5 
+# Store the last N predictions
+gesture_history = collections.deque(maxlen=TEMPORAL_WINDOW_SIZE) 
+
+# Last time a command was executed (debounce)
+last_action_time = 0
+DEBOUNCE_TIME_S = 0.5 
+
+def get_most_frequent_gesture():
+    """Returns the most frequent gesture in the history window."""
+    if not gesture_history:
+        return 'None'
+    # Uses Counter to find the most common element (mode)
+    return collections.Counter(gesture_history).most_common(1)[0][0]
+
+def execute_media_command(gesture_name):
+    """Maps a stable, classified gesture to a system media command."""
+    global last_action_time
+    current_time = time.time()
+    
+    # Simple Debounce Logic
+    if current_time - last_action_time < DEBOUNCE_TIME_S:
+        return
+
+    command_executed = False
+    
+    # Mapping ML Gestures to System Media Actions (Clear Voices/Commands)
+    if gesture_name == 'Open_Palm':
+        keyboard.press(Key.media_play_pause)
+        print("COMMAND: Play/Pause Media")
+        command_executed = True
+    elif gesture_name == 'Closed_Fist':
+        keyboard.press(Key.media_volume_up)
+        print("COMMAND: Volume Up")
+        command_executed = True
+    elif gesture_name == 'Victory': # Peace sign
+        keyboard.press(Key.media_next)
+        print("COMMAND: Next Track")
+        command_executed = True
+        
+    if command_executed:
+        last_action_time = current_time # Reset debounce timer
+
+
+# --- 3. Main HUD Loop ---
+
+cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+mp_drawing = mp.solutions.drawing_utils
+
+while cap.isOpened():
+    success, frame = cap.read()
+    if not success:
+        continue
+
+    # Flip the frame for a mirror view, convert to RGB
+    frame = cv2.flip(frame, 1)
+    
+    # Get the frame's timestamp in milliseconds for MediaPipe
+    timestamp_ms = int(cv2.getTickCount() * 1000 / cv2.getTickFrequency())
+    
+    # Convert the frame to MediaPipe Image format
+    mp_image = mp.Image(image_format=mp.ImageFormat.RGB, data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    
+    # Run the ML gesture recognition model
+    recognition_result = recognizer.recognize_for_video(mp_image, timestamp_ms)
+
+    # --- 4. Processing & HUD Visualization ---
+
+    current_gesture = 'None'
+    
+    if recognition_result.gestures:
+        # Get the highest confidence gesture from the ML model
+        top_gesture = recognition_result.gestures[0][0].category_name
+        
+        # Add the raw ML prediction to the temporal history queue
+        gesture_history.append(top_gesture)
+        
+        # Draw the hand landmarks (HUD)
+        for hand_landmarks in recognition_result.hand_landmarks:
+            mp_drawing.draw_landmarks(frame, mp.solutions.hands.HandLandmarks, hand_landmarks, 
+                                      mp_drawing.DrawingSpec(color=(0, 0, 255), thickness=2, circle_radius=4),
+                                      mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2))
+
+    else:
+        # If no hand/gesture detected, still append 'None' to maintain queue length
+        gesture_history.append('None') 
+    
+    # Get the temporally filtered (stable) gesture
+    stable_gesture = get_most_frequent_gesture()
+    
+    # Execute command based on the stable gesture
+    execute_media_command(stable_gesture)
+
+    # Display HUD Information
+    cv2.putText(frame, f'RAW AI: {gesture_history[-1]}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 100, 0), 2)
+    cv2.putText(frame, f'STABLE CMD: {stable_gesture}', (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3)
+    cv2.putText(frame, f'HIST: {list(gesture_history)}', (10, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+
+    cv2.imshow('Advanced AI HUD Controller', frame)
+
+    if cv2.waitKey(5) & 0xFF == 27: # Press ESC to exit
+        break
+
+cap.release()
+cv2.destroyAllWindows()
