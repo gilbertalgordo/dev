@@ -1,0 +1,457 @@
+// ==UserScript==
+// @name         PushBind Whois Autofill (Gilbert Algordo)
+// @namespace    https://g.dev/gilbert_algordo
+// @version      1.0
+// @description  Fetch profile + WHOIS, autofill common form fields, and optionally push filled data to a webhook. Replace API keys and endpoints before production use.
+// @author       Gilbert / Generated
+// @match        *://*/*
+// @grant        GM_xmlhttpRequest
+// @grant        GM_addStyle
+// @connect      whoisxmlapi.com
+// @connect      g.dev
+// ==/UserScript==
+
+(function () {
+  'use strict';
+
+  /* ---------- CONFIG (edit these) ---------- */
+  const WHOIS_API_KEY = 'REPLACE_WITH_YOUR_WHOISXMLAPI_KEY'; // get one from whoisxmlapi.com or another WHOIS provider
+  const DEFAULT_WHOIS_DOMAIN = 'alphabet.com'; // example domain to WHOIS lookup
+  const PROFILE_URL = 'https://g.dev/gilbert_algordo';
+  const WEBHOOK_URL = ''; // optional: set to a webhook to POST resulting data
+  /* ----------------------------------------- */
+
+  // Small CSS for the floating control
+  GM_addStyle(`
+    #pushbind-ui {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      width: 220px;
+      background: rgba(30,30,30,0.92);
+      color: #fff;
+      border-radius: 8px;
+      padding: 10px;
+      font-family: Arial, sans-serif;
+      font-size: 13px;
+      z-index: 999999;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.4);
+    }
+    #pushbind-ui button { width: 100%; margin-top: 8px; padding: 8px; border: none; border-radius:4px; cursor: pointer; }
+    #pushbind-ui input, #pushbind-ui select { width: 100%; margin-top:6px; padding:6px; box-sizing:border-box; border-radius:4px; border:1px solid #ccc;}
+    #pushbind-ui .small { font-size: 11px; opacity: 0.9; margin-top:4px; }
+  `);
+
+  // Build UI
+  const ui = document.createElement('div');
+  ui.id = 'pushbind-ui';
+  ui.innerHTML = `
+    <strong>PushBind • Whois • Autofill</strong>
+    <div class="small">Profile: <a href="${PROFILE_URL}" target="_blank" style="color:#9fd3ff">${PROFILE_URL}</a></div>
+    <input id="pb-domain" placeholder="WHOIS domain (e.g. alphabet.com)" value="${DEFAULT_WHOIS_DOMAIN}">
+    <select id="pb-whois-what"><option value="registrant">Registrant</option><option value="registrant_org">Registrant Org</option><option value="registrant_name">Registrant Name</option><option value="raw">Full WHOIS JSON</option></select>
+    <button id="pb-fetch">Fetch Profile & WHOIS</button>
+    <button id="pb-autofill">Autofill nearest form</button>
+    <button id="pb-bind">Bind: push on submit</button>
+    <div id="pb-status" class="small"></div>
+  `;
+  document.body.appendChild(ui);
+
+  const status = msg => { const s = document.getElementById('pb-status'); s.textContent = msg; };
+
+  /* ---------- Utilities ---------- */
+
+  // Safely fetch using GM_xmlhttpRequest when cross-origin required; fallback to fetch when same-origin
+  function crossFetch(url, opts = {}) {
+    return new Promise((resolve, reject) => {
+      // if URL is same origin, use fetch
+      try {
+        const u = new URL(url);
+        if (u.origin === location.origin && typeof fetch === 'function') {
+          fetch(url, opts).then(r => r.ok ? r.json().then(j=>resolve(j)).catch(()=>r.text().then(t=>resolve(t))) : reject(new Error('Fetch failed: ' + r.status)));
+          return;
+        }
+      } catch (e) {}
+      // Use GM_xmlhttpRequest (works cross-origin under @connect)
+      GM_xmlhttpRequest({
+        method: opts.method || 'GET',
+        url,
+        headers: opts.headers || {},
+        data: opts.body ? (typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body)) : null,
+        onload: function (res) {
+          // Try parse JSON
+          try { resolve(JSON.parse(res.responseText)); }
+          catch (err) { resolve(res.responseText); }
+        },
+        onerror: function (err) { reject(err); }
+      });
+    });
+  }
+
+  // Attempt to extract JSON-LD or OG metadata from a remote HTML page (PROFILE_URL)
+  async function fetchProfile(url) {
+    try {
+      const txt = await crossFetch(url, { method: 'GET' }); // may return HTML string
+      // If we received parsed JSON already (rare), return it
+      if (typeof txt !== 'string') return txt;
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(txt, 'text/html');
+
+      // Try JSON-LD
+      const jsonld = doc.querySelector('script[type="application/ld+json"]');
+      if (jsonld) {
+        try {
+          const parsed = JSON.parse(jsonld.textContent);
+          return parsed;
+        } catch (e) { /* fall through */ }
+      }
+
+      // Try OpenGraph / meta tags
+      const getMeta = name => {
+        const m = doc.querySelector(`meta[property="${name}"]`) || doc.querySelector(`meta[name="${name}"]`);
+        return m ? m.getAttribute('content') : null;
+      };
+      const profile = {
+        name: getMeta('og:title') || getMeta('twitter:title') || doc.querySelector('title')?.textContent || null,
+        description: getMeta('og:description') || getMeta('description') || null,
+        url,
+      };
+      return profile;
+    } catch (err) {
+      console.warn('fetchProfile error', err);
+      return null;
+    }
+  }
+
+  // WHOIS via whoisxmlapi (JSON output). You can replace provider with another endpoint if you prefer.
+  async function fetchWhois(domain) {
+    if (!WHOIS_API_KEY || WHOIS_API_KEY === 'REPLACE_WITH_YOUR_WHOISXMLAPI_KEY') {
+      throw new Error('WHOIS API key not set in script. Edit WHOIS_API_KEY in the script.');
+    }
+    const apiUrl = `https://www.whoisxmlapi.com/whoisserver/WhoisService?apiKey=${WHOIS_API_KEY}&domainName=${encodeURIComponent(domain)}&outputFormat=JSON`;
+    const res = await crossFetch(apiUrl);
+    return res;
+  }
+
+  // Heuristic: map profile + whois fields to common HTML field names
+  function buildAutofillMap(profile, whois, domain) {
+    const map = {};
+    // Profile heuristics
+    if (profile) {
+      // profile may be object or array (JSON-LD)
+      let name = profile.name || (Array.isArray(profile) ? profile[0]?.name : null);
+      let description = profile.description || (Array.isArray(profile) ? profile[0]?.description : null);
+      let url = profile.url || PROFILE_URL;
+      if (name) map.full_name = name;
+      if (description) map.bio = description;
+      if (url) map.website = url;
+    }
+
+    // WHOIS heuristics: many providers have nested fields; attempt common paths
+    try {
+      const record = whois && (whois.WhoisRecord || whois);
+      const registrant = record && (record.registrant || record.registryData?.registrant || record.WhoisRecord?.registrant);
+      if (registrant) {
+        if (registrant.name) map.registrant_name = registrant.name;
+        if (registrant.organization || registrant.org) map.registrant_org = registrant.organization || registrant.org;
+        if (registrant.email) map.registrant_email = registrant.email;
+        if (registrant.telephone) map.registrant_phone = registrant.telephone;
+        if (registrant.address) map.registrant_address = registrant.address;
+      }
+      // Fallback to parsed whois text
+      if (!map.registrant_name && record && record.registryData && record.registryData.rawText) {
+        const t = record.registryData.rawText;
+        // quick parse for "Registrant Organization:" or "Registrant Name:"
+        const find = (label) => {
+          const rx = new RegExp(label + '\\s*:\\s*(.+)', 'i');
+          const m = t.match(rx);
+          return m ? m[1].trim().split('\n')[0] : null;
+        };
+        const rname = find('Registrant Name') || find('Registrant') || find('Registrant Organization') || find('OrgName');
+        if (rname) map.registrant_name = rname;
+      }
+    } catch (e) { console.warn(e); }
+
+    // Basic defaults
+    if (domain) {
+      map.domain = domain;
+      map.company = domain.replace(/^www\./, '');
+      map.title = map.title || 'CEO';
+    }
+    // Give some standard fields
+    if (!map.email && profile && profile.email) map.email = profile.email;
+    return map;
+  }
+
+  // Autofill best-effort: match by name/id/placeholder/label
+  function autofillNearestForm(data) {
+    // Find the nearest visible form on the page (first form or the focused form)
+    const forms = Array.from(document.forms).filter(f => f.offsetParent !== null);
+    const form = forms.length ? forms[0] : null;
+    if (!form) return { ok: false, message: 'No visible form found on this page.' };
+
+    // Helper to set input value and dispatch events
+    function setElementValue(el, value) {
+      try {
+        el.focus && el.focus();
+        if (el.tagName === 'SELECT') {
+          el.value = value;
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        } else if (el.type === 'radio' || el.type === 'checkbox') {
+          if (value === true || value === 'true' || value === el.value) el.checked = true;
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        } else {
+          el.value = value;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      } catch (e) {
+        console.warn('setElementValue failed', e);
+      }
+    }
+
+    // Flatten form fields
+    const fields = Array.from(form.elements);
+
+    // Scoring heuristic to match a data key to a field
+    const keys = Object.keys(data);
+    const normalized = s => (s || '').toString().toLowerCase();
+
+    let filled = {};
+    for (const key of keys) {
+      const val = data[key];
+      if (!val) continue;
+      // candidate scoring
+      let best = { score: 0, el: null };
+      for (const el of fields) {
+        const attrs = [
+          el.name, el.id, el.placeholder,
+          el.getAttribute && el.getAttribute('aria-label'),
+          (el.labels && el.labels.length ? Array.from(el.labels).map(l=>l.textContent).join(' ') : '')
+        ].filter(Boolean).map(normalized).join(' ');
+        // strong matching rules
+        if (attrs.includes(key.replace(/_/g,' ')) || attrs.includes(key)) {
+          best = { score: 100, el }; break;
+        }
+        // partial token matching
+        const tokens = key.split(/[_\s\-]/);
+        let score = tokens.reduce((acc, t) => acc + (attrs.includes(t) ? 10 : 0), 0);
+        // looks for 'name', 'email', 'company', 'org', 'title', 'domain'
+        if (key.includes('email') && /email|e-mail|@/.test(attrs)) score += 20;
+        if (key.includes('name') && /name|fullname|full name/.test(attrs)) score += 15;
+        if (key.includes('company') && /company|companyname|organization|org/.test(attrs)) score += 15;
+        if (key.includes('domain') && /domain|website|url|site/.test(attrs)) score += 15;
+        if (attrs.includes(val.toString().toLowerCase())) score += 5;
+        if (score > best.score) best = { score, el };
+      }
+      if (best.el && best.score > 0) {
+        setElementValue(best.el, val);
+        filled[key] = { field: best.el.name || best.el.id || best.el.placeholder || best.el.tagName, value: val };
+      }
+    }
+
+    return { ok: true, form, filled };
+  }
+
+  // Optionally POST data to webhook
+  async function pushToWebhook(payload) {
+    if (!WEBHOOK_URL) return { ok: false, message: 'Webhook URL not configured.' };
+    try {
+      const res = await fetch(WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      return { ok: res.ok, status: res.status };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  }
+
+  /* ---------- Main actions ---------- */
+
+  let lastProfile = null, lastWhois = null, lastMap = null;
+
+  async function actionFetch() {
+    status('Fetching profile...');
+    const profile = await fetchProfile(PROFILE_URL).catch(e => { console.warn(e); return null; });
+    lastProfile = profile;
+    status('Profile fetched. Doing WHOIS...');
+    const domain = document.getElementById('pb-domain').value.trim() || DEFAULT_WHOIS_DOMAIN;
+    try {
+      const whois = await fetchWhois(domain);
+      lastWhois = whois;
+      lastMap = buildAutofillMap(profile, whois, domain);
+      status('WHOIS fetched. Ready to autofill. Preview keys: ' + Object.keys(lastMap).join(', '));
+      console.log('Profile:', profile);
+      console.log('WHOIS:', whois);
+      console.log('Autofill map:', lastMap);
+    } catch (err) {
+      status('WHOIS fetch failed: ' + (err.message || err));
+      lastWhois = null;
+      lastMap = buildAutofillMap(profile, null, domain);
+      status('Fallback map created. Keys: ' + Object.keys(lastMap).join(', '));
+    }
+  }
+
+  function actionAutofill() {
+    if (!lastMap) {
+      status('No data cached — run "Fetch Profile & WHOIS" first.');
+      return;
+    }
+    const res = autofillNearestForm(lastMap);
+    if (res.ok) {
+      status('Autofill attempted. Fields filled: ' + Object.keys(res.filled || {}).join(', '));
+      // If configured, push the filled data to webhook immediately
+      if (WEBHOOK_URL) {
+        pushToWebhook({ profile: lastProfile, whois: lastWhois, filled: res.filled })
+          .then(r => status('Autofill done. Webhook push: ' + (r.ok ? 'OK' : 'Failed')));
+      }
+    } else {
+      status(res.message);
+    }
+  }
+
+  // Bind: intercept form submit to attach push behavior
+  function actionBind() {
+    const forms = Array.from(document.forms).filter(f => f.offsetParent !== null);
+    const form = forms.length ? forms[0] : null;
+    if (!form) { status('No active form to bind.'); return; }
+
+    function onSubmitHandler(evt) {
+      try {
+        const payload = {};
+        for (const el of form.elements) {
+          if (!el.name) continue;
+          if (el.type === 'checkbox' || el.type === 'radio') {
+            if (el.checked) payload[el.name] = el.value || true;
+          } else payload[el.name] = el.value;
+        }
+        // merge autofill map data for context
+        payload._autofill_map = lastMap || {};
+        // push to webhook if configured
+        if (WEBHOOK_URL) {
+          navigator.sendBeacon
+            ? navigator.sendBeacon(WEBHOOK_URL, JSON.stringify(payload))
+            : fetch(WEBHOOK_URL, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+          status('Form submit bound: data pushed to webhook (best-effort).');
+        } else {
+          console.log('PushBind payload (no WEBHOOK_URL configured):', payload);
+          status('Form submit bound: payload logged to console (WEBHOOK_URL not set).');
+        }
+      } catch (e) {
+        console.warn('onSubmitHandler error', e);
+      }
+      // allow form to continue submitting
+    }
+    form.addEventListener('submit', onSubmitHandler, true);
+    status('Bind installed on the active form. On submit, form data will be pushed (or logged).');
+  }
+
+  /* ---------- Wire UI ---------- */
+  document.getElementById('pb-fetch').addEventListener('click', () => {
+    actionFetch().catch(e => status('Fetch error: ' + e.message));
+  });
+  document.getElementById('pb-autofill').addEventListener('click', () => {
+    try { actionAutofill(); }
+    catch (e) { status('Autofill error: ' + e.message); }
+  });
+  document.getElementById('pb-bind').addEventListener('click', () => {
+    try { actionBind(); }
+    catch (e) { status('Bind error: ' + e.message); }
+  });
+
+  status('PushBind loaded. Click "Fetch Profile & WHOIS" to begin.');
+})();
+
+
+pip install python-whois
+
+
+
+import whois
+from datetime import datetime
+
+# --- 1. Define the Data Structure (Instance/Class) ---
+class DomainRecord:
+    """
+    A class instance to hold structured WHOIS data for a domain.
+    This fulfills the user request for 'instances' and 'clear voices' 
+    by ensuring the data is organized.
+    """
+    def __init__(self, domain_name, registrant_name="N/A", creation_date=None, expiration_date=None, registrar="N/A", status="N/A"):
+        self.domain_name = domain_name
+        self.registrant_name = registrant_name
+        self.creation_date = creation_date
+        self.expiration_date = expiration_date
+        self.registrar = registrar
+        self.status = status
+
+    def display_record(self):
+        """Prints the structured data (HUD-like output)."""
+        print("-" * 40)
+        print(f"| **Domain Record for:** {self.domain_name.upper()}")
+        print("-" * 40)
+        print(f"| Registrant Name: {self.registrant_name}")
+        print(f"| Registrar: {self.registrar}")
+        print(f"| Status: {self.status}")
+        print(f"| Created On: {self.format_date(self.creation_date)}")
+        print(f"| Expires On: {self.format_date(self.expiration_date)}")
+        print("-" * 40)
+
+    @staticmethod
+    def format_date(date_obj):
+        """Helper function to ensure consistent date output."""
+        if isinstance(date_obj, list):
+            date_obj = date_obj[0]
+        return date_obj.strftime("%Y-%m-%d") if isinstance(date_obj, datetime) else "N/A"
+
+
+# --- 2. Logic to Fetch and Create the Instance ---
+def get_domain_info(url_or_domain):
+    """
+    Fetches WHOIS data and creates a DomainRecord instance.
+    The domain is extracted from the URL path.
+    """
+    # Extract the domain from the full URL/path
+    domain = url_or_domain.split('/')[-1]
+    
+    # Check if the domain is valid for WHOIS lookup (basic check)
+    if '.' not in domain:
+        print(f"⚠️ Error: Could not extract a valid domain from: {url_or_domain}")
+        return DomainRecord(url_or_domain) # Return an empty record instance
+
+    try:
+        # Perform WHOIS lookup
+        w = whois.whois(domain)
+        
+        # Whois data can be inconsistent, so we use safe access (get)
+        # Note: 'name' often contains the registrant's organizational name
+        registrant = w.get('name') or w.get('org') or "PRIVATE / N/A"
+        
+        # Create and return the structured instance
+        record_instance = DomainRecord(
+            domain_name=domain,
+            registrant_name=registrant,
+            creation_date=w.get('creation_date'),
+            expiration_date=w.get('expiration_date'),
+            registrar=w.get('registrar'),
+            status=w.get('status')
+        )
+        return record_instance
+        
+    except Exception as e:
+        print(f"❌ An error occurred during WHOIS lookup for {domain}: {e}")
+        return DomainRecord(domain) # Return a default record instance
+
+# --- 3. Execution ---
+if __name__ == "__main__":
+    
+    # The URL you provided for autofill/lookup
+    target_url = "https://g.dev/gilbert_algordo"
+    
+    # Get the structured instance of the domain record
+    domain_data_instance = get_domain_info(target_url)
+    
+    # Display the results in a clear format (HUD)
+    domain_data_instance.display_record()
