@@ -1,0 +1,271 @@
+import json
+import requests
+from google.oauth2 import service_account
+from google.auth.transport.requests import Request
+import time
+from datetime import datetime
+
+# --- Configuration ---
+SERVICE_ACCOUNT_FILE = 'path/to/your/service_account.json'
+TARGET_URL = 'https://www.your-website.com/updated-page' # The URL you want Google to re-index
+API_ENDPOINT = 'https://indexing.googleapis.com/v3/urlNotifications:publish'
+# --- End Configuration ---
+
+def get_credentials():
+    """Authenticates using the Service Account file."""
+    # The scope for the Indexing API
+    SCOPES = ['https://www.googleapis.com/auth/indexing']
+    
+    # Load credentials from the service account file
+    creds = service_account.Credentials.from_service_account_file(
+        SERVICE_ACCOUNT_FILE, scopes=SCOPES
+    )
+    
+    # Refresh the token if necessary
+    creds.refresh(Request())
+    return creds
+
+def update_google_index(url_to_update, credentials):
+    """Sends a URL_UPDATED notification to the Google Indexing API."""
+    
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {credentials.token}'
+    }
+    
+    # The payload to notify Google that the URL has been updated
+    payload = {
+        "url": url_to_update,
+        "type": "URL_UPDATED"
+    }
+    
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Attempting to update index for: {url_to_update}")
+    
+    try:
+        response = requests.post(API_ENDPOINT, headers=headers, data=json.dumps(payload))
+        
+        if response.status_code == 200:
+            print("✅ Successfully submitted URL update to Indexing API.")
+        else:
+            print(f"❌ API call failed with status code {response.status_code}. Response: {response.text}")
+            
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+def scheduled_index_update():
+    """The main function that runs every hour."""
+    
+    # 1. Authenticate
+    try:
+        creds = get_credentials()
+    except Exception as e:
+        print(f"Authentication failed: {e}")
+        return
+    
+    # 2. Update the Index
+    update_google_index(TARGET_URL, creds)
+
+
+# --- Hourly Scheduling Logic ---
+
+# **NOTE:** This simple loop is for demonstration. 
+# For production, you must use a reliable scheduler (like cron, Windows Task Scheduler, 
+# or a cloud service like Google Cloud Scheduler) to run the `scheduled_index_update` function every hour.
+
+# Example of a simple, continuous loop (NOT recommended for production servers)
+# while True:
+#     scheduled_index_update()
+#     print("Waiting for 1 hour before the next update...")
+#     time.sleep(3600) # Sleep for 3600 seconds (1 hour)
+
+# For a script that runs via a **cron job** or **Cloud Scheduler** once an hour:
+if __name__ == "__main__":
+    scheduled_index_update()
+
+
+
+import schedule
+import time
+from datetime import datetime
+
+# You would need a function to safely scrape or call a SERP API
+def scrape_google_search_results(query):
+    """
+    Conceptual function to get search results. 
+    REPLACE THIS with a call to a SERP API or a robust scraper.
+    """
+    
+    # Example: In a real scenario, this would return a list of titles, links, and snippets
+    # The actual implementation is complex and often requires a paid API for reliability.
+    
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Running search for query: '{query}'")
+    
+    # --- Actual Code Placeholder ---
+    # try:
+    #     results = some_serp_api.get_results(query)
+    #     # Code to process results and save them to a database/file
+    #     print(f"Found {len(results)} results and updated the index/database.")
+    # except Exception as e:
+    #     print(f"Error scraping/API call: {e}")
+    # -------------------------------
+    
+    print("Conceptual search result tracking completed.")
+
+# Schedule the job to run every hour
+# The 'schedule' library requires the script to be running continuously.
+schedule.every(1).hour.do(scrape_google_search_results, 'your desired search query')
+
+print(f"Scheduler started. Tracking set for every 1 hour.")
+
+# The continuous loop to run the scheduled jobs
+# while True:
+#     schedule.run_pending()
+#     time.sleep(1) 
+
+
+
+import json
+import requests
+import time
+from datetime import datetime, timedelta
+from google.oauth2 import service_account
+from google.auth.transport.requests import Request
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+import os
+
+# --- Configuration ---
+# Set this environment variable or define the path directly
+SERVICE_ACCOUNT_FILE = os.environ.get(
+    'GCP_SA_KEY_PATH', 
+    'path/to/your/service_account.json' 
+)
+# Define the URLs you need to update hourly (up to 100 per batch request)
+URLS_TO_UPDATE = [
+    'https://www.your-website.com/job/senior-developer-2025',
+    'https://www.your-website.com/livestream/event-recap-q3-2025',
+    'https://www.your-website.com/new-job/product-manager-2026',
+    # ... add up to 100 URLs for a batch submission
+]
+API_ENDPOINT = 'https://indexing.googleapis.com/v3/urlNotifications:batch'
+# --- End Configuration ---
+
+# --- Exponential Backoff Retry Strategy for HTTP 503 (Service Unavailable/Quota) ---
+def requests_retry_session(
+    retries=5,
+    backoff_factor=0.3,
+    status_forcelist=(500, 502, 503, 504),
+    session=None,
+):
+    """
+    Creates a requests session with robust retry logic.
+    Waits 0.3, 0.6, 1.2, 2.4, 4.8 seconds between retries for specified status codes.
+    """
+    session = session or requests.Session()
+    retry = Retry(
+        total=retries,
+        read=retries,
+        connect=retries,
+        backoff_factor=backoff_factor,
+        status_forcelist=status_forcelist,
+        method_whitelist=frozenset(['POST', 'GET']),
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount('http://', adapter)
+    session.mount('https://', adapter)
+    return session
+
+# --- Authentication and API Call Logic ---
+def get_credentials():
+    """Authenticates using the Service Account and returns credentials."""
+    SCOPES = ['https://www.googleapis.com/auth/indexing']
+    
+    try:
+        creds = service_account.Credentials.from_service_account_file(
+            SERVICE_ACCOUNT_FILE, scopes=SCOPES
+        )
+        creds.refresh(Request())
+        return creds
+    except Exception as e:
+        print(f"🚨 FATAL: Authentication failed. Check your service account file and path: {e}")
+        return None
+
+def build_batch_payload(urls):
+    """
+    Constructs the batch payload containing multiple URL_UPDATED requests.
+    """
+    notifications = []
+    for url in urls:
+        notifications.append({
+            "url": url,
+            "type": "URL_UPDATED"
+        })
+        
+    return {
+        "notifications": notifications
+    }
+
+def submit_hourly_update(urls, credentials):
+    """
+    Submits a batch of URL update requests to the Google Indexing API.
+    """
+    if not credentials:
+        return
+
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {credentials.token}'
+    }
+    
+    payload = build_batch_payload(urls)
+    
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Attempting to submit batch update for {len(urls)} URLs...")
+    
+    try:
+        session = requests_retry_session()
+        response = session.post(API_ENDPOINT, headers=headers, data=json.dumps(payload))
+        
+        # Check for non-retryable HTTP errors
+        if response.status_code == 200:
+            print("✅ Batch submission successful.")
+            results = response.json().get('urlNotificationMetadatas', [])
+            
+            # Print status for the first few URLs for verification
+            print(f"   First {min(3, len(results))} URL statuses:")
+            for result in results[:3]:
+                print(f"   - {result.get('url')}: Status Code {result.get('latestUpdate', {}).get('publish', {}).get('urlNotification', {}).get('type')}")
+
+        else:
+            print(f"❌ API call failed (Status: {response.status_code}). Response: {response.text}")
+            
+    except requests.exceptions.RetryError as e:
+        print(f"❌ Critical error: Retries exhausted. Quota may be exceeded or service is unavailable. Error: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred during API submission: {e}")
+
+
+# --- Main Execution Function (Scheduled by Cron/Cloud) ---
+def scheduled_hourly_run():
+    """
+    The main execution function designed to be run exactly once every hour.
+    """
+    print("\n" + "="*50)
+    print(f"Hourly Indexing Update Started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("="*50)
+
+    # 1. Authenticate with Google
+    creds = get_credentials()
+    if creds:
+        # 2. Submit the update for the list of hourly URLs
+        submit_hourly_update(URLS_TO_UPDATE, creds)
+    
+    print(f"Hourly Indexing Update Finished.")
+
+
+if __name__ == "__main__":
+    scheduled_hourly_run()
+
+
+
+# Minute (0-59) | Hour (0-23) | Day of Month | Month | Day of Week | Command
+0 * * * * /usr/bin/python3 /path/to/your/hourly_index_updater.py
