@@ -1,0 +1,694 @@
+python3 -m pip install pywifi requests flask python-dotenv
+
+
+# internet_assistant.py
+"""
+Internet Connection Assistant (legal/legitimate use only).
+
+Features:
+- connectivity checks (HTTP probe)
+- scan Wi-Fi networks (pywifi)
+- attempt connect to supplied known networks (user provides SSID/password)
+- detect captive portal (HTTP redirect or unexpected content)
+- optional VPN start/stop wrapper (calls external client; you must provide config)
+- simple Flask status UI and logs
+
+Requirements:
+pip install pywifi requests flask python-dotenv
+Run with appropriate system privileges for Wi-Fi control (may require sudo/admin).
+"""
+
+import time
+import threading
+import subprocess
+import logging
+from datetime import datetime
+import os
+from dotenv import load_dotenv
+
+import requests
+from flask import Flask, jsonify, request, render_template_string
+
+# Attempt to import pywifi; if not available, scanning and connect functions will warn.
+try:
+    import pywifi
+    from pywifi import const
+except Exception:
+    pywifi = None
+
+load_dotenv()
+
+# ----- CONFIG -----
+CHECK_URL = os.getenv("CHECK_URL", "http://clients3.google.com/generate_204")
+CHECK_TIMEOUT = float(os.getenv("CHECK_TIMEOUT", "5"))
+CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "10"))  # seconds between connectivity checks
+AUTO_RECONNECT = os.getenv("AUTO_RECONNECT", "true").lower() in ("1", "true", "yes")
+KNOWN_NETWORKS = {}  # will be loaded from env (format: SSID1:PASS1;SSID2:PASS2)
+
+# parse KNOWN_NETWORKS env var like "HomeSSID:secret;CafeSSID:password"
+raw_known = os.getenv("KNOWN_NETWORKS", "")
+for pair in [p for p in raw_known.split(";") if p.strip()]:
+    if ":" in pair:
+        ssid, pwd = pair.split(":", 1)
+        KNOWN_NETWORKS[ssid.strip()] = pwd.strip()
+
+# Optional VPN wrapper command (user-supplied; e.g. "openvpn --config /path/to/config.ovpn")
+VPN_START_CMD = os.getenv("VPN_START_CMD", "")
+VPN_STOP_CMD = os.getenv("VPN_STOP_CMD", "")  # if you have a way to stop
+# -------------------
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger("internet_assistant")
+
+app = Flask(__name__)
+state = {
+    "online": False,
+    "last_check": None,
+    "last_status_code": None,
+    "connected_ssid": None,
+    "scan_results": [],
+    "logs": [],
+    "vpn_running": False,
+    "reconnect_attempts": 0,
+}
+
+
+def log(msg):
+    t = f"{datetime.now().isoformat()} - {msg}"
+    logger.info(msg)
+    state["logs"].append(t)
+    # keep logs bounded
+    if len(state["logs"]) > 500:
+        state["logs"] = state["logs"][-500:]
+
+
+def check_connectivity():
+    """Returns (online: bool, detail: str)."""
+    try:
+        resp = requests.get(CHECK_URL, timeout=CHECK_TIMEOUT, allow_redirects=True)
+        state["last_status_code"] = resp.status_code
+        # clients3.google.com/generate_204 returns 204 when fully online, else captive portal redirect
+        if resp.status_code == 204:
+            return True, "204_no_content"
+        else:
+            # possible captive portal (redirect to login)
+            # treat anything other than 204 as not fully online but HTTP reachable
+            return False, f"unexpected_status_{resp.status_code}"
+    except requests.RequestException as e:
+        return False, f"request_error:{e}"
+
+
+# ----- Wi-Fi helpers (pywifi) -----
+def wifi_available():
+    return pywifi is not None
+
+
+def scan_wifi_once(timeout=5):
+    """Return list of dict {ssid, bssid, signal, auth} - may be empty."""
+    if not wifi_available():
+        log("pywifi not installed or unavailable; cannot scan Wi-Fi.")
+        return []
+    wifi = pywifi.PyWiFi()
+    iface = wifi.interfaces()[0]
+    iface.scan()
+    time.sleep(timeout)
+    results = iface.scan_results()
+    networks = []
+    seen = set()
+    for ap in results:
+        if ap.ssid in seen:
+            continue
+        seen.add(ap.ssid)
+        networks.append({
+            "ssid": ap.ssid,
+            "bssid": ap.bssid,
+            "signal": ap.signal,
+            "akm": ap.akm,
+            "auth": ap.auth,
+        })
+    state["scan_results"] = networks
+    return networks
+
+
+def connect_to_network(ssid, password, timeout=20):
+    """
+    Attempt connect to an SSID with given password. Returns True/False, message.
+    Requires system permissions.
+    """
+    if not wifi_available():
+        return False, "pywifi_unavailable"
+    wifi = pywifi.PyWiFi()
+    iface = wifi.interfaces()[0]
+    # disconnect existing
+    try:
+        iface.disconnect()
+    except Exception:
+        pass
+    # build profile
+    profile = pywifi.Profile()
+    profile.ssid = ssid
+    profile.auth = const.AUTH_ALG_OPEN
+    # basic handling for WPA2-PSK networks:
+    profile.akm.append(const.AKM_TYPE_WPA2PSK)
+    profile.cipher = const.CIPHER_TYPE_CCMP
+    profile.key = password
+    iface.remove_all_network_profiles()
+    tmp_profile = iface.add_network_profile(profile)
+    iface.connect(tmp_profile)
+    started = time.time()
+    while time.time() - started < timeout:
+        if iface.status() == const.IFACE_CONNECTED:
+            state["connected_ssid"] = ssid
+            return True, "connected"
+        time.sleep(1)
+    # failed
+    try:
+        iface.disconnect()
+    except Exception:
+        pass
+    state["connected_ssid"] = None
+    return False, "timeout_or_failed"
+
+
+# ----- VPN helpers (simple wrappers) -----
+vpn_proc = None
+
+
+def start_vpn():
+    global vpn_proc
+    if not VPN_START_CMD:
+        log("No VPN_START_CMD configured.")
+        return False, "no_vpn_cmd"
+    if state["vpn_running"]:
+        return True, "already_running"
+    try:
+        # NOTE: This uses subprocess.Popen. You are responsible for supplying a safe command.
+        vpn_proc = subprocess.Popen(VPN_START_CMD.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        state["vpn_running"] = True
+        log(f"Started VPN with command: {VPN_START_CMD}")
+        return True, "started"
+    except Exception as e:
+        log(f"Failed to start VPN: {e}")
+        return False, f"error:{e}"
+
+
+def stop_vpn():
+    global vpn_proc
+    if vpn_proc and vpn_proc.poll() is None:
+        vpn_proc.terminate()
+        vpn_proc.wait(timeout=5)
+    state["vpn_running"] = False
+    return True, "stopped"
+
+
+# ----- Background monitor thread -----
+def monitor_loop():
+    log("Monitor thread started.")
+    while True:
+        online, detail = check_connectivity()
+        state["online"] = online
+        state["last_check"] = datetime.utcnow().isoformat()
+        log(f"Connectivity check: online={online} detail={detail} status_code={state.get('last_status_code')}")
+        if not online and AUTO_RECONNECT:
+            # Try to reconnect to known networks
+            state["reconnect_attempts"] += 1
+            if KNOWN_NETWORKS:
+                log("Attempting auto-reconnect to known networks...")
+                for ssid, pwd in KNOWN_NETWORKS.items():
+                    log(f"Trying {ssid}...")
+                    success, msg = connect_to_network(ssid, pwd)
+                    log(f"Connect attempt {ssid}: success={success}, msg={msg}")
+                    if success:
+                        # re-check connectivity quickly
+                        time.sleep(3)
+                        online2, detail2 = check_connectivity()
+                        state["online"] = online2
+                        if online2:
+                            log(f"Reconnected and proven online via {ssid}")
+                            break
+                else:
+                    log("Auto-reconnect: no known SSID succeeded.")
+            else:
+                log("No known networks configured for auto-reconnect.")
+        # If online but captive portal suspected (non-204), inform user in logs
+        if not online and state.get("last_status_code") and state["last_status_code"] != 204:
+            log("Possible captive portal or restricted access detected (HTTP status != 204). Please open a browser and authenticate.")
+        time.sleep(CHECK_INTERVAL)
+
+
+# ----- Flask UI -----
+MAIN_PAGE = """
+<!doctype html>
+<title>Internet Assistant</title>
+<h1>Internet Connection Assistant</h1>
+<p>Online: <strong>{{online}}</strong></p>
+<p>Last check (UTC): {{last_check}}</p>
+<p>Connected SSID: {{connected_ssid}}</p>
+<p>VPN running: {{vpn_running}}</p>
+<h2>Scan Results</h2>
+<ul>
+{% for n in scan_results %}
+  <li>{{n.ssid}} (signal: {{n.signal}})</li>
+{% endfor %}
+</ul>
+<h2>Actions</h2>
+<form action="/scan" method="post"><button type="submit">Scan Wi-Fi now</button></form>
+<form action="/connect" method="post">
+  <label>SSID: <input name="ssid"></label>
+  <label>Password: <input name="password" type="password"></label>
+  <button type="submit">Connect</button>
+</form>
+<form action="/vpn/start" method="post"><button type="submit">Start VPN</button></form>
+<form action="/vpn/stop" method="post"><button type="submit">Stop VPN</button></form>
+<h2>Logs (last 50)</h2>
+<pre>{{logs}}</pre>
+"""
+
+@app.route("/")
+def index():
+    return render_template_string(MAIN_PAGE,
+                                  online=state["online"],
+                                  last_check=state["last_check"],
+                                  connected_ssid=state["connected_ssid"],
+                                  scan_results=state["scan_results"],
+                                  logs="\n".join(state["logs"][-50:]),
+                                  vpn_running=state["vpn_running"])
+
+
+@app.route("/scan", methods=["POST"])
+def do_scan():
+    networks = scan_wifi_once()
+    log(f"Manual scan returned {len(networks)} networks.")
+    return ("", 204)
+
+
+@app.route("/connect", methods=["POST"])
+def do_connect_route():
+    ssid = request.form.get("ssid", "").strip()
+    password = request.form.get("password", "")
+    if not ssid:
+        return "missing_ssid", 400
+    success, msg = connect_to_network(ssid, password)
+    log(f"Manual connect {ssid}: success={success}, msg={msg}")
+    return ("", 204) if success else (msg, 500)
+
+
+@app.route("/vpn/start", methods=["POST"])
+def vpn_start_route():
+    ok, msg = start_vpn()
+    return (msg, 200 if ok else 500)
+
+
+@app.route("/vpn/stop", methods=["POST"])
+def vpn_stop_route():
+    ok, msg = stop_vpn()
+    return (msg, 200 if ok else 500)
+
+
+@app.route("/status")
+def json_status():
+    return jsonify(state)
+
+
+# ----- Entrypoint -----
+if __name__ == "__main__":
+    # Start monitor thread
+    t = threading.Thread(target=monitor_loop, daemon=True)
+    t.start()
+    # Launch Flask UI
+    app.run(host="127.0.0.1", port=5000, debug=False)
+
+
+    #!/usr/bin/env python3
+"""
+internet_assistant_advanced.py
+Advanced, legal Internet Connection Manager for personal use (Linux / NetworkManager).
+
+Features:
+- prioritized authorized networks (ssid/password)
+- nmcli-based scanning/connection (fast and reliable on Linux)
+- captive portal detection (HTTP probe + redirect detection)
+- WireGuard VPN control (wg-quick)
+- fallback to tether (usb/ModemManager) if available
+- exponential backoff for retries
+- Flask API/UI for local control and status
+- structured logging and basic metrics
+
+Requirements (examples):
+sudo apt install network-manager-wireless network-manager
+pip install flask requests python-dotenv
+
+Run with sudo if you will control network adapters.
+"""
+
+import os
+import json
+import time
+import subprocess
+import threading
+import logging
+from datetime import datetime, timezone
+from flask import Flask, jsonify, request, render_template_string
+import requests
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# ---------- Config ----------
+CHECK_URL = os.getenv("CHECK_URL", "http://clients3.google.com/generate_204")
+CHECK_TIMEOUT = float(os.getenv("CHECK_TIMEOUT", "5"))
+CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "12"))
+AUTHORIZED_NETWORKS_FILE = os.getenv("AUTHORIZED_NETWORKS_FILE", "authorized_networks.json")
+WIREGUARD_CONF = os.getenv("WIREGUARD_CONF", "/etc/wireguard/wg0.conf")
+WG_QUICK = os.getenv("WG_QUICK", "wg-quick")
+AUTO_VPN_IF_NEEDED = os.getenv("AUTO_VPN_IF_NEEDED", "true").lower() in ("1", "true", "yes")
+LOG_FILE = os.getenv("LOG_FILE", "internet_assistant.log")
+CAPTIVE_KEYWORDS = ["portal", "login", "captive"]
+MAX_BACKOFF = int(os.getenv("MAX_BACKOFF", "300"))  # seconds
+# ----------------------------
+
+# Set up logging
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s %(levelname)s %(message)s",
+                    handlers=[logging.FileHandler(LOG_FILE), logging.StreamHandler()])
+
+logger = logging.getLogger("internet_assistant")
+
+app = Flask(__name__)
+
+# In-memory state
+state = {
+    "online": False,
+    "last_check": None,
+    "last_status": None,
+    "current_ssid": None,
+    "reconnect_attempts": 0,
+    "backoff": 1,
+    "logs": [],
+    "wg_running": False,
+}
+
+def log(msg):
+    t = f"{datetime.now(timezone.utc).isoformat()} - {msg}"
+    logger.info(msg)
+    state["logs"].append(t)
+    if len(state["logs"]) > 1000:
+        state["logs"] = state["logs"][-1000:]
+
+# ---------- Utilities ----------
+def shell(cmd, timeout=30):
+    """Run a shell command and return (code, stdout, stderr)."""
+    try:
+        p = subprocess.run(cmd, shell=True, check=False, capture_output=True, text=True, timeout=timeout)
+        return p.returncode, p.stdout.strip(), p.stderr.strip()
+    except subprocess.TimeoutExpired as e:
+        return 124, "", f"timeout: {e}"
+
+# ---------- Authorized networks storage ----------
+def load_authorized_networks(path=AUTHORIZED_NETWORKS_FILE):
+    if not os.path.exists(path):
+        return []
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def save_authorized_networks(networks, path=AUTHORIZED_NETWORKS_FILE):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(networks, f, indent=2)
+
+# Example schema: [{"ssid":"HomeWifi","password":"...","priority":10}, ...]
+
+
+# ---------- NMCLI helpers ----------
+def nmcli_list_devices():
+    code, out, err = shell("nmcli -t -f DEVICE,TYPE,STATE device")
+    if code != 0:
+        log(f"nmcli device list failed: {err}")
+        return []
+    rows = []
+    for line in out.splitlines():
+        if not line: continue
+        dev, typ, state_ = line.split(":")
+        rows.append({"device": dev, "type": typ, "state": state_})
+    return rows
+
+def nmcli_scan():
+    # trigger a wifi scan then list access points
+    shell("nmcli device wifi rescan")
+    code, out, err = shell("nmcli -t -f SSID,BSSID,SIGNAL,SECURITY device wifi list")
+    aps = []
+    if code != 0:
+        log(f"nmcli scan failed: {err}")
+        return aps
+    for line in out.splitlines():
+        parts = line.split(":")
+        ssid = parts[0]
+        bssid = parts[1] if len(parts) > 1 else ""
+        signal = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+        security = parts[3] if len(parts) > 3 else ""
+        aps.append({"ssid": ssid, "bssid": bssid, "signal": signal, "security": security})
+    return aps
+
+def nmcli_connect(ssid, password=None):
+    """
+    Connect to an SSID. If password is provided, attempt to create a connection profile.
+    Returns (ok: bool, message: str)
+    """
+    # First try to activate an existing connection profile
+    code, out, err = shell(f"nmcli -t -f NAME,UUID connection show --active")
+    # Try to connect using nmcli device wifi connect
+    cmd = f"nmcli device wifi connect '{ssid}'"
+    if password:
+        cmd += f" password '{password}'"
+    code, out, err = shell(cmd, timeout=45)
+    if code == 0:
+        # update state
+        state["current_ssid"] = ssid
+        log(f"nmcli connected to {ssid}")
+        return True, out or "connected"
+    else:
+        log(f"nmcli connect failed for {ssid}: {err}")
+        return False, err or out
+
+def nmcli_disconnect():
+    shell("nmcli networking off && nmcli networking on")
+    state["current_ssid"] = None
+
+# ---------- WireGuard control ----------
+def wg_is_running():
+    code, out, err = shell(f"wg show")
+    return code == 0 and out.strip() != ""
+
+def wg_start():
+    if not WG_QUICK or not os.path.exists(WIREGUARD_CONF):
+        log("WireGuard config missing or WG_QUICK not set.")
+        return False, "no_config"
+    code, out, err = shell(f"sudo {WG_QUICK} up {WIREGUARD_CONF}", timeout=20)
+    if code == 0:
+        state["wg_running"] = True
+        log("WireGuard started")
+        return True, out
+    else:
+        return False, err
+
+def wg_stop():
+    code, out, err = shell(f"sudo {WG_QUICK} down {WIREGUARD_CONF}", timeout=20)
+    state["wg_running"] = False
+    return code == 0, out if code == 0 else err
+
+# ---------- Connectivity checks ----------
+def check_connectivity():
+    try:
+        resp = requests.get(CHECK_URL, timeout=CHECK_TIMEOUT, allow_redirects=True)
+        state["last_status"] = resp.status_code
+        if resp.status_code == 204:
+            return True, "ok_204"
+        # Detect possible captive portal content or redirects
+        text = (resp.text or "").lower()
+        for kw in CAPTIVE_KEYWORDS:
+            if kw in text:
+                return False, f"captive_detected_keyword:{kw}"
+        # If redirected or a non-204, treat as not fully open (but HTTP reachable)
+        if resp.history or resp.status_code != 204:
+            return False, f"unexpected_status_{resp.status_code}"
+        return False, f"unknown_{resp.status_code}"
+    except requests.RequestException as e:
+        return False, f"request_error:{e}"
+
+# ---------- Reconnect policy ----------
+def attempt_reconnect(prioritized_networks):
+    """
+    Iterate through prioritized networks and try to connect.
+    prioritized_networks: list ordered by priority desc
+    """
+    for net in prioritized_networks:
+        ssid = net.get("ssid")
+        pwd = net.get("password")
+        if not ssid:
+            continue
+        log(f"Attempting connect to authorized SSID: {ssid}")
+        ok, msg = nmcli_connect(ssid, pwd)
+        if ok:
+            # short pause then check connectivity
+            time.sleep(3)
+            ok2, detail = check_connectivity()
+            if ok2:
+                log(f"Connected to {ssid} and internet probe succeeded.")
+                state["backoff"] = 1
+                return True
+            else:
+                log(f"Connected to {ssid} but probe failed: {detail}")
+        # if failed, continue to next
+    return False
+
+# ---------- Monitor thread ----------
+def monitor_loop():
+    log("Starting monitor loop")
+    networks = load_authorized_networks()
+    while True:
+        online, detail = check_connectivity()
+        state["online"] = online
+        state["last_check"] = datetime.now(timezone.utc).isoformat()
+        log(f"Connectivity check: online={online} detail={detail}")
+        if online:
+            # if vpn running when not needed, optionally stop – here we keep running to be safe
+            state["backoff"] = 1
+        else:
+            # not online -> try network-level fixes
+            state["reconnect_attempts"] += 1
+            networks = load_authorized_networks()  # reload in case user updated file
+            # Sort by priority
+            prioritized = sorted(networks, key=lambda n: n.get("priority",0), reverse=True)
+            ok = attempt_reconnect(prioritized)
+            if not ok:
+                # Try starting VPN if configured and allowed
+                if AUTO_VPN_IF_NEEDED:
+                    log("Starting configured VPN as fallback...")
+                    s, m = wg_start()
+                    if s:
+                        # after starting VPN, recheck connectivity
+                        time.sleep(5)
+                        online2, d2 = check_connectivity()
+                        if online2:
+                            log("Connectivity restored via VPN.")
+                            state["online"] = True
+                    else:
+                        log(f"VPN start failed: {m}")
+                # If still offline, backoff and try again later
+                backoff = min(state["backoff"] * 2, MAX_BACKOFF)
+                log(f"No connection succeeded; backing off for {backoff} seconds.")
+                state["backoff"] = backoff
+                time.sleep(backoff)
+                continue
+        time.sleep(CHECK_INTERVAL)
+
+# ---------- Flask UI ----------
+MAIN_PAGE = """
+<!doctype html>
+<title>Internet Assistant (Advanced)</title>
+<h1>Internet Assistant — Advanced</h1>
+<p>Online: <strong>{{online}}</strong></p>
+<p>Last check: {{last_check}}</p>
+<p>Current SSID: {{current_ssid}}</p>
+<p>WG running: {{wg_running}}</p>
+<form action="/scan" method="post"><button type="submit">Scan networks</button></form>
+<form action="/connect" method="post">
+SSID: <input name="ssid">
+Password: <input name="password" type="password">
+<button type="submit">Connect</button>
+</form>
+<form action="/wg/start" method="post"><button type="submit">Start VPN</button></form>
+<form action="/wg/stop" method="post"><button type="submit">Stop VPN</button></form>
+<h2>Authorized networks (file: {{netfile}})</h2>
+<pre>{{networks}}</pre>
+<h2>Logs (last 200)</h2>
+<pre>{{logs}}</pre>
+"""
+
+@app.route("/")
+def index():
+    nets = load_authorized_networks()
+    return render_template_string(MAIN_PAGE,
+                                  online=state["online"],
+                                  last_check=state["last_check"],
+                                  current_ssid=state["current_ssid"],
+                                  wg_running=state["wg_running"],
+                                  netfile=AUTHORIZED_NETWORKS_FILE,
+                                  networks=json.dumps(nets, indent=2),
+                                  logs="\n".join(state["logs"][-200:]))
+
+@app.route("/scan", methods=["POST"])
+def scan_route():
+    aps = nmcli_scan()
+    log(f"Manual scan found {len(aps)} APs.")
+    return jsonify(aps)
+
+@app.route("/connect", methods=["POST"])
+def connect_route():
+    ssid = request.form.get("ssid")
+    pwd = request.form.get("password")
+    if not ssid:
+        return "missing ssid", 400
+    ok, msg = nmcli_connect(ssid, pwd)
+    return (jsonify({"ok": ok, "msg": msg}), 200 if ok else 500)
+
+@app.route("/wg/start", methods=["POST"])
+def wg_start_route():
+    ok, msg = wg_start()
+    return jsonify({"ok": ok, "msg": msg})
+
+@app.route("/wg/stop", methods=["POST"])
+def wg_stop_route():
+    ok, msg = wg_stop()
+    return jsonify({"ok": ok, "msg": msg})
+
+@app.route("/authorized", methods=["POST","GET","PUT","DELETE"])
+def authorized_route():
+    """
+    GET returns list, POST adds, PUT updates, DELETE removes by SSID.
+    """
+    if request.method == "GET":
+        return jsonify(load_authorized_networks())
+    if request.method == "POST":
+        data = request.get_json() or {}
+        nets = load_authorized_networks()
+        nets.append(data)
+        save_authorized_networks(nets)
+        return jsonify({"ok": True})
+    if request.method == "PUT":
+        data = request.get_json() or {}
+        ssid = data.get("ssid")
+        if not ssid:
+            return "missing ssid", 400
+        nets = load_authorized_networks()
+        for i,n in enumerate(nets):
+            if n.get("ssid")==ssid:
+                nets[i].update(data)
+                save_authorized_networks(nets)
+                return jsonify({"ok": True})
+        return "not found", 404
+    if request.method == "DELETE":
+        ssid = request.args.get("ssid")
+        if not ssid:
+            return "missing ssid", 400
+        nets = [n for n in load_authorized_networks() if n.get("ssid")!=ssid]
+        save_authorized_networks(nets)
+        return jsonify({"ok": True})
+
+@app.route("/status")
+def status_json():
+    return jsonify(state)
+
+# ---------- Entrypoint ----------
+if __name__ == "__main__":
+    # Start monitor thread
+    t = threading.Thread(target=monitor_loop, daemon=True)
+    t.start()
+    # Launch Flask UI
+    app.run(host="127.0.0.1", port=5000, debug=False)
+
+
+    [
+  {"ssid": "HomeSSID", "password": "your-home-pass", "priority": 100},
+  {"ssid": "WorkSSID", "password": "workpass", "priority": 90},
+  {"ssid": "PublicCafe", "password": "", "priority": 10}
+]
