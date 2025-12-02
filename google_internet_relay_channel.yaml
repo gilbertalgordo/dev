@@ -1,0 +1,551 @@
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, collection, query, orderBy, addDoc, onSnapshot, serverTimestamp, setLogLevel, where } from 'firebase/firestore';
+import { MessageSquare, Users, Send, MonitorPlay, Code, Link, FileText, Calendar, Gamepad2, X, Circle } from 'lucide-react';
+
+// --- Global Variables Provided by Canvas Environment ---
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'girc-advanced-app-id';
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+// Constants for Firestore collection paths
+const CHANNELS_PATH = `artifacts/${appId}/public/data/girc_channels`;
+const MESSAGES_PATH = `artifacts/${appId}/public/data/girc_messages`;
+
+// Enum for main view tabs
+const ChatTab = {
+  CHAT: 'CHAT',
+  WORKSPACE: 'WORKSPACE',
+  GAMES: 'GAMES',
+};
+
+// --- Utility Functions ---
+
+// Extracts YouTube video ID from various URL formats
+const extractYoutubeId = (url) => {
+  const regex = /(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+  const match = url.match(regex);
+  return match ? match[1] : null;
+};
+
+// --- Components ---
+
+/**
+ * Renders a single chat message, including rich media previews for YouTube links.
+ */
+const Message = React.memo(({ msg, userId, userName }) => {
+  const isMine = msg.userId === userId;
+  const youtubeId = extractYoutubeId(msg.text);
+
+  return (
+    <div className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}>
+      <div
+        className={`max-w-xs sm:max-w-md lg:max-w-lg p-3 rounded-xl shadow-lg transition duration-150 ${
+          isMine
+            ? 'bg-blue-600 text-white rounded-br-none'
+            : 'bg-gray-700 text-gray-100 rounded-tl-none'
+        }`}
+      >
+        <div className={`font-bold text-xs mb-1 ${isMine ? 'text-blue-200' : 'text-green-400'}`}>
+          {msg.userName || 'Unknown User'}
+        </div>
+
+        {/* Media Preview */}
+        {youtubeId ? (
+          <div className="w-full my-2">
+            <div className="relative w-full aspect-video rounded-lg overflow-hidden border border-gray-600">
+              <iframe
+                className="w-full h-full absolute top-0 left-0"
+                src={`https://www.youtube.com/embed/${youtubeId}?rel=0`}
+                title="YouTube video player"
+                frameBorder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              ></iframe>
+            </div>
+          </div>
+        ) : null}
+
+        <p className="text-sm break-words">{msg.text}</p>
+
+        <div className={`text-xs mt-1 ${isMine ? 'text-blue-300' : 'text-gray-400'}`}>
+          {msg.timestamp?.toDate ? new Date(msg.timestamp.toDate()).toLocaleTimeString() : '...'}
+        </div>
+      </div>
+    </div>
+  );
+});
+
+/**
+ * Renders the integrated, single-player Tic-Tac-Toe game.
+ */
+const TicTacToe = () => {
+  const [board, setBoard] = useState(Array(9).fill(null));
+  const [isXNext, setIsXNext] = useState(true);
+  const [status, setStatus] = useState("Player X's turn");
+  const [winner, setWinner] = useState(null);
+
+  // Check for a winner
+  const calculateWinner = (squares) => {
+    const lines = [
+      [0, 1, 2], [3, 4, 5], [6, 7, 8], // Rows
+      [0, 3, 6], [1, 4, 7], [2, 5, 8], // Columns
+      [0, 4, 8], [2, 4, 6],           // Diagonals
+    ];
+    for (let i = 0; i < lines.length; i++) {
+      const [a, b, c] = lines[i];
+      if (squares[a] && squares[a] === squares[b] && squares[a] === squares[c]) {
+        return squares[a];
+      }
+    }
+    if (squares.every(Boolean)) return 'Tie';
+    return null;
+  };
+
+  useEffect(() => {
+    const gameWinner = calculateWinner(board);
+    setWinner(gameWinner);
+
+    if (gameWinner === 'Tie') {
+      setStatus("Game Over: It's a Tie!");
+    } else if (gameWinner) {
+      setStatus(`Game Over: Winner is ${gameWinner}!`);
+    } else {
+      setStatus(`Player ${isXNext ? 'X' : 'O'}'s turn`);
+    }
+  }, [board, isXNext]);
+
+  const handleClick = (i) => {
+    if (winner || board[i]) {
+      return;
+    }
+    const newBoard = board.slice();
+    newBoard[i] = isXNext ? 'X' : 'O';
+    setBoard(newBoard);
+    setIsXNext(!isXNext);
+  };
+
+  const resetGame = () => {
+    setBoard(Array(9).fill(null));
+    setIsXNext(true);
+    setWinner(null);
+  };
+
+  const renderSquare = (i) => (
+    <button
+      className={`w-full h-full flex items-center justify-center text-4xl font-extrabold rounded-lg transition duration-200 shadow-inner 
+        ${board[i] === 'X' ? 'bg-red-500 hover:bg-red-600 text-white' : ''}
+        ${board[i] === 'O' ? 'bg-green-500 hover:bg-green-600 text-white' : ''}
+        ${!board[i] && !winner ? 'bg-gray-600 hover:bg-gray-500 text-gray-800' : 'cursor-default'}
+      `}
+      onClick={() => handleClick(i)}
+      disabled={!!winner || !!board[i]}
+      aria-label={`Square ${i}`}
+    >
+      {board[i] === 'X' && <X className="w-8 h-8"/>}
+      {board[i] === 'O' && <Circle className="w-8 h-8"/>}
+    </button>
+  );
+
+  return (
+    <div className="flex flex-col items-center p-6 bg-gray-800 rounded-xl shadow-2xl space-y-4 max-w-sm mx-auto">
+      <h2 className="text-3xl font-bold text-green-400">Tic-Tac-Toe</h2>
+      <div className="text-xl font-semibold text-gray-100 h-8 flex items-center justify-center">
+        {status}
+      </div>
+      <div className="grid grid-cols-3 grid-rows-3 gap-2 w-full aspect-square">
+        {[0, 1, 2, 3, 4, 5, 6, 7, 8].map(i => (
+          <div key={i} className="aspect-square">
+            {renderSquare(i)}
+          </div>
+        ))}
+      </div>
+      <button
+        onClick={resetGame}
+        className="w-full py-3 px-4 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-lg shadow-md transition duration-200 transform hover:scale-[1.02]"
+      >
+        New Game
+      </button>
+      <p className="text-sm text-gray-400">
+        This is a local, single-player game integration.
+      </p>
+    </div>
+  );
+};
+
+// --- Main App Component ---
+
+export default function App() {
+  const [db, setDb] = useState(null);
+  const [auth, setAuth] = useState(null);
+  const [userId, setUserId] = useState(null);
+  const [userName, setUserName] = useState('');
+  const [channels, setChannels] = useState([]);
+  const [currentChannelId, setCurrentChannelId] = useState(null);
+  const [currentTab, setCurrentTab] = useState(ChatTab.CHAT);
+  const [messages, setMessages] = useState([]);
+  const [newMessageText, setNewMessageText] = useState('');
+  const [authLoading, setAuthLoading] = useState(true);
+  const messagesEndRef = useRef(null);
+
+  // 1. Initialize Firebase and Authenticate User
+  useEffect(() => {
+    setLogLevel('debug');
+    try {
+      const app = initializeApp(firebaseConfig);
+      const firestore = getFirestore(app);
+      const authInstance = getAuth(app);
+
+      setDb(firestore);
+      setAuth(authInstance);
+
+      const authenticate = async () => {
+        try {
+          if (initialAuthToken) {
+            await signInWithCustomToken(authInstance, initialAuthToken);
+          } else {
+            await signInAnonymously(authInstance);
+          }
+        } catch (error) {
+          console.error("Firebase Auth error:", error);
+          await signInAnonymously(authInstance); // Fallback to anonymous sign-in
+        }
+      };
+
+      const unsubscribe = onAuthStateChanged(authInstance, (user) => {
+        if (user) {
+          setUserId(user.uid);
+          const name = `GIRC-User-${user.uid.substring(0, 8)}`;
+          setUserName(name);
+        } else {
+          setUserId(null);
+          setUserName('');
+        }
+        setAuthLoading(false);
+      });
+
+      authenticate();
+      return () => unsubscribe();
+    } catch (error) {
+      console.error("Firebase Initialization Error:", error);
+      setAuthLoading(false);
+    }
+  }, []);
+
+  // Utility to scroll to the latest message
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  // 2. Fetch Channels and Auto-Select First One
+  useEffect(() => {
+    if (!db || !userId) return;
+
+    const channelsCol = collection(db, CHANNELS_PATH);
+    const q = query(channelsCol, orderBy('name'));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedChannels = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+
+      setChannels(fetchedChannels);
+
+      // If no channel is selected and channels exist, select the first one
+      if (!currentChannelId && fetchedChannels.length > 0) {
+        setCurrentChannelId(fetchedChannels[0].id);
+      }
+      // If no channels exist, seed a default channel
+      else if (fetchedChannels.length === 0) {
+        const seedChannel = async () => {
+          try {
+            const seedData = {
+              name: "Welcome Lounge",
+              description: "Main public channel for general discussion and onboarding.",
+              workspaceLink: "https://docs.google.com/document/d/1B_GIRC_WelcomeDoc/edit", // Simulated Doc
+              meetingLink: "https://meet.google.com/girc-lounge-meet", // Simulated Meet
+              createdAt: serverTimestamp()
+            };
+            const newDoc = await addDoc(channelsCol, seedData);
+            setCurrentChannelId(newDoc.id);
+          } catch (e) {
+            console.error("Error seeding channel: ", e);
+          }
+        };
+        seedChannel();
+      }
+    }, (error) => {
+      console.error("Error fetching channels:", error);
+    });
+
+    return () => unsubscribe();
+  }, [db, userId, currentChannelId]);
+
+  // 3. Fetch Messages for the Current Channel
+  useEffect(() => {
+    if (!db || !currentChannelId || !userId || currentTab !== ChatTab.CHAT) {
+      setMessages([]); // Clear messages if not in chat view
+      return;
+    }
+
+    const messagesCol = collection(db, MESSAGES_PATH);
+    const q = query(
+      messagesCol,
+      where('channelId', '==', currentChannelId),
+      orderBy('timestamp', 'asc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedMessages = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setMessages(fetchedMessages);
+    }, (error) => {
+      console.error("Error fetching messages:", error);
+    });
+
+    return () => unsubscribe();
+  }, [db, currentChannelId, userId, currentTab]); // Dependency on currentTab added
+
+  // Scroll to bottom whenever messages update
+  useEffect(() => {
+    if (currentTab === ChatTab.CHAT) {
+      scrollToBottom();
+    }
+  }, [messages, currentTab]);
+
+  // 4. Send Message Function
+  const sendMessage = useCallback(async (e) => {
+    e.preventDefault();
+    if (!db || !currentChannelId || !newMessageText.trim() || !userId) return;
+
+    try {
+      await addDoc(collection(db, MESSAGES_PATH), {
+        channelId: currentChannelId,
+        userId: userId,
+        userName: userName,
+        text: newMessageText.trim(),
+        timestamp: serverTimestamp()
+      });
+      setNewMessageText('');
+    } catch (e) {
+      console.error("Error adding document: ", e);
+    }
+  }, [db, currentChannelId, newMessageText, userId, userName]);
+
+  // Get current channel object
+  const currentChannel = channels.find(c => c.id === currentChannelId);
+
+  // --- Render Functions for Tabs ---
+
+  const renderContent = () => {
+    if (!currentChannel) {
+        return <div className="p-6 text-center text-gray-400">Please select a channel to begin.</div>;
+    }
+
+    switch (currentTab) {
+      case ChatTab.CHAT:
+        return (
+          <div className="flex flex-col flex-1">
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {messages.map((msg) => (
+                <Message key={msg.id} msg={msg} userId={userId} userName={userName} />
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/* Message Input */}
+            <div className="p-4 bg-gray-800 border-t border-gray-700">
+              <form onSubmit={sendMessage} className="flex space-x-3">
+                <input
+                  type="text"
+                  value={newMessageText}
+                  onChange={(e) => setNewMessageText(e.target.value)}
+                  placeholder={`Message #${currentChannel.name} (Paste a YouTube link for preview!)`}
+                  className="flex-1 p-3 rounded-full bg-gray-700 text-white placeholder-gray-400 focus:ring-2 focus:ring-green-500 focus:outline-none transition duration-150"
+                  disabled={!currentChannelId}
+                />
+                <button
+                  type="submit"
+                  disabled={!currentChannelId || !newMessageText.trim()}
+                  className={`p-3 rounded-full shadow-lg transition duration-150 flex items-center justify-center ${
+                    currentChannelId && newMessageText.trim()
+                      ? 'bg-green-500 hover:bg-green-600 text-white transform hover:scale-105'
+                      : 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                  }`}
+                >
+                  <Send className="w-5 h-5" />
+                </button>
+              </form>
+            </div>
+          </div>
+        );
+
+      case ChatTab.WORKSPACE:
+        return (
+          <div className="p-6 space-y-6 flex-1 overflow-y-auto">
+            <h2 className="text-3xl font-bold text-green-400 mb-4 flex items-center">
+                <Code className="w-6 h-6 mr-2" />
+                Workspace Integration
+            </h2>
+            <p className="text-gray-300">
+                Quick links for collaboration tools associated with the <span className="font-mono text-yellow-400">#{currentChannel.name}</span> channel.
+            </p>
+
+            {/* Google Docs Link */}
+            <div className="bg-gray-700 p-4 rounded-xl shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between transition duration-200 hover:bg-gray-600">
+              <div className="flex items-center">
+                <FileText className="w-6 h-6 mr-3 text-blue-400" />
+                <div>
+                  <h3 className="text-xl font-semibold text-white">Channel Document</h3>
+                  <p className="text-sm text-gray-400">Collaborative notes and planning.</p>
+                </div>
+              </div>
+              <a
+                href={currentChannel.workspaceLink || "#"}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-3 sm:mt-0 py-2 px-4 bg-blue-500 text-white rounded-lg font-medium shadow-md flex items-center hover:bg-blue-600 transition duration-150"
+              >
+                Open Google Doc <Link className="w-4 h-4 ml-2" />
+              </a>
+            </div>
+
+            {/* Google Meet Link */}
+            <div className="bg-gray-700 p-4 rounded-xl shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between transition duration-200 hover:bg-gray-600">
+              <div className="flex items-center">
+                <Calendar className="w-6 h-6 mr-3 text-red-400" />
+                <div>
+                  <h3 className="text-xl font-semibold text-white">Instant Channel Meeting</h3>
+                  <p className="text-sm text-gray-400">Jump into a video call now.</p>
+                </div>
+              </div>
+              <a
+                href={currentChannel.meetingLink || "#"}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-3 sm:mt-0 py-2 px-4 bg-red-500 text-white rounded-lg font-medium shadow-md flex items-center hover:bg-red-600 transition duration-150"
+              >
+                Join Google Meet <MonitorPlay className="w-4 h-4 ml-2" />
+              </a>
+            </div>
+
+            <p className="text-xs text-gray-500 pt-4">
+                Note: These links are simulated for demonstration purposes. In a true production environment, they would be dynamically generated via Google Workspace APIs.
+            </p>
+          </div>
+        );
+
+      case ChatTab.GAMES:
+        return (
+          <div className="p-6 flex-1 overflow-y-auto">
+            <h2 className="text-3xl font-bold text-green-400 mb-8 text-center flex items-center justify-center">
+                <Gamepad2 className="w-6 h-6 mr-2" />
+                Channel Games
+            </h2>
+            <TicTacToe />
+          </div>
+        );
+
+      default:
+        return <div className="p-6 text-center text-gray-400">Select a feature tab.</div>;
+    }
+  };
+
+  if (authLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-400"></div>
+        <p className="ml-3">Establishing Secure Connection (Firebase Auth)...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-screen bg-gray-900 text-gray-100 antialiased">
+      {/* Sidebar - Channels */}
+      <div className="flex flex-col w-24 sm:w-64 border-r border-gray-700 bg-gray-800 shadow-xl flex-shrink-0">
+        <div className="p-4 text-xl sm:text-2xl font-extrabold text-green-400 border-b border-gray-700 shadow-md h-16 sm:h-20 flex items-center justify-center sm:justify-start">
+          <span className="hidden sm:inline">GIRC</span><span className="sm:hidden">⚡</span>
+        </div>
+        <div className="flex-grow overflow-y-auto p-2 space-y-1">
+          {channels.map((channel) => (
+            <div
+              key={channel.id}
+              onClick={() => {
+                setCurrentChannelId(channel.id);
+                setCurrentTab(ChatTab.CHAT); // Reset to chat when channel changes
+              }}
+              className={`flex items-center p-3 rounded-lg cursor-pointer transition duration-150 ease-in-out group ${
+                channel.id === currentChannelId
+                  ? 'bg-green-600 text-white font-bold shadow-lg'
+                  : 'text-gray-300 hover:bg-gray-700'
+              }`}
+            >
+              <MessageSquare className="w-4 h-4 mr-2 flex-shrink-0" />
+              <span className="truncate hidden sm:inline">#{channel.name}</span>
+            </div>
+          ))}
+        </div>
+        <div className="p-4 text-sm border-t border-gray-700">
+          <p className="text-gray-400 font-semibold mb-1 hidden sm:block">Signed in as:</p>
+          <div className="flex items-center overflow-hidden">
+            <Users className="w-4 h-4 mr-2 text-green-400 shrink-0" />
+            <span className="truncate hidden sm:inline" title={userName}>{userName}</span>
+          </div>
+          <p className="text-xs text-gray-500 mt-1 truncate hidden sm:block" title={userId}>
+            ID: {userId}
+          </p>
+        </div>
+      </div>
+
+      {/* Main Content Area */}
+      <div className="flex flex-col flex-1 min-w-0">
+        {/* Header & Tabs */}
+        <div className="bg-gray-800 border-b border-gray-700 shadow-md">
+            {/* Main Title */}
+            <div className="p-4 text-xl font-extrabold flex flex-col justify-center h-16 sm:h-20">
+                {currentChannel ? `#${currentChannel.name}` : 'Select a Channel'}
+                <p className="text-sm font-medium text-gray-400 mt-0.5">
+                    {currentChannel?.description || 'Start a discussion.'}
+                </p>
+            </div>
+
+            {/* Tab Navigation */}
+            <div className="flex border-t border-gray-700">
+                {[
+                    { id: ChatTab.CHAT, label: 'Chat', icon: MessageSquare },
+                    { id: ChatTab.WORKSPACE, label: 'Workspace', icon: Code },
+                    { id: ChatTab.GAMES, label: 'Games', icon: Gamepad2 },
+                ].map((tab) => (
+                    <button
+                        key={tab.id}
+                        onClick={() => setCurrentTab(tab.id)}
+                        className={`flex-1 py-3 px-2 flex items-center justify-center font-semibold text-sm transition duration-150 ${
+                            currentChannelId
+                            ? (tab.id === currentTab
+                                ? 'border-b-4 border-green-500 text-white bg-gray-700'
+                                : 'text-gray-400 hover:bg-gray-700/50')
+                            : 'text-gray-600 cursor-not-allowed'
+                        }`}
+                        disabled={!currentChannelId}
+                    >
+                        <tab.icon className="w-4 h-4 mr-1 sm:mr-2" />
+                        <span className="hidden sm:inline">{tab.label}</span>
+                    </button>
+                ))}
+            </div>
+        </div>
+
+        {/* Dynamic Content Renderer */}
+        <div className="flex-1 overflow-hidden">
+            {renderContent()}
+        </div>
+      </div>
+    </div>
+  );
+}
+
