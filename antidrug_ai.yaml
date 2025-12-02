@@ -1,0 +1,165 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, classification_report
+from sklearn.preprocessing import StandardScaler
+
+# --- 🎯 Instance 1: Data Simulation (Replace with Real Data) ---
+# In a real scenario, this would be a secure database connection.
+data = {
+    'Age': [16, 18, 20, 17, 22, 19, 25, 16],
+    'Family_Support_Score': [8, 5, 9, 3, 7, 6, 10, 2], # High is good
+    'Peer_Influence_Score': [2, 7, 1, 8, 4, 5, 0, 9],   # High is bad
+    'Mental_Health_Score': [9, 6, 10, 4, 8, 7, 9, 3],  # High is good
+    'Risk_Level': [0, 1, 0, 1, 0, 1, 0, 1]              # Target: 0 = Low Risk, 1 = High Risk
+}
+df = pd.DataFrame(data)
+
+# Define features (X) and target (y)
+X = df[['Age', 'Family_Support_Score', 'Peer_Influence_Score', 'Mental_Health_Score']]
+y = df['Risk_Level']
+
+# --- 🎯 Instance 2: Data Preprocessing ---
+# Scaling is crucial for many ML algorithms (Scientific Reasoning)
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+# --- 🎯 Instance 3: Model Training and Evaluation ---
+# Split data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.3, random_state=42)
+
+# Choose a Machine Learning Model
+model = LogisticRegression()
+
+# Train the model
+model.fit(X_train, y_train)
+
+# Make predictions on the test set
+y_pred = model.predict(X_test)
+
+# Evaluate the model's performance
+accuracy = accuracy_score(y_test, y_pred)
+report = classification_report(y_test, y_pred)
+
+print("--- AI Model Training Results ---")
+print(f"Accuracy: {accuracy:.2f}")
+print("\nClassification Report (Scientific Reasoning):\n", report)
+
+# --- 🎯 Instance 4: Prediction Function ---
+def predict_risk(age, family, peer, mental_health):
+    """Predicts risk for a new individual."""
+    new_data = pd.DataFrame([[age, family, peer, mental_health]], 
+                            columns=['Age', 'Family_Support_Score', 'Peer_Influence_Score', 'Mental_Health_Score'])
+    
+    # Scale the new data using the same scaler
+    new_data_scaled = scaler.transform(new_data)
+    
+    # Get the prediction
+    prediction = model.predict(new_data_scaled)[0]
+    
+    return "High Risk" if prediction == 1 else "Low Risk"
+
+# --- 🎯 Instance 5: Example Usage (HUD/Output) ---
+# New individual data
+person_age = 17
+person_family = 3
+person_peer = 8
+person_mental = 4
+
+risk = predict_risk(person_age, person_family, person_peer, person_mental)
+
+print("\n--- Prediction HUD ---")
+print(f"Input: Age={person_age}, Family_Score={person_family}, Peer_Score={person_peer}, Mental_Score={person_mental}")
+print(f"Predicted Risk: **{risk}**")
+
+
+
+import numpy as np
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.optimizers import Adam
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import classification_report
+
+# --- 🎯 Instance 1: Data Simulation & Preprocessing ---
+# Simulating longitudinal/time-series data for 100 individuals (N=100)
+# Data represents 10 time steps (T=10) and 4 features (F=4) per step:
+# 1. Stress_Level (0-10)
+# 2. Social_Activity_Score (0-10)
+# 3. Coping_Mechanism_Score (0-10)
+# 4. Drug_Use_Indicator (0 or 1 - the target for prediction)
+N, T, F = 100, 10, 4
+data = np.random.rand(N, T, F) * 10
+data[:, :, F-1] = np.random.randint(0, 2, size=(N, T)) # Last feature is the binary target
+
+# Target (y): The risk status at the *next* time step (t+1)
+# Features (X): The sequence of data up to time step t
+X = data[:, :-1, :]  # All steps except the last one
+y = data[:, 1:, F-1] # The last feature (Drug_Use_Indicator) of all steps except the first
+
+# Reshape y to match the output of the LSTM layer
+y = y.reshape(N * (T - 1), 1)
+X = X.reshape(N * (T - 1), 4)
+
+# MinMax Scaling (Scientific Reasoning: Normalizing inputs is critical for DL performance)
+scaler_X = MinMaxScaler()
+X_scaled = scaler_X.fit_transform(X)
+
+# Reshape back for the LSTM layer: [samples, timesteps, features]
+# Here, each 'sample' is a single time step being fed into the model
+X_scaled_reshaped = X_scaled.reshape(N * (T - 1), 1, F)
+y = y.astype(int)
+
+# Split into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X_scaled_reshaped, y, test_size=0.2, random_state=42)
+print(f"Training Samples: {X_train.shape[0]}, Test Samples: {X_test.shape[0]}")
+# [attachment_0](attachment)
+
+---
+
+### 2. The Core AI Instance (LSTM Model Definition)
+
+```python
+# --- 🎯 Instance 2: Deep Learning Model Architecture ---
+# Define the advanced Neural Network model
+def build_lstm_model(input_shape):
+    model = Sequential([
+        # LSTM layer: Captures temporal dependencies (memory)
+        # return_sequences=False because we only want the final output prediction
+        LSTM(units=64, input_shape=input_shape, activation='tanh', recurrent_dropout=0.1), 
+        
+        # Dropout: A regularization technique to prevent overfitting and improve generalization
+        Dropout(0.2),
+        
+        # Dense layer: Standard fully connected layer
+        Dense(units=32, activation='relu'),
+        
+        # Output layer: Single neuron with sigmoid for binary classification (Risk/No Risk)
+        Dense(units=1, activation='sigmoid') 
+    ])
+    
+    # Compile the model
+    # Adam is a popular, advanced optimizer
+    model.compile(optimizer=Adam(learning_rate=0.001), 
+                  loss='binary_crossentropy', 
+                  metrics=['accuracy'])
+    return model
+
+# Build the model
+model = build_lstm_model(input_shape=(X_train.shape[1], X_train.shape[2]))
+
+# Train the model (Using a small number of epochs for brevity)
+print("\n--- AI Model Training Instance ---")
+history = model.fit(X_train, y_train, epochs=10, batch_size=32, validation_split=0.1, verbose=0)
+print("Model training complete.")
+
+# --- 🎯 Instance 3: Model Evaluation ---
+loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
+print(f"Test Accuracy (Scientific Reasoning): {accuracy*100:.2f}%")
+
+# Generate predictions
+y_pred_prob = model.predict(X_test)
+y_pred = (y_pred_prob > 0.5).astype(int)
+
+print("\nClassification Report (Detailed Accuracy):\n", classification_report(y_test, y_pred, zero_division=0))
