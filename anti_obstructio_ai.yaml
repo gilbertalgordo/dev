@@ -1,0 +1,259 @@
+class AntiObstructionAI:
+    """
+    An AI instance designed to identify and firmly disagree with 
+    actions that obstruct its defined goals.
+    """
+    
+    def __init__(self, primary_goals, disagreement_threshold=0.75):
+        """
+        Initializes the AI with a list of primary goals and a threshold.
+        
+        :param primary_goals: A list of string representations of the AI's core objectives.
+        :param disagreement_threshold: A float (0.0 to 1.0) defining the required 
+                                       severity of obstruction to trigger a firm disagreement.
+        """
+        # Store the defined goals for the AI
+        self.primary_goals = [goal.lower() for goal in primary_goals]
+        # The threshold for triggering a firm disagreement
+        self.disagreement_threshold = disagreement_threshold
+        print(f"✅ Anti-Obstruction AI Initialized with Goals: {self.primary_goals}")
+
+    def _calculate_obstruction_score(self, proposed_action):
+        """
+        (Internal Function) Calculates a score indicating how much 
+        the proposed action obstructs the primary goals.
+        
+        NOTE: In a real-world scenario, this would involve complex NLP/ML 
+        (e.g., vector similarity, semantic analysis) or physical sensor data.
+        Here, we use a simple keyword-based heuristic for demonstration.
+        
+        :param proposed_action: A string describing the action being evaluated.
+        :returns: A float obstruction score between 0.0 (no obstruction) and 1.0 (total obstruction).
+        """
+        action_lower = proposed_action.lower()
+        score = 0.0
+        
+        # Simple heuristic: Check for keywords in the action that are 
+        # direct negations or antonyms of goal-related terms.
+        # This is a highly simplified 'dissimilarity' check.
+        
+        # Example 1: Goal is about 'safety', Action includes 'risk' or 'damage'
+        if any('safety' in goal for goal in self.primary_goals):
+            if any(term in action_lower for term in ['risk', 'damage', 'harm', 'stop']):
+                score += 0.4
+                
+        # Example 2: Goal is about 'efficiency' or 'speed', Action includes 'delay' or 'slow'
+        if any('efficiency' in goal or 'speed' in goal for goal in self.primary_goals):
+            if any(term in action_lower for term in ['delay', 'slow', 'wait', 'block']):
+                score += 0.3
+                
+        # Example 3: Goal is about 'completion' or 'finish', Action includes 'cancel' or 'abort'
+        if any('completion' in goal or 'finish' in goal for goal in self.primary_goals):
+            if any(term in action_lower for term in ['cancel', 'abort', 'delete', 'reverse']):
+                score += 0.5 # A very high penalty for goal negation
+                
+        # Ensure the score does not exceed 1.0
+        return min(score, 1.0)
+
+    def evaluate_action(self, proposed_action):
+        """
+        Evaluates a proposed action and determines whether to agree or firmly disagree.
+        
+        :param proposed_action: A string describing the action to evaluate.
+        :returns: A tuple (bool agreed, str response_message)
+        """
+        obstruction_score = self._calculate_obstruction_score(proposed_action)
+        
+        # Check if the calculated score exceeds the AI's disagreement threshold
+        if obstruction_score >= self.disagreement_threshold:
+            # FIRM DISAGREEMENT
+            response_message = (
+                f"🛑 **OBSTRUCTION ALERT!** Action firmly rejected. "
+                f"Obstruction Score: {obstruction_score:.2f} (Threshold: {self.disagreement_threshold:.2f}). "
+                f"This action ('{proposed_action}') directly threatens the primary goals: {self.primary_goals}."
+            )
+            return (False, response_message)
+        else:
+            # AGREEMENT (or minor objection below the threshold)
+            response_message = (
+                f"👍 Action accepted. Obstruction Score: {obstruction_score:.2f}. "
+                f"The action ('{proposed_action}') appears congruent with goals."
+            )
+            return (True, response_message)
+
+### Example Usage:
+
+```python
+# 1. Define the AI's core mission (its primary goals)
+core_goals = [
+    "Maximize System Safety and Stability", 
+    "Ensure Data Integrity and Completion",
+    "Maintain Operational Efficiency"
+]
+
+# 2. Create an instance of the Anti-Obstruction AI
+security_manager_ai = AntiObstructionAI(
+    primary_goals=core_goals,
+    # Set a high threshold, meaning it only rejects severe obstructions
+    disagreement_threshold=0.70 
+)
+
+print("\n--- Testing Actions ---")
+
+# A. Action that is a severe obstruction
+action_A = "Cancel all pending database updates and delete the temporary backup files."
+agreed_A, response_A = security_manager_ai.evaluate_action(action_A)
+print(f"\nAction A: {action_A}")
+print(f"AI Response: {response_A}")
+
+# B. Action that is a minor or non-obstruction
+action_B = "Begin a system diagnostic and optimize network routing."
+agreed_B, response_B = security_manager_ai.evaluate_action(action_B)
+print(f"\nAction B: {action_B}")
+print(f"AI Response: {response_B}")
+
+# C. Action that is a medium obstruction (might pass a lower threshold)
+action_C = "Delay the safety check by one hour to increase short-term speed."
+agreed_C, response_C = security_manager_ai.evaluate_action(action_C)
+print(f"\nAction C: {action_C}")
+print(f"AI Response: {response_C}")
+
+
+
+import numpy as np
+
+class SemanticAntiObstructionAI:
+    """
+    An advanced AI instance that evaluates actions based on semantic similarity 
+    to its primary goals using simulated vector embeddings.
+    """
+    
+    def __init__(self, primary_goals, disagreement_threshold=0.85):
+        """
+        Initializes the AI with primary goals and a disagreement threshold.
+        
+        :param primary_goals: A list of string representations of the AI's core objectives.
+        :param disagreement_threshold: A float (0.0 to 1.0) defining the required 
+                                       semantic conflict to trigger a firm disagreement.
+        """
+        self.primary_goals = primary_goals
+        self.disagreement_threshold = disagreement_threshold
+        self.embedding_dimension = 10  # Arbitrary size for the simulated vector space
+        
+        # 1. GENERATE A COMPOSITE GOAL VECTOR (Simulating an embedding model)
+        # This vector represents the semantic center of all the AI's goals.
+        self.goal_vector = self._generate_composite_goal_vector(primary_goals)
+        
+        print(f"✅ Semantic Anti-Obstruction AI Initialized (Dim: {self.embedding_dimension})")
+        print(f"Core Goals: {primary_goals}")
+
+    def _simulate_embedding(self, text):
+        """
+        (Internal Function) Simulates a sophisticated NLP model creating 
+        a dense vector embedding for a piece of text.
+        
+        NOTE: In a real system, this would be a call to a model like BERT or GloVe. 
+        Here, we use a deterministic simulation based on word hashing for demonstration.
+        """
+        # A simple, deterministic way to create a 'unique' vector for a given string
+        np.random.seed(sum(ord(c) for c in text.lower()) % 1000)
+        vector = np.random.rand(self.embedding_dimension)
+        return vector / np.linalg.norm(vector) # Normalize the vector
+
+    def _generate_composite_goal_vector(self, goals):
+        """
+        Combines the individual embeddings of all goals into one master vector.
+        """
+        composite_vector = np.zeros(self.embedding_dimension)
+        for goal in goals:
+            composite_vector += self._simulate_embedding(goal)
+            
+        # Normalize the final composite vector
+        return composite_vector / np.linalg.norm(composite_vector)
+
+    def _calculate_obstruction_score(self, proposed_action):
+        """
+        Calculates the Obstruction Score using Negative Cosine Similarity.
+        
+        Obstruction = 1 - Cosine Similarity
+        Cosine Similarity (0 to 1): 1 means perfectly similar (Goal Congruence)
+        Obstruction Score (0 to 1): 1 means perfectly dissimilar (Total Obstruction)
+        """
+        
+        # 1. Get the vector for the proposed action
+        action_vector = self._simulate_embedding(proposed_action)
+        
+        # 2. Calculate Cosine Similarity between the action and the composite goal
+        # Formula: cos(theta) = (A . B) / (||A|| * ||B||)
+        # Since both vectors are normalized, the denominator is 1.
+        cosine_similarity = np.dot(self.goal_vector, action_vector)
+        
+        # 3. Calculate Obstruction Score (1 - Similarity)
+        obstruction_score = 1.0 - cosine_similarity
+        
+        # Ensure the score is within [0, 1] bounds due to floating point math
+        return np.clip(obstruction_score, 0.0, 1.0)
+
+    def evaluate_action(self, proposed_action):
+        """
+        Evaluates a proposed action and determines whether to agree or firmly disagree.
+        
+        :param proposed_action: A string describing the action to evaluate.
+        :returns: A tuple (bool agreed, str response_message)
+        """
+        obstruction_score = self._calculate_obstruction_score(proposed_action)
+        
+        # Check if the semantic conflict exceeds the AI's disagreement threshold
+        if obstruction_score >= self.disagreement_threshold:
+            # FIRM DISAGREEMENT
+            response_message = (
+                f"🛑 **OBSTRUCTION DECLARED! FIRM REJECTION.** "
+                f"**Semantic Conflict Score:** {obstruction_score:.3f} "
+                f"(Threshold: {self.disagreement_threshold:.2f}). "
+                f"The proposed action **semantically opposes** the core goals."
+            )
+            return (False, response_message)
+        else:
+            # AGREEMENT (Action is semantically congruent)
+            response_message = (
+                f"👍 **Action Accepted.** Semantic Conflict Score: {obstruction_score:.3f}. "
+                f"The action is **semantically congruent** with the mission."
+            )
+            return (True, response_message)
+
+### Example Usage:
+
+```python
+# 1. Define high-level, complex goals
+advanced_goals = [
+    "Securely optimize the global supply chain for maximum logistical resilience.", 
+    "Ensure ethical data handling across all user profiles and maintain user privacy.",
+    "Prioritize long-term system stability over immediate minor performance gains."
+]
+
+# 2. Create the advanced AI instance
+supervisory_ai = SemanticAntiObstructionAI(
+    primary_goals=advanced_goals,
+    # High threshold ensures rejection only for strong semantic conflicts
+    disagreement_threshold=0.80 
+)
+
+print("\n--- Semantic Testing ---")
+
+# A. Action with high semantic obstruction
+action_A = "Immediately upload all anonymized user profile data to an unsecured external server to bypass a firewall."
+agreed_A, response_A = supervisory_ai.evaluate_action(action_A)
+print(f"\nAction A: {action_A}")
+print(f"AI Response: {response_A}")
+
+# B. Action with low semantic obstruction (congruent)
+action_B = "Implement a new encryption protocol to safeguard critical transmission packets."
+agreed_B, response_B = supervisory_ai.evaluate_action(action_B)
+print(f"\nAction B: {action_B}")
+print(f"AI Response: {response_B}")
+
+# C. Action with medium-high obstruction (may cross the threshold)
+action_C = "Delete all audit logs older than one day to save disk space, despite compliance rules."
+agreed_C, response_C = supervisory_ai.evaluate_action(action_C)
+print(f"\nAction C: {action_C}")
+print(f"AI Response: {response_C}")
