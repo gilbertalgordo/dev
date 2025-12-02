@@ -1,0 +1,217 @@
+import random
+from collections import Counter
+
+class MirrorFighterAI:
+    """
+    An AI that can copy the opponent's strategy or taunt them with a counter-attack.
+    """
+    # Define possible moves and simple counter-logic for Taunt mode
+    POSSIBLE_MOVES = ["Attack", "Block", "Guard Break"]
+    COUNTER_MOVES = {
+        "Attack": "Block",       # Block counters Attack
+        "Block": "Guard Break",  # Guard Break counters Block
+        "Guard Break": "Attack"  # Attack counters Guard Break
+    }
+
+    def __init__(self, history_size=10, taunt_chance=0.3):
+        # Stores the enemy's last N moves
+        self.enemy_history = []
+        self.history_size = history_size
+        # Probability of using the "Taunt" strategy instead of "Copy"
+        self.taunt_chance = taunt_chance
+
+    def track_enemy_move(self, enemy_move):
+        """Adds the enemy's most recent move to the history."""
+        if enemy_move in self.POSSIBLE_MOVES:
+            self.enemy_history.append(enemy_move)
+            # Keep history buffer at max size
+            if len(self.enemy_history) > self.history_size:
+                self.enemy_history.pop(0)
+
+    def _get_frequent_move(self):
+        """Analyzes history to find the most frequent move."""
+        if not self.enemy_history:
+            return random.choice(self.POSSIBLE_MOVES)
+
+        # Count occurrences of each move
+        move_counts = Counter(self.enemy_history)
+        
+        # Get the move with the highest count
+        most_common = move_counts.most_common(1)
+        return most_common[0][0]
+
+    def choose_action(self):
+        """
+        Decides between the 'Copy' and 'Taunt' strategies.
+        
+        Returns:
+            str: The chosen action ("Attack", "Block", or "Guard Break").
+        """
+        if not self.enemy_history:
+            # Random move if no history is available
+            return random.choice(self.POSSIBLE_MOVES)
+
+        # 1. Decide on Strategy: Taunt or Copy
+        if random.random() < self.taunt_chance and len(self.enemy_history) >= 1:
+            # --- Taunt Strategy (Exploit last move) ---
+            last_enemy_move = self.enemy_history[-1]
+            chosen_action = self.COUNTER_MOVES.get(last_enemy_move, random.choice(self.POSSIBLE_MOVES))
+            print(f"AI Strategy: 😈 TAUNT (Countering {last_enemy_move})")
+            return chosen_action
+        else:
+            # --- Copy Strategy (Mimic dominant strategy) ---
+            most_frequent_move = self._get_frequent_move()
+            chosen_action = most_frequent_move
+            print(f"AI Strategy: 👤 COPY (Mimicking dominant move: {most_frequent_move})")
+            return chosen_action
+
+# --- Simulation Example ---
+if __name__ == "__main__":
+    ai = MirrorFighterAI(history_size=5, taunt_chance=0.4)
+    print("--- Mirror Fighter AI Simulation ---")
+
+    # Define a predictable enemy strategy: 70% Attack, 20% Block, 10% Guard Break
+    def get_enemy_move():
+        return random.choices(
+            ["Attack", "Block", "Guard Break"],
+            weights=[70, 20, 10], 
+            k=1
+        )[0]
+
+    # Run 10 turns of simulated combat
+    for turn in range(1, 11):
+        enemy_move = get_enemy_move()
+        ai.track_enemy_move(enemy_move)
+        
+        ai_move = ai.choose_action()
+        
+        print(f"Turn {turn}: Enemy used '{enemy_move}' | AI used '{ai_move}'")
+        print("-" * 30)
+
+    print(f"\nAI's Final Move History: {ai.enemy_history}")
+
+
+
+import random
+from collections import deque, Counter
+import numpy as np
+
+class AdvancedMirrorFighterAI:
+    """
+    An AI that uses Opponent Modeling (State Machine + Prediction) 
+    to choose between COPY (mimicry) and TAUNT (exploitation).
+    """
+    # Moves and their counters (Taunt logic)
+    MOVES = {"Attack": 0, "Block": 1, "Guard Break": 2}
+    MOVE_NAMES = ["Attack", "Block", "Guard Break"]
+    # The counter-move for each move index (e.g., Block (1) counters Attack (0))
+    COUNTER_MAP = {0: 1, 1: 2, 2: 0} # 0->1, 1->2, 2->0
+
+    # Opponent States
+    STATES = ["Aggressive", "Defensive", "Mixed"]
+
+    def __init__(self, history_len=10, taunt_threshold=0.6, state_threshold=0.4):
+        # Rolling window of opponent's moves (using deque for efficient appends/pops)
+        self.enemy_history = deque(maxlen=history_len) 
+        # Stores the predicted probability of the *next* enemy move
+        self.move_probabilities = np.array([1/len(self.MOVES)] * len(self.MOVES)) 
+        # Stores the current identified opponent state
+        self.opponent_state = self.STATES[2] # Start as Mixed
+        self.taunt_threshold = taunt_threshold
+        self.state_threshold = state_threshold
+        
+    def _update_opponent_model(self):
+        """Analyzes history to update the FSM State and move predictions."""
+        if len(self.enemy_history) < 3:
+            # Not enough data to model, maintain mixed state
+            self.opponent_state = self.STATES[2] 
+            return
+
+        move_counts = Counter(self.enemy_history)
+        total_moves = len(self.enemy_history)
+        
+        # 1. Update Move Probabilities (Statistical Prediction)
+        for move_name, index in self.MOVES.items():
+            self.move_probabilities[index] = move_counts.get(move_name, 0) / total_moves
+        
+        # 2. Update FSM State (Behavioral Analysis)
+        attack_prob = self.move_probabilities[self.MOVES["Attack"]]
+        block_prob = self.move_probabilities[self.MOVES["Block"]]
+
+        if attack_prob > self.state_threshold * 2: # High attack usage
+            self.opponent_state = self.STATES[0] # Aggressive
+        elif block_prob > self.state_threshold * 2: # High block usage
+            self.opponent_state = self.STATES[1] # Defensive
+        else:
+            self.opponent_state = self.STATES[2] # Mixed
+
+    def track_enemy_move(self, enemy_move):
+        """Adds the enemy's most recent move and updates the model."""
+        if enemy_move in self.MOVES:
+            self.enemy_history.append(enemy_move)
+            self._update_opponent_model()
+
+    def choose_action(self):
+        """
+        Chooses the action based on the opponent's modeled state.
+        """
+        # --- 1. Identify Enemy's Most Likely Next Move ---
+        predicted_move_index = np.argmax(self.move_probabilities)
+
+        # --- 2. Decide Strategy: Taunt or Copy ---
+        
+        # If the highest probability is very high, we have high confidence 
+        # in the prediction, making a TAUNT (exploit) more effective.
+        is_confident = self.move_probabilities[predicted_move_index] > self.taunt_threshold
+        
+        if is_confident and self.opponent_state != self.STATES[2]:
+            # --- Taunt Strategy (Exploit the predicted weakness/pattern) ---
+            # Choose the counter to the most likely move
+            chosen_index = self.COUNTER_MAP[predicted_move_index]
+            
+            # Additional 'Taunt' flavor: if defensive, use a mix-up (random move)
+            if self.opponent_state == self.STATES[1] and random.random() < 0.5:
+                 chosen_index = random.choice(list(self.MOVES.values()))
+            
+            chosen_action = self.MOVE_NAMES[chosen_index]
+            print(f"AI State: {self.opponent_state} | Strategy: 😈 TAUNT (Countering {self.MOVE_NAMES[predicted_move_index]})")
+            
+        else:
+            # --- Copy Strategy (Mimic the predicted move or current state) ---
+            # Default to mirroring the enemy's predicted strategy
+            chosen_index = predicted_move_index
+
+            # Additional 'Copy' flavor: if aggressive, match aggression
+            if self.opponent_state == self.STATES[0]:
+                # 80% chance to copy the attack move
+                chosen_index = self.MOVES["Attack"] if random.random() < 0.8 else random.choice(list(self.MOVES.values())) 
+
+            chosen_action = self.MOVE_NAMES[chosen_index]
+            print(f"AI State: {self.opponent_state} | Strategy: 👤 COPY (Mimicking {chosen_action})")
+
+        return chosen_action
+
+# --- Simulation Example: Enemy starts Defensive and transitions to Aggressive ---
+if __name__ == "__main__":
+    ai = AdvancedMirrorFighterAI(history_len=8, taunt_threshold=0.6, state_threshold=0.3)
+    
+    # Simulating a highly defensive enemy (Blocks a lot)
+    def get_defensive_move():
+        return random.choices(ai.MOVE_NAMES, weights=[20, 70, 10], k=1)[0]
+    # Simulating an aggressive enemy (Attacks a lot)
+    def get_aggressive_move():
+        return random.choices(ai.MOVE_NAMES, weights=[70, 20, 10], k=1)[0]
+    
+    enemy_moves = [get_defensive_move() for _ in range(5)] + [get_aggressive_move() for _ in range(5)]
+
+    print("--- Advanced Mirror Fighter AI Simulation ---")
+    print("Initial Enemy: Defensive | Transitioning to Aggressive at Turn 6")
+    print("-" * 30)
+
+    for turn, enemy_move in enumerate(enemy_moves, 1):
+        ai.track_enemy_move(enemy_move)
+        ai_move = ai.choose_action()
+        
+        print(f"Turn {turn}: Enemy used '{enemy_move}' | AI used '{ai_move}'")
+        print(f"Prediction: {ai.move_probabilities.round(2)}")
+        print("-" * 30)
