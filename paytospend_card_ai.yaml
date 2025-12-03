@@ -1,0 +1,257 @@
+import pandas as pd
+from typing import List, Dict, Union
+
+class Card:
+    """Represents a single credit or debit card and its reward scheme."""
+    def __init__(self, name: str, id: str, rewards_rate: Dict[str, float], default_rate: float):
+        self.name = name
+        self.id = id
+        # rewards_rate: { 'category': <multiplier/percent> }
+        self.rewards_rate = rewards_rate 
+        self.default_rate = default_rate
+
+    def get_reward_rate(self, category: str) -> float:
+        """Get the specific reward rate for a given category."""
+        # Use the specific category rate, otherwise fall back to the default rate
+        return self.rewards_rate.get(category.lower(), self.default_rate)
+
+class Transaction:
+    """Represents a potential or completed purchase."""
+    def __init__(self, amount: float, category: str, description: str):
+        self.amount = amount
+        self.category = category.lower()
+        self.description = description
+
+
+
+class RewardOptimizer:
+    """
+    A simple rule-based AI to optimize which card to use for a transaction.
+    A more advanced AI would use ML to predict future card offers or
+    optimize for points valuation over simple cashback.
+    """
+    def __init__(self, user_cards: List[Card]):
+        self.user_cards = user_cards
+
+    def determine_best_card(self, transaction: Transaction) -> Dict[str, Union[str, float]]:
+        """
+        Finds the card that yields the maximum reward for a given transaction.
+        """
+        max_reward_value = -1.0
+        best_card_choice = None
+        
+        # Use the HUD principle: find the best instance and display the logic
+        for card in self.user_cards:
+            rate = card.get_reward_rate(transaction.category)
+            reward_value = transaction.amount * rate
+            
+            if reward_value > max_reward_value:
+                max_reward_value = reward_value
+                best_card_choice = {
+                    "card_name": card.name,
+                    "card_id": card.id,
+                    "reward_rate": rate,
+                    "reward_cashback": max_reward_value,
+                    "category": transaction.category
+                }
+
+        return best_card_choice if best_card_choice else {"error": "No cards available"}
+
+
+
+# --- 💡 INSTANCES: Define the Credit Cards ---
+print("Defining Card Instances...\n")
+
+# Card 1: Excellent for Groceries (4%), Good default (1%)
+card_a = Card(
+    name="Mega-Rewards Platinum",
+    id="1234",
+    rewards_rate={"groceries": 0.04, "gas": 0.02},
+    default_rate=0.01
+)
+
+# Card 2: Excellent for Gas (5%), Poor default (0.5%)
+card_b = Card(
+    name="Fuel-Master Gold",
+    id="5678",
+    rewards_rate={"gas": 0.05, "travel": 0.03},
+    default_rate=0.005
+)
+
+# Card 3: Basic flat rate card (2%)
+card_c = Card(
+    name="Simple Cashback",
+    id="9012",
+    rewards_rate={},
+    default_rate=0.02
+)
+
+all_cards = [card_a, card_b, card_c]
+optimizer = RewardOptimizer(all_cards)
+
+# --- 🛒 INSTANCES: Define Purchases ---
+print("Defining Transaction Instances...\n")
+
+# Instance 1: A big grocery purchase
+purchase_1 = Transaction(amount=150.00, category="Groceries", description="Weekly grocery haul")
+
+# Instance 2: Filling up the tank
+purchase_2 = Transaction(amount=60.00, category="Gas", description="Gas station fill-up")
+
+# Instance 3: A generic online purchase (no special category)
+purchase_3 = Transaction(amount=85.00, category="Online Shopping", description="New headphones from generic retailer")
+
+# --- 🚀 RUN AI OPTIMIZATION ---
+
+transactions = [purchase_1, purchase_2, purchase_3]
+
+print("--- 🧠 AI REWARD OPTIMIZER HUD ---")
+print("-----------------------------------")
+
+for i, tx in enumerate(transactions):
+    result = optimizer.determine_best_card(tx)
+    
+    # Display the results clearly (HUD principle)
+    print(f"\nTransaction {i+1}: **{tx.description}** (${tx.amount:.2f} in {tx.category.upper()})")
+    print(f"  > **Best Card:** {result['card_name']} (ID: {result['card_id']})")
+    print(f"  > **Optimal Rate:** {result['reward_rate'] * 100:.2f}%")
+    print(f"  > **Cashback Earned:** **\${result['reward_cashback']:.2f}**")
+    print("-----------------------------------")
+
+
+
+from pulp import *
+import pandas as pd
+
+# --- Data Definition (Instances) ---
+# A real system would use a database/API, but here we define the dataframes.
+
+# Card Definitions
+CARD_DATA = {
+    'CardID': ['C1', 'C2', 'C3'],
+    'Name': ['Travel Miles Elite', 'CashBack Premium', 'Gas & Groceries'],
+    'AnnualFee': [95.00, 0.00, 0.00],
+    'MaxAnnualReward': [500.00, 1000.00, 300.00] # Total max reward cap
+}
+cards_df = pd.DataFrame(CARD_DATA).set_index('CardID')
+
+# Transaction Definitions (Simulated as a forecast of monthly spending)
+TXN_DATA = {
+    'TxnID': ['T1', 'T2', 'T3', 'T4', 'T5', 'T6'],
+    'Category': ['TRAVEL', 'GROCERIES', 'GAS', 'DINING', 'TRAVEL', 'GROCERIES'],
+    'Amount': [450.00, 120.00, 60.00, 80.00, 300.00, 90.00]
+}
+txns_df = pd.DataFrame(TXN_DATA).set_index('TxnID')
+
+# Reward Rate Matrix (Rates based on CardID and Category)
+# A real system would use a complex ML model to determine the most dynamic/current rate.
+REWARD_RATES = {
+    ('C1', 'TRAVEL'): 0.03, # 3% back on travel
+    ('C1', 'GROCERIES'): 0.01,
+    ('C2', 'GROCERIES'): 0.02, # 2% back on groceries, dining
+    ('C2', 'DINING'): 0.02,
+    ('C3', 'GAS'): 0.05, # 5% back on gas
+    ('C3', 'GROCERIES'): 0.03, # 3% back on groceries
+}
+
+# Default rate for all other combinations
+DEFAULT_RATE = 0.005 
+
+def get_reward(card_id, category):
+    """Retrieves the reward rate, falling back to a default."""
+    return REWARD_RATES.get((card_id, category), DEFAULT_RATE)
+
+# Build a mapping of reward for every Card-Transaction combination
+reward_map = {}
+for card_id in cards_df.index:
+    for txn_id, row in txns_df.iterrows():
+        reward_map[(card_id, txn_id)] = row['Amount'] * get_reward(card_id, row['Category'])
+
+
+
+# Create the LP Maximization Problem
+prob = LpProblem("CreditCardRewardOptimization", LpMaximize)
+
+# Decision Variables (x_c_t = 1 if card 'c' is used for transaction 't', 0 otherwise)
+# This is where the AI decision is mathematically represented.
+x = LpVariable.dicts("UseCard", 
+                      [(c, t) for c in cards_df.index for t in txns_df.index], 
+                      0, 1, LpBinary)
+
+# --- A. OBJECTIVE FUNCTION: Maximize Total Net Rewards ---
+# Total Reward = SUM(Reward_c_t * x_c_t) - SUM(Annual Fees)
+
+# 1. Total Rewards Earned
+total_rewards = lpSum([reward_map[(c, t)] * x[(c, t)] 
+                       for c in cards_df.index 
+                       for t in txns_df.index])
+
+# 2. Annual Fees (Only pay the fee if the card is used at least once)
+# z_c = 1 if card 'c' is used, 0 otherwise
+z = LpVariable.dicts("CardUsed", cards_df.index, 0, 1, LpBinary)
+
+# Constraint: z_c must be 1 if ANY transaction is assigned to card 'c'
+# This link ensures we only pay the fee if the card is active.
+for c in cards_df.index:
+    # M is a large number (must be > total number of transactions)
+    M = len(txns_df)
+    prob += lpSum([x[(c, t)] for t in txns_df.index]) <= M * z[c] 
+    
+total_fees = lpSum([cards_df.loc[c, 'AnnualFee'] * z[c] for c in cards_df.index])
+
+# The final objective: Maximize (Rewards - Fees)
+prob += total_rewards - total_fees, "Maximize_Net_Rewards"
+
+# --- B. CONSTRAINTS (The Financial Rules) ---
+
+# Constraint 1: Each Transaction Must Be Assigned to EXACTLY ONE Card
+for t in txns_df.index:
+    prob += lpSum([x[(c, t)] for c in cards_df.index]) == 1, f"OneCardPerTransaction_{t}"
+
+# Constraint 2: Annual Reward Cap (Ensures AI doesn't overspend on a card)
+for c in cards_df.index:
+    card_reward_sum = lpSum([reward_map[(c, t)] * x[(c, t)] for t in txns_df.index])
+    prob += card_reward_sum <= cards_df.loc[c, 'MaxAnnualReward'], f"AnnualRewardCap_{c}"
+
+# --- C. Solve the Problem ---
+prob.solve()
+
+# --- D. HUD (Heads-Up Display) Output ---
+if LpStatus[prob.status] == "Optimal":
+    print("--- 🧠 AI REWARD OPTIMIZER HUD (Optimal Solution) ---")
+    print(f"**Total Net Reward Maximized:** **\${value(prob.objective):.2f}**")
+    print("-" * 50)
+    
+    results = []
+    total_fees_paid = 0
+    total_rewards_earned = 0
+    
+    for c in cards_df.index:
+        card_used_for_txn = [t for t in txns_df.index if value(x[(c, t)]) == 1]
+        
+        if card_used_for_txn:
+            # Calculate total reward for this card
+            card_reward = sum(reward_map[(c, t)] for t in card_used_for_txn)
+            total_rewards_earned += card_reward
+            
+            # Print card details (Instance and HUD)
+            print(f"**Card Used: {cards_df.loc[c, 'Name']} (ID: {c})**")
+            print(f"  Annual Fee Paid: \${cards_df.loc[c, 'AnnualFee']:.2f}")
+            print(f"  Reward Earned on this Card: \${card_reward:.2f}")
+            
+            # Display transaction breakdown (Clear Voices / Instances)
+            for t in card_used_for_txn:
+                txn_amount = txns_df.loc[t, 'Amount']
+                txn_category = txns_df.loc[t, 'Category']
+                rate = get_reward(c, txn_category)
+                reward = txn_amount * rate
+                print(f"    - TXN {t} ({txn_category}): \${txn_amount:.2f} -> {rate*100:.1f}% Rate -> \${reward:.2f} Reward")
+            print("-" * 50)
+            
+            total_fees_paid += cards_df.loc[c, 'AnnualFee']
+
+    print(f"Total Rewards Earned: \${total_rewards_earned:.2f}")
+    print(f"Total Fees Incurred: \${total_fees_paid:.2f}")
+    print(f"Final Net Profit: \${value(prob.objective):.2f}")
+else:
+    print(f"Optimization failed. Status: {LpStatus[prob.status]}")
