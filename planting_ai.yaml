@@ -1,0 +1,218 @@
+# Import necessary libraries
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Define the number of plant/disease categories
+NUM_CLASSES = 10 
+# Define the size to resize all images to
+IMAGE_SIZE = (128, 128) 
+# Define the batch size for training
+BATCH_SIZE = 32 
+# Define the path to your dataset (replace with your actual path)
+DATASET_PATH = 'path/to/your/plant_dataset'
+
+
+
+# Create image data generators
+# Rescale the pixel values from 0-255 to 0-1
+train_datagen = ImageDataGenerator(
+    rescale=1./255,
+    rotation_range=20,
+    width_shift_range=0.2,
+    height_shift_range=0.2,
+    shear_range=0.2,
+    zoom_range=0.2,
+    horizontal_flip=True,
+    validation_split=0.2 # Use 20% of data for validation
+)
+
+# Load the training data from the directory
+train_generator = train_datagen.flow_from_directory(
+    DATASET_PATH,
+    target_size=IMAGE_SIZE,
+    batch_size=BATCH_SIZE,
+    class_mode='categorical',
+    subset='training'
+)
+
+# Load the validation data (only rescale, no augmentation)
+validation_generator = train_datagen.flow_from_directory(
+    DATASET_PATH,
+    target_size=IMAGE_SIZE,
+    batch_size=BATCH_SIZE,
+    class_mode='categorical',
+    subset='validation'
+)
+
+# You would see output here indicating the number of images found
+
+
+
+# Initialize a Sequential model
+model = Sequential([
+    # First Convolutional Block
+    Conv2D(32, (3, 3), activation='relu', input_shape=(IMAGE_SIZE[0], IMAGE_SIZE[1], 3)),
+    MaxPooling2D((2, 2)),
+    
+    # Second Convolutional Block
+    Conv2D(64, (3, 3), activation='relu'),
+    MaxPooling2D((2, 2)),
+    
+    # Third Convolutional Block
+    Conv2D(128, (3, 3), activation='relu'),
+    MaxPooling2D((2, 2)),
+    
+    # Flatten the 3D output to 1D for the Dense layers
+    Flatten(),
+    
+    # Fully Connected Layers (Dense)
+    Dense(512, activation='relu'),
+    
+    # Output layer: uses 'softmax' for multi-class classification
+    Dense(NUM_CLASSES, activation='softmax')
+])
+
+# Compile the model
+model.compile(
+    optimizer='adam', 
+    loss='categorical_crossentropy', 
+    metrics=['accuracy']
+)
+
+# Print a summary of the model's structure
+model.summary()
+
+
+
+# Train the model
+history = model.fit(
+    train_generator,
+    steps_per_epoch=train_generator.samples // BATCH_SIZE,
+    epochs=10, # Number of training iterations
+    validation_data=validation_generator,
+    validation_steps=validation_generator.samples // BATCH_SIZE
+)
+
+print("Model training complete.")
+
+# Save the trained model for later use
+model.save('plant_disease_classifier.h5')
+
+
+
+import tensorflow as tf
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
+from tensorflow.keras.applications import ResNet50
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
+import numpy as np
+
+# --- Configuration ---
+NUM_CLASSES = 15 # Example: 15 different plant diseases/conditions
+IMAGE_SIZE = (224, 224) # ResNet50 requires 224x224 input
+BATCH_SIZE = 64
+DATASET_PATH = 'path/to/your/large_plant_dataset'
+
+
+
+# Create specialized generators for ResNet50
+# Rescale is handled by the model's preprocessing function, not the generator
+train_datagen = ImageDataGenerator(
+    rotation_range=20,
+    width_shift_range=0.2,
+    height_shift_range=0.2,
+    shear_range=0.2,
+    zoom_range=0.2,
+    horizontal_flip=True,
+    validation_split=0.2,
+    # Crucially, use the application-specific preprocessing function
+    preprocessing_function=tf.keras.applications.resnet50.preprocess_input 
+)
+
+# Training Data Flow
+train_generator = train_datagen.flow_from_directory(
+    DATASET_PATH,
+    target_size=IMAGE_SIZE,
+    batch_size=BATCH_SIZE,
+    class_mode='categorical',
+    subset='training'
+)
+
+# Validation Data Flow
+validation_generator = train_datagen.flow_from_directory(
+    DATASET_PATH,
+    target_size=IMAGE_SIZE,
+    batch_size=BATCH_SIZE,
+    class_mode='categorical',
+    subset='validation'
+)
+
+
+
+## Load the Pre-trained Base Model (ResNet50)
+base_model = ResNet50(
+    weights='imagenet', # Use weights pre-trained on the massive ImageNet dataset
+    include_top=False,  # Exclude the classifier layers at the top
+    input_shape=(IMAGE_SIZE[0], IMAGE_SIZE[1], 3)
+)
+
+# Freeze the layers of the base model
+for layer in base_model.layers:
+    layer.trainable = False
+
+## Build the New Classifier Head
+x = base_model.output
+# Add a Global Average Pooling layer to reduce parameters
+x = GlobalAveragePooling2D()(x)
+# Add a Dense layer with a high number of neurons for complex learning
+x = Dense(1024, activation='relu')(x)
+# Final output layer for multi-class classification
+predictions = Dense(NUM_CLASSES, activation='softmax')(x)
+
+# Combine the base model and the new head
+model = Model(inputs=base_model.input, outputs=predictions)
+
+# Compile the model
+model.compile(
+    optimizer='adam', 
+    loss='categorical_crossentropy', 
+    metrics=['accuracy']
+)
+
+print("--- ResNet50 Transfer Learning Model Summary ---")
+model.summary()
+
+
+
+# Define Checkpoint to save the best weights
+checkpoint = ModelCheckpoint(
+    'best_plant_ai_model.weights.h5', 
+    monitor='val_accuracy', 
+    save_best_only=True, 
+    mode='max', 
+    verbose=1
+)
+
+# Define Early Stopping to prevent overfitting
+early_stopping = EarlyStopping(
+    monitor='val_loss', 
+    patience=5, # Stop if validation loss doesn't improve for 5 epochs
+    restore_best_weights=True
+)
+
+# Train the model
+history = model.fit(
+    train_generator,
+    steps_per_epoch=train_generator.samples // BATCH_SIZE,
+    epochs=50, # Set a high number, Early Stopping will halt it
+    validation_data=validation_generator,
+    validation_steps=validation_generator.samples // BATCH_SIZE,
+    callbacks=[checkpoint, early_stopping]
+)
+
+print("Advanced AI model training complete and best weights saved.")
