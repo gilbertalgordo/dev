@@ -1,0 +1,260 @@
+pip install pandas numpy scikit-learn
+
+
+
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error, r2_score
+
+# ----------------------------------------------------------------------
+# 1. Create Sample Data (Simulated Real-World Data)
+# ----------------------------------------------------------------------
+
+# In a real-world scenario, you would load a CSV file: 
+# data = pd.read_csv('solar_data.csv')
+
+# Create a sample DataFrame to represent historical data
+np.random.seed(42)
+data_size = 300
+temp = np.random.uniform(15, 40, data_size)  # Temperature in Celsius
+irradiance = np.random.uniform(0, 1000, data_size) # Solar Irradiance in W/m^2
+
+# Simple relationship: Power = 0.05 * Irradiance + 0.1 * Temp + noise
+# Note: Real power models are much more complex.
+power_output = (0.05 * irradiance + 0.1 * temp + np.random.normal(0, 10, data_size)).round(2)
+power_output[irradiance < 50] = 0 # Power is near zero if sun is low
+
+data = pd.DataFrame({
+    'Temperature_C': temp,
+    'Solar_Irradiance_Wm2': irradiance,
+    'Power_Output_kW': power_output
+})
+
+print("--- Sample Data (First 5 Rows) ---")
+print(data.head())
+print("-" * 40)
+
+# ----------------------------------------------------------------------
+# 2. Data Preparation
+# ----------------------------------------------------------------------
+
+# Define features (X) and target (y)
+X = data[['Temperature_C', 'Solar_Irradiance_Wm2']]
+y = data['Power_Output_kW']
+
+# Split the data into training and testing sets (80% train, 20% test)
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+
+# ----------------------------------------------------------------------
+# 3. Model Training
+# ----------------------------------------------------------------------
+
+# Initialize the Linear Regression model
+model = LinearRegression()
+
+# Train the model using the training data
+model.fit(X_train, y_train)
+
+print("✅ Model Training Complete!")
+print(f"Model Intercept: {model.intercept_:.2f}")
+print(f"Coefficients (Temp, Irradiance): {np.round(model.coef_, 2)}")
+print("-" * 40)
+
+# ----------------------------------------------------------------------
+# 4. Model Evaluation and Prediction
+# ----------------------------------------------------------------------
+
+# Make predictions on the test set
+y_pred = model.predict(X_test)
+
+# Evaluate the model
+mse = mean_squared_error(y_test, y_pred)
+r2 = r2_score(y_test, y_pred)
+
+print(f"Evaluation Metrics:")
+print(f"  Mean Squared Error (MSE): {mse:.2f}")
+print(f"  R-squared (R2) Score: {r2:.2f}") # Closer to 1 is better
+
+# ----------------------------------------------------------------------
+# 5. Making a New Prediction
+# ----------------------------------------------------------------------
+
+# Predict the power output for a new, sunny day (e.g., 35°C, 950 W/m^2)
+new_data = pd.DataFrame({
+    'Temperature_C': [35.0], 
+    'Solar_Irradiance_Wm2': [950.0]
+})
+
+# Predict using the trained model
+predicted_power = model.predict(new_data)
+
+print("-" * 40)
+print(f"☀️ Prediction for a sunny day:")
+print(f"  Input: {new_data.iloc[0].to_dict()}")
+print(f"  Predicted Power Output: **{predicted_power[0]:.2f} kW**")
+
+
+
+pip install pandas numpy scikit-learn tensorflow
+
+
+
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.model_selection import train_test_split
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.callbacks import EarlyStopping
+from sklearn.metrics import mean_absolute_error, r2_score
+
+# --- Utility Function for Data Preparation (Crucial for Time Series) ---
+def create_sequences(data, history_steps):
+    """
+    Converts time-series data into sequences (X) and next-step targets (y).
+    This structure is mandatory for LSTM networks.
+    
+    Args:
+        data (np.array): The feature data.
+        history_steps (int): The number of previous time steps (look-back window) 
+                             to use as input (X) for predicting the next step (y).
+    """
+    X, y = [], []
+    for i in range(len(data) - history_steps):
+        # Create input sequence (X) from the current time step up to the history_steps back
+        X.append(data[i:(i + history_steps), :])
+        # The target (y) is the value *immediately* after the sequence ends
+        y.append(data[i + history_steps, 0]) # We predict the first column (Power_kW)
+    return np.array(X), np.array(y)
+
+# ----------------------------------------------------------------------
+# 1. Create Simulated Advanced Data
+# ----------------------------------------------------------------------
+# A real dataset would contain thousands of rows with a time index.
+np.random.seed(42)
+timesteps = 5000 
+time = pd.date_range(start='2024-01-01', periods=timesteps, freq='H')
+wind_speed = np.random.uniform(0, 25, timesteps)
+wind_dir = np.random.uniform(0, 360, timesteps)
+# Power is non-linearly related to speed (cubic) and slightly affected by direction
+noise = np.random.normal(0, 10, timesteps)
+power_output = np.clip(0.3 * (wind_speed**3) - 0.05 * wind_dir + noise, 0, 5000).round(2)
+power_output[wind_speed < 3] = 0 # Cut-in speed
+power_output[wind_speed > 20] = 4800 # Rated power (flat top)
+
+data = pd.DataFrame({
+    'Power_kW': power_output,
+    'Wind_Speed_ms': wind_speed,
+    'Wind_Direction_deg': wind_dir
+}, index=time)
+
+print("--- Sample Data (First 5 Rows) ---")
+print(data.head())
+print("-" * 50)
+
+# ----------------------------------------------------------------------
+# 2. Data Preprocessing: Scaling
+# ----------------------------------------------------------------------
+# Scaling is essential for Neural Networks (especially LSTMs)
+scaler = MinMaxScaler(feature_range=(0, 1))
+scaled_data = scaler.fit_transform(data)
+
+# Extract a separate scaler for the target variable (Power_kW) for inverse transform later
+target_scaler = MinMaxScaler(feature_range=(0, 1))
+target_scaler.fit(data[['Power_kW']])
+
+# ----------------------------------------------------------------------
+# 3. Time Series Sequence Preparation
+# ----------------------------------------------------------------------
+HISTORY_STEPS = 24 # Use the previous 24 hours of data to predict the next hour
+
+# X_seq shape: (samples, history_steps, features) -> (4976, 24, 3)
+# y_seq shape: (samples,) -> (4976,)
+X_seq, y_seq = create_sequences(scaled_data, HISTORY_STEPS)
+
+# Split into training and test sets (90% train / 10% test)
+train_size = int(len(X_seq) * 0.9)
+X_train, X_test = X_seq[:train_size], X_seq[train_size:]
+y_train, y_test = y_seq[:train_size], y_seq[train_size:]
+
+print(f"Shape of X_train (Samples, Time Steps, Features): {X_train.shape}")
+print("-" * 50)
+
+# ----------------------------------------------------------------------
+# 4. Deep Learning Model Construction (LSTM)
+# ----------------------------------------------------------------------
+# Ensure accuracy in generating models by using appropriate architecture
+model = Sequential([
+    # First LSTM layer: units=100, return_sequences=True (passes output to next LSTM)
+    LSTM(units=100, return_sequences=True, input_shape=(HISTORY_STEPS, X_train.shape[2])),
+    Dropout(0.2),
+    # Second LSTM layer: units=50 (does not return sequences, output goes to Dense layer)
+    LSTM(units=50),
+    Dropout(0.2),
+    # Output layer: 1 unit for the single-step prediction (Power_kW)
+    Dense(units=1)
+])
+
+# Use Adam optimizer with a custom learning rate for better convergence
+optimizer = Adam(learning_rate=0.001)
+# Compile the model using Mean Squared Error (MSE) loss
+model.compile(optimizer=optimizer, loss='mse')
+
+print("✅ LSTM Model Architecture:")
+print(model.summary())
+print("-" * 50)
+
+# ----------------------------------------------------------------------
+# 5. Model Training (Fitting the instances)
+# ----------------------------------------------------------------------
+# Early Stopping prevents overfitting by stopping training when validation loss stops improving
+early_stopping = EarlyStopping(monitor='val_loss', patience=10, verbose=1, restore_best_weights=True)
+
+history = model.fit(
+    X_train, y_train,
+    epochs=50,
+    batch_size=32,
+    validation_split=0.1, # Use a portion of the training data for validation
+    callbacks=[early_stopping],
+    verbose=1
+)
+
+# 
+
+# ----------------------------------------------------------------------
+# 6. Evaluation and Inverse Scaling
+# ----------------------------------------------------------------------
+
+# Make predictions
+y_pred_scaled = model.predict(X_test, verbose=0)
+
+# Inverse transform predictions and actual values to the original kW scale
+# Note: The target scaler needs a 2D array, so we reshape the 1D arrays
+y_pred = target_scaler.inverse_transform(y_pred_scaled)
+y_actual_scaled_2d = y_test.reshape(-1, 1)
+y_actual = target_scaler.inverse_transform(y_actual_scaled_2d)
+
+# Calculate evaluation metrics (ensuring scientific reasoning and accuracy)
+mae = mean_absolute_error(y_actual, y_pred)
+r2 = r2_score(y_actual, y_pred)
+
+print(f"**Performance Metrics on Test Set:**")
+print(f"  Mean Absolute Error (MAE): **{mae:.2f} kW** (Average forecast error)")
+print(f"  R-squared Score (R2): **{r2:.4f}** (Closer to 1.0 is better)")
+print("-" * 50)
+
+# ----------------------------------------------------------------------
+# 7. Sample Prediction
+# ----------------------------------------------------------------------
+# Take the last sequence from the test set for a sample forecast
+sample_sequence = X_test[-1].reshape(1, HISTORY_STEPS, X_test.shape[2])
+sample_prediction_scaled = model.predict(sample_sequence, verbose=0)
+sample_prediction = target_scaler.inverse_transform(sample_prediction_scaled)[0][0]
+
+print(f"⚡ Last actual Power Output (kW): {y_actual[-1][0]:.2f}")
+print(f"🔮 Predicted Next Hour Power (kW): **{sample_prediction:.2f}**")
