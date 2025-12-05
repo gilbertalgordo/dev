@@ -1,0 +1,290 @@
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense
+
+# --- 1. Nanomaterial Simulation (Actuation) ---
+
+# Hypothetical list of predefined camouflage patterns/states
+CAMOUFLAGE_STATES = {
+    0: {"name": "Forest_Green", "nano_input": [0.1, 0.9, 0.2]},  # Target Nanoparticle Spacing/Orientation
+    1: {"name": "Desert_Sand", "nano_input": [0.8, 0.7, 0.1]},
+    2: {"name": "Urban_Gray", "nano_input": [0.5, 0.5, 0.5]},
+    3: {"name": "Snow_White", "nano_input": [0.9, 0.9, 0.9]},
+}
+
+def actuate_nanomaterials(nano_input):
+    """
+    Simulates the control system sending signals to the nanoscopic
+    color-changing structure (e.g., plasmonic metasurfaces or
+    structural color nanocrystals).
+    """
+    # In reality, this would be a complex control signal (voltage,
+    # acoustic wave, mechanical strain) applied to the surface.
+    r, g, b = nano_input
+    print(f"** Actuation: Adjusting Nanostructures to color/pattern: R={r:.2f}, G={g:.2f}, B={b:.2f} **")
+    return f"Material set to state based on input: {nano_input}"
+
+# --- 2. AI Model (Processing) ---
+
+def create_camouflage_ai_model(input_shape=(64, 64, 3), num_classes=len(CAMOUFLAGE_STATES)):
+    """Creates a simplified CNN model for background classification."""
+    model = Sequential([
+        Conv2D(32, (3, 3), activation='relu', input_shape=input_shape),
+        MaxPooling2D((2, 2)),
+        Conv2D(64, (3, 3), activation='relu'),
+        MaxPooling2D((2, 2)),
+        Flatten(),
+        Dense(128, activation='relu'),
+        Dense(num_classes, activation='softmax') # Output layer for classification
+    ])
+    model.compile(optimizer='adam',
+                  loss='categorical_crossentropy',
+                  metrics=['accuracy'])
+    return model
+
+# Create a dummy AI model (in a real scenario, this would be pre-trained)
+# [attachment_0](attachment)
+camouflage_ai = create_camouflage_ai_model()
+
+# --- 3. Main Defense Loop (Sensing & Decision) ---
+
+def run_chameleon_defense(sensor_data_stream, ai_model, states):
+    """
+    The main AI loop that continuously senses, processes, and actuates the
+    nanotechnology defense system.
+    """
+    print("--- Chameleon Defense System Initialized ---")
+    
+    # Simulate receiving sensor data (e.g., a camera frame)
+    for i, sensor_image in enumerate(sensor_data_stream):
+        print(f"\n--- Cycle {i+1} ---")
+        
+        # 1. Sensing (Input)
+        # Reshape the simulated image data for the CNN model
+        input_image = np.expand_dims(sensor_image, axis=0)
+        print("Sensing: Background image captured.")
+
+        # 2. Processing (AI Decision)
+        # Use the AI model to predict the best camouflage state
+        predictions = ai_model.predict(input_image, verbose=0)
+        
+        # Determine the best matching state index
+        best_state_index = np.argmax(predictions[0])
+        best_state_prob = np.max(predictions[0])
+        
+        chosen_state = states[best_state_index]
+
+        # Conditional Logic for Decision Display (HUD)
+        if best_state_prob > 0.7:
+            print(f"AI Decision (Confidence: {best_state_prob:.2f}): Best match is **{chosen_state['name']}**.")
+        else:
+            print(f"AI Decision (Confidence: {best_state_prob:.2f}): Low confidence, defaulting to best guess: **{chosen_state['name']}**.")
+
+
+        # 3. Actuation (Output)
+        # Trigger the nanomaterial control system
+        nano_feedback = actuate_nanomaterials(chosen_state['nano_input'])
+        print(f"System Feedback: {nano_feedback}")
+
+        # Optional: Log the instance for later analysis (adhering to user preference)
+        # print(f"Instance Logged: Cycle {i+1}, State: {chosen_state['name']}")
+
+# --- Simulation Data ---
+# Create 3 instances of dummy image data (64x64 pixel, 3 color channels)
+def create_dummy_image(label_index):
+    """Creates a distinct dummy image for simulation."""
+    img = np.zeros((64, 64, 3))
+    if label_index == 0: # Forest
+        img[:, :, 1] = 1.0  # Green
+    elif label_index == 1: # Desert
+        img[:, :, 0] = 0.8  # Red/Brown hue
+    elif label_index == 2: # Urban
+        img[:, :, :] = 0.5  # Gray
+    return img
+
+# Simulate a sequence of environments (instances)
+SIMULATED_ENVIRONMENTS = [
+    create_dummy_image(0), # Starts in Forest
+    create_dummy_image(2), # Moves to Urban
+    create_dummy_image(1), # Moves to Desert
+]
+
+# --- Run the Simulation ---
+# NOTE: This simulation uses a randomly initialized, untrained AI model,
+# so the "predictions" are purely theoretical for demonstration purposes.
+run_chameleon_defense(SIMULATED_ENVIRONMENTS, camouflage_ai, CAMOUFLAGE_STATES)
+
+
+
+import numpy as np
+import random
+import time
+from collections import defaultdict
+
+# --- 1. System Parameters (Nanotechnology and Sensing) ---
+
+# The environment is represented by 4 key spectral characteristics (Hyperspectral/Thermal)
+# State Vector: [Visible_Hue, NIR_Reflectance, Thermal_Signature, Motion_Level]
+STATE_DIMENSIONS = 4
+MAX_STATE_VALUE = 10 # Used for simplifying the continuous state space
+
+# Actions correspond to the control inputs for the nanomaterials (Actuation)
+ACTIONS = {
+    0: "Forest_Match",  # E.g., High NIR, Low Thermal, Green Visible
+    1: "Desert_Match",  # E.g., Low NIR, High Thermal (day), Sand Visible
+    2: "Urban_Match",   # E.g., Mid NIR, Mid Thermal, Gray Visible
+    3: "Adaptive_Dazzle" # E.g., Rapid, random texture change
+}
+NUM_ACTIONS = len(ACTIONS)
+
+# --- 2. The AI Core: Q-Learning Agent ---
+
+class QLearningCamouflageAgent:
+    """
+    An agent that learns the optimal camouflage strategy using Q-Learning.
+    The goal is to maximize the time the object remains undetected (high reward).
+    """
+    def __init__(self, alpha=0.1, gamma=0.9, epsilon=0.1, num_states=MAX_STATE_VALUE):
+        # alpha (learning rate): how much new info overrides old info
+        self.alpha = alpha
+        # gamma (discount factor): importance of future rewards
+        self.gamma = gamma
+        # epsilon (exploration rate): probability of taking a random action
+        self.epsilon = epsilon
+        
+        # Q-Table initialization: maps (State) -> (Action) -> Q-Value (expected reward)
+        # States are simplified/discretized for the table (e.g., 10^4 possible states)
+        self.q_table = defaultdict(lambda: np.zeros(NUM_ACTIONS))
+        self.num_states = num_states
+        
+    def discretize_state(self, state_vector):
+        """
+        Converts the continuous hyperspectral/thermal sensor data into a 
+        discrete, hashable state representation for the Q-Table.
+        """
+        # Quantize each dimension to a set number of bins (e.g., 10)
+        discrete_state = (np.clip(state_vector / MAX_STATE_VALUE, 0, 1) * (self.num_states - 1)).astype(int)
+        # Convert the array to a tuple so it can be used as a dictionary key
+        return tuple(discrete_state)
+
+    def choose_action(self, state_vector):
+        """
+        Epsilon-Greedy strategy: Explore (random action) or Exploit (best known action).
+        """
+        discrete_state = self.discretize_state(state_vector)
+        
+        if random.uniform(0, 1) < self.epsilon:
+            # Explore: Choose a random action
+            action = random.choice(list(ACTIONS.keys()))
+        else:
+            # Exploit: Choose the action with the highest Q-value for the current state
+            action = np.argmax(self.q_table[discrete_state])
+            
+        return action, discrete_state
+
+    def update_q_table(self, old_state_vector, action, reward, new_state_vector):
+        """
+        The core Q-Learning update rule.
+        Q(s, a) = Q(s, a) + α * [ R(s, a) + γ * max(Q(s', a')) - Q(s, a) ]
+        """
+        old_discrete_state = self.discretize_state(old_state_vector)
+        new_discrete_state = self.discretize_state(new_state_vector)
+        
+        # Get the old Q-value
+        old_q = self.q_table[old_discrete_state][action]
+        
+        # Calculate the maximum possible future reward (max(Q(s', a')))
+        max_future_q = np.max(self.q_table[new_discrete_state])
+        
+        # Apply the Q-Learning formula
+        new_q = old_q + self.alpha * (reward + self.gamma * max_future_q - old_q)
+        
+        # Update the Q-Table
+        self.q_table[old_discrete_state][action] = new_q
+        
+        return new_q
+
+# --- 3. Simulated Environment and Sensor (Sensing & Reward) ---
+
+def simulate_environment(state_vector, action):
+    """
+    Simulates the environment's response to the chosen camouflage action.
+    This replaces the complex physics simulation of the nanomaterial response.
+    """
+    # Simulate a reward: High reward means the camouflage was effective.
+    # Theoretical Reward Function: R = (Target_Match_Score - Threat_Detection_Likelihood)
+    
+    match_score = np.dot(state_vector, np.array([0.5, 0.3, 0.1, 0.1])) / MAX_STATE_VALUE
+    
+    # Introduce randomness and penalty for non-matching actions
+    if action == 0 and state_vector[0] < 5:  # If we chose Forest_Match in a non-forest state
+        reward = -5.0 + random.uniform(0, 1)  # Punish a poor choice
+    elif action == 1 and state_vector[1] > 8: # If we chose Desert_Match in a high NIR state
+        reward = 10.0 + random.uniform(0, 5) # Reward a good choice (high score)
+    else:
+        reward = match_score * 8.0 + random.uniform(-2, 2)
+        
+    # Simulate the next sensor reading (environmental change)
+    new_state = state_vector + np.random.uniform(-1.0, 1.0, size=STATE_DIMENSIONS)
+    new_state = np.clip(new_state, 0, MAX_STATE_VALUE)
+    
+    return new_state, reward
+
+# --- 4. Main Execution Loop ---
+
+def advanced_defense_run(episodes=1000, max_steps=50):
+    """Runs the advanced RL defense simulation."""
+    agent = QLearningCamouflageAgent()
+    
+    # Initial state (e.g., a cold, dark, still environment)
+    current_state = np.array([1.0, 1.0, 1.0, 0.1])
+    
+    print(f"--- Advanced Chameleon AI (Q-Learning) Initialized ---")
+    print(f"Running {episodes} training episodes with max {max_steps} steps each.")
+    
+    # To display progress
+    total_rewards = [] 
+
+    for episode in range(episodes):
+        # Reset environment state at the beginning of each episode
+        current_state = np.random.uniform(0, MAX_STATE_VALUE, size=STATE_DIMENSIONS)
+        episode_reward = 0
+        
+        for step in range(max_steps):
+            # 1. Sense (Input)
+            old_state = current_state
+            
+            # 2. Decide (AI Processing)
+            action, discrete_state = agent.choose_action(old_state)
+            
+            # 3. Actuate & Receive Feedback
+            new_state, reward = simulate_environment(old_state, action)
+            
+            # 4. Learn (AI Update)
+            q_update = agent.update_q_table(old_state, action, reward, new_state)
+            
+            current_state = new_state
+            episode_reward += reward
+            
+            # Display HUD data for the instance (User Preference)
+            if episode % 100 == 0 and step == 0:
+                 print(f"\n[HUD Instance E{episode+1}, S{step+1}] State: {old_state.round(1)} -> Action: {ACTIONS[action]} (Reward: {reward:.2f})")
+            
+            # End episode if a critical condition is met (e.g., high detection likelihood)
+            if reward < -8: 
+                break
+
+        total_rewards.append(episode_reward)
+        
+        # Decay epsilon (exploration) over time to favor exploitation
+        if agent.epsilon > 0.01:
+            agent.epsilon *= 0.999
+            
+    print("\n--- Training Complete ---")
+    print(f"Average Reward over last 100 episodes: {np.mean(total_rewards[-100:]):.2f}")
+    
+    # 
+
+# --- Execute the Advanced Simulation ---
+advanced_defense_run(episodes=1000, max_steps=20)
