@@ -1,0 +1,122 @@
+// A conceptual example for a Firebase Cloud Function fulfillment
+const { conversation } = require('@assistant/conversation');
+const functions = require('firebase-functions');
+
+// Initialize the Assistant app
+const app = conversation();
+
+// Handle the intent for checking the weather
+app.handle('check.weather', (conv) => {
+  // 1. Get the city parameter from the user's request (entity)
+  const city = conv.intent.params.city.resolved;
+  
+  // 2. Perform external logic (e.g., call a weather API)
+  // 
+  const weatherData = getWeatherForCity(city); 
+
+  let responseText;
+  if (weatherData) {
+    responseText = `The weather in ${city} is currently ${weatherData.condition} with a temperature of ${weatherData.temp} degrees.`;
+  } else {
+    responseText = `Sorry, I couldn't get the weather for ${city}.`;
+  }
+
+  // 3. Send the response back to the user via Google Home
+  conv.add(responseText);
+});
+
+// Expose the app to be called by the Actions console
+exports.ActionsHandler = functions.https.onRequest(app);
+
+// Placeholder for external function (actual API call logic would go here)
+function getWeatherForCity(city) {
+  // ... actual API call to an external service ...
+  return { condition: 'sunny', temp: 25 }; 
+}
+
+
+
+metadata:
+  name: Turn on lights when door opens after sunset
+automations:
+  - starters:
+      - type: device.event.Open
+        device: Door Lock - Entrance
+    conditions:
+      - type: time.schedule
+        at: sunset
+        # The 'at' field with 'sunset' acts as a condition that must be met.
+    actions:
+      - type: device.command.OnOff
+        devices:
+          - Kitchen Lights - Kitchen
+          - Hallway Light - Hallway
+        on: true
+
+
+
+# Conceptual example of using the Gemini API in Python
+import google.generativeai as genai
+
+# Configuration (API key must be set)
+genai.configure(api_key="YOUR_API_KEY") 
+model = genai.GenerativeModel('gemini-2.5-flash')
+
+# Prompt the model
+prompt = "Write a Python function to calculate the factorial of a number."
+
+print("Asking Gemini for a code snippet...")
+
+# Generate content
+response = model.generate_content(prompt)
+
+# Print the generated code
+print(response.text) 
+# The response.text would contain the generated Python function code.
+
+
+
+metadata:
+  name: Late-Night Security and Energy Saver
+  description: Checks and locks the door, adjusts temp, and alerts if a window is open after 10 PM on weekdays.
+
+automations:
+  - starters:
+      # Starter 1: Triggers every weekday at 10:00 PM
+      - type: time.schedule
+        at: 22:00:00
+        weekdays:
+          - MONDAY
+          - TUESDAY
+          - WEDNESDAY
+          - THURSDAY
+          - FRIDAY
+          
+  # The main automation block
+    actions:
+      # Action 1: Lock the front door unconditionally
+      - type: device.command.Lock
+        devices:
+          - Front Door Lock - Entrance
+        lock: true
+
+      # Action 2: Adjust Thermostat for nighttime (Lowering the temp)
+      - type: device.command.ThermostatTemperatureSetpoint
+        devices:
+          - Main Thermostat - Hallway
+        thermostatTemperatureSetpoint: 68.0  # Set to a conservative temperature
+
+      # Conditional Block: CHECK FOR UNSECURED WINDOW OR HOME PRESENCE
+      - type: condition.check
+        condition: >
+          # If the Living Room window is OPEN OR
+          # the home is in HOME mode (meaning someone is likely still awake/up)
+          device.state.OpenClose.open(Window Sensor - Living Room) == true ||
+          mode.state.Home.homePresenceMode() == 'HOME'
+        
+        # Actions to run IF the condition is TRUE (i.e., someone is home OR window is open)
+        actions:
+          - type: assistant.command.Broadcast
+            devices:
+              - Google Home Speaker - Entrance
+            message: "Security check complete. The front door is locked, but the house is still active or a window is ajar. Please check the living room window if it is open."
