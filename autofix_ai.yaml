@@ -1,0 +1,748 @@
+#!/usr/bin/env python3
+"""
+autofix.py
+
+Usage:
+  python autofix.py [--apply] [--model MODEL] [--dry-run]
+
+- --apply: actually apply the patch (otherwise it's only proposed and validated)
+- --dry-run: do not call the LLM; print the prompt instead (useful for debugging)
+"""
+
+import argparse
+import os
+import subprocess
+import sys
+import tempfile
+import json
+from typing import Tuple, List, Dict, Optional
+import shlex
+import textwrap
+import uuid
+import datetime
+import pathlib
+import logging
+import requests
+
+# -------- configuration ----------
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_API_URL = os.getenv("OPENAI_API_URL", "https://api.openai.com/v1/chat/completions")
+DEFAULT_MODEL = "gpt-4o-mini"  # replace per your provider
+TIMEOUT = 60
+# linter/test commands - adapt to your repo
+LINTER_CMD = ["flake8", "."]     # collects lint errors
+FORMATTER_CMD = ["black", "--check", "."]  # check formatting
+TEST_CMD = ["pytest", "-q", "--maxfail=1"]
+# --------------------------------
+
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+
+def run_cmd(cmd: List[str], cwd: str = ".", capture_output: bool = True) -> Tuple[int, str, str]:
+    """Run a shell command and return (exit_code, stdout, stderr)."""
+    logging.info(f"Running: {' '.join(shlex.quote(c) for c in cmd)}")
+    proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        out, err = proc.communicate(timeout=300)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        out, err = proc.communicate()
+    return proc.returncode, out or "", err or ""
+
+
+def collect_git_diff_of_workspace() -> str:
+    """Return the git diff of the current workspace (unstaged changes) - used as context."""
+    code, out, err = run_cmd(["git", "diff", "--", "."])
+    if code != 0:
+        logging.warning("git diff failed; continuing without it.")
+        return ""
+    return out
+
+
+def run_linters_and_tests() -> Dict[str, str]:
+    """Run linter/formatter/test commands and collect outputs."""
+    results = {}
+    code, out, err = run_cmd(LINTER_CMD)
+    results["linter_exit"] = str(code)
+    results["linter_out"] = out + err
+
+    code, out, err = run_cmd(FORMATTER_CMD)
+    results["formatter_exit"] = str(code)
+    results["formatter_out"] = out + err
+
+    code, out, err = run_cmd(TEST_CMD)
+    results["tests_exit"] = str(code)
+    results["tests_out"] = out + err
+
+    return results
+
+
+def find_changed_files_from_failures(linter_out: str, tests_out: str) -> List[str]:
+    """
+    Heuristic: parse linter/test outputs to find filenames that appear in error traces.
+    This is simple but effective for many Python projects.
+    """
+    files = set()
+    combined = linter_out + "\n" + tests_out
+    for line in combined.splitlines():
+        # simple pattern: path:line:col or path.py:
+        if ":" in line:
+            parts = line.split(":")
+            maybe_path = parts[0]
+            if maybe_path.endswith(".py") and os.path.exists(maybe_path):
+                files.add(maybe_path)
+        # pytest tracebacks often have 'File "path", line X'
+        if 'File "' in line:
+            try:
+                start = line.index('File "') + len('File "')
+                end = line.index('"', start)
+                path = line[start:end]
+                if path.endswith(".py") and os.path.exists(path):
+                    files.add(path)
+            except ValueError:
+                pass
+    return sorted(files)
+
+
+def build_prompt(project_name: str, diagnostics: Dict[str, str], changed_files: List[str], git_diff: str) -> str:
+    """
+    Create a clear instruction prompt for the LLM. Ask for a unified diff patch.
+    """
+    header = f"Project: {project_name}\nTimestamp: {datetime.datetime.utcnow().isoformat()}Z\n"
+    instructions = textwrap.dedent(
+        """
+        You are an expert software engineer assistant. The repository is a Python project.
+        Goal: produce a minimal, correct **unified diff** patch that fixes the failing lints/tests shown below.
+        Requirements:
+        - Output ONLY a unified diff (git-style) between the current HEAD and the fixed files.
+        - Do NOT output code explanation or anything else outside the diff.
+        - Keep changes minimal and localized.
+        - Avoid changing API behavior unless a failing test or lint forces a small deterministic change.
+        - If multiple candidate fixes exist, prefer the simplest fix that preserves behavior and passes tests.
+        - If a test failure indicates a bug whose root cause is unclear, include a small unit test update only if necessary,
+          but prefer to fix the code under test.
+        - If you cannot produce a safe patch, respond with the single line: "NO_PATCH_POSSIBLE".
+        """
+    )
+    diag_section = "\n--- DIAGNOSTICS ---\n"
+    for k, v in diagnostics.items():
+        diag_section += f"\n### {k}\n```\n{v[:8000]}\n```\n"  # truncate long outputs
+    files_section = "\n--- AFFECTED FILES ---\n" + ("\n".join(changed_files) if changed_files else "NONE\n")
+    diff_section = "\n--- GIT_DIFF_OF_WORKSPACE ---\n" + (git_diff[:16000] if git_diff else "NONE\n")
+    prompt = header + instructions + diag_section + files_section + diff_section + "\nProvide the unified diff now.\n"
+    return prompt
+
+
+def call_llm(prompt: str, model: str = DEFAULT_MODEL, max_tokens: int = 1200) -> str:
+    """Call an OpenAI-compatible chat/completion API and return the assistant text."""
+    if not OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY not set in environment.")
+    # Simple Chat Completions call - adapt if your provider differs.
+    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": max_tokens,
+        "temperature": 0.0,
+        "n": 1,
+    }
+    resp = requests.post(OPENAI_API_URL, headers=headers, json=payload, timeout=TIMEOUT)
+    if resp.status_code != 200:
+        raise RuntimeError(f"LLM request failed {resp.status_code}: {resp.text}")
+    j = resp.json()
+    # adjust extraction depending on API shape
+    if "choices" in j and len(j["choices"]) > 0:
+        return j["choices"][0]["message"]["content"]
+    if "output" in j:
+        return j["output"][0]["content"][0]["text"]
+    raise RuntimeError("Unknown LLM response shape: " + json.dumps(j)[:1000])
+
+
+def save_patch_and_validate(patch_text: str, repo_dir: str = ".") -> bool:
+    """
+    Try to apply the patch in a temporary branch to validate it.
+    Returns True if applied successfully.
+    """
+    temp_branch = f"autofix-temp-{uuid.uuid4().hex[:8]}"
+    code, out, err = run_cmd(["git", "checkout", "-b", temp_branch], cwd=repo_dir)
+    if code != 0:
+        logging.error("Failed creating temp branch: " + out + err)
+        return False
+
+    # write patch to temp file
+    with tempfile.NamedTemporaryFile("w+", delete=False, suffix=".patch") as tf:
+        tf.write(patch_text)
+        patch_path = tf.name
+
+    # Try apply check
+    code, out, err = run_cmd(["git", "apply", "--index", "--verbose", patch_path], cwd=repo_dir)
+    if code != 0:
+        logging.error("git apply failed: " + out + err)
+        # cleanup: checkout back and delete branch
+        run_cmd(["git", "checkout", "-"], cwd=repo_dir)
+        run_cmd(["git", "branch", "-D", temp_branch], cwd=repo_dir)
+        return False
+
+    # Commit the changes
+    run_cmd(["git", "add", "-A"], cwd=repo_dir)
+    run_cmd(["git", "commit", "-m", "autofix: automated patch"], cwd=repo_dir)
+
+    # Run linters/tests
+    results = run_linters_and_tests()
+    tests_ok = results.get("tests_exit", "1") == "0" and results.get("linter_exit", "1") == "0" and results.get("formatter_exit", "1") == "0"
+
+    # rebase back to previous branch (stash nothing)
+    run_cmd(["git", "checkout", "-"], cwd=repo_dir)
+
+    # optionally keep the temp branch for inspection; delete it
+    run_cmd(["git", "branch", "-D", temp_branch], cwd=repo_dir)
+    return tests_ok
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--apply", action="store_true", help="Apply the patch to the current branch if valid.")
+    parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--dry-run", action="store_true", help="Don't call LLM; print the prompt and exit.")
+    args = parser.parse_args()
+
+    repo_dir = "."
+    # ensure git repo
+    code, out, err = run_cmd(["git", "rev-parse", "--is-inside-work-tree"])
+    if code != 0:
+        logging.error("Not a git repository (or git not available).")
+        sys.exit(1)
+
+    project_name = pathlib.Path('.').resolve().name
+    logging.info(f"Project: {project_name}")
+
+    # collect diagnostics
+    diagnostics = run_linters_and_tests()
+
+    changed_files = find_changed_files_from_failures(diagnostics["linter_out"], diagnostics["tests_out"])
+    git_diff = collect_git_diff_of_workspace()
+    prompt = build_prompt(project_name, diagnostics, changed_files, git_diff)
+
+    if args.dry_run:
+        print("=== PROMPT (DRY RUN) ===\n")
+        print(prompt)
+        sys.exit(0)
+
+    # call LLM
+    try:
+        llm_output = call_llm(prompt, model=args.model)
+    except Exception as e:
+        logging.error("LLM call failed: " + str(e))
+        sys.exit(1)
+
+    if llm_output.strip() == "NO_PATCH_POSSIBLE":
+        logging.info("LLM responded NO_PATCH_POSSIBLE. Manual intervention required.")
+        sys.exit(2)
+
+    # validate patch structure -- quick heuristic: must contain @@ unified diff chunks or diff header
+    if not (llm_output.startswith("diff ") or "@@" in llm_output):
+        logging.error("LLM output did not look like a unified diff. Aborting.")
+        print("LLM output (first 400 chars):\n", llm_output[:400])
+        sys.exit(1)
+
+    logging.info("LLM produced a patch. Validating by applying in temporary branch and running tests/linters...")
+    ok = save_patch_and_validate(llm_output, repo_dir=repo_dir)
+    if not ok:
+        logging.error("Patch failed validation (tests or linters). Aborting.")
+        # write patch to file for inspection
+        with open("autofix_failed.patch", "w") as f:
+            f.write(llm_output)
+        logging.info("Wrote patch to autofix_failed.patch for inspection.")
+        sys.exit(1)
+
+    logging.info("Patch validated successfully (tests and linters passed).")
+    if args.apply:
+        # apply to current branch and commit
+        with tempfile.NamedTemporaryFile("w+", delete=False, suffix=".patch") as tf:
+            tf.write(llm_output)
+            patch_path = tf.name
+        code, out, err = run_cmd(["git", "apply", "--index", patch_path], cwd=repo_dir)
+        if code != 0:
+            logging.error("git apply failed at final step: " + out + err)
+            sys.exit(1)
+        run_cmd(["git", "add", "-A"], cwd=repo_dir)
+        run_cmd(["git", "commit", "-m", "autofix: automated patch (validated)"], cwd=repo_dir)
+        logging.info("Patch applied and committed to current branch.")
+    else:
+        # save patch for human review
+        out_patch = "autofix_proposed.patch"
+        with open(out_patch, "w") as f:
+            f.write(llm_output)
+        logging.info(f"Patch saved to {out_patch}. Run with --apply to commit automatically.")
+
+    print("Done.")
+
+
+if __name__ == "__main__":
+    main()
+
+
+
+    name: AutoFix AI
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  autofix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest flake8 black requests
+      - name: Run autofix (dry-run)
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_URL: https://api.openai.com/v1/chat/completions
+        run: |
+          python autofix.py --model gpt-4o-mini --dry-run
+      # Optionally, if you want automatic PR creation you'd run the tool without --dry-run
+      # and then use actions/create-pull-request@v5 to open a PR with the changes.
+
+
+     version: '3.8'
+services:
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  server:
+    build: ./autofix-server
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - AUDIT_S3_URL=${AUDIT_S3_URL:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+
+  worker:
+    build: ./autofix-worker
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - SANDBOX_IMAGE=autofix-sandbox:latest
+    depends_on:
+      - redis
+
+
+     # autofi x-server/app.py
+from fastapi import FastAPI, BackgroundTasks, HTTPException
+from pydantic import BaseModel
+from uuid import uuid4
+import os
+import requests
+from celery import Celery
+
+BROKER = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0")
+celery = Celery("autofix", broker=BROKER)
+
+app = FastAPI(title="Autofix AI Server")
+
+class JobRequest(BaseModel):
+    repo_url: str
+    commit_sha: str
+    language: str = "python"
+    allow_apply: bool = False
+    max_changes: int = 200  # max lines changed, safety
+
+@app.post("/jobs")
+def create_job(req: JobRequest):
+    job_id = str(uuid4())
+    payload = {
+        "job_id": job_id,
+        "repo_url": req.repo_url,
+        "commit_sha": req.commit_sha,
+        "language": req.language,
+        "allow_apply": req.allow_apply,
+        "max_changes": req.max_changes,
+    }
+    task = celery.send_task("tasks.process_job", kwargs=payload)
+    return {"job_id": job_id, "task_id": task.id, "status": "queued"}
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+    # autofi x-worker/tasks.py
+import os
+from celery import Celery
+import tempfile
+import shutil
+import subprocess
+from llm.client import LLMClient
+from sandbox.runner import SandboxRunner
+from gitops import GitManager
+from integrations.github import GitHubPRCreator
+import logging
+import json
+
+BROKER = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0")
+app = Celery("tasks", broker=BROKER)
+
+OPENAI_KEY = os.getenv("OPENAI_API_KEY")
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+SANDBOX_IMAGE = os.getenv("SANDBOX_IMAGE", "autofix-sandbox:latest")
+
+llm = LLMClient(api_key=OPENAI_KEY)
+pr_creator = GitHubPRCreator(token=GITHUB_TOKEN)
+sandbox = SandboxRunner(image=SANDBOX_IMAGE)
+
+@app.task(name="tasks.process_job", bind=True)
+def process_job(self, job_id, repo_url, commit_sha, language="python", allow_apply=False, max_changes=200):
+    logging.info(f"Processing job {job_id} for {repo_url}@{commit_sha}")
+    workdir = tempfile.mkdtemp(prefix="autofix-")
+    try:
+        gm = GitManager(repo_url, workdir)
+        gm.clone_at_commit(commit_sha)
+
+        # 1. Collect diagnostics (lint/test output) in sandbox
+        diag = sandbox.run_checks(workdir, language)
+        if diag["status"] == "no-failures":
+            return {"job_id": job_id, "status": "no-action", "diagnostics": diag}
+
+        # 2. Identify candidate files
+        candidate_files = gm.find_files_from_output(diag["output"])
+
+        # 3. Build prompt
+        prompt = build_prompt(repo_name=gm.repo_name, commit=commit_sha,
+                              diagnostics=diag, candidate_files=candidate_files, max_changes=max_changes)
+
+        # 4. Call LLM for patch (enforce deterministic temperature 0)
+        patch = llm.request_patch(prompt)
+
+        # 5. Quick security check (line counts, banned tokens)
+        if exceeds_limits(patch, max_changes):
+            return {"job_id": job_id, "status": "rejected", "reason": "exceeds_max_changes"}
+
+        # 6. Validate patch in sandbox
+        validation = sandbox.apply_patch_and_validate(workdir, patch, language)
+        if not validation["ok"]:
+            # store artifact for inspection
+            store_artifact(job_id, patch, diag, validation)
+            return {"job_id": job_id, "status": "validation_failed", "details": validation}
+
+        # 7. Commit patch on a branch and open PR (for human review)
+        branch_name = gm.create_branch_with_patch(patch, prefix="autofix/")
+        pr_url = pr_creator.create_pr(repo_full_name=gm.repo_full_name,
+                                      branch=branch_name,
+                                      title=f"Autofix: automated fixes for {gm.repo_name}",
+                                      body=compose_pr_body(diag, patch))
+        # Optionally apply automatically when allow_apply True (dangerous)
+        result = {"job_id": job_id, "status": "pr_created", "pr_url": pr_url}
+        return result
+    except Exception as ex:
+        logging.exception("Job failed")
+        return {"job_id": job_id, "status": "failed", "error": str(ex)}
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+# helper stubs
+def build_prompt(repo_name, commit, diagnostics, candidate_files, max_changes):
+    # concise, strict prompt asking for a git-style unified diff; redaction hooks applied inside LLMClient
+    return f"""You are an expert engineer. Repo: {repo_name} Commit: {commit}
+Diagnostics:
+{diagnostics['output'][:8000]}
+
+Affected files:
+{', '.join(candidate_files)}
+
+Constraints:
+- Return ONLY a unified git diff (git apply-able).
+- Limit total lines changed to {max_changes}.
+- If no safe patch, return single line NO_PATCH_POSSIBLE.
+Provide patch now."""
+def exceeds_limits(patch, max_changes):
+    # simple heuristic: count changed lines (those starting with + or -)
+    changed = sum(1 for l in patch.splitlines() if l.startswith('+') or l.startswith('-'))
+    return changed > max_changes
+def store_artifact(job_id, patch, diag, validation):
+    # implement storage e.g., S3 or disk - left as exercise
+    pass
+def compose_pr_body(diag, patch):
+    return f"Autofix generated changes.\n\nDiagnostics:\n```\n{diag['output'][:2000]}\n```\n\nPatch:\n```\n{patch[:4000]}\n```"
+
+
+    # autofi x-worker/llm/client.py
+import os
+import requests
+import time
+import logging
+
+class LLMClient:
+    def __init__(self, api_key: str, api_url: str = None):
+        self.api_key = api_key
+        self.api_url = api_url or "https://api.openai.com/v1/chat/completions"
+        self.headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+
+    def request_patch(self, prompt: str, model: str = "gpt-4o-mini", max_tokens=2000, retries=3):
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "temperature": 0.0,
+        }
+        for attempt in range(retries):
+            try:
+                resp = requests.post(self.api_url, headers=self.headers, json=payload, timeout=60)
+                if resp.status_code != 200:
+                    logging.warning(f"LLM returned {resp.status_code}: {resp.text}")
+                    time.sleep(2 ** attempt)
+                    continue
+                j = resp.json()
+                if "choices" in j and j["choices"]:
+                    txt = j["choices"][0]["message"]["content"]
+                    return self._postprocess(txt)
+                # fallback shapes...
+                return ""
+            except Exception as ex:
+                logging.exception("LLM request error")
+                time.sleep(2 ** attempt)
+        raise RuntimeError("LLM call failed after retries")
+
+    def _postprocess(self, text: str) -> str:
+        # Basic clean-up: remove leading/trailing non-diff chatter
+        if "NO_PATCH_POSSIBLE" in text.strip():
+            return "NO_PATCH_POSSIBLE"
+        # locate first "diff " or "@@" chunk
+        if "diff " in text:
+            idx = text.index("diff ")
+            return text[idx:].strip()
+        if "@@" in text:
+            idx = text.index("@@")
+            return text[idx:].strip()
+        return text.strip()
+
+
+# autofi x-worker/sandbox/runner.py
+import docker
+import os
+import tempfile
+import shutil
+import uuid
+import subprocess
+import logging
+
+class SandboxRunner:
+    def __init__(self, image="autofix-sandbox:latest", timeout=300):
+        self.client = docker.from_env()
+        self.image = image
+        self.timeout = timeout
+
+    def run_checks(self, repo_path, language):
+        # Build and run the container which executes linters/tests and returns exit code/output
+        container = None
+        workdir = "/workspace"
+        try:
+            # create a tar of repo and send as context via bind mount for simplicity
+            container = self.client.containers.run(
+                self.image,
+                command=f"/runner/checks.sh {language}",
+                volumes={repo_path: {"bind": workdir, "mode": "rw"}},
+                detach=True,
+                stdout=True,
+                stderr=True,
+                network_mode="none",
+                mem_limit="1g",
+            )
+            res = container.wait(timeout=self.timeout)
+            logs = container.logs().decode("utf-8", errors="replace")
+            if res.get("StatusCode", 1) == 0:
+                # parse logs for failures - here we look for "FAIL" markers
+                if "FAIL" in logs or "Traceback" in logs or "ERROR" in logs:
+                    return {"status": "failures", "output": logs}
+                return {"status": "no-failures", "output": logs}
+            else:
+                return {"status": "error", "output": logs}
+        finally:
+            if container:
+                try:
+                    container.remove(force=True)
+                except Exception:
+                    pass
+
+    def apply_patch_and_validate(self, repo_path, patch_text, language):
+        # Apply the patch in the repo copy and run checks again inside sandbox
+        # Write patch file
+        pfile = os.path.join(repo_path, "autofix_patch.diff")
+        with open(pfile, "w") as f:
+            f.write(patch_text)
+        # run docker to apply and test
+        container = None
+        try:
+            container = self.client.containers.run(
+                self.image,
+                command=f"/runner/apply_and_validate.sh /workspace/autofix_patch.diff {language}",
+                volumes={repo_path: {"bind": "/workspace", "mode": "rw"}},
+                detach=True,
+                stdout=True,
+                stderr=True,
+                network_mode="none",
+                mem_limit="1g",
+            )
+            res = container.wait(timeout=self.timeout)
+            logs = container.logs().decode("utf-8", errors="replace")
+            ok = res.get("StatusCode", 1) == 0 and "VALIDATION_OK" in logs
+            return {"ok": ok, "logs": logs}
+        finally:
+            if container:
+                try:
+                    container.remove(force=True)
+                except Exception:
+                    pass
+
+
+
+FROM ubuntu:22.04
+RUN apt-get update && apt-get install -y git curl python3 python3-pip nodejs npm golang-go build-essential
+# install common tools
+RUN pip3 install pytest flake8 black
+RUN npm install -g eslint
+# copy runner scripts
+COPY runner /runner
+RUN chmod +x /runner/*.sh
+ENTRYPOINT ["/bin/bash"]
+
+
+
+#!/usr/bin/env bash
+LANG="$1"
+set -e
+cd /workspace
+if [ "$LANG" = "python" ]; then
+  flake8 . || true
+  pytest -q --maxfail=1 || { echo "FAILURES"; exit 1; }
+  echo "PY_CHECK_OK"
+elif [ "$LANG" = "node" ]; then
+  npm ci || true
+  npm test || { echo "FAILURES"; exit 1; }
+fi
+
+
+#!/usr/bin/env bash
+PATCH="$1"
+LANG="$2"
+cd /workspace
+git apply --index "$PATCH" || { echo "APPLY_FAILED"; exit 2; }
+git add -A
+git commit -m "autofix temp commit" || true
+# run checks
+/runner/checks.sh "$LANG"
+# if checks passed
+echo "VALIDATION_OK"
+exit 0
+
+
+# autofi x-worker/gitops.py
+import os
+import subprocess
+import tempfile
+import shutil
+
+class GitManager:
+    def __init__(self, repo_url, workdir):
+        self.repo_url = repo_url
+        self.workdir = workdir
+        self.repo_name = os.path.basename(repo_url).replace(".git", "")
+        self.repo_full_name = None
+
+    def clone_at_commit(self, commit_sha):
+        subprocess.check_call(["git", "clone", self.repo_url, self.workdir])
+        subprocess.check_call(["git", "checkout", commit_sha], cwd=self.workdir)
+        # attempt to derive full name from origin
+        out = subprocess.check_output(["git", "config", "--get", "remote.origin.url"], cwd=self.workdir).decode()
+        self.repo_full_name = self._derive_full_name(out)
+
+    def _derive_full_name(self, origin_url):
+        # parse git@github.com:owner/repo.git or https://github.com/owner/repo.git
+        origin_url = origin_url.strip()
+        if origin_url.startswith("git@"):
+            path = origin_url.split(":")[1]
+        else:
+            path = origin_url.split("github.com/")[-1]
+        return path.replace(".git", "")
+
+    def find_files_from_output(self, output_text):
+        # heuristic: pull .py, .js, .go paths mentioned in traces
+        files = set()
+        for line in output_text.splitlines():
+            if ":" in line:
+                p = line.split(":")[0]
+                if p.endswith((".py", ".js", ".go")) and os.path.exists(os.path.join(self.workdir, p)):
+                    files.add(p)
+        return list(files)
+
+    def create_branch_with_patch(self, patch_text, prefix="autofix/"):
+        branch = prefix + (os.urandom(4).hex())
+        subprocess.check_call(["git", "checkout", "-b", branch], cwd=self.workdir)
+        patch_file = os.path.join(self.workdir, "autofix_patch.diff")
+        with open(patch_file, "w") as f:
+            f.write(patch_text)
+        subprocess.check_call(["git", "apply", "--index", patch_file], cwd=self.workdir)
+        subprocess.check_call(["git", "add", "-A"], cwd=self.workdir)
+        subprocess.check_call(["git", "commit", "-m", "autofix: automated patch"], cwd=self.workdir)
+        # push - requires GITHUB_TOKEN auth configured in env/git remote
+        subprocess.check_call(["git", "push", "-u", "origin", branch], cwd=self.workdir)
+        return branch
+
+
+        # autofi x-worker/integrations/github.py
+import requests
+import os
+
+class GitHubPRCreator:
+    def __init__(self, token):
+        self.token = token
+        self.base = "https://api.github.com"
+
+    def create_pr(self, repo_full_name, branch, title, body, base_branch="main"):
+        url = f"{self.base}/repos/{repo_full_name}/pulls"
+        headers = {"Authorization": f"token {self.token}", "Accept": "application/vnd.github.v3+json"}
+        payload = {"title": title, "head": branch, "base": base_branch, "body": body}
+        r = requests.post(url, json=payload, headers=headers, timeout=20)
+        r.raise_for_status()
+        return r.json().get("html_url")
+
+
+        name: Trigger Autofi x AI
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  call-autofix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Autofi x server
+        env:
+          SERVER_URL: ${{ secrets.AUTOFIX_SERVER_URL }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          AUTH_TOKEN: ${{ secrets.AUTOFIX_AUTH_TOKEN }}
+        run: |
+          curl -X POST "${SERVER_URL}/jobs" \
+            -H "Authorization: Bearer ${AUTH_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"repo_url\":\"https://github.com/${REPO}.git\",\"commit_sha\":\"${SHA}\",\"language\":\"python\"}"
+
+                    
+        
