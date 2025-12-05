@@ -1,0 +1,188 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error, r2_score
+import matplotlib.pyplot as plt
+
+# --- 1. Load and Prepare Data (Simulated Data) ---
+# In a real-world scenario, this data would come from CNC machine sensors
+# (e.g., vibration, temperature, cutting forces) over time.
+
+data = {
+    'Cutting_Time_hrs': [10, 25, 40, 55, 70, 85, 100, 115, 130, 145],
+    'Vibration_Amplitude': [0.12, 0.15, 0.20, 0.28, 0.35, 0.45, 0.58, 0.70, 0.85, 1.00],
+    'Tool_Wear_Index': [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0] # Target variable (0.0 to 1.0, 1.0 being worn out)
+}
+df = pd.DataFrame(data)
+
+# Define Features (X) and Target (y)
+X = df[['Cutting_Time_hrs', 'Vibration_Amplitude']] # Input features
+y = df['Tool_Wear_Index'] # Output to predict
+
+# Split data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+# --- 2. Select and Train Model ---
+# Using Linear Regression as a simple starting model
+model = LinearRegression()
+model.fit(X_train, y_train)
+
+# --- 3. Evaluate Model ---
+y_pred = model.predict(X_test)
+
+mse = mean_squared_error(y_test, y_pred)
+r2 = r2_score(y_test, y_pred)
+
+print(f"**Trained Model Coefficients:** {model.coef_}")
+print(f"**Mean Squared Error (MSE):** {mse:.4f}")
+print(f"**R-squared (R2):** {r2:.4f}")
+
+# --- 4. Make a Prediction (Deploy Instance) ---
+# Instance data for a new machine operation (120 hours, 0.75 vibration)
+new_data = pd.DataFrame({'Cutting_Time_hrs': [120], 'Vibration_Amplitude': [0.75]})
+predicted_wear = model.predict(new_data)
+
+print("\n--- Prediction Instance ---")
+print(f"Predicted Tool Wear Index for new instance: {predicted_wear[0]:.2f}")
+if predicted_wear[0] > 0.8:
+    print("Recommendation: Schedule tool change soon.")
+else:
+    print("Recommendation: Tool wear is within acceptable limits.")
+
+# 
+
+
+
+
+import numpy as np
+import pandas as pd
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.model_selection import train_test_split
+from tensorflow.keras.callbacks import EarlyStopping
+
+# Ensure clear voices in the output by using a clear structure.
+
+# --- 1. Simulate and Prepare Time-Series Data (Instances) ---
+# In a real scenario, this is sensor data from one complete tool life cycle.
+# Features: 3 sensor readings (Time-series)
+# Target: RUL (Remaining Useful Life)
+
+# Hyperparameters
+SEQUENCE_LENGTH = 10 # Number of previous time steps (sensor readings) to look back
+NUM_FEATURES = 3
+
+# Simulated Data Points
+total_steps = 500
+np.random.seed(42)
+time_steps = np.arange(total_steps)
+
+# Degradation features (simulated sensor signals)
+vibration = 0.5 + 0.005 * time_steps + np.random.normal(0, 0.05, total_steps)
+force = 100 + 0.1 * time_steps + np.random.normal(0, 5, total_steps)
+acoustic_emission = 20 + 0.05 * time_steps + np.random.normal(0, 2, total_steps)
+
+# Remaining Useful Life (Target): Decreases from 1 to 0
+rul = 1 - (time_steps / total_steps)
+rul[rul < 0] = 0
+
+# Create DataFrame
+data = pd.DataFrame({
+    'Vibration': vibration,
+    'Force': force,
+    'Acoustic_Emission': acoustic_emission,
+    'RUL': rul
+})
+
+# --- 2. Data Normalization and Sequencing ---
+# Normalize features for stable training
+scaler = MinMaxScaler()
+data[['Vibration', 'Force', 'Acoustic_Emission']] = scaler.fit_transform(
+    data[['Vibration', 'Force', 'Acoustic_Emission']]
+)
+
+# Function to create sequence instances for LSTM
+def create_sequences(df, sequence_length):
+    X, y = [], []
+    features = df[['Vibration', 'Force', 'Acoustic_Emission']].values
+    target = df['RUL'].values
+    for i in range(len(df) - sequence_length):
+        X.append(features[i:i + sequence_length])
+        y.append(target[i + sequence_length])
+    return np.array(X), np.array(y)
+
+X_seq, y_seq = create_sequences(data, SEQUENCE_LENGTH)
+
+# Split data (using the first 70% of the time steps for training)
+split_idx = int(0.7 * len(X_seq))
+X_train, X_test = X_seq[:split_idx], X_seq[split_idx:]
+y_train, y_test = y_seq[:split_idx], y_seq[split_idx:]
+
+print(f"Training Instances Shape (X_train): {X_train.shape}")
+print(f"Testing Instances Shape (X_test): {X_test.shape}")
+
+
+
+# --- 3. Build the Stacked LSTM Model ---
+# This architecture is designed for accurate scientific reasoning on time-series data.
+model = Sequential([
+    # LSTM Layer 1: Returns sequences to feed into the next LSTM layer
+    LSTM(units=100, activation='relu', input_shape=(SEQUENCE_LENGTH, NUM_FEATURES), return_sequences=True),
+    Dropout(0.2), # Dropout to prevent overfitting
+
+    # LSTM Layer 2: A second layer for deeper feature extraction
+    LSTM(units=50, activation='relu', return_sequences=False),
+    Dropout(0.2),
+
+    # Output Layer: Dense layer for the final regression prediction (RUL value between 0 and 1)
+    Dense(units=1, activation='linear')
+])
+
+# Compile the model
+model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+
+# Stop training early if validation loss doesn't improve
+early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+
+print("\n--- Model Summary ---")
+model.summary()
+
+# --- 4. Train the Model ---
+# Note: Validation split is taken from the training set.
+history = model.fit(
+    X_train, y_train,
+    epochs=50,
+    batch_size=16,
+    validation_split=0.2, # Use 20% of training data for validation
+    callbacks=[early_stop],
+    verbose=0 # Set to 1 or 2 to see the training progress (hud)
+)
+
+print("\nTraining complete.")
+
+# --- 5. Evaluate and Predict ---
+mse, mae = model.evaluate(X_test, y_test, verbose=0)
+print(f"\n**Model Performance on Test Instances:**")
+print(f"Mean Squared Error (MSE): {mse:.4f}")
+print(f"Mean Absolute Error (MAE): {mae:.4f} (Average RUL prediction error)")
+
+# Make a prediction on a new instance sequence (e.g., the last sequence in the test set)
+# We can see the hud/instance by observing the input/output of a single prediction
+last_sequence = X_test[-1].reshape(1, SEQUENCE_LENGTH, NUM_FEATURES)
+predicted_rul = model.predict(last_sequence)[0][0]
+
+print("\n--- Prediction Instance (Clear Voice) ---")
+print(f"Input Sequence Shape: {last_sequence.shape}")
+print(f"Predicted Remaining Useful Life (RUL): {predicted_rul:.2f}")
+
+# Example of a decision based on the prediction
+if predicted_rul < 0.1:
+    print("**ACTION: TOOL FAILURE IMMINENT - STOP MACHINE IMMEDIATELY.**")
+elif predicted_rul < 0.3:
+    print("ACTION: Schedule tool change within the next shift.")
+else:
+    print("ACTION: Tool life is nominal.")
+
+# 
