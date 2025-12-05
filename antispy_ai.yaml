@@ -1,0 +1,149 @@
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import IsolationForest
+import psutil # You would use this library for real-world process data
+
+# --- 1. Mock Data: Simulating Normal and Suspicious Process Behavior ---
+# In a real scenario, this data would come from monitoring live processes (e.g., via psutil)
+data = {
+    'process_name': [
+        'chrome.exe', 'explorer.exe', 'svchost.exe', 'Word.exe', 'spytool.exe', 
+        'Teams.exe', 'background.exe', 'malware.exe', 'spotify.exe', 'normalapp.exe'
+    ],
+    # Simplified features:
+    'cpu_percent': [5.2, 1.1, 0.5, 12.5, 85.0, 7.0, 50.0, 95.0, 3.5, 2.0],  # CPU usage
+    'memory_percent': [15.0, 2.0, 1.5, 20.0, 45.0, 10.0, 55.0, 70.0, 8.0, 5.0],  # Memory usage
+    'network_connections': [5, 1, 3, 0, 50, 6, 25, 60, 2, 1]  # Number of open connections
+}
+
+df = pd.DataFrame(data)
+# Features used for the anomaly detection model
+X = df[['cpu_percent', 'memory_percent', 'network_connections']]
+
+# --- 2. Initialize and Train the Isolation Forest Model ---
+# Isolation Forest is an unsupervised ML algorithm effective for anomaly detection.
+# 'contamination' is the expected proportion of anomalies in the dataset (e.g., 0.1 for 10%)
+model = IsolationForest(contamination=0.2, random_state=42) 
+
+# Training the model to learn the 'normal' boundaries
+# Note: For unsupervised anomaly detection, you train on a dataset assumed to be mostly "normal."
+model.fit(X)
+
+# --- 3. Prediction and Anomaly Flagging ---
+# Predict the anomaly score: -1 for anomaly (suspicious), 1 for normal.
+df['anomaly_score'] = model.decision_function(X)
+df['is_suspicious'] = model.predict(X)
+
+# --- 4. Reporting the Suspicious Processes ---
+print("--- Anti-Spy AI Anomaly Report ---")
+# Filter processes flagged as suspicious (-1)
+suspicious_processes = df[df['is_suspicious'] == -1]
+
+if not suspicious_processes.empty:
+    print("\n🚨 **Suspicious Processes Detected (Potential Spyware/Malware):** 🚨")
+    print(suspicious_processes[['process_name', 'cpu_percent', 'memory_percent', 'network_connections', 'anomaly_score']])
+else:
+    print("✅ No significant behavioral anomalies detected.")
+
+
+
+import numpy as np
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Embedding, LSTM, Dense
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+from sklearn.model_selection import train_test_split
+
+# --- 1. Mock Data: API Call Sequences ---
+# In a real scenario, this data is extracted from dynamic analysis of executables.
+# Spyware behavior is often characterized by sequences like:
+# [Access File] -> [Read Data] -> [Network Connect] -> [Send Data]
+
+# 100 Unique API Calls (Vocabulary Size)
+VOCABULARY_SIZE = 100 
+MAX_SEQUENCE_LENGTH = 50 # Maximum length of API call sequence to consider
+
+# Mock Malicious/Spyware Sequences (e.g., access, read, network)
+malicious_sequences = [
+    [5, 12, 88, 92, 45, 10, 88], # Suspicious network activity (88, 92)
+    [3, 10, 80, 5, 2, 88, 92, 10, 30, 88],
+    [1, 2, 3, 4, 88, 92, 5, 6, 7],
+    [12, 12, 12, 12, 12, 88, 92, 1, 2],
+]
+
+# Mock Benign Sequences (e.g., standard file/process operations)
+benign_sequences = [
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    [15, 20, 25, 30, 35, 40],
+    [50, 51, 52, 53, 54, 55, 56, 57],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [40, 41, 42, 43, 44, 45, 46],
+]
+
+# Create dataset and labels
+sequences = malicious_sequences * 500 + benign_sequences * 500 # Balance the dataset (1000 total instances)
+labels = [1] * 500 + [0] * 500 # 1 for Malicious, 0 for Benign
+
+# --- 2. Data Preprocessing for Deep Learning ---
+
+# Pad sequences to ensure uniform length for the LSTM input layer
+# Pre-padding ensures the model focuses on the sequence end (the most recent behavior)
+X = pad_sequences(sequences, maxlen=MAX_SEQUENCE_LENGTH, padding='pre', truncating='pre')
+y = np.array(labels)
+
+# Split data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+print(f"Training sequences shape: {X_train.shape}")
+print(f"Training labels shape: {y_train.shape}")
+
+# --- 3. Build the LSTM Model Architecture ---
+# [attachment_0](attachment)
+
+embedding_dim = 16 # Dimension for the vector representation of each API call
+
+model = Sequential([
+    # 1. Embedding Layer: Converts integer API codes into dense vectors for DL
+    Embedding(VOCABULARY_SIZE + 1, embedding_dim, input_length=MAX_SEQUENCE_LENGTH), 
+    
+    # 2. LSTM Layer: Captures temporal dependencies (the *order* of API calls)
+    LSTM(units=64, dropout=0.2, recurrent_dropout=0.2),
+    
+    # 3. Dense Layer: Standard neural network layer for classification
+    Dense(32, activation='relu'),
+    
+    # 4. Output Layer: Single neuron with sigmoid for binary classification (0 or 1)
+    Dense(1, activation='sigmoid')
+])
+
+# --- 4. Compile and Train the Model ---
+model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+print("\n--- Model Summary ---")
+model.summary()
+
+# Train the model
+# Using instances=True in accordance with user preferences
+history = model.fit(
+    X_train, y_train,
+    epochs=10, 
+    batch_size=32, 
+    validation_data=(X_test, y_test),
+    verbose=0 # Quiet training for clean output
+)
+
+# --- 5. Evaluate and Test ---
+loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
+print(f"\n--- Model Evaluation ---")
+print(f"Test Accuracy: **{accuracy:.4f}**")
+print(f"Test Loss: {loss:.4f}")
+
+# Example Prediction on a new, highly suspicious sequence
+new_suspicious_sequence = [5, 12, 88, 92, 45, 10, 88, 92, 92, 88, 92]
+new_sequence_padded = pad_sequences([new_suspicious_sequence], maxlen=MAX_SEQUENCE_LENGTH, padding='pre')
+prediction = model.predict(new_sequence_padded)[0][0]
+
+print("\n--- New Instance Prediction (Probability of Malicious) ---")
+print(f"Suspicious sequence probability: **{prediction:.4f}**")
+if prediction > 0.5:
+    print("Classification: **MALICIOUS (Potential Spyware)**")
+else:
+    print("Classification: BENIGN")
