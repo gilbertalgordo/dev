@@ -1,0 +1,247 @@
+// AShockwaveProjectile.h (Simplified)
+#pragma once
+#include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "AShockwaveProjectile.generated.h"
+
+UCLASS()
+class MYPROJECT_API AShockwaveProjectile : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    AShockwaveProjectile();
+
+protected:
+    UPROPERTY(VisibleAnywhere, Category = "Components")
+    class USphereComponent* CollisionComponent;
+
+    UPROPERTY(VisibleAnywhere, Category = "Components")
+    class UProjectileMovementComponent* ProjectileMovement;
+    
+    // Configurable variables for the shockwave effect
+    UPROPERTY(EditAnywhere, Category = "Shockwave")
+    float ShockwaveRadius = 500.0f; 
+
+    UPROPERTY(EditAnywhere, Category = "Shockwave")
+    float ShockwaveForce = 2000.0f; // Force of the impulse
+    
+    virtual void BeginPlay() override;
+    
+    // Function bound to the collision component's hit event
+    UFUNCTION()
+    void OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit);
+
+private:
+    void ApplyShockwaveEffect(const FVector& HitLocation);
+};
+
+
+
+// AShockwaveProjectile.cpp (Simplified)
+#include "AShockwaveProjectile.h"
+#include "Components/SphereComponent.h"
+#include "GameFramework/ProjectileMovementComponent.h"
+#include "Kismet/GameplayStatics.h"
+
+AShockwaveProjectile::AShockwaveProjectile()
+{
+    // ... Component setup (CollisionComponent, ProjectileMovement) ...
+    // Setting up the OnHit binding
+    CollisionComponent->OnComponentHit.AddDynamic(this, &AShockwaveProjectile::OnHit);
+    InitialLifeSpan = 5.0f; // Destroy after 5 seconds if no hit
+}
+
+void AShockwaveProjectile::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
+{
+    // Don't do anything if we hit the weapon owner
+    if (OtherActor && (OtherActor != GetInstigator()))
+    {
+        // 1. Trigger the shockwave effect
+        ApplyShockwaveEffect(Hit.Location);
+        
+        // 2. Destroy the projectile (and optionally spawn a visual/sound FX)
+        Destroy();
+    }
+}
+
+void AShockwaveProjectile::ApplyShockwaveEffect(const FVector& HitLocation)
+{
+    // A simplified way to apply a radial impulse to all physics objects
+    // This is the core 'shockwave' function
+    UGameplayStatics::ApplyRadialImpulse(
+        GetWorld(), 
+        ShockwaveForce,            // Impulse strength
+        HitLocation,               // Center of the impulse
+        ShockwaveRadius,           // Radius of effect
+        1.0f,                      // Falloff (e.g., 1.0 = linear)
+        bVelChange = true          // Apply as a velocity change (bypasses mass)
+    );
+    
+    // TODO: Add code to apply damage to non-physics objects (e.g., players) 
+    // using UGameplayStatics::ApplyRadialDamage.
+}
+
+
+
+// AAdvancedShockwaveProjectile.h (Key Advanced Properties)
+#pragma once
+// ... includes ...
+
+UCLASS()
+class MYPROJECT_API AAdvancedShockwaveProjectile : public AActor
+{
+    // ... GENERATED_BODY() and basic components from previous example ...
+    
+protected:
+    // **Damage and Force Configuration**
+    UPROPERTY(EditAnywhere, Category = "Shockwave|Physics")
+    float BaseImpulseForce = 3500.0f; // Stronger initial force
+    
+    UPROPERTY(EditAnywhere, Category = "Shockwave|Physics")
+    float UpwardLiftFactor = 0.5f; // Multiplier for vertical impulse to launch enemies
+    
+    UPROPERTY(EditAnywhere, Category = "Shockwave|Physics")
+    float ShockwaveMaxRadius = 1000.0f; 
+    
+    UPROPERTY(EditAnywhere, Category = "Shockwave|Damage")
+    float BaseDamage = 150.0f;
+    
+    UPROPERTY(EditAnywhere, Category = "Shockwave|Damage")
+    float DamageFalloffExponent = 2.0f; // Higher exponent means sharper falloff (e.g., inverse square)
+
+private:
+    // New function handles the complex falloff logic
+    void ApplyAdvancedShockwaveEffect(const FVector& HitLocation);
+    
+    // Calculates the force/damage based on distance, incorporating scientific falloff.
+    float CalculateForceAndDamage(float Distance, float MaxValue, float MaxRange, float Exponent) const;
+
+    // ... OnHit function remains the same, calling ApplyAdvancedShockwaveEffect ...
+};
+
+
+
+// AAdvancedShockwaveProjectile.cpp (Advanced Logic)
+#include "AAdvancedShockwaveProjectile.h"
+#include "Kismet/GameplayStatics.h"
+#include "PhysicsEngine/RadialForceComponent.h" // Optional: For persistent effects
+
+// ... Constructor and OnHit function ...
+
+float AAdvancedShockwaveProjectile::CalculateForceAndDamage(float Distance, float MaxValue, float MaxRange, float Exponent) const
+{
+    // Clamp the distance to ensure it's within the effect radius
+    float ClampedDistance = FMath::Clamp(Distance, 0.0f, MaxRange);
+
+    // Normalize the distance (0 at center, 1 at max range)
+    float NormalizedDistance = ClampedDistance / MaxRange;
+
+    // Use a power function for exponential falloff
+    // Result = MaxValue * (1 - NormalizedDistance^Exponent)
+    // For Exponent = 2.0, this simulates a rough inverse-square law style decay for pressure/force
+    float FalloffMultiplier = 1.0f - FMath::Pow(NormalizedDistance, Exponent);
+
+    return MaxValue * FalloffMultiplier;
+}
+
+void AAdvancedShockwaveProjectile::ApplyAdvancedShockwaveEffect(const FVector& HitLocation)
+{
+    // 1. Trace for all potential targets in the max radius
+    TArray<FHitResult> HitResults;
+    FCollisionQueryParams Params;
+    Params.AddIgnoredActor(this); // Ignore the projectile itself
+    
+    GetWorld()->SweepMultiByChannel(
+        HitResults,
+        HitLocation,
+        HitLocation,
+        FQuat::Identity,
+        ECC_WorldStatic, // Use a relevant collision channel
+        FCollisionShape::MakeSphere(ShockwaveMaxRadius),
+        Params
+    );
+
+    // 2. Iterate through targets and apply custom force/damage
+    for (const FHitResult& Hit : HitResults)
+    {
+        AActor* TargetActor = Hit.GetActor();
+        UPrimitiveComponent* Primitive = Hit.GetComponent();
+
+        if (TargetActor && Primitive)
+        {
+            float Distance = FVector::Dist(HitLocation, TargetActor->GetActorLocation());
+            
+            // Calculate force and damage based on falloff
+            float AppliedForce = CalculateForceAndDamage(Distance, BaseImpulseForce, ShockwaveMaxRadius, 2.0f);
+            float AppliedDamage = CalculateForceAndDamage(Distance, BaseDamage, ShockwaveMaxRadius, DamageFalloffExponent);
+
+            // **A. Apply Custom Physics Impulse (Launch Effect)**
+            if (Primitive->IsSimulatingPhysics())
+            {
+                // Direction vector: Radial from center to target
+                FVector ImpulseDirection = (TargetActor->GetActorLocation() - HitLocation).GetSafeNormal();
+                
+                // Add an upward vector component for dramatic lift (anti-gravity effect)
+                FVector FinalImpulse = (ImpulseDirection * AppliedForce) + (FVector::UpVector * AppliedForce * UpwardLiftFactor);
+                
+                Primitive->AddImpulse(FinalImpulse, NAME_None, bVelChange = true);
+            }
+
+            // **B. Apply Damage**
+            UGameplayStatics::ApplyPointDamage(
+                TargetActor,
+                AppliedDamage,
+                (TargetActor->GetActorLocation() - HitLocation).GetSafeNormal(), // Direction
+                Hit,
+                GetInstigatorController(),
+                this,
+                UDamageType::StaticClass() // Use a specific UDamageType for shockwave if needed
+            );
+        }
+    }
+    
+    // 3. Spawn visual and sound effects
+    // [attachment_0](attachment)
+}
+
+
+
+
+// AShockwaveRifle.cpp (Charge Logic Snippet)
+void AShockwaveRifle::StartSecondaryFire()
+{
+    bIsCharging = true;
+    CurrentChargeTime = 0.0f;
+    GetWorld()->GetTimerManager().SetTimer(ChargeHandle, this, &AShockwaveRifle::UpdateCharge, 0.01f, true);
+}
+
+void AShockwaveRifle::UpdateCharge()
+{
+    // Clamp the charge time
+    CurrentChargeTime = FMath::Clamp(CurrentChargeTime + 0.01f, 0.0f, MaxChargeTime);
+    
+    // Update HUD/Visuals: Scale a particle effect or set a dynamic material parameter
+    float ChargeRatio = CurrentChargeTime / MaxChargeTime;
+    // Notify HUD: Send ChargeRatio to the HUD to update a charge bar (as requested).
+    
+    if (CurrentChargeTime >= MaxChargeTime)
+    {
+        StopSecondaryFire(); // Auto-fire at max charge
+    }
+}
+
+void AShockwaveRifle::StopSecondaryFire()
+{
+    if (bIsCharging)
+    {
+        GetWorld()->GetTimerManager().ClearTimer(ChargeHandle);
+        bIsCharging = false;
+        
+        // Finalize charge for the projectile
+        float ProjectilePower = FMath::Lerp(MinProjectilePower, MaxProjectilePower, CurrentChargeTime / MaxChargeTime);
+        
+        // Spawn and launch AAdvancedShockwaveProjectile with calculated power
+        // ... (Code to spawn the projectile with the final power variable) ...
+    }
+}
