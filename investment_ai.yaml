@@ -1,0 +1,313 @@
+import pandas as pd
+import numpy as np
+import yfinance as yf
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, classification_report
+
+# --- Configuration ---
+TICKER = 'MSFT' # Microsoft stock ticker
+START_DATE = '2015-01-01'
+END_DATE = '2024-01-01'
+
+
+
+def create_features(df):
+    """
+    Creates technical indicator features for the model.
+    """
+    # Simple Moving Averages
+    df['SMA_10'] = df['Close'].rolling(window=10).mean()
+    df['SMA_50'] = df['Close'].rolling(window=50).mean()
+    
+    # Relative Strength Index (RSI) - a common momentum indicator
+    # (A simplified calculation for example purposes)
+    delta = df['Close'].diff()
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+    avg_gain = gain.rolling(window=14).mean()
+    avg_loss = loss.rolling(window=14).mean()
+    rs = avg_gain / avg_loss
+    df['RSI'] = 100 - (100 / (1 + rs))
+    
+    # Target Variable: 
+    # Will the price go up (1) or down (0) tomorrow?
+    # Shift(-1) moves the price change from the future to the current row.
+    df['Target'] = (df['Close'].shift(-1) > df['Close']).astype(int)
+    
+    # Drop NaNs created by rolling windows (SMA_50 will have 49 NaNs)
+    df.dropna(inplace=True)
+    
+    return df
+
+# --- Data Fetching and Feature Creation ---
+data = yf.download(TICKER, start=START_DATE, end=END_DATE)
+data = create_features(data)
+
+# Show the first few rows of the processed data
+print(f"✅ Data for {TICKER} fetched and prepared.")
+print(data.head())
+
+
+
+# --- Define Features (X) and Target (y) ---
+# We use the engineered features as our inputs
+features = ['Open', 'High', 'Low', 'Close', 'Volume', 'SMA_10', 'SMA_50', 'RSI']
+X = data[features]
+y = data['Target']
+
+# --- Split Data for Training and Testing ---
+# Use a time-based split (e.g., 80% for training, 20% for testing)
+split_point = int(len(data) * 0.8)
+X_train, X_test = X[:split_point], X[split_point:]
+y_train, y_test = y[:split_point], y[split_point:]
+
+# --- Initialize and Train the Model ---
+# RandomForestClassifier is a strong classifier for financial data.
+# We want clear voices, so we use a model known for robustness.
+model = RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced')
+model.fit(X_train, y_train)
+
+print("\n🧠 Investment AI Model Training Complete.")
+
+# --- Evaluate the Model ---
+y_pred = model.predict(X_test)
+
+print("\n--- Model Evaluation (Accuracy and Report) ---")
+print(f"Accuracy: {accuracy_score(y_test, y_pred):.2f}")
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred))
+
+
+
+
+# --- Strategy: Simple Buy/Sell based on Model Prediction ---
+
+# 1. Create a Series of predictions for the test period
+data_test = data.iloc[split_point:].copy()
+data_test['Predicted_Signal'] = model.predict(X_test)
+
+# 2. Simulate Portfolio Returns
+# If the model predicts an 'Up' day (1), we 'buy' and assume we get the next day's return.
+# The 'Return' column is calculated as the daily percentage change.
+data_test['Return'] = data_test['Close'].pct_change().shift(-1)
+data_test['Strategy_Return'] = data_test['Predicted_Signal'] * data_test['Return']
+
+# 3. Calculate Cumulative Returns
+data_test['Cumulative_Market_Return'] = (1 + data_test['Return']).cumprod()
+data_test['Cumulative_Strategy_Return'] = (1 + data_test['Strategy_Return']).cumprod()
+
+print("\n📈 Backtesting Results:")
+print(f"  Final Market Return: {data_test['Cumulative_Market_Return'].iloc[-1]:.2f}x")
+print(f"  Final Strategy Return: {data_test['Cumulative_Strategy_Return'].iloc[-1]:.2f}x")
+print("\nFirst 5 Strategy Returns:")
+print(data_test[['Return', 'Strategy_Return', 'Cumulative_Strategy_Return']].head())
+
+
+
+import pandas as pd
+import numpy as np
+import yfinance as yf
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+
+# --- Configuration ---
+TICKER = 'TSLA'
+START_DATE = '2018-01-01'
+END_DATE = '2024-01-01'
+LOOKBACK_DAYS = 60 # Time step: how many past days to look at for prediction
+FORECAST_FEATURE = 'Close' # The feature we want to predict
+
+# --- 1. Data Preparation and Scaling ---
+data = yf.download(TICKER, start=START_DATE, end=END_DATE)
+features = ['Open', 'High', 'Low', 'Close', 'Volume']
+df = data[features]
+
+# Scale the data to be between 0 and 1 (Crucial for Neural Networks)
+scaler = MinMaxScaler(feature_range=(0, 1))
+scaled_data = scaler.fit_transform(df)
+
+# --- 2. Create Time-Series Dataset ---
+def create_dataset(dataset, lookback_days=LOOKBACK_DAYS):
+    """Reshapes data into sequences for LSTM training."""
+    X, Y = [], []
+    # Find the index of the feature we are trying to predict (e.g., 'Close')
+    forecast_idx = df.columns.get_loc(FORECAST_FEATURE)
+    
+    for i in range(len(dataset) - lookback_days):
+        # X: A window of 'lookback_days' of all features
+        X.append(dataset[i:(i + lookback_days), :])
+        # Y: The next day's forecast feature (e.g., Close price)
+        Y.append(dataset[i + lookback_days, forecast_idx])
+    return np.array(X), np.array(Y)
+
+# Create the sequence data
+X, y = create_dataset(scaled_data)
+
+# Reshape Y for later inverse scaling
+y = y.reshape(-1, 1)
+
+# Split data (time-based split is essential for time series)
+train_size = int(len(X) * 0.8)
+X_train, X_test = X[:train_size], X[train_size:]
+y_train, y_test = y[:train_size], y[train_size:]
+
+# --- 3. Build the Stacked LSTM Model ---
+# This architecture is designed to capture deep temporal patterns
+model = Sequential()
+# Stacked LSTM layers capture complex, hierarchical temporal dependencies.
+model.add(LSTM(units=50, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])))
+model.add(Dropout(0.2)) # Dropout helps prevent overfitting
+model.add(LSTM(units=50, return_sequences=False)) # Last LSTM layer doesn't return sequence
+model.add(Dropout(0.2))
+model.add(Dense(units=1)) # Output layer for the single price prediction
+
+# Compile the model
+model.compile(optimizer='adam', loss='mean_squared_error')
+print("🧠 Stacked LSTM Model Architecture:")
+print(model.summary())
+
+# --- 4. Train and Evaluate ---
+print("\n--- Training Model (Patience is a virtue) ---")
+model.fit(X_train, y_train, epochs=25, batch_size=32, verbose=0)
+
+# Make predictions
+predictions_scaled = model.predict(X_test)
+
+# Inverse transform the predictions to the original price scale
+# NOTE: We need a temporary scaler for the target variable to inverse transform correctly
+temp_scaler = MinMaxScaler(feature_range=(0, 1))
+temp_scaler.fit(df[[FORECAST_FEATURE]]) # Only fit on the target feature's range
+predictions = temp_scaler.inverse_transform(predictions_scaled)
+actual_prices = temp_scaler.inverse_transform(y_test)
+
+print("\n✅ LSTM Forecasting Complete.")
+print(f"First 5 Actual Prices: {actual_prices[:5].flatten()}")
+print(f"First 5 Predicted Prices: {predictions[:5].flatten()}")
+
+
+
+# Libraries needed: stable_baselines3, gym, numpy, pandas
+
+import numpy as np
+import pandas as pd
+import gym
+from stable_baselines3 import PPO  # Proximal Policy Optimization (a robust DRL algorithm)
+
+# --- 1. Define the Trading Environment (The Market) ---
+# This is the most complex part of DRL for trading.
+class StockTradingEnv(gym.Env):
+    """
+    A custom OpenAI Gym Environment for Stock Trading.
+    The agent interacts with this environment to learn a strategy.
+    """
+    def __init__(self, df, lookback_window=10):
+        super(StockTradingEnv, self).__init__()
+        self.df = df.reset_index()
+        self.current_step = lookback_window
+        self.lookback_window = lookback_window
+        self.initial_balance = 100000 # Starting capital
+        self.balance = self.initial_balance
+        self.shares_held = 0
+        self.max_shares = 1000
+        
+        # Action Space: 0=Hold, 1=Buy, 2=Sell (Discrete actions)
+        self.action_space = gym.spaces.Discrete(3)
+        
+        # Observation Space (State): Market data + Agent's portfolio info
+        # Shape: (lookback_window * num_features + 2)
+        num_features = len(df.columns) - 1 # Exclude 'Date'
+        self.observation_space = gym.spaces.Box(
+            low=0, high=np.inf, 
+            shape=(lookback_window * num_features + 2,), 
+            dtype=np.float32
+        )
+
+    def _get_state(self):
+        """Returns the current state (Observation) for the agent."""
+        # 1. Market Data (Normalized prices/indicators from the lookback window)
+        window = self.df.iloc[self.current_step - self.lookback_window:self.current_step]
+        
+        # 2. Portfolio State (Current cash and shares)
+        portfolio_state = np.array([self.balance / self.initial_balance, # Normalized balance
+                                    self.shares_held / self.max_shares]) # Normalized shares held
+
+        # Flatten market data and concatenate with portfolio state
+        market_data_flat = window.drop(columns=['Date']).values.flatten()
+        
+        return np.concatenate([market_data_flat, portfolio_state]).astype(np.float32)
+
+    def step(self, action):
+        """Executes one trading step (Buy/Sell/Hold) and calculates the reward."""
+        self.current_step += 1
+        
+        # Price at the end of the day
+        current_price = self.df.loc[self.current_step, 'Close']
+
+        # Previous portfolio value for reward calculation
+        prev_net_worth = self.balance + self.shares_held * self.df.loc[self.current_step - 1, 'Close']
+
+        # --- Execute Action ---
+        if action == 1: # Buy (Attempt to buy 10 shares)
+            shares_to_buy = min(10, self.max_shares - self.shares_held)
+            cost = shares_to_buy * current_price
+            if cost <= self.balance:
+                self.balance -= cost
+                self.shares_held += shares_to_buy
+                
+        elif action == 2: # Sell (Attempt to sell all shares)
+            revenue = self.shares_held * current_price
+            self.balance += revenue
+            self.shares_held = 0
+            
+        # Action 0 is Hold (do nothing)
+
+        # --- Calculate Reward (Change in Portfolio Net Worth) ---
+        current_net_worth = self.balance + self.shares_held * current_price
+        reward = (current_net_worth - prev_net_worth) / prev_net_worth * 100 # Percentage change
+
+        # --- Determine Done State ---
+        done = self.current_step >= len(self.df) - 1
+
+        # Truncate is True if episode is naturally finished by reaching end of data
+        truncated = self.current_step >= len(self.df) - 1
+
+        # Get next state
+        next_state = self._get_state() if not done else np.zeros_like(self.observation_space.low)
+        
+        # Return Gym standard tuple
+        return next_state, reward, done, truncated, {}
+
+    def reset(self, seed=None, options=None):
+        """Resets the environment to its initial state."""
+        super().reset(seed=seed)
+        self.current_step = self.lookback_window
+        self.balance = self.initial_balance
+        self.shares_held = 0
+        return self._get_state(), {}
+
+# --- 2. DRL Agent Training ---
+# NOTE: To run this, you need a preprocessed DataFrame `df` with features.
+# You would need to define features (like SMA, RSI, etc.) and normalize them *before* passing them to the Env.
+# df_for_drl = create_features_and_normalize(yf.download(...)) 
+#
+# env = StockTradingEnv(df=df_for_drl)
+#
+# # PPO (Proximal Policy Optimization) is a stable and high-performing DRL algorithm
+# model = PPO("MlpPolicy", env, verbose=0)
+#
+# print("🚀 DRL Agent Training Starting...")
+# model.learn(total_timesteps=50000)
+# print("✅ DRL Agent Training Complete.")
+
+# --- 3. Testing/Deployment ---
+# obs, info = env.reset()
+# while True:
+#     action, _states = model.predict(obs, deterministic=True)
+#     obs, reward, done, truncated, info = env.step(action)
+#     # Log portfolio, action, and reward
+#     if done or truncated:
+#         break
+
+# Final Agent Net Worth: env.balance + env.shares_held * final_price
