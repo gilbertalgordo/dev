@@ -1,0 +1,267 @@
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score
+
+# --- 1. SIMULATED HISTORICAL DATA ---
+
+# Features: [CPU_Cores, RAM_GB, Disk_Free_GB, Network_Latency_ms]
+# Target: [Update_Success (1) or Failure (0)]
+historical_data = np.array([
+    [4, 8, 100, 50, 1],   # Good system, successful update
+    [2, 4, 20, 150, 0],   # Poor system, failed update
+    [8, 16, 250, 30, 1],  # Excellent system, successful update
+    [4, 8, 50, 80, 1],    # Mid-range, successful update
+    [2, 2, 10, 200, 0],   # Very poor, failed update
+    [6, 12, 150, 45, 1],  # Good system, successful update
+    [4, 4, 30, 100, 0],   # Mid-range with low RAM/Disk, failed update
+])
+
+X = historical_data[:, :-1]  # Features
+y = historical_data[:, -1]   # Target
+
+# --- 2. TRAIN THE AI MODEL ---
+
+# Split data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+# Choose and train the ML model (Logistic Regression for classification)
+model = LogisticRegression()
+model.fit(X_train, y_train)
+
+# (Optional: Evaluate model accuracy)
+# y_pred = model.predict(X_test)
+# print(f"Model Accuracy: {accuracy_score(y_test, y_pred):.2f}")
+
+# --- 3. AI-DRIVEN PREDICTION/DECISION LOGIC ---
+
+def predict_update_success(cpu_cores, ram_gb, disk_free_gb, network_latency_ms):
+    """
+    Uses the trained AI model to predict if an update will succeed on a new system.
+    """
+    # Format the new system data for the model
+    new_system_features = np.array([[cpu_cores, ram_gb, disk_free_gb, network_latency_ms]])
+
+    # Get the prediction (0=Failure, 1=Success)
+    prediction = model.predict(new_system_features)[0]
+
+    # Get the probability of success
+    success_probability = model.predict_proba(new_system_features)[0][1]
+
+    # Convert prediction to an action and decision
+    if prediction == 1 and success_probability >= 0.8:
+        action = "**Deploy Update**"
+        decision = f"High probability of success ({success_probability*100:.1f}%)"
+    else:
+        action = "**Hold/Block Update**"
+        decision = f"Low probability of success ({success_probability*100:.1f}%) or predicted failure."
+
+    print(f"\n--- AI Update Decision for System ---")
+    print(f"System Specs: {cpu_cores} Cores, {ram_gb}GB RAM, {disk_free_gb}GB Free, {network_latency_ms}ms Latency")
+    print(f"AI Action: {action}")
+    print(f"Reasoning: {decision}")
+    print("-----------------------------------")
+    return action
+
+# --- 4. INSTANCES OF USAGE ---
+
+# Instance 1: A robust system
+predict_update_success(cpu_cores=8, ram_gb=16, disk_free_gb=300, network_latency_ms=20)
+
+# Instance 2: A weak system
+predict_update_success(cpu_cores=2, ram_gb=3, disk_free_gb=15, network_latency_ms=180)
+
+# Instance 3: A borderline system
+predict_update_success(cpu_cores=4, ram_gb=8, disk_free_gb=40, network_latency_ms=60)
+
+
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
+import random
+from collections import deque
+
+# --- Define the Environment ---
+# The environment simulates the OS fleet and the outcomes of update actions.
+class OSUpdateEnvironment:
+    def __init__(self, fleet_size=1000):
+        # State: [Fleet_Health, Update_Failure_Rate_P7D, Last_Update_Phase_Size]
+        self.state_space = 3
+        # Actions: 0: HOLD, 1: CANARY_5_PERCENT, 2: FULL_ROLLOUT_100_PERCENT
+        self.action_space = 3
+        self.fleet_health = 1.0 # 1.0 is 100% healthy
+        self.failure_rate_p7d = 0.0
+        self.last_phase_size = 0.0
+
+    def get_state(self):
+        # Normalized state vector
+        return np.array([self.fleet_health, self.failure_rate_p7d, self.last_phase_size])
+
+    def step(self, action):
+        """Executes an action and returns new state, reward, and done status."""
+        phase_size_map = {0: 0.0, 1: 0.05, 2: 1.0}
+        phase_size = phase_size_map[action]
+
+        # Simulate update outcome (scientific reasoning based on current failure rate)
+        # Higher current failure rate means higher risk of new failures
+        simulated_risk = self.failure_rate_p7d * 0.5 + (1 - self.fleet_health) * 0.3
+        
+        # New failures are proportional to phase size and risk
+        new_failures = phase_size * random.uniform(0, 0.2) * simulated_risk * 10 
+        
+        # Calculate Reward (Maximize Success, Minimize Failures, Favor Fast Deployment)
+        if action == 0: # HOLD
+            reward = -5.0  # Penalty for delay
+        elif action == 1: # CANARY_5_PERCENT
+            reward = 1.0 - new_failures * 10  # Moderate reward/penalty
+        elif action == 2: # FULL_ROLLOUT_100_PERCENT
+            if new_failures < 0.1:
+                reward = 10.0  # High reward for fast, safe rollout
+            else:
+                reward = -50.0  # Severe penalty for major failure
+
+        # Update environment metrics
+        self.fleet_health = max(0.8, self.fleet_health - new_failures * 0.01) # Fleet health degrades on failures
+        self.failure_rate_p7d = (self.failure_rate_p7d * 6 + new_failures) / 7 # Exponential moving average
+        self.last_phase_size = phase_size
+        
+        # The episode is 'done' if the fleet is fully healthy OR critically damaged
+        done = self.fleet_health > 0.99 or self.fleet_health < 0.85
+        
+        return self.get_state(), reward, done
+        
+# --- Define the Deep Q-Network (DQN) Agent ---
+class DQN(nn.Module):
+    def __init__(self, state_space, action_space):
+        super(DQN, self).__init__()
+        # Simple feed-forward network for Q-value approximation
+        self.net = nn.Sequential(
+            nn.Linear(state_space, 64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, action_space) # Output Q-value for each action
+        )
+
+    def forward(self, state):
+        return self.net(state)
+
+
+
+# --- Training Parameters and Utilities ---
+env = OSUpdateEnvironment()
+model = DQN(env.state_space, env.action_space)
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+loss_fn = nn.MSELoss()
+memory = deque(maxlen=10000) # Experience Replay Buffer
+
+GAMMA = 0.99  # Discount factor for future rewards
+EPS_START = 1.0
+EPS_END = 0.01
+EPS_DECAY = 500
+
+def select_action(state, steps_done):
+    """Epsilon-greedy strategy for exploration vs. exploitation."""
+    epsilon = EPS_END + (EPS_START - EPS_END) * np.exp(-1. * steps_done / EPS_DECAY)
+    
+    if random.random() > epsilon:
+        with torch.no_grad():
+            state_tensor = torch.tensor(state, dtype=torch.float32)
+            # Exploit: Choose the action with the highest predicted Q-value
+            return model(state_tensor).argmax().item()
+    else:
+        # Explore: Choose a random action
+        return random.randrange(env.action_space)
+
+def optimize_model():
+    """Performs one step of optimization on the DQN."""
+    if len(memory) < 100: # Wait until memory is full enough
+        return
+    
+    # Sample a batch of experiences (state, action, reward, next_state, done)
+    transitions = random.sample(memory, 64)
+    batch = list(zip(*transitions))
+
+    state_batch = torch.tensor(np.array(batch[0]), dtype=torch.float32)
+    action_batch = torch.tensor(batch[1], dtype=torch.int64).unsqueeze(1)
+    reward_batch = torch.tensor(batch[2], dtype=torch.float32)
+    next_state_batch = torch.tensor(np.array(batch[3]), dtype=torch.float32)
+    done_batch = torch.tensor(batch[4], dtype=torch.float32)
+
+    # Compute Q(s_t, a) - the model predicts Q for all actions, we select the one taken
+    state_action_values = model(state_batch).gather(1, action_batch)
+
+    # Compute V(s_{t+1}) = max_a Q(s_{t+1}, a) for the next state
+    next_state_values = model(next_state_batch).max(1)[0].detach()
+    
+    # Compute the expected Q values (Bellman Equation)
+    # Expected Q = Reward + GAMMA * V(s_{t+1}) * (1 - done_flag)
+    expected_state_action_values = reward_batch + (GAMMA * next_state_values * (1 - done_batch))
+
+    # Compute Loss
+    loss = loss_fn(state_action_values.squeeze(), expected_state_action_values)
+
+    # Optimize the model
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+# --- RL Training Loop (Conceptual) ---
+num_episodes = 500
+steps_done = 0
+
+# for episode in range(num_episodes):
+#     state = env.reset() # Not implemented in the simple class above, but assumed in a real RL env
+#     done = False
+#     while not done:
+#         action = select_action(state, steps_done)
+#         next_state, reward, done = env.step(action)
+#         memory.append((state, action, reward, next_state, done))
+#         state = next_state
+#         optimize_model()
+#         steps_done += 1
+
+
+
+ACTION_LABELS = {
+    0: "HOLD Update (Observe Fleet)",
+    1: "CANARY Rollout (5% of Instances)",
+    2: "FULL Rollout (100% of Instances)"
+}
+
+def get_rl_decision(current_fleet_health, failure_rate_p7d):
+    """
+    Uses the trained DQN model to recommend the optimal update strategy.
+    This assumes the model has been trained and saved.
+    """
+    # Create the current state vector (last phase size is assumed 0 for a new decision cycle)
+    current_state = np.array([current_fleet_health, failure_rate_p7d, 0.0])
+    
+    # Get Q-values from the trained model
+    state_tensor = torch.tensor(current_state, dtype=torch.float32)
+    with torch.no_grad():
+        q_values = model(state_tensor)
+    
+    # The optimal action is the one with the highest Q-value
+    optimal_action_index = q_values.argmax().item()
+    optimal_action_label = ACTION_LABELS[optimal_action_index]
+    
+    print(f"\n--- RL Update Decision Instance ---")
+    print(f"Current Fleet Health: {current_fleet_health*100:.1f}%")
+    print(f"Past 7-Day Failure Rate: {failure_rate_p7d*100:.2f}%")
+    print(f"AI Decision (Q-Values: {q_values.tolist()}): {optimal_action_label}")
+    print("---------------------------------")
+    return optimal_action_label
+
+# --- INSTANCES OF USAGE ---
+
+# Instance 1: High Health, Low Failures -> Go for aggressive rollout
+get_rl_decision(current_fleet_health=0.98, failure_rate_p7d=0.001)
+
+# Instance 2: Moderate Health, Recent Failures -> Be cautious
+get_rl_decision(current_fleet_health=0.90, failure_rate_p7d=0.05)
+
+# Instance 3: Critical State, High Failures -> Hold and investigate
+get_rl_decision(current_fleet_health=0.86, failure_rate_p7d=0.1)
