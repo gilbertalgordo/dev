@@ -1,0 +1,117 @@
+import datetime
+
+# 1. Get the current datetime object
+now = datetime.datetime.now()
+
+# 2. Print the datetime object in its default format (includes microseconds)
+print(f"Default Datetime Object: {now}")
+
+# 3. Format the date and time into a clean string (Year-Month-Day Hour:Minute:Second)
+# The strftime() method allows for custom formatting.
+formatted_string = now.strftime("%Y-%m-%d %H:%M:%S")
+
+print(f"Formatted Date and Time: {formatted_string}")
+
+# 4. Access individual components
+print(f"Current Year: {now.year}")
+print(f"Current Hour: {now.hour}")
+
+
+
+from datetime import datetime, timezone
+
+# Get a timezone-aware datetime object for UTC
+utc_now = datetime.now(timezone.utc)
+
+print(f"UTC Timezone-Aware Datetime: {utc_now}")
+
+
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+
+# --- Data Simulation (Replace with your actual data loading) ---
+# Create a time-series with a trend and strong monthly seasonality
+np.random.seed(42)
+dates = pd.date_range(start='2020-01-01', periods=48, freq='MS')
+trend = np.arange(48) * 2
+seasonal = 10 * np.sin(2 * np.pi * dates.month / 12)
+noise = np.random.normal(0, 5, 48)
+data = trend + seasonal + noise
+time_series = pd.Series(data, index=dates)
+
+# Create a DataFrame and set the time index
+df = pd.DataFrame({'Value': time_series})
+
+print("Sample Data Head:")
+print(df.head())
+print("----------------")
+
+
+
+# Define split point (e.g., last 12 months for testing)
+split_point = len(df) - 12 
+train_data = df[:split_point]
+test_data = df[split_point:]
+
+# 1. Define the SARIMAX Model Parameters (p, d, q) x (P, D, Q, s)
+# This is typically found through analysis (like ACF/PACF plots) or auto-functions.
+# Example parameters:
+# order=(1, 1, 1): Non-seasonal AR(1), Integrated(1), MA(1)
+# seasonal_order=(1, 1, 1, 12): Seasonal AR(1), Integrated(1), MA(1) with period 12 (months)
+order_params = (1, 1, 1)
+seasonal_params = (1, 1, 1, 12)
+
+# 2. Instantiate and Fit the Model
+# The 'enforce_stationarity=False' and 'enforce_invertibility=False' are often
+# used for initial experimentation with complex seasonal data.
+sarimax_model = SARIMAX(
+    train_data['Value'],
+    order=order_params,
+    seasonal_order=seasonal_params,
+    enforce_stationarity=False,
+    enforce_invertibility=False
+)
+
+print("Fitting SARIMAX model...")
+model_fit = sarimax_model.fit(disp=False)
+print("Model Fitting Complete.")
+
+# Display model summary (optional, shows coefficients and statistics)
+# print(model_fit.summary())
+
+
+
+# Get the forecast for the length of the test set
+n_steps = len(test_data)
+forecast_result = model_fit.get_forecast(steps=n_steps)
+forecast_mean = forecast_result.predicted_mean
+confidence_intervals = forecast_result.conf_int()
+
+# 4. Create a DataFrame for the forecast
+forecast_df = pd.DataFrame({
+    'Forecast': forecast_mean,
+    'Lower Bound': confidence_intervals.iloc[:, 0],
+    'Upper Bound': confidence_intervals.iloc[:, 1]
+})
+
+# 5. Visualization of the Results
+plt.figure(figsize=(12, 6))
+plt.plot(df.index, df['Value'], label='Observed Data', color='blue')
+plt.plot(forecast_df.index, forecast_df['Forecast'], label='SARIMAX Forecast', color='red')
+plt.fill_between(
+    forecast_df.index,
+    forecast_df['Lower Bound'],
+    forecast_df['Upper Bound'],
+    color='pink',
+    alpha=0.3,
+    label='95% Confidence Interval'
+)
+
+plt.title('SARIMAX Time Series Forecasting')
+plt.xlabel('Date')
+plt.ylabel('Value')
+plt.legend()
+plt.show()
