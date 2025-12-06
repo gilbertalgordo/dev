@@ -1,0 +1,260 @@
+{
+  "manifest_version": 3,
+  "name": "AI Content Summarizer",
+  "version": "1.0",
+  "description": "Summarize the current page using an external AI service.",
+  "permissions": ["activeTab", "scripting"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icon.png"
+  },
+  "host_permissions": [
+    "https://api.example-ai-service.com/*" 
+  ]
+}
+
+
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Summarizer</title>
+</head>
+<body>
+  <button id="summarizeButton">Summarize Page</button>
+  <p id="summaryOutput">Click to summarize...</p>
+  <script src="popup.js"></script>
+</body>
+</html>
+
+
+
+document.getElementById('summarizeButton').addEventListener('click', async () => {
+  const outputElement = document.getElementById('summaryOutput');
+  outputElement.textContent = 'Fetching summary...';
+
+  // Get the content of the current tab
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  
+  // Execute a script to extract the text content of the page
+  const result = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => document.body.innerText
+  });
+
+  const pageText = result[0].result;
+  
+  // --- This is where the AI logic happens ---
+  try {
+    const aiResponse = await fetch('YOUR_AI_API_ENDPOINT', { 
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer YOUR_API_KEY' // **Keep this secret!**
+      },
+      body: JSON.stringify({ 
+        prompt: `Please summarize the following text in three bullet points: ${pageText.substring(0, 10000)}`, // Truncate text for API limits
+        model: 'gemini-2.5-flash'
+      })
+    });
+
+    const data = await aiResponse.json();
+    // Assuming the API returns the summary text in data.summary
+    outputElement.textContent = data.summary || "Summary generation failed or response was empty.";
+
+  } catch (error) {
+    console.error("AI API Error:", error);
+    outputElement.textContent = `Error: Could not connect to AI service.`;
+  }
+});
+
+
+
+{
+  "manifest_version": 3,
+  "name": "Gemini Streaming Assistant",
+  "version": "1.0",
+  "description": "Uses the Gemini API to stream generative content based on page context.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": [
+    "<all_urls>" 
+  ],
+  "action": {
+    "default_title": "Stream AI Summary"
+  },
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module" 
+  }
+}
+
+
+
+// WARNING: NEVER store the API Key directly in client-side code for a real-world extension.
+// For production, the API call should be proxied through YOUR server.
+// For this example, we assume the API key is securely retrieved or set via a configuration page.
+const GEMINI_API_KEY = "YOUR_SECURELY_MANAGED_API_KEY"; 
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContentStream';
+
+// Listens for a message from the content script (running on the webpage)
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'streamContent') {
+    // We execute the streaming function here, which handles the response asynchronously
+    streamAIResponse(request.prompt, sender.tab.id);
+    // Return true to indicate we will send the response later (as a stream)
+    return true; 
+  }
+});
+
+/**
+ * Sends a prompt to the Gemini API and streams the response back to the content script.
+ * @param {string} prompt The text prompt derived from the webpage content.
+ * @param {number} tabId The ID of the tab to send streaming chunks to.
+ */
+async function streamAIResponse(prompt, tabId) {
+  try {
+    const response = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        config: {
+            // Setting the temperature for creative control
+            temperature: 0.2
+        }
+      })
+    });
+
+    if (!response.body) {
+      throw new Error("No response body received from Gemini API.");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        // Send a final message to the content script to indicate the stream is complete
+        chrome.tabs.sendMessage(tabId, { action: 'streamEnd' });
+        break;
+      }
+
+      // Process the streaming chunk
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split('\n');
+      
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const jsonText = line.substring(6);
+            const data = JSON.parse(jsonText);
+            
+            // Check for a text response chunk
+            const chunkText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            
+            if (chunkText) {
+              // Send the received text chunk to the active tab's content script
+              chrome.tabs.sendMessage(tabId, { 
+                action: 'streamChunk', 
+                text: chunkText 
+              });
+            }
+          } catch (e) {
+            console.error("Error parsing JSON chunk:", e, line);
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error("AI Streaming Error:", error);
+    // Send an error message back to the UI
+    chrome.tabs.sendMessage(tabId, { 
+        action: 'streamError', 
+        message: 'Could not connect to the AI service or an error occurred.'
+    });
+  }
+}
+
+
+
+// A function to extract a useful text block from the page
+function extractPageContent() {
+    // Advanced logic: look for main content elements, ignoring headers, footers, etc.
+    const mainElement = document.querySelector('main, article, .post-body');
+    const content = mainElement ? mainElement.innerText : document.body.innerText;
+    
+    // Simple truncation for a clean prompt and to avoid hitting context limits
+    return content.substring(0, 15000); 
+}
+
+// A simple function to create and manage a floating UI element
+function createFloatingUI() {
+    let ui = document.getElementById('gemini-stream-ui');
+    if (!ui) {
+        ui = document.createElement('div');
+        ui.id = 'gemini-stream-ui';
+        ui.style.cssText = `
+            position: fixed; right: 20px; top: 20px; z-index: 99999;
+            width: 300px; max-height: 400px; overflow-y: auto;
+            background: #fff; border: 1px solid #ddd; 
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1); padding: 10px;
+            font-family: sans-serif; font-size: 14px;
+        `;
+        document.body.appendChild(ui);
+    }
+    ui.innerHTML = '<strong>Streaming AI Summary...</strong><hr><div id="summary-area"></div>';
+    return { ui, summaryArea: document.getElementById('summary-area') };
+}
+
+// --- Listener for messages from the Service Worker ---
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    const { summaryArea } = createFloatingUI(); 
+    
+    if (message.action === 'streamChunk') {
+        // Append the new chunk of text in real-time
+        summaryArea.textContent += message.text; 
+        summaryArea.scrollTop = summaryArea.scrollHeight; // Auto-scroll
+    } else if (message.action === 'streamEnd') {
+        summaryArea.innerHTML += '<p style="margin-top: 10px; color: green;">Stream Complete.</p>';
+    } else if (message.action === 'streamError') {
+         summaryArea.innerHTML = `<p style="color: red;">Error: ${message.message}</p>`;
+    }
+});
+
+// --- Main execution when the user clicks the extension icon (Action button) ---
+chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
+    if (request.action === 'triggerSummary') {
+        const pageContent = extractPageContent();
+        const prompt = `Please analyze the following article content and provide a concise, high-quality summary in three distinct bullet points. Content: ${pageContent}`;
+
+        const { summaryArea } = createFloatingUI();
+        summaryArea.innerHTML = 'Initiating stream...';
+
+        // Send the prompt to the Service Worker for processing
+        chrome.runtime.sendMessage({ 
+            action: 'streamContent', 
+            prompt: prompt 
+        });
+        
+        // This is necessary to close the messaging channel from the action button click
+        sendResponse({status: "Streaming initiated"});
+        return true; 
+    }
+});
+
+
+
+// This script is registered in the manifest to run when the toolbar button is clicked.
+chrome.action.onClicked.addListener(async (tab) => {
+  // Execute a script that sends a message to the content script in the active tab
+  // The content script will then send a message to the Service Worker to start the AI stream.
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => {
+        chrome.runtime.sendMessage({ action: 'triggerSummary' });
+    }
+  });
+});
