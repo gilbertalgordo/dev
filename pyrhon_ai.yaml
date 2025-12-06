@@ -1,0 +1,127 @@
+import numpy as np
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
+
+# 1. Create Sample Data (The "Instances" of your data)
+# Feature (X) - e.g., 'Hours Studied'
+X = np.array([5, 15, 25, 35, 45, 55]).reshape(-1, 1) # Must be 2D array
+# Target (y) - e.g., 'Test Score'
+y = np.array([5, 20, 14, 32, 22, 38])
+
+# 
+
+# 2. Split Data (For training and testing the model's accuracy)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+# 3. Create and Train the Model
+model = LinearRegression()
+model.fit(X_train, y_train) # Training the model
+
+# 4. Make Predictions
+y_pred = model.predict(X_test)
+
+# 5. Evaluate the Model (Check Accuracy)
+print(f"**Linear Regression Model Results**")
+print(f"Coefficient (Slope): {model.coef_[0]:.2f}")
+print(f"Intercept (y-intercept): {model.intercept_:.2f}")
+print(f"Mean Squared Error (Accuracy metric): {mean_squared_error(y_test, y_pred):.2f}")
+
+# Example of a new prediction
+new_X = np.array([40]).reshape(-1, 1)
+prediction = model.predict(new_X)
+print(f"\nPrediction for X=40: {prediction[0]:.2f}")
+
+
+
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
+from tensorflow.keras.datasets import cifar10
+from tensorflow.keras.utils import to_categorical
+import numpy as np
+
+# --- 1. Load and Prepare Data (Instances) ---
+print("Loading and preparing CIFAR-10 data...")
+(x_train, y_train), (x_test, y_test) = cifar10.load_data()
+
+# Normalize pixel values to be between 0 and 1
+x_train = x_train.astype('float32') / 255.0
+x_test = x_test.astype('float32') / 255.0
+
+# Convert labels to one-hot encoding (e.g., 2 becomes [0, 0, 1, 0, ...])
+num_classes = 10
+y_train = to_categorical(y_train, num_classes)
+y_test = to_categorical(y_test, num_classes)
+
+# Define input shape
+input_shape = x_train.shape[1:]  # (32, 32, 3) for 32x32 color images
+print(f"Input image shape: {input_shape}")
+
+# --- 2. Define the Convolutional Neural Network (CNN) Model ---
+model = Sequential([
+    # First Convolutional Block
+    Conv2D(32, (3, 3), activation='relu', padding='same', input_shape=input_shape),
+    Conv2D(32, (3, 3), activation='relu'),
+    MaxPooling2D(pool_size=(2, 2)),
+    Dropout(0.25), # Regularization for better generalization
+
+    # Second Convolutional Block
+    Conv2D(64, (3, 3), activation='relu', padding='same'),
+    Conv2D(64, (3, 3), activation='relu'),
+    MaxPooling2D(pool_size=(2, 2)),
+    Dropout(0.25),
+
+    # Classifier (Dense Layers)
+    Flatten(), # Converts 2D feature maps into a 1D vector
+    Dense(512, activation='relu'),
+    Dropout(0.5),
+    Dense(num_classes, activation='softmax') # Output layer (10 classes)
+])
+
+# Display the model's structure (HUD/summary of layers)
+print("\n--- Model Architecture Summary (HUD) ---")
+model.summary()
+
+# 
+
+# --- 3. Compile the Model ---
+model.compile(
+    optimizer='adam',
+    loss='categorical_crossentropy', # Appropriate for multi-class classification
+    metrics=['accuracy']
+)
+
+# --- 4. Train the Model ---
+# Note: This is a fast training example. Real-world models need more epochs.
+print("\nStarting model training...")
+history = model.fit(
+    x_train, y_train,
+    batch_size=32,
+    epochs=5,
+    validation_data=(x_test, y_test),
+    verbose=1 # Show training progress
+)
+print("Training complete.")
+
+# --- 5. Evaluate the Model (Scientific Reasoning) ---
+print("\nEvaluating model on test data...")
+loss, accuracy = model.evaluate(x_test, y_test, verbose=0)
+
+# The accuracy is a measure of the model's scientific reasoning capacity
+print(f"Test Loss: {loss:.4f}")
+print(f"**Test Accuracy: {accuracy*100:.2f}%**")
+
+# --- 6. Make a Single Prediction (Instance Prediction) ---
+# Predict the class for the first test image instance
+example_image = x_test[0:1] # Select the first instance
+predictions = model.predict(example_image)
+predicted_class = np.argmax(predictions[0])
+
+# Define the class names for a clearer voice/output
+cifar10_classes = ['airplane', 'automobile', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck']
+true_class_index = np.argmax(y_test[0])
+
+print(f"\nPrediction for Instance 0:")
+print(f"Model confidently predicts: **{cifar10_classes[predicted_class]}**")
+print(f"True label was: {cifar10_classes[true_class_index]}")
