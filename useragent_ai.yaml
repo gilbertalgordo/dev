@@ -1,0 +1,216 @@
+# Example installation for a popular LLM provider
+# Replace with the library you choose (e.g., anthropic, google-genai)
+pip install openai python-dotenv
+
+
+
+import os
+from dotenv import load_dotenv
+from openai import OpenAI # Replace with your chosen LLM SDK
+
+# Load environment variables (like API keys) from a .env file
+load_dotenv()
+
+class ConversationalAgent:
+    """
+    A simple AI Agent that uses an LLM to respond to user messages 
+    while maintaining a conversation history (memory).
+    """
+
+    def __init__(self, system_prompt: str, model: str = "gpt-3.5-turbo"):
+        """
+        Initializes the agent with a system prompt and conversation history.
+        
+        Args:
+            system_prompt: A set of instructions defining the agent's role and personality.
+            model: The name of the LLM to use.
+        """
+        # [attachment_0](attachment)
+        # Initialize the LLM client (assuming OpenAI here)
+        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY")) 
+        self.model = model
+        
+        # Long-Term Memory (defining the agent's core identity)
+        self.system_message = {"role": "system", "content": system_prompt}
+        
+        # Short-Term Memory (conversation history)
+        self.messages = [self.system_message]
+        print("Agent Initialized. Ready for chat.")
+
+    def chat(self, user_input: str) -> str:
+        """
+        Processes a user message, updates memory, and gets a response from the LLM.
+        
+        Args:
+            user_input: The message from the user.
+        
+        Returns:
+            The agent's text response.
+        """
+        # 1. Update Short-Term Memory with the new user message
+        user_message = {"role": "user", "content": user_input}
+        self.messages.append(user_message)
+
+        # 2. Call the LLM (The 'Action' step)
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=self.messages
+            )
+            
+            # 3. Extract the agent's response
+            ai_response = response.choices[0].message.content
+            
+            # 4. Update Short-Term Memory with the agent's response
+            self.messages.append({"role": "assistant", "content": ai_response})
+            
+            return ai_response
+
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            return "Sorry, I encountered an error while processing your request."
+
+# --- Usage Example (Instance) ---
+
+# Define the agent's role
+AGENT_PROMPT = (
+    "You are a helpful and concise scientific assistant. "
+    "Your goal is to provide accurate scientific reasoning and clear voices. "
+    "Keep your answers brief and factual."
+)
+
+# Create an instance of the agent
+scientific_agent = ConversationalAgent(system_prompt=AGENT_PROMPT)
+
+# Start a conversation
+print("\n--- Starting Conversation ---")
+
+# First turn: Establish context
+response1 = scientific_agent.chat("Explain the concept of quantum entanglement.")
+print(f"User: Explain the concept of quantum entanglement.")
+print(f"AI Agent: {response1}")
+
+print("-" * 20)
+
+# Second turn: The agent uses its memory to relate the new question to the previous one
+response2 = scientific_agent.chat("Is it used for communication?")
+print(f"User: Is it used for communication?")
+print(f"AI Agent: {response2}")
+
+print("\n--- Conversation History ---")
+for msg in scientific_agent.messages:
+    print(f"{msg['role'].title()}: {msg['content'][:50]}...")
+
+
+
+
+pip install langchain langchain-openai langchain-google-genai google-search-results python-dotenv
+
+
+import os
+from dotenv import load_dotenv
+from langchain_openai import ChatOpenAI
+from langchain.agents import initialize_agent, AgentType, Tool
+from langchain_google_genai import GoogleSearchAPIWrapper
+from langchain.chains import LLMMathChain
+
+# Load environment variables
+load_dotenv()
+
+class AdvancedUserAgentAI:
+    """
+    A goal-oriented AI Agent that uses an LLM and external tools 
+    to execute complex tasks, providing clear voices and accurate scientific reasoning.
+    """
+
+    def __init__(self, model_name: str = "gpt-4-turbo"):
+        """
+        Initializes the agent with a powerful LLM and a set of external tools.
+        """
+        # 
+        
+        # 1. Initialize the Core LLM (The brain)
+        self.llm = ChatOpenAI(
+            temperature=0, 
+            model=model_name
+        )
+
+        # 2. Define the Tools (The senses and hands)
+        # Tool 1: Google Search for up-to-date information (e.g., scientific data)
+        search = GoogleSearchAPIWrapper()
+        search_tool = Tool(
+            name="Google Search",
+            func=search.run,
+            description=(
+                "A powerful tool for searching the current internet for up-to-date facts, "
+                "scientific reasoning, or general knowledge."
+            )
+        )
+
+        # Tool 2: Calculator for accurate scientific and complex math
+        llm_math_chain = LLMMathChain.from_llm(llm=self.llm)
+        math_tool = Tool(
+            name="Calculator",
+            func=llm_math_chain.run,
+            description=(
+                "Useful for when you need to answer questions that involve math calculations "
+                "or complex formulas. Input should be a mathematical expression."
+            )
+        )
+
+        self.tools = [search_tool, math_tool]
+
+        # 3. Initialize the Agent Executor (The control center)
+        # AgentType.ZERO_SHOT_REACT_DESCRIPTION uses the ReAct framework 
+        # (Reasoning and Acting) for scientific and logical step-by-step thinking.
+        self.agent_executor = initialize_agent(
+            self.tools,
+            self.llm,
+            agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+            verbose=True, # Shows the step-by-step reasoning (the "hud" of the agent)
+            handle_parsing_errors=True
+        )
+        print(f"Advanced Agent Initialized with model: {model_name} and tools: {[t.name for t in self.tools]}")
+
+    def execute_task(self, prompt: str) -> str:
+        """
+        Runs the agent on a complex prompt, allowing it to autonomously decide 
+        which tools to use and when.
+        """
+        print(f"\n--- EXECUTION START (Input: {prompt}) ---")
+        try:
+            # The agent decides the best course of action (Observation, Thought, Action)
+            result = self.agent_executor.run(prompt)
+            print("--- EXECUTION END ---")
+            return result
+        except Exception as e:
+            print(f"An error occurred during execution: {e}")
+            return "Task failed. Could not complete the multi-step request."
+
+# --- Usage Example (Instance) ---
+
+# Create an instance of the Advanced Agent
+advanced_agent = AdvancedUserAgentAI()
+
+# Run a complex task that requires both searching for a fact and a calculation
+complex_prompt = (
+    "What is the current atmospheric concentration of CO2 in parts per million (ppm), "
+    "and if a chemical process produces 1.5 moles of CO2 per unit, how many grams is that?"
+)
+
+# Execute the task
+final_answer = advanced_agent.execute_task(complex_prompt)
+
+## ### Breakdown of the Agent's Expected Steps
+
+1.  **Thought:** I need two pieces of information. First, the current $\text{CO}_2$ concentration (requires **Google Search**). Second, I need to calculate the mass of $1.5$ moles of $\text{CO}_2$ (requires **Calculator** and the molecular weight).
+2.  **Action 1 (Search):** Find the current $\text{CO}_2$ concentration.
+3.  **Observation 1:** (Retrieves the $\text{CO}_2$ concentration, e.g., $420$ ppm).
+4.  **Thought:** Now I must calculate the mass. The molecular weight of $\text{CO}_2$ is $12.01 (\text{C}) + 2 \times 16.00 (\text{O}) = 44.01 \text{g/mol}$. The calculation is $1.5 \text{mol} \times 44.01 \text{g/mol}$.
+5.  **Action 2 (Calculator):** $1.5 * 44.01$.
+6.  **Observation 2:** (Retrieves the result, e.g., $66.015$).
+7.  **Thought:** I have both required facts. I can now synthesize the final, comprehensive answer.
+8.  **Final Answer:** Presents both pieces of information clearly.
+
+print(f"\n\nFINAL RESPONSE:\n{final_answer}")
+
