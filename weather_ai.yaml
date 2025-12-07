@@ -1,0 +1,170 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_absolute_error
+import numpy as np
+
+# --- 1. Create a Sample Dataset ---
+# In a real scenario, you would load data from a CSV file (e.g., pd.read_csv('weather.csv'))
+# This dummy data represents MinTemp, Humidity, Pressure, and WindSpeed at 9 am,
+# and the MaxTemp we want to predict (for the *same* day).
+data = {
+    'MinTemp': [10.5, 12.0, 9.8, 14.2, 11.5, 13.0, 10.0, 15.0, 8.5, 12.5],
+    'Humidity9am': [60, 55, 70, 45, 65, 50, 75, 40, 80, 52],
+    'Pressure9am': [1015.2, 1016.5, 1014.0, 1018.8, 1016.0, 1017.5, 1013.5, 1019.5, 1013.0, 1017.0],
+    'WindSpeed9am': [15, 10, 20, 5, 12, 8, 25, 6, 18, 9],
+    'MaxTemp': [25.5, 27.0, 23.0, 30.5, 26.5, 28.0, 22.5, 31.5, 20.0, 27.5]
+}
+df = pd.DataFrame(data)
+
+# --- 2. Prepare Data (Features and Target) ---
+# X (Features): The input variables used to make the prediction
+X = df[['MinTemp', 'Humidity9am', 'Pressure9am', 'WindSpeed9am']]
+# y (Target): The variable we want to predict
+y = df['MaxTemp']
+
+# --- 3. Split Data into Training and Testing Sets ---
+# We train the model on the training data and check its accuracy on the unseen test data.
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.3, random_state=42
+)
+
+# --- 4. Initialize and Train the Model (The AI Part) ---
+# Create a Linear Regression instance
+model = LinearRegression()
+
+# Train the model on the training data
+model.fit(X_train, y_train)
+print("✅ Model training complete.")
+
+# --- 5. Make Predictions and Evaluate ---
+y_pred = model.predict(X_test)
+
+# Evaluate the model using Mean Absolute Error (MAE)
+mae = mean_absolute_error(y_test, y_pred)
+print(f"\n📏 Mean Absolute Error (MAE) on Test Data: {mae:.2f}°C")
+# Lower MAE means the model's predictions are closer to the actual values.
+
+# --- 6. Use the Model for a New Prediction ---
+# Let's predict MaxTemp for a new day with specific conditions:
+# MinTemp: 11.0°C, Humidity: 60%, Pressure: 1015 hPa, WindSpeed: 15 km/h
+new_weather_data = pd.DataFrame([[11.0, 60, 1015.0, 15]], columns=X.columns)
+
+predicted_maxtemp = model.predict(new_weather_data)[0]
+
+print(f"\n🔮 Predicted MaxTemp for the new day: {predicted_maxtemp:.2f}°C")
+
+
+
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+
+# --- 1. Load and Preprocess Data ---
+
+# NOTE: In a real scenario, you would load a large dataset here:
+# df = pd.read_csv('historical_weather_data.csv')
+
+# Dummy Data for demonstration:
+data = {
+    'Date': pd.to_datetime(pd.date_range(start='2024-01-01', periods=100, freq='D')),
+    'MaxTemp': np.random.uniform(20, 35, 100),
+    'MinTemp': np.random.uniform(10, 20, 100),
+    'Humidity': np.random.uniform(50, 90, 100),
+    'Pressure': np.random.uniform(1000, 1020, 100)
+}
+df = pd.DataFrame(data).set_index('Date')
+
+# Select the features used for prediction
+FEATURES = ['MaxTemp', 'MinTemp', 'Humidity', 'Pressure']
+data_to_scale = df[FEATURES].values
+
+# Normalize the data (important for LSTMs)
+scaler = MinMaxScaler(feature_range=(0, 1))
+scaled_data = scaler.fit_transform(data_to_scale)
+print(f"Data shape after scaling: {scaled_data.shape}")
+
+# --- 2. Create Time-Series Sequences ---
+
+# Time steps to look back (e.g., use the last 7 days of data)
+TIME_STEPS = 7 
+# Index of the target feature in the scaled_data array (e.g., MaxTemp is at index 0)
+TARGET_INDEX = FEATURES.index('MaxTemp')
+
+def create_sequences(data, time_steps):
+    X, y = [], []
+    for i in range(time_steps, len(data)):
+        # X: Sequence of TIME_STEPS historical days
+        X.append(data[i-time_steps:i])
+        # y: The MaxTemp value (index 0) on the *current* day (i.e., day 'i')
+        y.append(data[i, TARGET_INDEX])
+    return np.array(X), np.array(y)
+
+X, y = create_sequences(scaled_data, TIME_STEPS)
+print(f"Input Sequence (X) shape: {X.shape}") # (Samples, Time Steps, Features)
+print(f"Target (y) shape: {y.shape}")
+
+# Split the data
+split_point = int(0.8 * len(X))
+X_train, X_test = X[:split_point], X[split_point:]
+y_train, y_test = y[:split_point], y[split_point:]
+
+# --- 3. Build the LSTM Model (The Advanced AI) ---
+# LSTM architecture is key for time-series forecasting [attachment_0](attachment)
+
+model = Sequential([
+    # LSTM layer to learn temporal dependencies
+    LSTM(units=50, return_sequences=True, input_shape=(TIME_STEPS, len(FEATURES))),
+    Dropout(0.2),
+    LSTM(units=50, return_sequences=False),
+    Dropout(0.2),
+    # Dense layer for the final prediction output
+    Dense(units=1) 
+])
+
+# Compile the model
+model.compile(optimizer='adam', loss='mean_squared_error')
+print("✅ Model built and compiled.")
+
+# --- 4. Train the Model ---
+# Train with an appropriate number of epochs
+history = model.fit(
+    X_train, y_train, 
+    epochs=25, 
+    batch_size=32, 
+    validation_data=(X_test, y_test), 
+    verbose=0
+)
+print("✅ Model training complete.")
+
+# --- 5. Make Predictions and Inverse Scale ---
+predicted_scaled = model.predict(X_test)
+
+# To interpret the prediction, we must inverse-transform it back to the original scale (°C).
+# We use a trick: create a dummy array with the prediction in the target column (index 0) 
+# and zeros in the other columns, then inverse transform the entire array.
+
+# 1. Create a dummy array for inverse transformation
+inverse_transform_target = np.zeros((len(predicted_scaled), len(FEATURES)))
+# 2. Place the scaled predictions into the target column
+inverse_transform_target[:, TARGET_INDEX] = predicted_scaled.flatten()
+
+# 3. Inverse transform the array
+predicted_maxtemp = scaler.inverse_transform(inverse_transform_target)[:, TARGET_INDEX]
+
+# Inverse transform the actual MaxTemp values from the test set for comparison
+y_test_inverse_transform = np.zeros((len(y_test), len(FEATURES)))
+y_test_inverse_transform[:, TARGET_INDEX] = y_test
+actual_maxtemp = scaler.inverse_transform(y_test_inverse_transform)[:, TARGET_INDEX]
+
+# --- 6. Evaluate and Display Results ---
+from sklearn.metrics import mean_absolute_error
+mae = mean_absolute_error(actual_maxtemp, predicted_maxtemp)
+
+print(f"\nModel Evaluation (Test Data):")
+print(f"📏 Mean Absolute Error (MAE): {mae:.2f}°C")
+print("\nSample Actual vs. Predicted (MaxTemp):")
+for i in range(5):
+    print(f"Actual: {actual_maxtemp[i]:.2f}°C, Predicted: {predicted_maxtemp[i]:.2f}°C")
