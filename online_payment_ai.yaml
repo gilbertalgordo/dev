@@ -1,0 +1,221 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import classification_report, accuracy_score
+import numpy as np
+
+
+
+# Create a simulated dataset (replace with your actual data load)
+data = {
+    'Amount': [100.0, 50.0, 3000.0, 25.0, 150.0, 4500.0, 80.0, 10000.0],
+    'Time_Since_Last': [300, 15, 60, 500, 90, 10, 200, 5],
+    'Location_Match': [1, 1, 0, 1, 1, 0, 1, 0], # 0 for mismatch (higher risk)
+    'Is_Fraud': [0, 0, 1, 0, 0, 1, 0, 1]
+}
+
+df = pd.DataFrame(data)
+
+# Define features (X) and target (y)
+X = df[['Amount', 'Time_Since_Last', 'Location_Match']]
+y = df['Is_Fraud']
+
+print("Initial Dataset:")
+print(df)
+
+
+
+# Split data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.3, random_state=42
+)
+
+# Initialize and train the Decision Tree Classifier
+# This is the "AI" or Machine Learning part
+model = DecisionTreeClassifier(random_state=42)
+model.fit(X_train, y_train)
+
+# Make predictions on the test set
+y_pred = model.predict(X_test)
+
+print("\n--- Model Evaluation ---")
+print(f"Accuracy: {accuracy_score(y_test, y_pred):.2f}")
+print("Classification Report:")
+print(classification_report(y_test, y_pred))
+
+
+
+def check_for_fraud(transaction_data: dict, ml_model) -> (int, str):
+    """
+    Simulates a real-time call to the Fraud Detection Engine.
+
+    Args:
+        transaction_data: A dictionary of transaction features.
+        ml_model: The trained machine learning model.
+
+    Returns:
+        A tuple: (Prediction (0/1), Risk_Flag)
+    """
+    
+    # 1. Convert new data into the format the model expects (DataFrame)
+    new_transaction_df = pd.DataFrame([transaction_data])
+    
+    # 2. Extract features in the correct order
+    features = new_transaction_df[['Amount', 'Time_Since_Last', 'Location_Match']]
+    
+    # 3. Get the prediction
+    prediction = ml_model.predict(features)[0]
+    
+    if prediction == 1:
+        risk_flag = "Transaction **Flagged for Fraud**"
+    else:
+        risk_flag = "Transaction **Approved**"
+        
+    return prediction, risk_flag
+
+# --- Testing the "API" with New Instances ---
+print("\n--- Real-Time Prediction Instances ---")
+
+# Instance 1: Small amount, fast, local match (LOW RISK)
+tx_low_risk = {'Amount': 75.0, 'Time_Since_Last': 100, 'Location_Match': 1}
+pred, flag = check_for_fraud(tx_low_risk, model)
+print(f"Transaction 1 (Low Risk): {flag}")
+
+# Instance 2: Large amount, very fast, no location match (HIGH RISK)
+tx_high_risk = {'Amount': 8000.0, 'Time_Since_Last': 2, 'Location_Match': 0}
+pred, flag = check_for_fraud(tx_high_risk, model)
+print(f"Transaction 2 (High Risk): {flag}")
+
+
+
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, RepeatVector, TimeDistributed
+from tensorflow.keras.callbacks import EarlyStopping
+
+
+
+# --- 1. Simulate Normalized Transaction Data ---
+# Features: Amount, Time_Diff (time since last tx), Location_Match
+N_TRANSACTIONS = 1000
+SEQUENCE_LENGTH = 10  # Look back at the last 10 transactions
+N_FEATURES = 3
+
+np.random.seed(42)
+# Simulate mostly normal data (low noise)
+data = np.random.randn(N_TRANSACTIONS, N_FEATURES) * 0.5 + 1.0
+
+# Introduce a few highly anomalous sequences (simulated fraud)
+for i in [20, 150, 400]:
+    # Set a block of 10 consecutive transactions to be highly unusual
+    data[i:i + SEQUENCE_LENGTH] += np.random.uniform(5, 10, (SEQUENCE_LENGTH, N_FEATURES)) 
+    
+# Scale data to be between 0 and 1
+scaler = MinMaxScaler()
+scaled_data = scaler.fit_transform(data)
+
+# --- 2. Create Sequential Data for LSTM ---
+def create_sequences(data, seq_len):
+    """Transforms transaction history into look-back sequences."""
+    sequences = []
+    for i in range(len(data) - seq_len + 1):
+        sequences.append(data[i:i + seq_len])
+    return np.array(sequences)
+
+# X is the sequence input, and y is the same sequence (Autoencoder task)
+X = create_sequences(scaled_data, SEQUENCE_LENGTH)
+# The autoencoder tries to reconstruct its input, so X_train = y_train
+y = X 
+
+print(f"Original Data Shape: {scaled_data.shape}")
+print(f"Sequence Input Shape (X): {X.shape} -> (Samples, Time Steps, Features)")
+
+
+
+# --- Define Model Parameters ---
+INPUT_SHAPE = (SEQUENCE_LENGTH, N_FEATURES)
+LATENT_DIM = 5  # The size of the compressed representation
+
+# --- Build the Keras Model ---
+model = Sequential([
+    # Encoder: Learns to compress the sequence
+    LSTM(64, activation='relu', input_shape=INPUT_SHAPE, return_sequences=True),
+    LSTM(32, activation='relu', return_sequences=False),
+    # Bottleneck: The compressed 'latent space' vector
+    Dense(LATENT_DIM),
+    RepeatVector(SEQUENCE_LENGTH), # Duplicates the bottleneck vector for the decoder input
+
+    # Decoder: Learns to reconstruct the original sequence
+    LSTM(32, activation='relu', return_sequences=True),
+    LSTM(64, activation='relu', return_sequences=True),
+    # Output layer: TimeDistributed applies the Dense layer to every time step
+    TimeDistributed(Dense(N_FEATURES))
+])
+
+# Compile the model
+model.compile(optimizer='adam', loss='mse')
+model.summary()
+
+
+
+# Train the model (EarlyStopping prevents overfitting)
+history = model.fit(
+    X, y,
+    epochs=50,
+    batch_size=128,
+    validation_split=0.1,
+    callbacks=[EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)],
+    verbose=0 # Set to 1 for training progress
+)
+print("\n--- Model Training Complete ---")
+print(f"Final Validation Loss: {history.history['val_loss'][-1]:.6f}")
+
+# --- Calculate Reconstruction Error for all sequences ---
+predictions = model.predict(X)
+# Mean Squared Error (MSE) is the loss/error calculation
+mse_error = np.mean(np.power(X - predictions, 2), axis=(1, 2))
+
+# --- Determine the Anomaly Threshold ---
+# Use the 95th percentile of the error of 'normal' data as the threshold
+# Transactions with error > THRESHOLD are flagged as fraudulent
+THRESHOLD = np.percentile(mse_error, 95)
+print(f"Anomaly Detection Threshold (95th Percentile MSE): {THRESHOLD:.6f}")
+
+
+
+def check_for_fraud_lstm(new_sequence: np.ndarray, ml_model, threshold: float, scaler: MinMaxScaler) -> (float, str):
+    """
+    Checks a new sequence of transactions for anomaly/fraud using the trained LSTM Autoencoder.
+    """
+    # 1. Scale the new sequence using the fit scaler
+    scaled_sequence = scaler.transform(new_sequence.reshape(-1, N_FEATURES))
+    
+    # 2. Reshape for the model: (1, SEQUENCE_LENGTH, N_FEATURES)
+    input_seq = scaled_sequence[np.newaxis, :, :]
+    
+    # 3. Predict the reconstruction and calculate error
+    reconstructed_seq = ml_model.predict(input_seq, verbose=0)
+    error = np.mean(np.power(input_seq - reconstructed_seq, 2))
+    
+    if error > threshold:
+        risk_flag = f"🚨 **Flagged as High Risk/Anomaly** (Error: {error:.6f})"
+    else:
+        risk_flag = f"✅ **Approved/Low Risk** (Error: {error:.6f})"
+        
+    return error, risk_flag
+
+# --- Testing the "Advanced Instance" with New Data ---
+print("\n--- Real-Time Prediction Instances ---")
+
+# Instance 1: Normal-looking sequence (taken from the start of the scaled data)
+normal_sequence = data[10:10 + SEQUENCE_LENGTH]
+error_norm, flag_norm = check_for_fraud_lstm(normal_sequence, model, THRESHOLD, scaler)
+print(f"Normal Transaction Sequence: {flag_norm}")
+
+# Instance 2: Highly Anomalous sequence (taken from one of the injected fraud blocks)
+# This sequence has large, unusual values
+fraud_sequence = data[400:400 + SEQUENCE_LENGTH]
+error_fraud, flag_fraud = check_for_fraud_lstm(fraud_sequence, model, THRESHOLD, scaler)
+print(f"Fraudulent Transaction Sequence: {flag_fraud}")
