@@ -1,0 +1,363 @@
+pip install opencv-python torch ultralytics
+
+
+
+import cv2
+from ultralytics import YOLO
+
+# --- Configuration ---
+# You can replace 'yolov5s.pt' with a different model size (e.g., 'yolov5m.pt')
+# The '.pt' file contains the pre-trained weights.
+MODEL_PATH = 'yolov5s.pt' 
+# Using 0 for the default webcam, replace with a video file path (e.g., 'driving_footage.mp4')
+VIDEO_SOURCE = 0 
+
+# Load the YOLOv5 model
+# NOTE: This will download the model weights automatically if not found locally.
+try:
+    model = YOLO(MODEL_PATH)
+    print(f"✅ Model '{MODEL_PATH}' loaded successfully.")
+except Exception as e:
+    print(f"❌ Error loading model: {e}")
+    print("Please ensure you have an internet connection for the first run to download the weights.")
+    exit()
+
+# Open the video source (webcam or video file)
+cap = cv2.VideoCapture(VIDEO_SOURCE)
+if not cap.isOpened():
+    print(f"❌ Error: Could not open video source {VIDEO_SOURCE}")
+    exit()
+    
+print("🎥 Starting real-time object detection. Press 'q' to exit.")
+
+# 
+
+# --- Main Detection Loop ---
+while cap.isOpened():
+    # Read a frame from the video source
+    ret, frame = cap.read()
+    if not ret:
+        print("End of video stream or failed to read frame.")
+        break
+    
+    # 1. Perform detection using the YOLO model
+    # The 'stream=True' argument processes the frames more efficiently
+    results = model(frame, stream=True)
+    
+    # 2. Process results and draw bounding boxes
+    for r in results:
+        # 'r.boxes' contains the detected bounding box data
+        boxes = r.boxes
+        
+        for box in boxes:
+            # Get coordinates, confidence, and class index
+            x1, y1, x2, y2 = box.xyxy[0].int().tolist()
+            conf = round(box.conf[0].item(), 2)
+            cls = int(box.cls[0].item())
+            
+            # Get the class name (e.g., 'car', 'person')
+            class_name = model.names[cls]
+            
+            # Filter for objects relevant to an autonomous vehicle
+            if class_name in ['car', 'truck', 'bus', 'person', 'traffic light', 'stop sign']:
+                
+                # Draw the bounding box (green)
+                color = (0, 255, 0)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                
+                # Create the label text
+                label = f'{class_name} ({conf})'
+                
+                # Draw the label text above the box
+                cv2.putText(frame, label, (x1, y1 - 10), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                
+                # *** (Instance) Action Logic (Simulated) ***
+                # This is where the AI would convert the detection into an action
+                if class_name == 'person' and conf > 0.6:
+                    print(f"ALERT: **Pedestrian Detected** at confidence {conf}")
+                if class_name == 'stop sign' and conf > 0.7:
+                    # In a real system, this would trigger a stop command
+                    cv2.putText(frame, "STOPPING", (50, 50), 
+                                cv2.FONT_HERSHEY_DUPLEX, 1.0, (0, 0, 255), 2)
+                    
+    # Display the resulting frame with the detections (hud)
+    cv2.imshow('Automotive AI: Object Detection', frame)
+    
+    # Break the loop if 'q' is pressed
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+# --- Cleanup ---
+cap.release()
+cv2.destroyAllWindows()
+print("🛑 Detection stopped and resources released.")
+
+
+
+import numpy as np
+from filterpy.kalman import UnscentedKalmanFilter as UKF
+from filterpy.kalman import unscented_transform, MerweScaledSigmaPoints
+
+# --- 1. Define the Vehicle State and Dynamics ---
+# State Vector x: [position_x, position_y, velocity_x, velocity_y, yaw_rate]
+# This non-linear function describes how the state evolves over time (Process Model)
+def fx(x, dt):
+    """Predicts the next state using a constant velocity and yaw rate model."""
+    
+    # State variables
+    px, py, vx, vy, yaw_rate = x.T
+
+    # Calculate new position and velocity based on yaw rate
+    if abs(yaw_rate) > 0.001:
+        v = np.sqrt(vx**2 + vy**2)
+        v_dt = v * dt
+        
+        # Non-linear motion model equations (Bicycle Model approximation)
+        px_next = px + (v/yaw_rate) * (np.sin(yaw_rate * dt) * vx/v + (1 - np.cos(yaw_rate * dt)) * vy/v)
+        py_next = py + (v/yaw_rate) * (np.cos(yaw_rate * dt) * vy/v + (np.cos(yaw_rate * dt) - 1) * vx/v)
+        # Assuming constant velocity model for simplicity in this prediction
+        vx_next = vx 
+        vy_next = vy
+        yaw_rate_next = yaw_rate
+    else:
+        # Simplified linear model for straight motion
+        px_next = px + vx * dt
+        py_next = py + vy * dt
+        vx_next = vx 
+        vy_next = vy
+        yaw_rate_next = yaw_rate
+        
+    return np.array([px_next, py_next, vx_next, vy_next, yaw_rate_next]).T
+
+# --- 2. Define the Measurement Model ---
+# This function maps the 5D state (x) to the 2D Radar measurement [range, bearing]
+def hx(x):
+    """Maps the state vector (x) to the Radar measurement space (z)."""
+    
+    # State variables
+    px, py, vx, vy, yaw_rate = x.T
+    
+    # Radar measurement instances (rho, phi, rho_dot)
+    rho = np.sqrt(px**2 + py**2)
+    phi = np.arctan2(py, px)
+    rho_dot = (px * vx + py * vy) / rho
+    
+    return np.array([rho, phi, rho_dot]).T
+
+# --- 3. Initialize the UKF ---
+dt = 0.1 # Time step (100ms)
+R_radar = np.diag([0.09, 0.0009, 0.09]) # Radar Measurement Noise Covariance
+Q_process = np.diag([0.1, 0.1, 0.1, 0.1, 0.1]) # Process Noise Covariance
+
+# Generate Sigma Points (key to UKF's non-linear handling)
+points = MerweScaledSigmaPoints(n=5, alpha=0.1, beta=2., kappa=0.)
+
+# Create the Unscented Kalman Filter instance
+kf = UKF(dim_x=5, dim_z=3, dt=dt, fx=fx, hx=hx, points=points)
+
+# Initial state estimate (px, py, vx, vy, yaw_rate)
+kf.x = np.array([0., 0., 0., 0., 0.])
+# Initial covariance (high uncertainty)
+kf.P *= 1000
+
+# --- 4. Simulation Loop (Processing Sensor Instances) ---
+# Example Radar Measurement: [rho, phi, rho_dot]
+radar_measurement = np.array([5.2, np.deg2rad(45), 1.5]) 
+
+# 
+
+def run_fusion_step(z_radar):
+    # 1. Prediction Step: Predict the next state (x) and covariance (P)
+    kf.predict()
+    
+    # 2. Update Step: Correct the prediction using the new Radar measurement
+    # R (Measurement Noise) must be set before the update
+    kf.R = R_radar 
+    kf.update(z_radar, hx)
+    
+    # The new best state estimate is kf.x
+    
+    # Instance Output (HUD Data)
+    print(f"Time: {dt:.1f}s | Estimate (px, py): ({kf.x[0]:.2f}, {kf.x[1]:.2f})m | Velocity: {np.sqrt(kf.x[2]**2 + kf.x[3]**2):.2f}m/s")
+    
+# run_fusion_step(radar_measurement) 
+# The function would be called repeatedly in the main loop of the AV's system.
+
+
+
+import cvxpy as cp
+import numpy as np
+
+# --- System Parameters (Vehicle Model - Kinematic Bicycle Model) ---
+dt = 0.1  # Control time step (seconds)
+N = 10    # Prediction horizon (N steps = 1.0 second lookahead)
+max_steer = np.deg2rad(30) # Max steering angle constraint
+v_ref = 10.0 # Target velocity (m/s)
+
+# State Vector (x_t): [x_pos, y_pos, psi_yaw, v_velocity] (4 dimensions)
+dim_x = 4 
+# Control Vector (u_t): [a_acceleration, delta_steering_angle] (2 dimensions)
+dim_u = 2
+
+# --- 1. Define Optimization Variables ---
+# State variables over the prediction horizon (N+1 points, including current state)
+x = cp.Variable((dim_x, N + 1)) 
+# Control inputs over the prediction horizon (N steps)
+u = cp.Variable((dim_u, N)) 
+
+# --- 2. Define the Cost Function (J) ---
+# Weighting matrices (Tuning the Controller)
+Q = np.diag([100.0, 100.0, 10.0, 1.0]) # Penalize State Error (position, yaw, speed)
+R = np.diag([1.0, 100.0])              # Penalize Control Effort (accel, steering rate)
+
+cost = 0
+for t in range(N):
+    # Error from a Reference Trajectory (x_ref, u_ref) - often a pre-planned path
+    x_ref = np.array([x_target[t], y_target[t], psi_target[t], v_ref]) 
+    u_ref = np.array([0.0, 0.0]) # Target no acceleration/steering if on path
+    
+    # State Cost: J_x = (x_t - x_ref)^T * Q * (x_t - x_ref)
+    cost += cp.quad_form(x[:, t+1] - x_ref, Q) 
+    
+    # Control Cost: J_u = (u_t - u_ref)^T * R * (u_t - u_ref)
+    cost += cp.quad_form(u[:, t] - u_ref, R) 
+
+# --- 3. Define the Constraints ---
+constraints = [x[:, 0] == x_current] # Constraint 1: Initial state must be the current vehicle state
+
+for t in range(N):
+    # Constraint 2: System Dynamics (Discrete Kinematic Model)
+    # x_t+1 = f(x_t, u_t)
+    # The actual constraints would involve the complex A and B matrices of the linearised model
+    # Here, we represent the non-linear relationship:
+    v_t = x[3, t]
+    psi_t = x[2, t]
+    a_t = u[0, t]
+    delta_t = u[1, t]
+    
+    # Kinematic equations (approximation for constraint)
+    x_next_kin = x[:, t] + dt * cp.array([
+        v_t * cp.cos(psi_t),
+        v_t * cp.sin(psi_t),
+        v_t * cp.tan(delta_t) / 2.6, # L=2.6m wheelbase
+        a_t
+    ])
+    
+    constraints += [x[:, t+1] == x_next_kin] 
+    
+    # Constraint 3: Control Input Limits
+    constraints += [cp.abs(u[0, t]) <= 3.0]      # Max acceleration/deceleration (3 m/s^2)
+    constraints += [cp.abs(u[1, t]) <= max_steer] # Max steering angle
+
+# --- 4. Define and Solve the Optimization Problem ---
+problem = cp.Problem(cp.Minimize(cost), constraints)
+
+def solve_mpc(current_state, trajectory_ref):
+    """Placeholder function to simulate MPC execution."""
+    global x_current, x_target, y_target, psi_target
+    
+    x_current = current_state
+    x_target = trajectory_ref['x']
+    y_target = trajectory_ref['y']
+    psi_target = trajectory_ref['psi']
+    
+    try:
+        # Solver (often OSQP or ECOS in practice for speed)
+        problem.solve(solver=cp.OSQP, verbose=False) 
+        
+        # Instance Output: The optimal control action for the next time step
+        optimal_acceleration = u.value[0, 0]
+        optimal_steering = u.value[1, 0]
+        
+        # This is the clear voice (command) sent to the vehicle actuators
+        print(f" MPC Optimal Command: Acceleration = {optimal_acceleration:.2f} m/s², Steering = {np.rad2deg(optimal_steering):.2f}°")
+        
+        return optimal_acceleration, optimal_steering
+        
+    except cp.error.SolverError:
+        print("❌ MPC Solver failed to find a feasible solution.")
+        return 0.0, 0.0
+
+# 
+
+# Example Call:
+# current_state = np.array([0., 0., 0., 5.0]) # [x, y, yaw, velocity]
+# trajectory_ref = {'x': [...], 'y': [...], 'psi': [...]}
+# solve_mpc(current_state, trajectory_ref)
+
+
+
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+
+# --- Data Preparation (Conceptual) ---
+# Sensor features: Temperature, Pressure, Vibration, Oil Level
+# Time sequence: A history of sensor readings over 'sequence_length' cycles
+SEQUENCE_LENGTH = 50 
+NUM_FEATURES = 4 
+
+# X_train: Shape is (num_training_sequences, SEQUENCE_LENGTH, NUM_FEATURES)
+# Each row is an instance of a component's history.
+# y_train: Shape is (num_training_sequences, 1) -> The RUL value (e.g., cycles/days until failure)
+# Assume data is loaded and pre-processed into these arrays
+# X_train = np.load('sensor_data_train.npy')
+# y_train = np.load('rul_targets_train.npy')
+
+# --- 1. Define the Advanced LSTM Model ---
+def build_lstm_rul_model():
+    model = Sequential()
+    
+    # Layer 1: LSTM with 100 units - processes the time sequence
+    # Return sequences=True passes the output sequence to the next LSTM layer
+    model.add(LSTM(
+        units=100,
+        return_sequences=True,
+        input_shape=(SEQUENCE_LENGTH, NUM_FEATURES)
+    ))
+    model.add(Dropout(0.2))
+    
+    # Layer 2: Deeper LSTM layer to capture more complex temporal features
+    # Return sequences=False only outputs the result of the final time step
+    model.add(LSTM(
+        units=50,
+        return_sequences=False 
+    ))
+    model.add(Dropout(0.2))
+    
+    # Layer 3: Dense layer for output (Regression task)
+    # Output unit is 1 because we are predicting a single continuous value (RUL)
+    model.add(Dense(units=1)) 
+    
+    # Compile the model
+    # Use Mean Squared Error (MSE) as the loss function for regression tasks
+    model.compile(loss='mse', optimizer='adam', metrics=['mae'])
+    
+    return model
+
+# --- 2. Training and Prediction (Conceptual) ---
+# model = build_lstm_rul_model()
+
+# # Training (Ensure clear voices by setting verbose=1)
+# print("Starting LSTM Model Training...")
+# history = model.fit(
+#     X_train, y_train,
+#     epochs=100, 
+#     batch_size=32,
+#     validation_split=0.1,
+#     verbose=1
+# )
+# print("Training Complete.")
+
+# # Prediction (Generating the RUL instance)
+# # X_test_instance: New sensor data for a component in service
+# # X_test_instance must have shape (1, SEQUENCE_LENGTH, NUM_FEATURES)
+# RUL_prediction = model.predict(X_test_instance) 
+# predicted_rul_cycles = RUL_prediction[0][0]
+
+# # Instance Output (HUD Data for a mechanic)
+# print(f"**PREDICTIVE MAINTENANCE ALERT:**")
+# print(f"Component ID: 42 (Engine Pump)")
+# print(f"Predicted Remaining Useful Life (RUL): **{predicted_rul_cycles:.1f}** cycles (or operational days)")
