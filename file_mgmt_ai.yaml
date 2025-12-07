@@ -1,0 +1,278 @@
+pip install scikit-learn pandas
+
+
+
+import os
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.metrics import classification_report
+
+# --- 1. DATA PREPARATION (Simulated Training Data) ---
+# In a real-world scenario, you would extract features like content, size, 
+# and creation date, but we'll use file extension for simplicity.
+
+data = {
+    'filename': [
+        'report.docx', 'photo.jpg', 'script.py', 'document.pdf', 
+        'vacation.png', 'config.json', 'essay.txt', 'notes.md', 
+        'app.js', 'image.gif', 'data.xlsx'
+    ],
+    'category': [
+        'Document', 'Image', 'Code', 'Document', 
+        'Image', 'Code', 'Document', 'Document', 
+        'Code', 'Image', 'Document'
+    ]
+}
+
+df = pd.DataFrame(data)
+
+# Extract file extension as the main feature
+df['extension'] = df['filename'].apply(lambda x: os.path.splitext(x)[1].lower())
+
+# Map the categories to numerical labels (required for scikit-learn)
+category_to_int = {'Document': 0, 'Image': 1, 'Code': 2}
+df['label'] = df['category'].map(category_to_int)
+
+# --- 2. FEATURE ENGINEERING & MODEL TRAINING ---
+
+# CountVectorizer converts text (extensions) into a matrix of token counts.
+vectorizer = CountVectorizer()
+X = vectorizer.fit_transform(df['extension'])
+y = df['label']
+
+# Split data (optional for this small set, but good practice)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+# Train a Naive Bayes classifier (simple and fast for text/categorization)
+model = MultinomialNB()
+model.fit(X_train, y_train)
+
+# --- 3. MODEL EVALUATION (Check the model's accuracy) ---
+y_pred = model.predict(X_test)
+# print("Classification Report (Model Accuracy):")
+# print(classification_report(y_test, y_pred, target_names=category_to_int.keys()))
+
+# --- 4. AI MANAGEMENT FUNCTION ---
+
+def classify_and_manage_file(filepath: str, target_dir: str = 'Organized_Files'):
+    """
+    Classifies a single file and simulates moving it to an organized folder.
+    """
+    
+    # Get the file extension and filename
+    filename = os.path.basename(filepath)
+    ext = os.path.splitext(filepath)[1].lower()
+    
+    # 1. AI Classification Step
+    # Transform the new extension using the trained vectorizer
+    ext_transformed = vectorizer.transform([ext])
+    
+    # Predict the category (label)
+    prediction = model.predict(ext_transformed)[0]
+    
+    # Map the numerical prediction back to the category name
+    int_to_category = {v: k for k, v in category_to_int.items()}
+    category = int_to_category.get(prediction, 'Other') # Default to 'Other' if unknown
+
+    print(f"**{filename}** Classified as: **{category}**")
+    
+    # 2. File Management Action (Simulated Move)
+    if category != 'Other':
+        destination_folder = os.path.join(target_dir, category)
+        
+        # In a real script, you would create the directory and move the file:
+        # os.makedirs(destination_folder, exist_ok=True)
+        # os.rename(filepath, os.path.join(destination_folder, filename))
+        
+        print(f"-> Action: Would move to: {destination_folder}")
+    else:
+        print("-> Action: No action taken (Category 'Other').")
+
+
+# --- 5. EXECUTION EXAMPLE ---
+
+if __name__ == '__main__':
+    
+    print("## 🤖 File Management AI Prototype Running ##")
+    
+    # Create some dummy files to simulate a real file system scan
+    # For a safe test, we'll use a temporary 'inbox' directory.
+    inbox_dir = 'File_Inbox_to_Scan'
+    os.makedirs(inbox_dir, exist_ok=True)
+    
+    test_files = [
+        'inbox.pdf', 'meme.jpeg', 'main.java', 'notes.txt', 
+        'unknown.dat', 'photo_1.heic' 
+    ]
+    
+    # Create empty files in the inbox for simulation
+    for name in test_files:
+        with open(os.path.join(inbox_dir, name), 'w') as f:
+            f.write("This is a placeholder.")
+
+    print("\n--- Scanning and Classifying Files ---")
+
+    # The AI scans and manages files in the simulated inbox
+    for item in os.listdir(inbox_dir):
+        full_path = os.path.join(inbox_dir, item)
+        if os.path.isfile(full_path):
+            classify_and_manage_file(full_path)
+            
+    # Cleanup (optional)
+    # import shutil
+    # shutil.rmtree(inbox_dir)
+    # shutil.rmtree('Organized_Files')
+    print("\n--- Scan Complete ---")
+
+
+
+
+pip install scikit-learn pandas
+
+
+
+import os
+import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.svm import SVC
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report
+
+# --- 1. DATA PREPARATION (Simulated Content) ---
+
+# Simulated dataset of file content and their true categories
+data = {
+    'content': [
+        "Please find attached the invoice for Project Alpha, totaling $5,000. Due date is Oct 30.",
+        "Internal Memo: The new remote work policy starts next Monday. All employees must follow the guidelines.",
+        "def calculate_total(price, quantity):\n    return price * quantity\n\n# Function for total",
+        "This is a formal invoice for services rendered in Q3. Amount due: $1,250.",
+        "Memo to the team: The meeting is postponed until further notice. Check your calendars.",
+        "class FileProcessor:\n    def __init__(self, path):\n        self.path = path",
+        "A regular text file with random words and no specific structure. Not easily classifiable.",
+        "Another invoice, payment expected within 30 days. Reference: INV-2025-004."
+    ],
+    'category': [
+        'Invoice', 'Memo', 'Code', 'Invoice', 
+        'Memo', 'Code', 'Other', 'Invoice'
+    ]
+}
+
+df = pd.DataFrame(data)
+labels = df['category'].unique()
+
+# --- 2. FEATURE ENGINEERING (TF-IDF) & MODEL TRAINING ---
+
+# TF-IDF Vectorizer: Converts text into numerical feature vectors. 
+# It weighs words by importance (Term Frequency in doc * Inverse Document Frequency across all docs).
+vectorizer = TfidfVectorizer(stop_words='english', max_features=1000)
+
+# X is the TF-IDF feature matrix, y is the numerical label
+X = vectorizer.fit_transform(df['content'])
+y = df['category']
+
+# Split data for training and testing (important for **accuracy** assessment)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+# Train a Support Vector Machine (SVM) Classifier
+model = SVC(kernel='linear', probability=True) # 'linear' kernel is often good for text data
+model.fit(X_train, y_train)
+
+# --- 3. MODEL EVALUATION ---
+y_pred = model.predict(X_test)
+print("## 📊 Model Classification Report (Trained on Sample Data) ##")
+print(classification_report(y_test, y_pred, target_names=labels, zero_division=0))
+
+# --- 4. ADVANCED AI MANAGEMENT FUNCTION ---
+
+def classify_and_organize_file_by_content(filepath: str, root_dir: str = 'NLP_Organized_Files'):
+    """
+    Reads file content, classifies it using the trained NLP model, and simulates organization.
+    """
+    
+    filename = os.path.basename(filepath)
+    print(f"\nScanning: **{filename}**")
+    
+    try:
+        # Read file content
+        with open(filepath, 'r', encoding='utf-8') as f:
+            file_content = f.read()
+    except Exception as e:
+        print(f"Error reading file {filename}: {e}")
+        return
+
+    # 1. AI Content Classification Step
+    
+    # Transform the new file content into a TF-IDF vector
+    content_transformed = vectorizer.transform([file_content])
+    
+    # Predict the category
+    category_prediction = model.predict(content_transformed)[0]
+    
+    # Get the confidence score for the prediction (a measure of 'hud' or certainty)
+    probabilities = model.predict_proba(content_transformed)[0]
+    confidence = max(probabilities) * 100
+
+    print(f"-> Classification: **{category_prediction}** (Confidence: {confidence:.2f}%)")
+    
+    # 2. File Management Action (Simulated Move)
+    
+    if confidence > 60: # Threshold for confidence to ensure reliability
+        destination_folder = os.path.join(root_dir, category_prediction)
+        
+        # Action is based on the category
+        if category_prediction == 'Invoice':
+            action = "Archive (Invoices)"
+            # Example of granular, category-specific management logic:
+            # os.rename(filepath, os.path.join(root_dir, 'FINANCE', filename))
+            
+        elif category_prediction == 'Memo':
+            action = "Move to Communication (Memo)"
+        
+        elif category_prediction == 'Code':
+            action = "Move to Development (Code)"
+            
+        else:
+            action = "Move to Other" # Includes the 'Other' category if confidence is high
+        
+        print(f"-> Action Taken: **{action}**")
+        print(f"-> Path: Would move to: {destination_folder}")
+    else:
+        print("-> Action Taken: **Unsure/Needs Review** (Confidence too low).")
+
+
+# --- 5. EXECUTION EXAMPLE ---
+
+if __name__ == '__main__':
+    
+    print("## 🧠 Advanced File Management AI Running (NLP) ##")
+    
+    # Setup simulated file system for testing
+    inbox_dir = 'Advanced_File_Inbox'
+    os.makedirs(inbox_dir, exist_ok=True)
+    
+    test_files_content = {
+        'Q4_Billing_INV.txt': "The attached document is a final invoice for Q4 marketing services. Amount: $8,900. Payable to ABC Corp.",
+        'HR_Update_MEMO.txt': "Policy update memo: New health benefits enrollment begins on November 1st. Please read the attached PDF.",
+        'data_parser.py': "def parse_csv(file_path):\n    with open(file_path, 'r') as f:\n        lines = f.readlines()\n    return lines[1:] # Skip header",
+        'random_file.log': "log entry 1: system initialized. log entry 2: user login success. log entry 3: disk space check ok."
+    }
+    
+    # Create the physical dummy files
+    for name, content in test_files_content.items():
+        full_path = os.path.join(inbox_dir, name)
+        with open(full_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+    print("\n--- Scanning and Classifying Files ---")
+    
+    # Scan and process each file in the inbox
+    for item in os.listdir(inbox_dir):
+        full_path = os.path.join(inbox_dir, item)
+        if os.path.isfile(full_path):
+            classify_and_organize_file_by_content(full_path)
+            
+    print("\n--- Scan Complete ---")
+
