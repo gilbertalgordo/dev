@@ -1,0 +1,194 @@
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+from cryptography.fernet import Fernet
+import hashlib
+import numpy as np
+
+# --- 1. AI (Neural Network) for Key Component Generation ---
+
+def generate_key_component(seed_value):
+    """
+    Creates and trains a simple neural network to output a key component.
+    """
+    # Simple FNN with a single hidden layer
+    model = Sequential([
+        Dense(64, activation='relu', input_shape=(1,)),
+        Dense(32, activation='relu'),
+        Dense(16, activation='linear') # Output 16 values (e.g., for key bytes)
+    ])
+    
+    # Use a simple optimizer and loss function (training is just to distribute weights)
+    model.compile(optimizer='adam', loss='mse')
+    
+    # Simple "training" data - the seed determines the final weights/output
+    X_train = np.array([seed_value])
+    # The 'target' is arbitrary, but its structure influences the final key bytes
+    Y_train = np.random.rand(1, 16)
+    
+    # Train the model (simple, few epochs for demonstration)
+    model.fit(X_train, Y_train, epochs=10, verbose=0)
+    
+    # Generate the key component from the network's output
+    key_component = model.predict(np.array([seed_value]), verbose=0).flatten()
+    
+    # Convert floats to a byte array (0-255)
+    byte_array = (key_component * 255).astype(np.uint8).tobytes()
+    return byte_array
+
+# --- 2. Secure Hashing and Standard Encryption (Fernet/AES) ---
+
+def ai_encrypt_message(message, seed):
+    # Step 1: Generate a non-standard key component using the AI model
+    ai_output_bytes = generate_key_component(seed)
+    
+    # Step 2: Use a strong hashing algorithm (SHA256) to derive a secure 32-byte key
+    # This is a critical security step for key quality.
+    key_hash = hashlib.sha256(ai_output_bytes).digest()
+    
+    # Step 3: Fernet requires a 32 URL-safe base64-encoded key
+    # We use the SHA256 hash output directly for the key.
+    fernet_key = base64.urlsafe_b64encode(key_hash)
+    
+    # Step 4: Encrypt the message using Fernet (AES-128 in CBC mode with HMAC)
+    f = Fernet(fernet_key)
+    encrypted_message = f.encrypt(message.encode())
+    
+    return encrypted_message, fernet_key
+
+def ai_decrypt_message(encrypted_message, fernet_key):
+    # Decryption uses the same key as encryption
+    f = Fernet(fernet_key)
+    decrypted_message = f.decrypt(encrypted_message).decode()
+    return decrypted_message
+
+# --- Example Usage ---
+import base64
+
+# This 'seed' is the secret input that controls the key generation
+secret_seed = 42 
+original_message = "This is a secret message secured by AI-derived key."
+
+# Encrypt
+ciphertext, secret_key = ai_encrypt_message(original_message, secret_seed)
+print("Original Message:", original_message)
+print("Secret Key (Fernet Format):", secret_key.decode())
+print("Ciphertext (Encrypted):", ciphertext.decode())
+
+# Decrypt
+plaintext = ai_decrypt_message(ciphertext, secret_key)
+print("Decrypted Message:", plaintext)
+
+
+
+pip install tenseal
+
+
+
+import tenseal as ts
+import torch
+import numpy as np
+
+## 1. Context Setup (The 'Key' for Homomorphic Operations)
+# The context defines the encryption parameters and is shared between
+# the encryptor and decryptor (client and server).
+
+def setup_context():
+    """Sets up the BFV scheme context for Homomorphic Encryption."""
+    
+    # Define parameters for the BFV scheme
+    # 'poly_modulus_degree': Determines the size of the ciphertext (security/performance trade-off)
+    # 'coeff_mod_bit_sizes': Defines the precision for the calculation
+    context = ts.context(
+        ts.SCHEME_TYPE.BFV,
+        poly_modulus_degree=4096,
+        coeff_mod_bit_sizes=[40, 20, 40]
+    )
+    
+    # 🚨 Crucial step: Generate and set the secret key.
+    # The secret key is needed for decryption and must be kept private (Client-side).
+    context.generate_galois_keys()
+    context.global_scale = 2**20  # Scale used for CKKS (if used), but kept here for consistency
+    
+    # The public key (without the secret key) is typically sent to the server.
+    print("✅ HE Context Initialized.")
+    return context
+
+## 2. Encryption (Client-Side)
+
+def encrypt_vector(context, data_vector):
+    """Encrypts a standard Python list into a Homomorphic Ciphertext."""
+    
+    # ts.bfv_vector is used to encrypt the data using the BFV scheme defined in the context.
+    # The secret key within the context performs the encryption.
+    encrypted_vector = ts.bfv_vector(context, data_vector)
+    
+    print("✨ Data Encrypted.")
+    return encrypted_vector
+
+## 3. Computation on Encrypted Data (Server-Side)
+
+def encrypted_dot_product(encrypted_vector, plain_weights):
+    """
+    Performs a homomorphic dot product (multiplication and summation).
+    The 'plain_weights' represent a small AI model's parameters.
+    """
+    
+    # The PlainTensor is a matrix/vector that is NOT encrypted but is encoded
+    # into the HE scheme's polynomial ring to allow homomorphic operations.
+    plain_weights_tensor = ts.plain_tensor(plain_weights)
+    
+    # 🤯 This operation performs multiplication and summation **without decrypting**
+    # the underlying data in 'encrypted_vector'.
+    encrypted_result = encrypted_vector.dot(plain_weights_tensor)
+    
+    print("⚙️ Homomorphic Dot Product Completed.")
+    return encrypted_result
+
+## 4. Decryption (Client-Side)
+
+def decrypt_result(encrypted_result):
+    """Decrypts the homomorphic result back into a standard list/float."""
+    
+    # The secret key in the context is implicitly used to call the decrypt method.
+    decrypted_result = encrypted_result.decrypt()
+    
+    print("🔓 Result Decrypted.")
+    # For a BFV vector, the result is a list of integers
+    return decrypted_result
+
+## --- EXECUTION ---
+
+# Data to be secured (e.g., a user's sensitive feature vector)
+USER_DATA = [10, 5, 12, 7, 3]
+
+# Model weights (e.g., a single layer of an AI model)
+MODEL_WEIGHTS = [0.1, 0.5, -0.2, 0.8, -0.4]
+
+# 1. Setup
+he_context = setup_context()
+
+# 2. Encrypt (Client's machine)
+# The encrypted data is ready to be sent to an untrusted server.
+ciphertext = encrypt_vector(he_context, USER_DATA)
+
+# 3. Compute (Server's machine)
+# The server performs the ML operation without seeing the raw data.
+encrypted_output = encrypted_dot_product(ciphertext, MODEL_WEIGHTS)
+
+# 4. Decrypt (Client's machine)
+final_result = decrypt_result(encrypted_output)
+
+
+## --- Verification ---
+
+# Standard (non-encrypted) computation for verification
+expected_result = np.dot(USER_DATA, MODEL_WEIGHTS)
+
+print("\n--- Results ---")
+print(f"Homomorphic Result (Decrypted): {final_result[0]}")
+print(f"Expected Result (Standard Dot Product): {expected_result}")
+print(f"Difference: {abs(final_result[0] - expected_result)}")
+
+# Note: In BFV, the result is an integer, so there might be a small
+# quantization error (difference).
