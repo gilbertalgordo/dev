@@ -1,0 +1,313 @@
+pip install numpy tensorflow matplotlib
+
+
+
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, Flatten, Dense, Reshape
+import matplotlib.pyplot as plt
+
+# --- 1. Define Constants and Placeholder Data ---
+IMAGE_SIZE = 64  # Size of the target image and hologram pattern (64x64 pixels)
+NUM_SAMPLES = 1000  # Number of simulated training examples
+
+# Placeholder function to simulate the complex optical process of CGH
+# In a real system, this would be based on diffraction physics (e.g., Fourier Transform)
+def simulate_cgh_pattern(image):
+    # A simple, non-physical simulation: the hologram is just a slightly blurred/distorted version
+    # of the image, representing the complex interference pattern.
+    pattern = image * 0.5 + np.roll(image, shift=1, axis=0) * 0.5
+    # Normalize to [0, 1] and ensure it looks like a high-frequency pattern
+    return np.clip(np.abs(np.fft.fftshift(np.fft.fft2(pattern))), 0, 1)
+
+# Generate synthetic image-hologram pairs for training
+print("Generating synthetic training data...")
+# X_train: Target images (Input to AI)
+X_train = np.random.rand(NUM_SAMPLES, IMAGE_SIZE, IMAGE_SIZE, 1).astype('float32') 
+# Y_train: Corresponding hologram patterns (Output from AI)
+Y_train = np.array([simulate_cgh_pattern(X_train[i, :, :, 0]) for i in range(NUM_SAMPLES)])
+Y_train = np.expand_dims(Y_train, axis=-1).astype('float32') # Add channel dimension
+
+# --- 2. Define the CNN Model ---
+# The CNN is trained to learn the mapping: Target Image -> Hologram Pattern
+def create_hologram_predictor_model():
+    model = Sequential([
+        # Input layer: Target Image (64x64x1)
+        Conv2D(32, (3, 3), activation='relu', padding='same', input_shape=(IMAGE_SIZE, IMAGE_SIZE, 1)),
+        Conv2D(64, (3, 3), activation='relu', padding='same'),
+        Flatten(),
+        Dense(IMAGE_SIZE * IMAGE_SIZE, activation='sigmoid'), # Output a flat array
+        Reshape((IMAGE_SIZE, IMAGE_SIZE, 1)) # Reshape to Hologram Pattern (64x64x1)
+    ])
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    return model
+
+model = create_hologram_predictor_model()
+model.summary()
+
+# --- 3. Train the Model ---
+print("\nTraining the model...")
+# Training on the synthetic data
+model.fit(X_train, Y_train, epochs=10, batch_size=32, verbose=1)
+
+# --- 4. Prediction (AI in Action) ---
+# Create a simple test image (e.g., a square)
+test_image = np.zeros((IMAGE_SIZE, IMAGE_SIZE, 1), dtype='float32')
+test_image[16:48, 16:48] = 1.0 # White square in the center
+
+# Use the trained AI to predict the required hologram pattern
+predicted_hologram_pattern = model.predict(np.expand_dims(test_image, axis=0))[0]
+
+# --- 5. Visualization ---
+fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+axes[0].imshow(test_image.squeeze(), cmap='gray')
+axes[0].set_title("Target Image (Input to AI)")
+axes[1].imshow(predicted_hologram_pattern.squeeze(), cmap='gray')
+axes[1].set_title("Predicted Hologram Pattern (AI Output)")
+axes[2].imshow(Y_train[0].squeeze(), cmap='gray')
+axes[2].set_title("Simulated Pattern (Example Training Data)")
+
+plt.show()
+
+# In a real mini hologram display:
+# The 'predicted_hologram_pattern' would be sent to a Spatial Light Modulator (SLM)
+# to diffract a laser and form the 3D target image.
+print("\nPrediction complete. The 'predicted_hologram_pattern' is the input for the holographic display hardware.")
+
+
+
+pip install torch torchvision numpy matplotlib tqdm
+
+
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
+import numpy as np
+from tqdm import tqdm
+import matplotlib.pyplot as plt
+
+# Check for GPU and set device
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {DEVICE}")
+
+# --- 1. Scientific Simulation Functions (Ground Truth Generation) ---
+# In real research, this complex operation generates the training data (GT Holograms)
+
+def angular_spectrum_propagation(field, wavelength, z, pixel_pitch):
+    """Simulates light propagation using the Angular Spectrum Method (ASM).
+    This is the physics model the network learns to approximate.
+    """
+    H, W = field.shape[-2:]
+    k = 2 * np.pi / wavelength
+    
+    # Frequency coordinates
+    fx = torch.fft.fftfreq(W, d=pixel_pitch).to(DEVICE)
+    fy = torch.fft.fftfreq(H, d=pixel_pitch).to(DEVICE)
+    
+    FX, FY = torch.meshgrid(fx, fy, indexing='xy')
+    
+    # Transfer function H(fx, fy)
+    H_tf = torch.exp(1j * k * z * torch.sqrt(1 - (wavelength * FX)**2 - (wavelength * FY)**2))
+    
+    # Propagation: FFT -> Multiply by Transfer Function -> IFFT
+    F = torch.fft.fftshift(torch.fft.fft2(field))
+    propagated_F = F * H_tf
+    propagated_field = torch.fft.ifft2(torch.fft.ifftshift(propagated_F))
+    
+    return propagated_field
+
+def gs_phase_retrieval(target_intensity, iterations, wavelength, z, pixel_pitch):
+    """
+    Simplified Gerchberg-Saxton (GS) algorithm for generating a Phase-Only Hologram.
+    This generates the 'Ground Truth' for the AI to learn.
+    """
+    amplitude = torch.sqrt(target_intensity).to(DEVICE)
+    current_field = amplitude.clone() # Start with target amplitude, random phase (implicit)
+
+    for i in range(iterations):
+        # 1. Propagate back (to SLM plane)
+        back_propagated_field = angular_spectrum_propagation(current_field, wavelength, -z, pixel_pitch)
+        
+        # 2. Apply SLM constraint (Phase-Only): Keep phase, set amplitude to 1
+        slm_field = torch.exp(1j * torch.angle(back_propagated_field))
+        
+        # 3. Propagate forward (to image plane)
+        forward_propagated_field = angular_spectrum_propagation(slm_field, wavelength, z, pixel_pitch)
+        
+        # 4. Apply Image constraint: Keep target amplitude, use the new phase
+        current_field = amplitude * torch.exp(1j * torch.angle(forward_propagated_field))
+        
+    # The output is the phase map that generated the image
+    phase_map = torch.angle(back_propagated_field)
+    return phase_map
+
+# --- 2. Advanced AI Model: U-Net Architecture ---
+# U-Net is ideal for learning complex image transformations like CGH.
+class UNetBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, 3, 1, 1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels, 3, 1, 1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+        )
+    def forward(self, x):
+        return self.conv(x)
+
+class UNetHologramPredictor(nn.Module):
+    def __init__(self, in_channels=1, out_channels=1):
+        super().__init__()
+        
+        # Down-sampling (Encoder)
+        self.enc1 = UNetBlock(in_channels, 64)
+        self.pool1 = nn.MaxPool2d(2)
+        self.enc2 = UNetBlock(64, 128)
+        self.pool2 = nn.MaxPool2d(2)
+        
+        # Bottleneck
+        self.bottleneck = UNetBlock(128, 256)
+        
+        # Up-sampling (Decoder)
+        self.upconv2 = nn.ConvTranspose2d(256, 128, 2, 2)
+        self.dec2 = UNetBlock(256, 128) # Note: 256 = 128 (from bottleneck) + 128 (from enc2)
+        self.upconv1 = nn.ConvTranspose2d(128, 64, 2, 2)
+        self.dec1 = UNetBlock(128, 64) # Note: 128 = 64 (from dec2) + 64 (from enc1)
+        
+        # Final output layer
+        self.final_conv = nn.Conv2d(64, out_channels, 1)
+        self.tanh = nn.Tanh() # Output bounded phase in [-pi, pi] for Tanh, or [0, 2pi] for Sigmoid*2*pi
+
+    def forward(self, x):
+        # Encoder
+        enc1 = self.enc1(x)
+        p1 = self.pool1(enc1)
+        enc2 = self.enc2(p1)
+        p2 = self.pool2(enc2)
+        
+        # Bottleneck
+        bottleneck = self.bottleneck(p2)
+        
+        # Decoder
+        up2 = self.upconv2(bottleneck)
+        dec2 = self.dec2(torch.cat([up2, enc2], dim=1)) # Skip Connection
+        up1 = self.upconv1(dec2)
+        dec1 = self.dec1(torch.cat([up1, enc1], dim=1)) # Skip Connection
+
+        output = self.final_conv(dec1)
+        # Scale phase output to the physical range of [-pi, pi]
+        return self.tanh(output) * torch.pi
+
+# --- 3. Data Generation and Setup ---
+class HologramDataset(Dataset):
+    def __init__(self, num_samples, img_size, phys_params):
+        self.num_samples = num_samples
+        self.img_size = img_size
+        self.phys_params = phys_params
+        
+    def __len__(self):
+        return self.num_samples
+    
+    def __getitem__(self, idx):
+        # Generate a random target image (e.g., a simple shape or noise)
+        # Using simple random noise as a complex proxy for a target image
+        target_intensity = torch.rand(1, self.img_size, self.img_size).to(DEVICE)
+
+        # Generate the Ground Truth (GT) hologram using the physics solver
+        gt_phase_map = gs_phase_retrieval(
+            target_intensity.squeeze(), 
+            iterations=5, # Low iterations for faster generation in this example
+            **self.phys_params
+        ).unsqueeze(0).to(DEVICE).float()
+        
+        # Normalize the phase map to [-1, 1] for Tanh output
+        gt_phase_map = gt_phase_map / torch.pi
+        
+        return target_intensity.cpu(), gt_phase_map.cpu()
+
+# Configuration
+IMG_SIZE = 128
+PHYS_PARAMS = {
+    'wavelength': 632.8e-9,  # Red laser (m)
+    'z': 0.1,                # Propagation distance (m)
+    'pixel_pitch': 8e-6      # SLM pixel size (m)
+}
+NUM_SAMPLES = 50 
+BATCH_SIZE = 8
+EPOCHS = 2
+
+# Create dataset and loader
+dataset = HologramDataset(NUM_SAMPLES, IMG_SIZE, PHYS_PARAMS)
+dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
+
+# --- 4. Model Training ---
+model = UNetHologramPredictor().to(DEVICE)
+# Loss function: L1 (Mean Absolute Error) is often better for image tasks than L2
+criterion = nn.L1Loss() 
+optimizer = optim.Adam(model.parameters(), lr=1e-4)
+
+print("\nStarting AI Training...")
+for epoch in range(EPOCHS):
+    total_loss = 0
+    # The progress bar is a nice user-facing 'hud' for instances of training
+    for target_intensity_batch, gt_phase_batch in tqdm(dataloader, desc=f"Epoch {epoch+1}"):
+        target_intensity_batch = target_intensity_batch.to(DEVICE)
+        gt_phase_batch = gt_phase_batch.to(DEVICE)
+
+        # Forward pass
+        predicted_phase = model(target_intensity_batch)
+        loss = criterion(predicted_phase, gt_phase_batch)
+
+        # Backward and optimize
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        
+        total_loss += loss.item()
+
+    avg_loss = total_loss / len(dataloader)
+    print(f"Epoch {epoch+1} finished. Avg Loss: {avg_loss:.4f}")
+
+# --- 5. Prediction & Validation ---
+
+# Generate a test image (e.g., a diagonal line)
+test_image_np = np.zeros((IMG_SIZE, IMG_SIZE), dtype=np.float32)
+np.fill_diagonal(test_image_np, 1.0)
+test_image = torch.tensor(test_image_np).unsqueeze(0).unsqueeze(0).to(DEVICE)
+
+# 1. AI Prediction (The fast part)
+with torch.no_grad():
+    model.eval()
+    # Predicted phase is normalized to [-1, 1], convert back to real phase [-pi, pi]
+    predicted_phase_map = model(test_image).squeeze().cpu().numpy() * np.pi 
+
+# 2. Reconstruct the image from the predicted hologram (Validation/Reconstruction)
+# This simulates the final optical output
+predicted_hologram_field = torch.exp(1j * torch.tensor(predicted_phase_map).to(DEVICE))
+reconstructed_field = angular_spectrum_propagation(predicted_hologram_field, **PHYS_PARAMS)
+reconstructed_intensity = torch.abs(reconstructed_field)**2
+reconstructed_intensity_np = reconstructed_intensity.squeeze().cpu().numpy()
+
+# --- 6. Visualization (Instances) ---
+fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+
+axes[0].imshow(test_image_np, cmap='gray')
+axes[0].set_title("Target Image (Input)")
+
+# The AI's output: The phase map to send to the Spatial Light Modulator (SLM)
+axes[1].imshow(predicted_phase_map, cmap='hsv') 
+axes[1].set_title("Predicted Phase Map (AI Output)")
+
+# The simulated result of the holographic display
+axes[2].imshow(reconstructed_intensity_np / np.max(reconstructed_intensity_np), cmap='gray')
+axes[2].set_title("Simulated Reconstruction (Optical Output)")
+
+plt.tight_layout()
+plt.show()
+
+print("\nAI-enhanced Hologram Generation Complete.")
