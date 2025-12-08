@@ -1,0 +1,164 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
+
+# --- 1. Simulate Data (Replace with your actual sensor/print data) ---
+data = {
+    'Print_Speed_mm_s': [50, 60, 45, 70, 55, 40, 65, 50, 75, 48],
+    'Layer_Height_mm': [0.2, 0.3, 0.15, 0.25, 0.2, 0.35, 0.1, 0.22, 0.3, 0.18],
+    'Nozzle_Temp_C': [200, 210, 195, 205, 200, 215, 190, 202, 212, 198],
+    'Failure': [0, 1, 0, 0, 0, 1, 1, 0, 1, 0] # 0=Success, 1=Failure
+}
+
+df = pd.DataFrame(data)
+print("--- Simulated 3D Print Data Snapshot ---")
+print(df)
+# 
+
+
+
+# --- 2. Prepare Data for ML ---
+# Features (Input parameters)
+X = df[['Print_Speed_mm_s', 'Layer_Height_mm', 'Nozzle_Temp_C']]
+# Target (Output - what we want to predict)
+y = df['Failure']
+
+# Split data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+# --- 3. Train the AI Model (Random Forest) ---
+# We are training an "instance" of the AI model.
+model = RandomForestClassifier(n_estimators=100, random_state=42)
+model.fit(X_train, y_train)
+
+# --- 4. Evaluate the Model ---
+y_pred = model.predict(X_test)
+accuracy = accuracy_score(y_test, y_pred)
+
+print(f"\nModel Training Complete.")
+print(f"Prediction Accuracy on Test Data: **{accuracy:.2f}**")
+
+
+
+# --- 5. Use the Model for a New Prediction (The "HUD" for print quality) ---
+new_print_parameters = pd.DataFrame({
+    'Print_Speed_mm_s': [65], # Fast speed
+    'Layer_Height_mm': [0.3],  # Large layer height
+    'Nozzle_Temp_C': [215]     # High temperature
+})
+
+# Predict the outcome (0 or 1)
+prediction = model.predict(new_print_parameters)
+probability = model.predict_proba(new_print_parameters)[0]
+
+# Display a clear "HUD" style output
+status = "**FAILURE LIKELY**" if prediction[0] == 1 else "**SUCCESS LIKELY**"
+
+print("\n--- AI Print Status HUD ---")
+print(f"Input Parameters: {new_print_parameters.iloc[0].to_dict()}")
+print(f"Predicted Outcome: **{status}**")
+print(f"Success Probability (0): {probability[0]:.2f}")
+print(f"Failure Probability (1): {probability[1]:.2f}")
+
+
+
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
+import numpy as np
+
+# --- Configuration Constants (Clear Voices in defining parameters) ---
+IMAGE_WIDTH = 128
+IMAGE_HEIGHT = 128
+NUM_CLASSES = 3  # e.g., 0: Success, 1: Stringing, 2: Under-extrusion
+
+def build_cnn_model():
+    """
+    Defines a simple Convolutional Neural Network (CNN) for image classification.
+    """
+    model = Sequential([
+        # 1. Convolutional Block 1
+        Conv2D(32, (3, 3), activation='relu', input_shape=(IMAGE_WIDTH, IMAGE_HEIGHT, 3), padding='same'),
+        MaxPooling2D((2, 2)),
+        Dropout(0.25),
+
+        # 2. Convolutional Block 2
+        Conv2D(64, (3, 3), activation='relu', padding='same'),
+        MaxPooling2D((2, 2)),
+        Dropout(0.25),
+
+        # 3. Classifier Block
+        Flatten(),
+        Dense(128, activation='relu'),
+        Dropout(0.5),
+        Dense(NUM_CLASSES, activation='softmax') # Output layer for multi-class classification
+    ])
+
+    # Compile the model with scientific reasoning
+    model.compile(
+        optimizer='adam',
+        loss='sparse_categorical_crossentropy', # Appropriate for multi-class integers
+        metrics=['accuracy']
+    )
+    return model
+
+# Create an instance of the model
+cnn_classifier = build_cnn_model()
+print("--- CNN Model Architecture ---")
+cnn_classifier.summary()
+# 
+
+
+
+# --- Mock Data Simulation for Training (Illustrative) ---
+# Replace with actual data loading (e.g., Keras ImageDataGenerator)
+MOCK_TRAIN_SAMPLES = 100
+MOCK_X_train = np.random.rand(MOCK_TRAIN_SAMPLES, IMAGE_WIDTH, IMAGE_HEIGHT, 3)
+MOCK_y_train = np.random.randint(0, NUM_CLASSES, MOCK_TRAIN_SAMPLES)
+
+# Note: The model would be trained here using model.fit(MOCK_X_train, MOCK_y_train, ...)
+# For demonstration, we will skip the time-consuming training and assume weights exist.
+
+# Save the trained instance (for deployment)
+MODEL_SAVE_PATH = '3d_print_defect_cnn.keras'
+# cnn_classifier.save(MODEL_SAVE_PATH) 
+
+
+
+# --- Real-Time Inference Function ---
+def analyze_print_frame(frame_image, trained_model):
+    """
+    Simulates processing a live image frame from the 3D printer camera.
+    """
+    # 1. Preprocessing (Resize and Normalize)
+    processed_frame = tf.image.resize(frame_image, (IMAGE_WIDTH, IMAGE_HEIGHT))
+    processed_frame = processed_frame / 255.0
+    
+    # CNN expects a batch of images, so add a dimension
+    input_tensor = np.expand_dims(processed_frame, axis=0)
+    
+    # 2. Prediction
+    predictions = trained_model.predict(input_tensor, verbose=0)
+    
+    # 3. Interpretation
+    predicted_class_index = np.argmax(predictions[0])
+    confidence = predictions[0][predicted_class_index]
+    
+    LABELS = {0: "✅ SUCCESS (No Defect)", 1: "⚠️ STRINGING/ZITS", 2: "❌ UNDER-EXTRUSION"}
+    
+    # --- HUD Output ---
+    print("\n--- AI Defect Detection HUD ---")
+    print(f"Predicted Defect: **{LABELS[predicted_class_index]}**")
+    print(f"Confidence Level: **{confidence:.2f}**")
+    
+    if predicted_class_index != 0 and confidence > 0.8:
+        print("> **ACTION REQUIRED:** Initiate G-code correction or halt print.")
+
+# --- Simulation of a Live Frame ---
+# In a real setup, this would be an image captured from a webcam (OpenCV)
+mock_defect_frame = np.random.rand(256, 256, 3).astype('float32') 
+# For demonstration, let's load a dummy model (must reload it to simulate a deployment scenario)
+deployed_model = build_cnn_model() # In a real scenario, load with: keras.models.load_model(MODEL_SAVE_PATH)
+
+analyze_print_frame(mock_defect_frame, deployed_model)
