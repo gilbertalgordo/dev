@@ -1,0 +1,168 @@
+import numpy as np
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
+
+
+
+# Simulated data: [Time in days], [Temperature in Celsius]
+# X: Input Feature (Temperature - increasing)
+X = np.array([30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80]).reshape(-1, 1)
+
+# Y: Target Variable (Remaining Useful Life (RUL) in days - decreasing)
+# (Component is expected to fail around day 100 with a max temp of 80C)
+Y = np.array([70, 65, 60, 55, 50, 45, 40, 35, 30, 25, 20])
+
+
+
+# Split data into training and testing sets
+X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=42)
+
+# Initialize the Linear Regression model
+model = LinearRegression()
+
+# Train the model using the training sets
+model.fit(X_train, Y_train)
+
+# Make predictions on the test set
+Y_pred = model.predict(X_test)
+
+
+
+# New sensor reading: A component is currently operating at 68°C
+new_temp = np.array([[68]]) 
+
+# Use the trained model to predict the Remaining Useful Life (RUL)
+predicted_rul = model.predict(new_temp)
+
+# Output Results
+print("## Prediction Results 📊\n")
+print(f"Model Intercept: {model.intercept_:.2f}")
+print(f"Model Coefficient (Slope): {model.coef_[0]:.2f}\n")
+print(f"Mean Squared Error on Test Data: {mean_squared_error(Y_test, Y_pred):.2f}")
+print("-" * 30)
+
+# The final, actionable prediction:
+print(f"For a component operating at {new_temp[0][0]}°C, the Predicted Remaining Useful Life (RUL) is approximately **{predicted_rul[0]:.2f} days**.")
+
+# Example of a threshold for maintenance:
+if predicted_rul[0] < 30:
+    print("\n**ALERT:** RUL is below 30 days. Schedule immediate maintenance or replacement.")
+else:
+    print("\nSystem status: Normal.")
+
+
+
+import numpy as np
+import pandas as pd
+import tensorflow as tf
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+
+
+
+# Number of operational cycles/time steps
+N_CYCLES = 50
+
+# Simulate sensor features over time (degradation)
+# Temperature slowly increases over time
+temp_series = 60 + np.linspace(0, 20, N_CYCLES) + np.random.normal(0, 0.5, N_CYCLES)
+# Voltage slowly decreases over time
+voltage_series = 12.0 - np.linspace(0, 2, N_CYCLES) + np.random.normal(0, 0.02, N_CYCLES)
+
+# Combine into a DataFrame
+df = pd.DataFrame({
+    'Cycle': range(1, N_CYCLES + 1),
+    'Temperature': temp_series,
+    'Voltage': voltage_series
+})
+
+# Calculate the Target (RUL): RUL decreases as cycles increase.
+# Assuming component failure at cycle 50, RUL at cycle N is (50 - N)
+df['RUL'] = N_CYCLES - df['Cycle']
+
+print("--- Simulated Data Snapshot (First 5 Cycles) ---")
+print(df.head())
+
+
+
+# 3.1. Normalize Features
+scaler = MinMaxScaler()
+# Scale only the sensor features (Temperature and Voltage)
+feature_cols = ['Temperature', 'Voltage']
+df[feature_cols] = scaler.fit_transform(df[feature_cols])
+
+# 3.2. Create Time Sequences for LSTM
+def create_sequences(features, targets, sequence_length):
+    """Restructures data into sequences (batches) for LSTM training."""
+    X, Y = [], []
+    for i in range(len(features) - sequence_length):
+        # Input sequence: data from i to i + sequence_length
+        X.append(features[i:(i + sequence_length), :])
+        # Target: RUL at the end of the sequence (i + sequence_length)
+        Y.append(targets[i + sequence_length])
+    return np.array(X), np.array(Y)
+
+SEQUENCE_LENGTH = 10 # Look back 10 cycles to predict RUL
+
+# Prepare input data (features) and target data (RUL)
+features = df[feature_cols].values
+targets = df['RUL'].values
+
+# Create sequences
+X_sequences, Y_targets = create_sequences(features, targets, SEQUENCE_LENGTH)
+
+# Split into training and testing sets
+split_point = int(0.8 * len(X_sequences))
+X_train, X_test = X_sequences[:split_point], X_sequences[split_point:]
+Y_train, Y_test = Y_targets[:split_point], Y_targets[split_point:]
+
+# The shape of the training data is (samples, sequence_length, number_of_features)
+print(f"\nTraining Data Shape (Samples, Sequence, Features): {X_train.shape}")
+
+
+
+# Determine the input shape for the model
+input_shape = (X_train.shape[1], X_train.shape[2]) # (SEQUENCE_LENGTH, num_features)
+
+# Initialize the Keras Sequential Model
+model = Sequential([
+    # LSTM layer: 100 units, returns sequences for the next layer (or not if it's the last recurrent layer)
+    LSTM(units=100, return_sequences=False, input_shape=input_shape),
+    # Dropout: Helps prevent overfitting by randomly setting a fraction of input units to 0
+    Dropout(0.2),
+    # Dense layer: Output layer for regression (predicting a single RUL value)
+    Dense(units=1, activation='linear')
+])
+
+# Compile the model
+# Adam optimizer is common. 'mse' (Mean Squared Error) is the standard loss function for regression
+model.compile(optimizer='adam', loss='mse', metrics=['mae']) # mae = Mean Absolute Error
+
+# Train the model (fitting the data)
+history = model.fit(
+    X_train, Y_train,
+    epochs=50,       # Number of times to iterate over the entire dataset
+    batch_size=16,
+    validation_split=0.1, # Use 10% of training data for validation during training
+    verbose=0          # Run silently
+)
+
+print("\n--- Model Training Complete ---")
+
+
+
+# 5.1. Evaluate the model on the unseen test data
+test_loss, test_mae = model.evaluate(X_test, Y_test, verbose=0)
+print(f"Test Loss (MSE): {test_loss:.2f}")
+print(f"Test Mean Absolute Error (MAE): {test_mae:.2f} cycles")
+
+# 5.2. Make a specific prediction on the last sequence of the test set
+# This represents the current state of the component just before the end of the data
+last_sequence = X_test[-1].reshape(1, SEQUENCE_LENGTH, len(feature_cols))
+predicted_rul = model.predict(last_sequence)[0][0]
+
+print("-" * 40)
+print(f"**Advanced Prediction Instance:**")
+print(f"The predicted Remaining Useful Life (RUL) for the current component state is: **{predicted_rul:.2f} cycles**.")
