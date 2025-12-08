@@ -1,0 +1,187 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# --- 1. Simulation Parameters ---
+SAMPLE_RATE = 1000  # Hz
+DURATION = 2.0      # Seconds
+T = np.linspace(0, DURATION, int(SAMPLE_RATE * DURATION), endpoint=False)
+
+# --- 2. Generate Signals ---
+# Original Signal (The "clear" signal we want)
+clean_signal = np.sin(2 * np.pi * 5 * T) + 0.5 * np.sin(2 * np.pi * 50 * T)
+
+# Noise Source (The "undesired" signal, e.g., an interference pattern)
+# For this example, we assume we can sense the noise source separately (reference signal).
+noise_source = np.random.normal(0, 0.5, T.size)
+
+# Observed Noisy Signal (The signal we receive, clean_signal + noise_source)
+noisy_signal = clean_signal + noise_source
+
+# --- 3. Simple LMS Adaptive Filter (The "AI Booster") ---
+
+# Initialize adaptive filter parameters
+filter_order = 10  # Number of weights (taps) in the filter
+weights = np.zeros(filter_order)
+learning_rate = 0.01 # Governs how quickly the filter adapts (The 'intelligence')
+
+# Pre-pad the noise source for the filter's history
+padded_noise = np.pad(noise_source, (filter_order - 1, 0), 'constant')
+
+# Process the signal
+boosted_signal = np.zeros_like(clean_signal)
+
+for i in range(len(noisy_signal)):
+    # 3a. Get the current noise reference history (X_n)
+    # The last 'filter_order' samples of the noise source
+    noise_history = padded_noise[i:i + filter_order][::-1]
+
+    # 3b. Predict the noise component in the noisy signal (y_hat_n)
+    predicted_noise = np.dot(weights, noise_history)
+
+    # 3c. Calculate the error (e_n = d_n - y_hat_n)
+    # The desired signal (d_n) is the noisy_signal, and the error is the residual signal.
+    error = noisy_signal[i] - predicted_noise
+
+    # 3d. Update the weights (The learning step)
+    weights = weights + learning_rate * error * noise_history
+
+    # 3e. The "boosted" (noise-cancelled) signal is the error output
+    boosted_signal[i] = error
+
+# --- 4. Plotting Results ---
+plt.figure(figsize=(10, 6))
+
+plt.subplot(3, 1, 1)
+plt.plot(T, clean_signal)
+plt.title('1. Original Clean Signal')
+plt.xlabel('Time (s)')
+
+
+plt.subplot(3, 1, 2)
+plt.plot(T, noisy_signal)
+plt.title('2. Observed Noisy Signal')
+plt.xlabel('Time (s)')
+
+plt.subplot(3, 1, 3)
+plt.plot(T, boosted_signal)
+plt.title('3. AI Boosted (Noise-Reduced) Signal')
+plt.xlabel('Time (s)')
+
+plt.tight_layout()
+plt.show()
+
+
+
+import numpy as np
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, Conv1D, MaxPooling1D, UpSampling1D
+from tensorflow.keras.optimizers import Adam
+import matplotlib.pyplot as plt
+
+# --- 1. Simulation Parameters ---
+# A real-world application would use actual time-series data (Source 1.1)
+SEQUENCE_LENGTH = 1000
+NUM_SAMPLES = 5000
+NOISE_LEVEL = 0.5
+FILTERS = 32
+
+# --- 2. Generate Synthetic Data ---
+
+def create_signal_data(num_samples, seq_length, noise_level):
+    # Generate clean signal (e.g., a mix of sine waves)
+    t = np.linspace(0, 10, seq_length, endpoint=False)
+    clean_signals = np.array([
+        np.sin(2 * np.pi * 5 * t + np.random.rand() * 2 * np.pi) +
+        0.5 * np.sin(2 * np.pi * 20 * t + np.random.rand() * 2 * np.pi)
+        for _ in range(num_samples)
+    ])
+
+    # Add Gaussian noise
+    noise = np.random.normal(0, noise_level, (num_samples, seq_length))
+    noisy_signals = clean_signals + noise
+
+    # Reshape for Keras (samples, sequence_length, features/channels)
+    clean_signals = clean_signals.reshape((num_samples, seq_length, 1))
+    noisy_signals = noisy_signals.reshape((num_samples, seq_length, 1))
+
+    return noisy_signals, clean_signals
+
+X_noisy, X_clean = create_signal_data(NUM_SAMPLES, SEQUENCE_LENGTH, NOISE_LEVEL)
+
+# Split data (80% train, 20% test)
+train_size = int(0.8 * NUM_SAMPLES)
+X_train_noisy, X_test_noisy = X_noisy[:train_size], X_noisy[train_size:]
+X_train_clean, X_test_clean = X_clean[:train_size], X_clean[train_size:]
+
+print(f"Training data shape: {X_train_noisy.shape}")
+
+
+
+# --- 3. Build the Denoising Autoencoder Model ---
+
+input_signal = Input(shape=(SEQUENCE_LENGTH, 1))
+
+# ENCODER (The part that learns the clean features)
+# Conv1D layers are excellent for finding local patterns in time-series data.
+x = Conv1D(FILTERS, kernel_size=16, activation='relu', padding='same')(input_signal)
+x = MaxPooling1D(pool_size=2, padding='same')(x)
+x = Conv1D(FILTERS // 2, kernel_size=16, activation='relu', padding='same')(x)
+encoded = MaxPooling1D(pool_size=2, padding='same')(x) # Bottleneck
+
+# DECODER (The part that reconstructs the signal)
+x = Conv1D(FILTERS // 2, kernel_size=16, activation='relu', padding='same')(encoded)
+x = UpSampling1D(2)(x)
+x = Conv1D(FILTERS, kernel_size=16, activation='relu', padding='same')(x)
+x = UpSampling1D(2)(x)
+
+# Output layer: Reconstruct the original 1-channel signal
+decoded = Conv1D(1, kernel_size=16, activation='linear', padding='same')(x)
+
+# Create the model
+autoencoder = Model(input_signal, decoded)
+autoencoder.compile(optimizer=Adam(learning_rate=0.001), loss='mse')
+
+# Print model summary to see the architecture
+# autoencoder.summary()
+
+
+
+
+# --- 4. Train the Model ---
+
+# We train the model to minimize the difference (loss) between the
+# noisy input and the clean output (MSE: Mean Squared Error).
+history = autoencoder.fit(
+    X_train_noisy, X_train_clean,
+    epochs=10, # For a real application, this would be much higher (e.g., 50-100)
+    batch_size=128,
+    shuffle=True,
+    validation_data=(X_test_noisy, X_test_clean),
+    verbose=0 # Turn off verbose output for cleaner display
+)
+
+print("\nModel Training Complete.")
+
+# --- 5. Test the Booster (Denoise a sample) ---
+
+# Select a random sample from the test set
+sample_index = np.random.randint(0, len(X_test_noisy))
+test_signal_noisy = X_test_noisy[sample_index:sample_index+1]
+test_signal_clean = X_test_clean[sample_index:sample_index+1]
+
+# Use the trained model to "boost" (denoise) the signal
+boosted_signal = autoencoder.predict(test_signal_noisy, verbose=0)
+
+# --- 6. Plotting the "Boosted" Result ---
+plt.figure(figsize=(10, 6))
+plt.plot(test_signal_clean.flatten(), label='Original Clean Signal', linewidth=2, color='green')
+plt.plot(test_signal_noisy.flatten(), label='Noisy Input Signal', linewidth=1, color='red', alpha=0.6)
+plt.plot(boosted_signal.flatten(), label='AI Boosted (Denoised) Signal', linewidth=2, color='blue', linestyle='--')
+plt.title('Advanced AI Signal Booster (CNN Autoencoder Denoising)')
+plt.xlabel('Time Sample')
+plt.ylabel('Amplitude')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# The final boosted signal will closely track the original clean signal.
