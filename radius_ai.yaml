@@ -1,0 +1,208 @@
+import numpy as np
+from sklearn.neighbors import RadiusNeighborsClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+import matplotlib.pyplot as plt
+
+# 1. Generate Sample Data
+# We'll create a simple dataset with two classes (0 and 1)
+# X: features (coordinates), y: target (class)
+np.random.seed(42)
+X = np.random.rand(100, 2) * 10 # 100 samples, 2 features (x, y coords)
+y = (X[:, 0] + X[:, 1] > 10).astype(int) # Simple boundary: x+y > 10 is class 1
+
+# Add some noise to make it more realistic
+y[np.random.choice(len(y), 10)] = 1 - y[np.random.choice(len(y), 10)]
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+# 2. Define the Radius Neighbors Model
+# key parameter is the 'radius' (r), which defines the neighborhood size.
+# If no neighbors are found within the radius, the prediction is set to the default label (or nan).
+radius_value = 2.0  # <--- **The management parameter: set the radius for neighbor search**
+model = RadiusNeighborsClassifier(
+    radius=radius_value,
+    weights='uniform', # All neighbors within the radius vote equally
+    p=2,               # Use Euclidean distance
+    outlier_label=1    # If no neighbors are found, label as class 1 (or 'most frequent', 'auto', etc.)
+)
+
+# 3. Train the Model
+# The fit method essentially just stores the training data
+model.fit(X_train, y_train)
+
+# 4. Make Predictions
+y_pred = model.predict(X_test)
+
+# 5. Evaluate and Print Results
+accuracy = accuracy_score(y_test, y_pred)
+
+print(f"Radius Neighbors Classifier with radius (r) = {radius_value}")
+print(f"Test Accuracy: {accuracy*100:.2f}%")
+
+# --- Visualization (Optional) ---
+# Create a grid for plotting the decision boundary
+x_min, x_max = X[:, 0].min() - 1, X[:, 0].max() + 1
+y_min, y_max = X[:, 1].min() - 1, X[:, 1].max() + 1
+xx, yy = np.meshgrid(np.arange(x_min, x_max, 0.1),
+                     np.arange(y_min, y_max, 0.1))
+
+# Predict on the grid to see the decision boundary
+Z = model.predict(np.c_[xx.ravel(), yy.ravel()])
+Z = Z.reshape(xx.shape)
+
+plt.figure(figsize=(8, 6))
+plt.contourf(xx, yy, Z, alpha=0.4)
+plt.scatter(X[:, 0], X[:, 1], c=y, s=20, edgecolor='k')
+plt.title(f'Radius Neighbors Classification (r={radius_value})')
+plt.xlabel('Feature 1')
+plt.ylabel('Feature 2')
+plt.show() # 
+
+
+
+import numpy as np
+import pandas as pd
+from geopy.distance import geodesic
+from typing import List, Tuple, Dict
+import random
+
+# --- 1. Define Data Structures (Instances) ---
+
+# Location of the Service Hub (e.g., technician office)
+HUB_LOCATION = (40.7128, -74.0060) # New York City
+
+class Task:
+    """Represents a service task that needs to be completed."""
+    def __init__(self, task_id: int, coords: Tuple[float, float], time_required: int, priority: int):
+        self.id = task_id
+        self.coords = coords  # (latitude, longitude)
+        self.time_required = time_required # in minutes
+        self.priority = priority
+
+    def __repr__(self):
+        return f"Task({self.id}, Coords:{self.coords[0]:.2f}, {self.coords[1]:.2f}, Prio:{self.priority})"
+
+class Agent:
+    """Represents a field technician (agent)."""
+    def __init__(self, agent_id: int, capacity: int, max_travel_time: int = 60):
+        self.id = agent_id
+        self.capacity = capacity # Max minutes available for tasks
+        self.max_travel_time = max_travel_time # Max *one-way* travel time (Isochrone Radius)
+        self.current_load = 0
+        self.assigned_tasks: List[Task] = []
+
+    def __repr__(self):
+        return f"Agent({self.id}, Load:{self.current_load}/{self.capacity}, MaxTime:{self.max_travel_time})"
+
+# --- 2. Simulation Setup ---
+
+# Generate Task Instances (using random data for simplicity)
+def generate_tasks(num_tasks):
+    tasks = []
+    for i in range(num_tasks):
+        # Generate coordinates within a realistic range of the hub
+        lat = HUB_LOCATION[0] + np.random.uniform(-0.15, 0.15)
+        lon = HUB_LOCATION[1] + np.random.uniform(-0.25, 0.25)
+        tasks.append(Task(
+            task_id=i,
+            coords=(lat, lon),
+            time_required=random.randint(30, 120),
+            priority=random.randint(1, 5) # 5 is highest priority
+        ))
+    return tasks
+
+tasks = generate_tasks(20)
+agents = [
+    Agent(101, capacity=360, max_travel_time=45), # Agent 1: 6 hours capacity, 45 min radius
+    Agent(102, capacity=240, max_travel_time=60), # Agent 2: 4 hours capacity, 60 min radius
+]
+
+# --- 3. Advanced Radius Management AI Logic (Constraint Solver) ---
+
+# Simulates travel time using a simple linear model based on straight-line distance,
+# as a proxy for a complex routing engine (like Google Maps API or OSRM).
+def calculate_travel_time_min(start_coords: Tuple, end_coords: Tuple) -> int:
+    """Simulate travel time based on distance (minutes)."""
+    # Geodesic distance in kilometers
+    distance_km = geodesic(start_coords, end_coords).km
+    # Simple model: 1 km = 2.5 minutes (accounts for urban travel and stoplights)
+    travel_time = distance_km * 2.5
+    return int(max(10, travel_time)) # Min 10 minutes travel time
+
+def assign_tasks_with_radius_management(tasks: List[Task], agents: List[Agent], hub: Tuple) -> Dict:
+    """
+    Assigns tasks to agents based on multiple constraints:
+    1. **Isochrone Radius Constraint**: Task must be reachable within agent's max_travel_time (one-way).
+    2. **Capacity Constraint**: Agent must have enough time capacity to complete the task.
+    3. **Optimization**: Prioritize tasks by highest priority first, then by shortest travel time.
+    """
+    # Sort tasks by Priority (descending) to optimize for important work first
+    sorted_tasks = sorted(tasks, key=lambda t: t.priority, reverse=True)
+    unassigned_tasks = sorted_tasks.copy()
+    assignment_results = {agent.id: [] for agent in agents}
+    
+    
+
+    for task in sorted_tasks:
+        best_agent: Agent = None
+        min_cost = float('inf') # Use cost function: travel_time + task_time
+
+        # 1. Evaluate all agents for eligibility
+        eligible_agents = []
+        for agent in agents:
+            travel_time = calculate_travel_time_min(hub, task.coords)
+            total_time_needed = travel_time + task.time_required
+            
+            # **Radius Constraint Check (Isochrone)**: Check one-way travel time
+            if travel_time <= agent.max_travel_time:
+                # **Capacity Constraint Check**: Check if agent has enough remaining time
+                if (agent.current_load + total_time_needed) <= agent.capacity:
+                    cost = total_time_needed
+                    eligible_agents.append((agent, cost))
+
+        # 2. Select the Best Agent (Optimization Goal)
+        if eligible_agents:
+            # Sort eligible agents by the lowest total time (minimal disruption)
+            best_agent, min_cost = min(eligible_agents, key=lambda x: x[1])
+
+            # 3. Perform Assignment and Update Agent State (Management)
+            best_agent.assigned_tasks.append(task)
+            best_agent.current_load += min_cost
+            unassigned_tasks.remove(task)
+            assignment_results[best_agent.id].append({
+                'task_id': task.id,
+                'travel_time_min': calculate_travel_time_min(hub, task.coords),
+                'task_duration_min': task.time_required,
+                'total_load_min': min_cost
+            })
+
+    return assignment_results, unassigned_tasks
+
+# --- 4. Execute and Display Management Results ---
+
+assignments, unassigned = assign_tasks_with_radius_management(tasks, agents, HUB_LOCATION)
+
+print("## 📊 AI Assignment Management Report")
+print("-" * 40)
+
+for agent in agents:
+    print(f"\n**Agent {agent.id} (Max Travel Time: {agent.max_travel_time} min)**")
+    print(f"  Final Load: {agent.current_load} / {agent.capacity} min")
+    
+    if assignments[agent.id]:
+        print("  Assigned Tasks:")
+        for assignment in assignments[agent.id]:
+            print(f"    - Task {assignment['task_id']}: Travel: {assignment['travel_time_min']} min, Work: {assignment['task_duration_min']} min")
+    else:
+        print("  Assigned Tasks: None")
+
+print("\n**❌ Unassigned Tasks (Missed Constraints):**")
+for task in unassigned:
+    # Calculate travel time to show why it might have failed the radius constraint
+    travel_time = calculate_travel_time_min(HUB_LOCATION, task.coords)
+    reason = "No agent had capacity."
+    if all(travel_time > agent.max_travel_time for agent in agents):
+        reason = f"Travel time ({travel_time} min) exceeded all agents' radii."
+    
+    print(f" - Task {task.id} (Prio {task.priority}): {reason}")
