@@ -1,0 +1,167 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_absolute_error
+import numpy as np
+
+# --- 1. Simulate/Load Battery Data ---
+print("⚙️ Initializing Battery AI Model...")
+
+# Features (Voltage and Temperature) and Target (SOC)
+data = {
+    'Voltage_V': [4.2, 4.15, 4.1, 4.0, 3.9, 3.8, 3.7, 3.6, 3.5, 3.3, 3.0],
+    'Temperature_C': [25, 26, 27, 25, 20, 21, 22, 30, 28, 29, 27],
+    'SOC_Percent': [100, 95, 90, 80, 65, 50, 40, 30, 20, 10, 0]
+}
+df = pd.DataFrame(data)
+
+# Separate Features (X) and Target (y)
+X = df[['Voltage_V', 'Temperature_C']] # Inputs for the model
+y = df['SOC_Percent']                  # Output to predict
+
+# --- 2. Split Data for Training and Testing ---
+# We use 80% for training the model and 20% for testing its accuracy
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+
+# --- 3. Train the Machine Learning Model ---
+model = LinearRegression()
+model.fit(X_train, y_train)
+print("✅ Model Training Complete.")
+
+# --- 4. Evaluate the Model ---
+y_pred = model.predict(X_test)
+mae = mean_absolute_error(y_test, y_pred)
+
+print(f"\n🔬 Model Evaluation:")
+print(f"  Test Data Count: {len(X_test)} instances")
+print(f"  Mean Absolute Error (MAE): {mae:.2f} %")
+print("(This is the average difference between the model's prediction and the true SOC)")
+
+# --- 5. Make a New Prediction (The AI in action) ---
+# Let's say the battery is currently at 3.75V and 24°C
+new_data = pd.DataFrame({
+    'Voltage_V': [3.75], 
+    'Temperature_C': [24]
+})
+
+# Predict the SOC
+predicted_soc = model.predict(new_data)[0]
+
+print(f"\n🚀 AI Prediction (New Instance):")
+print(f"  Input: Voltage={new_data['Voltage_V'].iloc[0]}V, Temp={new_data['Temperature_C'].iloc[0]}°C")
+print(f"  Predicted State of Charge (SOC): **{predicted_soc:.2f}%**")
+
+
+
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.model_selection import train_test_split
+
+# --- 1. Generate/Simulate Advanced Time-Series Data ---
+
+# Simulate features: Voltage (V), Current (A), Temperature (C) over 50 cycles
+# Simulate target: State of Health (SOH - %) decreasing over time
+N_CYCLES = 50
+TIMESTEPS = 10 # We'll use 10 previous time points to predict the next SOH
+
+# Features (Input Data)
+V = np.linspace(4.2, 3.0, N_CYCLES) + np.random.normal(0, 0.05, N_CYCLES)
+I = np.abs(np.sin(np.linspace(0, 2*np.pi, N_CYCLES) * 5)) * 5 # Cyclical current
+T = np.linspace(25, 35, N_CYCLES) + np.random.normal(0, 1, N_CYCLES)
+
+# Target (Output Data) - SOH degradation
+SOH = 100 - np.linspace(0, 20, N_CYCLES)**1.2 # Non-linear degradation curve
+
+# Combine into a DataFrame-like structure (for simplicity, we use NumPy array)
+data = np.stack((V, I, T, SOH), axis=1) # Shape: (50, 4)
+
+print("⚙️ Data Simulation Complete. Shape:", data.shape)
+
+# --- 2. Data Preprocessing (Scaling and Sequence Creation) ---
+
+# Scale all features and target between 0 and 1 (critical for Neural Networks)
+scaler = MinMaxScaler()
+data_scaled = scaler.fit_transform(data)
+
+# Function to create sequences (required for RNN/LSTM)
+def create_sequences(data, timesteps):
+    X, y = [], []
+    # Create windows of 'timesteps' length
+    for i in range(len(data) - timesteps):
+        # X is the window of the last 'timesteps' points (all 4 features)
+        X.append(data[i:(i + timesteps), :])
+        # y is the SOH (index 3) at the *next* time point
+        y.append(data[i + timesteps, 3]) 
+    return np.array(X), np.array(y)
+
+X_seq, y_seq = create_sequences(data_scaled, TIMESTEPS)
+
+# X_seq shape: (N_samples, TIMESTEPS, N_features)
+print("🔗 Sequence Creation Complete. X Shape:", X_seq.shape) 
+
+# Split data
+X_train, X_test, y_train, y_test = train_test_split(
+    X_seq, y_seq, test_size=0.2, random_state=42
+)
+
+# --- 3. Build the LSTM Model ---
+
+# Number of features (V, I, T, SOH)
+N_FEATURES = data_scaled.shape[1] 
+
+model = Sequential([
+    # LSTM layer: 50 units, returns sequences for the next layer (optional here)
+    LSTM(50, activation='relu', input_shape=(TIMESTEPS, N_FEATURES)),
+    # Dense layer: 1 unit for the SOH prediction
+    Dense(1)
+])
+
+# Compile the model
+model.compile(optimizer='adam', loss='mse')
+print("🧠 LSTM Model Built.")
+
+# --- 4. Train the Model ---
+# Note: In a real scenario, you'd use hundreds of thousands of data points
+print("⏳ Training Model...")
+history = model.fit(
+    X_train, y_train, 
+    epochs=50, 
+    batch_size=16, 
+    validation_split=0.1, 
+    verbose=0 # Set to 1 for training progress details (HUD preference)
+)
+print("✅ Training Complete.")
+
+# --- 5. Evaluate and Predict ---
+
+# Get the last sequence from the training data for a prediction instance
+# This simulates using the last 10 known states to predict the next one.
+last_sequence_scaled = X_test[0].reshape(1, TIMESTEPS, N_FEATURES)
+
+# Predict the next SOH (scaled value)
+predicted_scaled_soh = model.predict(last_sequence_scaled, verbose=0)[0, 0]
+
+# --- Inverse Transform to get the actual SOH value (in Percent) ---
+# We need a dummy array for the inverse transform since the scaler was trained on 4 features
+# We take the predicted SOH and put it into the SOH column (index 3)
+dummy_array = np.zeros((1, N_FEATURES)) 
+dummy_array[0, 3] = predicted_scaled_soh 
+predicted_soh = scaler.inverse_transform(dummy_array)[0, 3]
+
+# --- Display HUD (Head-Up Display) of Results ---
+print("\n--- 📊 Prediction HUD (Head-Up Display) ---")
+print(f"  LSTM Layers: 1 (50 units)")
+print(f"  Timesteps used for prediction: {TIMESTEPS} instances")
+print(f"  Mean Squared Error (Loss): {history.history['loss'][-1]:.4f}")
+print("---------------------------------------------")
+print(f"  Prediction Input (Last 10 cycles, Scaled):")
+print(f"    Avg Voltage: {np.mean(X_test[0,:,0] * scaler.data_range_[0] + scaler.data_min_[0]):.2f} V")
+print(f"    Avg Current: {np.mean(X_test[0,:,1] * scaler.data_range_[1] + scaler.data_min_[1]):.2f} A")
+print(f"    Current SOH (Last known point): {y_test[0] * scaler.data_range_[3] + scaler.data_min_[3]:.2f} %")
+print("---------------------------------------------")
+print(f"  Predicted Next State of Health (SOH): **{predicted_soh:.2f}%**")
