@@ -1,0 +1,234 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+# --- Configuration for the Hologram Generation ---
+# Note: Actual sizes depend on the display and resolution (e.g., 1080p, 4K)
+INPUT_COMPLEX_FIELD_SIZE = 64  # Size of the input 3D scene representation
+OUTPUT_HOLOGRAM_SIZE = 64      # Size of the resulting hologram (phase map)
+
+class HologramGenerator(nn.Module):
+    """
+    A conceptual CNN model for generating a phase-only hologram 
+    from a 3D scene representation (complex field).
+    Based on the principles of Tensor Holography.
+    """
+    def __init__(self):
+        super(HologramGenerator, self).__init__()
+        # Input: [Batch_Size, 2, W, H] (2 channels for real/imaginary parts of complex field)
+        
+        # 1. Feature Extraction (Convolutional Layers)
+        self.conv1 = nn.Conv2d(2, 64, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv2d(128, 64, kernel_size=3, padding=1)
+        
+        # 2. Output Layer (Generate the Phase Map)
+        # Output: [Batch_Size, 1, W, H] (1 channel for phase value)
+        self.output_conv = nn.Conv2d(64, 1, kernel_size=3, padding=1)
+        
+    def forward(self, x):
+        # x is the input complex field representation
+        
+        # Activation functions for non-linearity
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+        
+        # Output is the phase-only hologram map (normalized between -pi and pi)
+        # Tanh activation squashes the output between -1 and 1. 
+        # We multiply by pi to map it to the phase range.
+        hologram_phase = torch.pi * torch.tanh(self.output_conv(x))
+        
+        return hologram_phase
+
+# --- Example Usage Instance ---
+if __name__ == '__main__':
+    # Initialize the model
+    ai_hologram_model = HologramGenerator()
+
+    # Create a dummy complex field input (Real and Imaginary parts)
+    # The '2' channel represents the real and imaginary components of the complex light field.
+    dummy_input = torch.randn(1, 2, INPUT_COMPLEX_FIELD_SIZE, OUTPUT_HOLOGRAM_SIZE)
+    
+    print(f"Input tensor size: {dummy_input.shape}")
+    
+    # Generate the hologram phase map
+    with torch.no_grad():
+        generated_hologram = ai_hologram_model(dummy_input)
+
+    print(f"Output hologram phase map size: {generated_hologram.shape}")
+    print(f"Hologram output range (approx): {generated_hologram.min():.4f} to {generated_hologram.max():.4f} radians")
+    
+    # The generated_hologram tensor would then be converted to a signal
+    # to drive a Spatial Light Modulator (SLM) for physical projection.
+
+
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+# --- Constants for Physics (must be differentiable tensors) ---
+WAVELENGTH = 532e-9  # Green laser, in meters
+DX = 8e-6            # SLM pixel pitch, in meters
+DISTANCE = 0.05      # Propagation distance, in meters
+PI = torch.pi
+
+def angular_spectrum_propagation(complex_field_in, distance, wavelength, dx):
+    """
+    Differentiable Angular Spectrum Method (ASM) propagation.
+    Propagates the complex field by a distance 'distance'.
+    """
+    H, W = complex_field_in.shape[-2:]
+    
+    # 1. Frequency coordinates (fx, fy)
+    k = 2 * PI / wavelength
+    
+    # Calculate frequency grid coordinates (f_x, f_y)
+    fx = torch.fft.fftfreq(W, d=dx).to(complex_field_in.device)
+    fy = torch.fft.fftfreq(H, d=dx).to(complex_field_in.device)
+    FX, FY = torch.meshgrid(fx, fy, indexing='xy')
+    
+    # 2. Transfer Function (H) in frequency domain
+    # F = sqrt(f_x^2 + f_y^2)
+    F_squared = FX**2 + FY**2
+    
+    # k_z = sqrt(k^2 - (2*pi*F)^2)
+    kz = torch.sqrt(k**2 - (2*PI)**2 * F_squared)
+    
+    # H = exp(i * k_z * z)
+    H_tf = torch.exp(1j * kz * distance)
+    H_tf = torch.fft.fftshift(H_tf) # Shift for proper FFT input
+    
+    # 3. Apply Propagation
+    # Step A: FFT of the input complex field
+    F_in = torch.fft.fft2(complex_field_in)
+    
+    # Step B: Multiply by Transfer Function
+    F_out = F_in * H_tf.to(complex_field_in.dtype)
+    
+    # Step C: Inverse FFT to get reconstructed complex field
+    complex_field_out = torch.fft.ifft2(F_out)
+    
+    return complex_field_out
+
+# [attachment_0](attachment)
+
+### 2. U-Net Generator Architecture
+
+We'll use a simplified U-Net that takes the **RGB-D data (4 channels)** and outputs the **phase map (1 channel)**.
+
+```python
+class UNetPhaseGenerator(nn.Module):
+    """
+    U-Net style network for high-resolution hologram phase map generation.
+    Input: RGB-D Image (4 channels). Output: Phase Map (1 channel).
+    """
+    def __init__(self, in_channels=4, out_channels=1):
+        super(UNetPhaseGenerator, self).__init__()
+        
+        # Encoder (Downsampling)
+        self.enc1 = nn.Conv2d(in_channels, 64, kernel_size=3, padding=1)
+        self.enc2 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
+        
+        # Bottleneck
+        self.bottleneck = nn.Conv2d(128, 256, kernel_size=3, padding=1)
+        
+        # Decoder (Upsampling)
+        # Uses transposed convolutions for upsampling and skip connections
+        self.upconv2 = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2) 
+        self.dec2 = nn.Conv2d(256, 128, kernel_size=3, padding=1) # 128 + 128 (skip)
+        
+        self.upconv1 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
+        self.dec1 = nn.Conv2d(128, 64, kernel_size=3, padding=1) # 64 + 64 (skip)
+
+        # Output Layer: Generates phase map normalized to [-pi, pi]
+        self.final_conv = nn.Conv2d(64, out_channels, kernel_size=1)
+
+    def forward(self, x):
+        # Initial encoding
+        e1 = F.relu(self.enc1(x))
+        p1 = F.max_pool2d(e1, kernel_size=2, stride=2) # Downsample 1
+        
+        e2 = F.relu(self.enc2(p1))
+        p2 = F.max_pool2d(e2, kernel_size=2, stride=2) # Downsample 2
+        
+        # Bottleneck
+        b = F.relu(self.bottleneck(p2))
+        
+        # Decoding and skip connections (c_i means concatenated with corresponding encoder output)
+        d2 = self.upconv2(b)
+        c2 = torch.cat([d2, e2], dim=1) # Concatenate with e2
+        d2 = F.relu(self.dec2(c2))
+        
+        d1 = self.upconv1(d2)
+        c1 = torch.cat([d1, e1], dim=1) # Concatenate with e1
+        d1 = F.relu(self.dec1(c1))
+        
+        # Final output: Phase is mapped to [-pi, pi] using tanh
+        phase_map = PI * torch.tanh(self.final_conv(d1))
+        return phase_map
+
+### 3. Physics-Driven Loss Function (Self-Supervised)
+
+This loss measures the difference between the **target image intensity** and the **reconstructed intensity** calculated via the differentiable physical propagation.
+
+```python
+def compute_holographic_loss(hologram_phase, target_intensity, distance, wavelength, dx):
+    """
+    Calculates the loss based on the reconstructed image intensity.
+    """
+    # 1. Convert phase map to complex field (Assuming unit amplitude A=1 for phase-only SLMs)
+    # Complex Field Input P_slm = A * exp(i * phase)
+    complex_field_slm = 1.0 * torch.exp(1j * hologram_phase)
+    
+    # 2. Differentiably propagate the complex field
+    reconstructed_complex_field = angular_spectrum_propagation(
+        complex_field_slm, distance, wavelength, dx
+    )
+    
+    # 3. Calculate Reconstructed Intensity (I = |P|^2)
+    # The magnitude squared of the complex field
+    reconstructed_intensity = torch.abs(reconstructed_complex_field)**2
+    
+    # 4. Compute Loss (e.g., Mean Squared Error between reconstructed and target intensity)
+    # This is the crucial self-supervised step.
+    loss = F.mse_loss(reconstructed_intensity, target_intensity)
+    
+    return loss, reconstructed_intensity
+
+# --- Example Training Loop Instance (Conceptual) ---
+if __name__ == '__main__':
+    # Initialize the model and optimizer
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = UNetPhaseGenerator().to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+    
+    # Dummy Data Instance (Batch size=1, 4 channels=RGBD, 256x256 resolution)
+    # Input is the RGBD scene data
+    dummy_input_rgbd = torch.randn(1, 4, 256, 256, device=device)
+    # Target is the desired intensity pattern in the reconstruction plane
+    dummy_target_intensity = torch.rand(1, 1, 256, 256, device=device)
+    
+    # Training Step
+    model.train()
+    optimizer.zero_grad()
+    
+    # 1. Generate Hologram Phase Map
+    hologram_phase_output = model(dummy_input_rgbd)
+    
+    # 2. Compute Physics-Driven Loss
+    loss, _ = compute_holographic_loss(
+        hologram_phase_output, 
+        dummy_target_intensity, 
+        distance=DISTANCE, 
+        wavelength=WAVELENGTH, 
+        dx=DX
+    )
+    
+    # 3. Backpropagate and Optimize
+    loss.backward()
+    optimizer.step()
+    
+    print(f"Training Loss Instance: {loss.item():.6f}")
+
