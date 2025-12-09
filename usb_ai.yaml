@@ -1,0 +1,182 @@
+# 1. Download example code and dependencies
+git clone https://github.com/google-coral/pycoral.git
+cd pycoral
+bash examples/install_requirements.sh classify_image.py
+
+# 2. Download the model, labels, and an example image
+# These are MobileNet V2 models compiled for the Edge TPU
+wget https://storage.googleapis.com/download.tensorflow.org/models/tflite/coral/mobilenet_v2_1.0_224_inat_bird_quant_edgetpu.tflite
+wget https://storage.googleapis.com/download.tensorflow.org/models/tflite/coral/inat_bird_labels.txt
+wget https://storage.googleapis.com/download.tensorflow.org/models/tflite/coral/parrot.jpg
+
+
+
+import argparse
+from pycoral.adapters import classify
+from pycoral.adapters import common
+from pycoral.utils.edgetpu import make_interpreter
+from PIL import Image
+
+def main():
+    # 1. Define command-line arguments for model, labels, and image
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.RawTextHelpFormatter)
+    parser.add_argument('--model', required=True,
+                        help='File path of TFLite model.')
+    parser.add_argument('--labels', required=True,
+                        help='File path of labels file.')
+    parser.add_argument('--image', required=True,
+                        help='File path of the image to be classified.')
+    args = parser.parse_args()
+
+    # 2. Initialize the Edge TPU Interpreter
+    # This automatically finds the connected USB Accelerator.
+    interpreter = make_interpreter(args.model)
+    interpreter.allocate_tensors()
+    
+    # Get model details (like input size)
+    size = common.input_size(interpreter) 
+    
+    # 3. Load the image and resize/preprocess it for the model
+    image = Image.open(args.image).convert('RGB').resize(size, Image.Resampling.LANCZOS)
+    common.set_input(interpreter, image)
+
+    # 4. Perform AI Inference on the USB Accelerator
+    print('---- INFERENCE TIME ----')
+    # The invoke() call runs the model on the Edge TPU
+    interpreter.invoke() 
+
+    # 5. Get and process the results
+    classes = classify.get_classes(interpreter, top_k=1)
+    
+    # Load human-readable labels
+    with open(args.labels, 'r') as f:
+        labels = [l.strip() for l in f.readlines()]
+
+    # 6. Print the top result
+    print('----- RESULTS ----')
+    for c in classes:
+        print(f'{labels[c.id]} (Score: {c.score:.6f})')
+
+if __name__ == '__main__':
+    main()
+
+# --- Example Run Command ---
+# python3 classify_image.py \
+# --model mobilenet_v2_1.0_224_inat_bird_quant_edgetpu.tflite \
+# --labels inat_bird_labels.txt \
+# --image parrot.jpg
+
+
+
+pip install opencv-python pycoral
+# Ensure the Edge TPU runtime and models are installed as described previously.
+
+
+
+import argparse
+import time
+import cv2
+
+from pycoral.adapters import detect
+from pycoral.utils.edgetpu import make_interpreter
+from pycoral.utils.dataset import read_label_file
+from PIL import Image
+
+# --- Constants and Configuration ---
+# Use one of the Edge TPU compiled detection models, e.g., SSD MobileNet V2
+MODEL_FILE = 'mobilenet_ssd_v2_coco_quant_postprocess_edgetpu.tflite'
+LABEL_FILE = 'coco_labels.txt'
+CONFIDENCE_THRESHOLD = 0.5 # Minimum confidence to show a detection
+
+# --- Function Definitions ---
+def draw_objects(draw_image, objs, labels):
+    """Draws the bounding box and label onto the image."""
+    for obj in objs:
+        bbox = obj.bbox.flatten().astype("int")
+        xmin, ymin, xmax, ymax = bbox
+
+        # Draw bounding box
+        cv2.rectangle(draw_image, (xmin, ymin), (xmax, ymax), (0, 255, 0), 2)
+        
+        # Get label and score
+        label = labels.get(obj.id, 'Unknown')
+        score = f'{obj.score:.2f}'
+        text = f'{label}: {score}'
+
+        # Draw label background
+        cv2.rectangle(draw_image, (xmin, ymin), (xmin + len(text) * 15, ymin - 20), (0, 255, 0), -1)
+        
+        # Draw label text
+        cv2.putText(draw_image, text, (xmin, ymin - 5), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+
+def main():
+    print("Initializing USB AI Accelerator...")
+    
+    # 1. Initialize Interpreter for Edge TPU
+    # The make_interpreter function handles the Edge TPU delegation automatically.
+    interpreter = make_interpreter(MODEL_FILE)
+    interpreter.allocate_tensors()
+    input_size = detect.input_size(interpreter)
+    labels = read_label_file(LABEL_FILE)
+
+    # 2. Initialize Video Stream (Webcam 0)
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        raise IOError("Cannot open webcam 0.")
+
+    print("Starting real-time object detection. Press 'q' to exit.")
+    
+    # Track FPS
+    last_time = time.time()
+
+    while True:
+        # Read a frame from the webcam
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # Convert frame to PIL Image for PyCoral compatibility and resizing
+        rgb_img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        pil_img = Image.fromarray(rgb_img)
+        resized_img = pil_img.resize(input_size, Image.Resampling.LANCZOS)
+
+        # 3. Perform Inference
+        # set_input copies the image data into the input tensor
+        detect.set_input(interpreter, resized_img)
+        
+        # Invoke the model on the Edge TPU
+        interpreter.invoke()
+        
+        # Get detected objects (bounding boxes, scores, and IDs)
+        objs = detect.get_objects(interpreter, score_threshold=CONFIDENCE_THRESHOLD)
+
+        # 4. Post-processing and Visualization
+        # The result coordinates are normalized; we need to scale them for the original frame.
+        if objs:
+            # Scale bounding boxes back to the original frame size
+            # (PyCoral does this automatically when getting objects)
+            draw_objects(frame, objs, labels)
+
+        # Calculate and display FPS (advanced feature for performance HUD)
+        current_time = time.time()
+        fps = 1 / (current_time - last_time)
+        last_time = current_time
+        
+        cv2.putText(frame, f"FPS: {fps:.2f}", (10, 30), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+        
+        # 5. Display the result
+        cv2.imshow('USB AI Object Detection (Edge TPU)', frame)
+
+        # Exit on 'q' press
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    # Clean up
+    cap.release()
+    cv2.destroyAllWindows()
+
+if __name__ == '__main__':
+    main()
