@@ -1,0 +1,220 @@
+pip install Pillow pyautogui pytesseract
+
+
+
+import pytesseract
+from PIL import ImageGrab
+
+def capture_and_read_text(region=None):
+    """
+    Captures a screen region and returns the text found via OCR.
+
+    Args:
+        region (tuple, optional): (left, top, right, bottom) coordinates.
+                                  If None, captures the entire screen.
+    
+    Returns:
+        str: Text extracted from the screen region.
+    """
+    try:
+        # Capture the image
+        screenshot = ImageGrab.grab(bbox=region)
+        
+        # Use Tesseract to perform OCR
+        text = pytesseract.image_to_string(screenshot)
+        
+        print(f"Captured Text:\n{text}")
+        return text
+        
+    except Exception as e:
+        print(f"An error occurred during capture/OCR: {e}")
+        return ""
+
+# Example usage (Captures the whole screen and prints recognized text)
+# print("--- Starting OCR Test ---")
+# capture_and_read_text()
+
+
+
+import pyautogui
+import time
+
+# Set a pause after every pyautogui function call (safety feature)
+pyautogui.PAUSE = 0.5
+
+def click_element_at(x, y):
+    """
+    Moves the mouse to specific coordinates and clicks.
+
+    Args:
+        x (int): X-coordinate of the element.
+        y (int): Y-coordinate of the element.
+    """
+    try:
+        print(f"Moving mouse to ({x}, {y}) and clicking...")
+        # Move the mouse instantly (duration=0)
+        pyautogui.moveTo(x, y, duration=0.1) 
+        # Click the left mouse button
+        pyautogui.click()
+        print("Click successful.")
+        
+    except Exception as e:
+        print(f"An error occurred during interaction: {e}")
+
+# Example usage: (WARNING: This will move your mouse!)
+# print("--- Starting Click Test (Wait 3 seconds) ---")
+# time.sleep(3) 
+# click_element_at(500, 500) # Clicks the center of a typical 1000x1000 screen
+
+
+
+def find_and_click_image(image_path, confidence=0.9):
+    """
+    Searches the screen for a sub-image (template) and clicks its center.
+
+    Args:
+        image_path (str): Path to the image file (e.g., 'login_button.png').
+        confidence (float): The minimum required confidence level (0.0 to 1.0).
+        
+    Returns:
+        bool: True if the image was found and clicked, False otherwise.
+    """
+    try:
+        # Locate the image on the screen
+        # The region parameter can speed up the search if you know the general area
+        location = pyautogui.locateOnScreen(
+            image_path, 
+            confidence=confidence, 
+            grayscale=True # Often improves performance
+        )
+        
+        if location:
+            # The location is a Box object (left, top, width, height)
+            center_x, center_y = pyautogui.center(location)
+            
+            print(f"Found image at: {location}")
+            
+            # Click the center of the found image
+            click_element_at(center_x, center_y)
+            return True
+        else:
+            print(f"Image not found on screen: {image_path}")
+            return False
+            
+    except Exception as e:
+        print(f"An error occurred during image finding: {e}")
+        return False
+
+# Example usage (You must create a small image file like 'test_icon.png' first)
+# print("--- Starting Image Find Test (Requires 'test_icon.png') ---")
+# find_and_click_image('test_icon.png', confidence=0.85)
+
+
+
+# Core libraries for screen capture and object detection
+pip install opencv-python ultralytics pyautogui mss numpy
+
+
+
+import cv2
+import numpy as np
+import pyautogui
+from mss import mss
+from ultralytics import YOLO
+import time
+
+# --- Configuration ---
+# Define the screen area (monitor region) to analyze
+MONITOR_AREA = {"top": 100, "left": 100, "width": 800, "height": 600}
+# Load the pre-trained YOLO model (e.g., a small, fast version)
+MODEL_PATH = 'yolov8n.pt'  # Nano model is fast, suitable for real-time screen analysis
+CONFIDENCE_THRESHOLD = 0.6  # Minimum confidence for a detection to be considered valid
+
+# --- Core Components ---
+def initialize_model():
+    """Load the YOLO model and set device."""
+    print(f"Loading YOLO model from {MODEL_PATH}...")
+    # YOLO automatically selects GPU/CPU based on availability
+    model = YOLO(MODEL_PATH) 
+    return model
+
+def click_detected_object(detection_box, class_name):
+    """
+    Calculates the center of a bounding box and sends a mouse click.
+    Args:
+        detection_box (list): [x1, y1, x2, y2] coordinates of the bounding box.
+        class_name (str): The name of the detected object class.
+    """
+    x1, y1, x2, y2 = map(int, detection_box)
+    
+    # Calculate the center of the bounding box
+    center_x = int((x1 + x2) / 2)
+    center_y = int((y1 + y2) / 2)
+    
+    # Adjust coordinates from the MONTIOR_AREA's frame of reference to absolute screen coordinates
+    # This is critical if the MONTIOR_AREA is not the full screen
+    absolute_x = center_x + MONITOR_AREA['left']
+    absolute_y = center_y + MONITOR_AREA['top']
+    
+    print(f"🤖 Detected '{class_name}' at ({absolute_x}, {absolute_y}). Clicking...")
+    
+    # Perform the click action
+    pyautogui.click(absolute_x, absolute_y)
+    # Add a short delay to allow the GUI to process the click
+    time.sleep(0.1) 
+
+
+def run_screen_ai():
+    """Main loop for real-time screen detection and interaction."""
+    sct = mss()
+    model = initialize_model()
+    
+    print("--- Starting Screen AI Loop (Press 'q' on the OpenCV window to exit) ---")
+
+    while True:
+        # 1. Capture Screen
+        # The mss library captures a screen region defined by MONITOR_AREA
+        sct_img = sct.grab(MONITOR_AREA)
+        # Convert the raw capture to a format OpenCV can use (BGR numpy array)
+        frame = np.array(sct_img.rgb, dtype=np.uint8)
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        
+        # 2. Perform Object Detection
+        # The 'stream=True' setting is key for performance in real-time applications
+        results = model.predict(source=frame, conf=CONFIDENCE_THRESHOLD, verbose=False)
+        
+        # 3. Process and Interact with Detections
+        if results and results[0].boxes:
+            for box in results[0].boxes:
+                
+                # Get bounding box coordinates and confidence
+                # xyxy is the format [x1, y1, x2, y2]
+                box_coords = box.xyxy[0].tolist()
+                conf = box.conf[0].item()
+                cls = int(box.cls[0].item())
+                class_name = model.names[cls]
+                
+                # Example Interaction: Click the first 'button' detected
+                if class_name == 'button' or class_name == 'person': # Adjust class names to your needs
+                    click_detected_object(box_coords, class_name)
+                
+                # Draw the bounding box and label on the frame for visualization (HUD)
+                x1, y1, x2, y2 = map(int, box_coords)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                label = f"{class_name} ({conf:.2f})"
+                cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        
+        # 4. Display the HUD (Heads-Up Display)
+        cv2.imshow("Screen AI HUD (Heads-Up Display)", frame)
+        
+        # Exit the loop on 'q' press
+        if (cv2.waitKey(1) & 0xFF) == ord('q'):
+            break
+
+    cv2.destroyAllWindows()
+
+# --- Run the AI ---
+# if __name__ == "__main__":
+#     run_screen_ai() 
+# WARNING: This code runs indefinitely and WILL move your mouse.
+# You must stop it by pressing 'q' on the displayed window.
