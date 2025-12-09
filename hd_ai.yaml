@@ -1,0 +1,180 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report, accuracy_score
+from sklearn.preprocessing import StandardScaler
+import numpy as np
+
+# --- 1. Load Simulated Data ---
+# In a real scenario, this would be a large dataset 
+# of S.M.A.R.T. metrics (e.g., Raw Read Error Rate, Reallocated Sector Count) 
+# collected over time from many drives.
+try:
+    # Assuming 'hdd_data.csv' exists with features and a 'failure' column
+    data = pd.read_csv('hdd_data.csv') 
+except FileNotFoundError:
+    print("Simulating sample data...")
+    # Create a small sample DataFrame for demonstration purposes
+    np.random.seed(42)
+    n_samples = 1000
+    data = pd.DataFrame({
+        'smart_5_raw': np.random.randint(0, 50, n_samples), # Reallocated Sector Count
+        'smart_197_raw': np.random.randint(0, 10, n_samples), # Current Pending Sector Count
+        'temperature_celsius': np.random.randint(25, 55, n_samples),
+        # Target variable: 1 for failure (rare event), 0 for healthy
+        'failure': np.random.choice([0, 1], size=n_samples, p=[0.95, 0.05]) 
+    })
+    # Artificially make high smart_5_raw/smart_197_raw correlate with failure
+    data.loc[data['smart_5_raw'] > 40, 'failure'] = 1 
+    data.loc[data['smart_197_raw'] > 5, 'failure'] = 1 
+    data.loc[data['temperature_celsius'] > 50, 'failure'] = 1
+    # Balance the data to avoid issues with rare event prediction (not shown here for brevity)
+
+print(f"Dataset shape: {data.shape}")
+print("First 5 rows of data:")
+print(data.head())
+
+
+
+# --- 2. Define Features (X) and Target (y) ---
+# Select the S.M.A.R.T. attributes as features
+features = ['smart_5_raw', 'smart_197_raw', 'temperature_celsius'] 
+X = data[features]
+y = data['failure']
+
+# Split the data into training and testing sets (80% train, 20% test)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+
+# --- 3. Feature Scaling (Optional but Recommended for some models) ---
+# Standardize the features
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+
+
+# --- 4. Initialize and Train the Model ---
+# Using a Random Forest Classifier for prediction
+model = RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced')
+
+# Fit the model to the training data
+print("\nTraining the Random Forest model...")
+model.fit(X_train_scaled, y_train)
+print("Training complete.")
+
+# --- 5. Make Predictions ---
+# Predict the probability of failure on the test set
+y_pred = model.predict(X_test_scaled)
+
+# --- 6. Evaluate the Model ---
+print("\nModel Evaluation:")
+print(f"Accuracy: {accuracy_score(y_test, y_pred):.4f}")
+print("\nClassification Report (Key metrics for rare event prediction):")
+# Focus on Recall (avoiding false negatives) and Precision (avoiding false positives) for failure class (1)
+print(classification_report(y_test, y_pred)) 
+
+
+
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+
+# --- 1. Simulate Time-Series Data ---
+# In a real scenario, this data would contain daily readings for many drives.
+def create_simulated_sequence_data(sequence_length=30):
+    # Simulate a single drive's features (e.g., smart_5, smart_197, temp) over 100 days
+    n_days = 100
+    np.random.seed(42)
+    
+    # Feature 1 (Smart 5 - Reallocated sectors) increases over time
+    f1 = np.clip(np.cumsum(np.random.normal(0.2, 0.5, n_days)), 0, None)
+    # Feature 2 (Temperature) has noise
+    f2 = 35 + np.random.normal(0, 2, n_days)
+    
+    data = pd.DataFrame({'smart_5': f1, 'temperature': f2})
+    data['RUL'] = np.arange(n_days - 1, -1, -1) # RUL decreases from 99 to 0
+    
+    # Normalize the data
+    scaler = MinMaxScaler()
+    data_scaled = scaler.fit_transform(data[['smart_5', 'temperature', 'RUL']])
+    
+    # Create sequences: Input (X) is 30 days of features, Output (y) is RUL on the last day
+    X, y = [], []
+    for i in range(len(data_scaled) - sequence_length):
+        X.append(data_scaled[i:i + sequence_length, :-1]) # Features of 30 days
+        y.append(data_scaled[i + sequence_length - 1, -1]) # RUL on the 30th day
+    
+    return np.array(X), np.array(y), scaler
+
+SEQUENCE_LENGTH = 30 # Use 30 days of data to predict the RUL
+X, y, scaler_obj = create_simulated_sequence_data(SEQUENCE_LENGTH)
+
+print(f"X shape (sequences, time steps, features): {X.shape}") 
+print(f"y shape (RUL target): {y.shape}")
+
+
+
+# --- 2. Define the LSTM Model ---
+# The model takes the sequence of features and outputs a single RUL value (regression)
+def build_lstm_model(input_shape):
+    model = Sequential([
+        # LSTM layer to process the sequences (time steps)
+        LSTM(units=100, return_sequences=True, input_shape=input_shape), 
+        Dropout(0.2),
+        
+        # Second LSTM layer to capture deeper temporal features
+        LSTM(units=50, return_sequences=False), 
+        Dropout(0.2),
+        
+        # Output layer (1 unit for RUL prediction - a regression task)
+        Dense(units=1, activation='linear') 
+    ])
+    
+    # Compile the model for regression
+    model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+    return model
+
+model = build_lstm_model((X.shape[1], X.shape[2]))
+print("\nModel Summary:")
+model.summary()
+
+
+# --- 3. Train the Model ---
+print("\nTraining the LSTM model...")
+# Training on the simulated data
+history = model.fit(
+    X, 
+    y, 
+    epochs=50, # Number of training iterations
+    batch_size=16, 
+    verbose=0 
+)
+print("Training complete. Final Mean Absolute Error (MAE):", history.history['mae'][-1])
+
+
+
+# --- 4. Making a Prediction ---
+
+# Simulate a new, "failing" drive's last 30 days of data
+# This data should be preprocessed (scaled) the same way as the training data
+new_drive_data = X[-1].reshape(1, SEQUENCE_LENGTH, X.shape[2]) # Get the last sequence
+    
+# Predict the RUL (normalized value)
+normalized_rul_pred = model.predict(new_drive_data)[0][0]
+
+# --- 5. Inverse Transform to get Actual Days ---
+# The RUL was scaled during preprocessing, so we must reverse the scaling.
+# The scaler used for training contained 3 columns: smart_5, temp, RUL
+# We create a dummy array to inverse transform just the RUL column.
+dummy_array = np.zeros((1, 3)) 
+dummy_array[0, 2] = normalized_rul_pred # Place predicted RUL in the RUL column
+actual_rul_pred = scaler_obj.inverse_transform(dummy_array)[0, 2]
+
+print(f"\n--- Prediction Result ---")
+print(f"Predicted Normalized RUL: {normalized_rul_pred:.4f}")
+# This is the key output for the Proactive Maintenance HUD
+print(f"Predicted Remaining Useful Life (RUL): **{int(round(actual_rul_pred))} days**")
+
+# If RUL is below a threshold (e.g., 7 days), trigger an alert for replacement.
