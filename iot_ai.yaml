@@ -1,0 +1,171 @@
+pip install qiskit qiskit-machine-learning numpy
+
+
+
+import numpy as np
+from qiskit import QuantumCircuit
+from qiskit.primitives import Sampler
+from qiskit.circuit.library import ZZFeatureMap, RealAmplitudes
+from qiskit_machine_learning.algorithms import VQC
+from qiskit_machine_learning.neural_networks import EstimatorQNN
+from qiskit.opflow import StateFn, PauliSumOp
+from qiskit.utils import algorithm_globals
+
+# Set a seed for reproducibility
+algorithm_globals.random_seed = 42
+
+# --- 1. IoT Data Simulation (Classical Component) ---
+# In a real IoT scenario, this would be data from sensors (e.g., temperature,
+# humidity, vibration) processed into a feature vector.
+# This example uses 2 features for 2 qubits.
+num_features = 2
+sample_train = np.array([
+    [0.5, 0.2], [0.1, 0.7], [0.8, 0.1], [0.3, 0.6]
+])
+label_train = np.array([0, 1, 0, 1]) # Two classes for classification (e.g., Normal/Anomaly)
+
+# --- 2. Quantum Feature Map (Encoding Classical Data) ---
+# The ZZFeatureMap maps classical data into the quantum state space (feature space).
+feature_map = ZZFeatureMap(feature_dimension=num_features, reps=1, entanglement='linear')
+
+
+# --- 3. Quantum Variational Circuit (The 'AI' part) ---
+# This is the trainable quantum circuit, often called an 'ansatz'.
+# RealAmplitudes is a common ansatz for VQC.
+ansatz = RealAmplitudes(num_qubits=num_features, reps=1)
+# You could combine the map and ansatz to see the full circuit:
+# circuit = feature_map.compose(ansatz)
+# print(circuit.draw(output='text'))
+
+# --- 4. Define the Variational Quantum Classifier (VQC) ---
+# VQC uses a quantum circuit to perform the classification.
+vqc = VQC(
+    sampler=Sampler(), # A Qiskit primitive for running the circuit
+    feature_map=feature_map,
+    ansatz=ansatz,
+    optimizer=algorithm_globals.optimizers.COBYLA(maxiter=100), # Classical optimizer
+)
+
+# --- 5. Train the VQC model ---
+print("Starting VQC training...")
+vqc.fit(sample_train, label_train)
+print("Training complete.")
+
+# --- 6. Test with new IoT data (Anomaly Detection) ---
+# New data from an IoT device
+sample_test = np.array([[0.9, 0.9], [0.0, 0.0]])
+predicted_labels = vqc.predict(sample_test)
+
+print(f"\nTest Data: \n{sample_test}")
+print(f"Predicted Labels (0 or 1): {predicted_labels}")
+print("---")
+# A more in-depth system would classify an 'Anomaly' based on the predicted class.
+
+
+
+pip install qiskit qiskit-machine-learning numpy scikit-learn mitiq
+
+
+
+
+import numpy as np
+from qiskit.circuit.library import ZZFeatureMap
+from qiskit_machine_learning.kernels import QuantumKernel
+from qiskit_machine_learning.algorithms import QSVC
+from qiskit_aer.primitives import Estimator
+from qiskit.utils import algorithm_globals
+from qiskit_aer.noise import NoiseModel
+from qiskit_aer import AerSimulator
+from sklearn.svm import SVC
+from mitiq.zne.extrapolation import fit_with_richardson
+from mitiq.zne import ZNE, execute_with_zne
+
+# Set a seed for reproducibility
+algorithm_globals.random_seed = 42
+np.random.seed(42)
+
+# --- 1. IoT Data Simulation (High-Dimensional) ---
+# Use a more complex dataset requiring advanced feature mapping (8 features for 8 qubits).
+num_features = 8
+train_size = 20
+test_size = 10
+
+X_train = np.random.rand(train_size, num_features) * 2 - 1
+y_train = (np.sum(X_train, axis=1) > 0).astype(int) # Simple classification boundary
+X_test = np.random.rand(test_size, num_features) * 2 - 1
+y_test = (np.sum(X_test, axis=1) > 0).astype(int)
+
+# --- 2. Setup the Noisy Quantum Backend (Simulating Real Hardware) ---
+# Create a simple, synthetic noise model for demonstration
+noise_model = NoiseModel.from_backend(
+    AerSimulator.from_backend(
+        AerSimulator.get_backend('fake_manila')
+    )
+)
+# Use the noisy simulator as the backend for the Estimator
+backend = AerSimulator(noise_model=noise_model)
+
+# --- 3. Define the Quantum Kernel (The Quantum Feature Extractor) ---
+# Use a highly expressive Feature Map (reps=2 for better non-linear separation)
+feature_map = ZZFeatureMap(feature_dimension=num_features, reps=2, entanglement='linear')
+
+
+# --- 4. Define the Advanced Estimator with Zero Noise Extrapolation (ZNE) ---
+
+# The ZNE routine is integrated using a wrapper function compatible with Qiskit's Estimator.
+# This function applies the ZNE technique to mitigate noise effects during expectation value estimation.
+def mitiq_zne_estimator(circuits, parameters, options):
+    """Wraps the Qiskit Estimator with Mitiq's ZNE routine."""
+    
+    # 1. Define the base noisy execution function
+    def noisy_estimator_run(circ):
+        # Qiskit's Estimator primitive
+        return Estimator(backend=backend).run(circ, parameters=parameters, **options).result().values
+    
+    # 2. Define the ZNE strategy (e.g., Richardson Extrapolation)
+    zne_routine = ZNE(extrapolate=fit_with_richardson)
+    
+    # 3. Execute the circuit list with ZNE
+    # The 'scale_factors' define how much the circuit depth is increased to estimate the noise-free limit.
+    scale_factors = [1.0, 2.0, 3.0] # 1.0 (original), 2.0, 3.0 (stretched circuits)
+    zne_results = execute_with_zne(
+        circuit=circuits,
+        executor=noisy_estimator_run,
+        factors=scale_factors
+    )
+    
+    # The ZNE routine automatically returns the extrapolated, noise-mitigated result
+    return zne_results
+
+# --- 5. Create the Quantum Kernel with the Advanced Estimator ---
+# The QuantumKernel will now use our ZNE-enabled estimation function.
+qkernel_zne = QuantumKernel(
+    feature_map=feature_map,
+    sampler=None, # Not used for kernel
+    estimator=mitiq_zne_estimator # Pass the custom ZNE function here
+)
+
+# --- 6. Train the Quantum Support Vector Classifier (QSVC) ---
+print("Starting Kernel Matrix calculation with ZNE...")
+
+# The SVC model is initialized with the custom ZNE-enabled kernel
+model_qsvc_zne = SVC(kernel='precomputed')
+
+# The QuantumKernel computes the precomputed kernel matrix K(X_train, X_train)
+# The mitiq_zne_estimator is called internally for every element of the kernel matrix!
+kernel_matrix_train = qkernel_zne.evaluate(x_vec=X_train)
+
+# Train the classical SVC on the quantum kernel matrix
+model_qsvc_zne.fit(kernel_matrix_train, y_train)
+print("Training complete.")
+
+# --- 7. Evaluate Performance ---
+# Calculate the test kernel matrix K(X_test, X_train)
+kernel_matrix_test = qkernel_zne.evaluate(x_vec=X_test, y_vec=X_train)
+
+# Predict using the trained model
+accuracy = model_qsvc_zne.score(kernel_matrix_test, y_test)
+
+print(f"\nModel Accuracy (with ZNE Mitigation): {accuracy * 100:.2f}%")
+print("---")
+print("The ZNE technique helped provide a more accurate kernel estimation by extrapolating the result to the zero-noise limit.")
