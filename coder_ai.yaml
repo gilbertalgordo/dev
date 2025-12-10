@@ -1,0 +1,242 @@
+import numpy as np
+
+# A simple class for a Neural Network
+class SimpleNeuralNetwork:
+    def __init__(self, input_size=2, hidden_size=3, output_size=1):
+        # 1. Initialization of weights and biases (randomly)
+        # Weights for the input -> hidden layer
+        self.W1 = np.random.randn(input_size, hidden_size)
+        # Biases for the hidden layer
+        self.b1 = np.zeros((1, hidden_size))
+        
+        # Weights for the hidden -> output layer
+        self.W2 = np.random.randn(hidden_size, output_size)
+        # Biases for the output layer
+        self.b2 = np.zeros((1, output_size))
+
+    # Activation function: Sigmoid
+    def sigmoid(self, x):
+        return 1 / (1 + np.exp(-x))
+
+    # Derivative of the Sigmoid function (used for backpropagation)
+    def sigmoid_derivative(self, x):
+        return x * (1 - x)
+
+    # 2. Forward Propagation
+    def forward(self, X):
+        # Input to Hidden Layer
+        self.z1 = np.dot(X, self.W1) + self.b1
+        self.a1 = self.sigmoid(self.z1) # Hidden layer activation
+
+        # Hidden to Output Layer
+        self.z2 = np.dot(self.a1, self.W2) + self.b2
+        self.a2 = self.sigmoid(self.z2) # Output activation
+        return self.a2
+
+    # 3. Training the Network (Backpropagation)
+    def train(self, X, y, epochs=10000, learning_rate=0.1):
+        for epoch in range(epochs):
+            # Forward pass to get the output
+            output = self.forward(X)
+            
+            # Calculate the error (Difference between actual and predicted)
+            error = y - output 
+
+            # Backpropagation (Layer 2)
+            # Derivative of loss w.r.t W2
+            d_output = error * self.sigmoid_derivative(output)
+            d_W2 = np.dot(self.a1.T, d_output)
+            d_b2 = np.sum(d_output, axis=0, keepdims=True)
+
+            # Backpropagation (Layer 1)
+            # Derivative of loss w.r.t W1
+            d_hidden = np.dot(d_output, self.W2.T) * self.sigmoid_derivative(self.a1)
+            d_W1 = np.dot(X.T, d_hidden)
+            d_b1 = np.sum(d_hidden, axis=0, keepdims=True)
+            
+            # Update weights and biases
+            self.W1 += learning_rate * d_W1
+            self.b1 += learning_rate * d_b1
+            self.W2 += learning_rate * d_W2
+            self.b2 += learning_rate * d_b2
+
+            # Print loss every 1000 epochs
+            if epoch % 1000 == 0:
+                loss = np.mean(np.square(error))
+                print(f"Epoch {epoch}: Loss = {loss:.4f}")
+                
+# --- Execution ---
+
+# Input data (XOR gate)
+# [Input 1, Input 2]
+X = np.array([
+    [0, 0], 
+    [0, 1], 
+    [1, 0], 
+    [1, 1]
+])
+
+# Desired output (y)
+# [Output]
+y = np.array([
+    [0], 
+    [1], 
+    [1], 
+    [0]
+])
+
+# Create and train the model
+nn = SimpleNeuralNetwork()
+print("Starting training...")
+nn.train(X, y)
+print("\nTraining complete. Testing results:")
+
+# Test the trained model
+predictions = nn.forward(X)
+print("Input | Predicted Output")
+print("-" * 30)
+for i in range(len(X)):
+    # Round the output to 0 or 1 for easy interpretation
+    predicted_rounded = np.round(predictions[i][0])
+    print(f"{X[i]}   | {predictions[i][0]:.4f} (-> {predicted_rounded})")
+
+
+
+pip install torch
+
+
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import math
+
+# --- 1. Multi-Head Attention Mechanism ---
+class MultiHeadAttention(nn.Module):
+    """
+    Implements the Scaled Dot-Product Attention mechanism.
+    $$ \text{Attention}(Q, K, V) = \text{softmax} \left( \frac{Q K^T}{\sqrt{d_k}} \right) V $$
+    """
+    def __init__(self, d_model, num_heads):
+        super(MultiHeadAttention, self).__init__()
+        assert d_model % num_heads == 0
+        
+        self.d_k = d_model // num_heads # Dimension of K and Q per head
+        self.num_heads = num_heads
+        self.d_model = d_model
+        
+        # Linear layers for Query (Q), Key (K), and Value (V) projections
+        self.W_q = nn.Linear(d_model, d_model)
+        self.W_k = nn.Linear(d_model, d_model)
+        self.W_v = nn.Linear(d_model, d_model)
+        
+        # Final output linear layer
+        self.W_o = nn.Linear(d_model, d_model)
+
+    def forward(self, Q, K, V, mask=None):
+        # 1. Linear projections
+        Q = self.W_q(Q)
+        K = self.W_k(K)
+        V = self.W_v(V)
+
+        # 2. Reshape and split into multiple heads
+        # (Batch_size, Seq_len, D_model) -> (Batch_size, Num_heads, Seq_len, D_k)
+        def split_heads(x):
+            batch_size, seq_len, d_model = x.size()
+            return x.view(batch_size, seq_len, self.num_heads, self.d_k).transpose(1, 2)
+            
+        Q, K, V = split_heads(Q), split_heads(K), split_heads(V)
+        
+        # 3. Scaled Dot-Product Attention
+        # Compute QK^T: (Batch, Heads, Seq_len, D_k) @ (Batch, Heads, D_k, Seq_len) -> (Batch, Heads, Seq_len, Seq_len)
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
+        
+        # Apply mask (e.g., padding mask)
+        if mask is not None:
+            # Set masked positions to a very large negative number so they become 0 after softmax
+            scores = scores.masked_fill(mask == 0, -1e9)
+            
+        # Softmax to get attention weights
+        attention_weights = F.softmax(scores, dim=-1)
+        
+        # 4. Multiply with Value (V)
+        # (Batch, Heads, Seq_len, Seq_len) @ (Batch, Heads, Seq_len, D_k) -> (Batch, Heads, Seq_len, D_k)
+        output = torch.matmul(attention_weights, V)
+        
+        # 5. Concatenate heads and final linear layer
+        # (Batch, Heads, Seq_len, D_k) -> (Batch, Seq_len, D_model)
+        output = output.transpose(1, 2).contiguous().view(output.size(0), -1, self.d_model)
+        
+        return self.W_o(output), attention_weights
+
+# --- 2. Transformer Encoder Layer ---
+class TransformerEncoderLayer(nn.Module):
+    """
+    A single layer of the Transformer Encoder.
+    Consists of:
+    1. Multi-Head Attention (Self-Attention)
+    2. Feedforward Network (Position-wise FFN)
+    Each sub-layer is followed by a Residual Connection and Layer Normalization.
+    """
+    def __init__(self, d_model, num_heads, d_ff, dropout_rate=0.1):
+        super(TransformerEncoderLayer, self).__init__()
+        
+        # Self-Attention sublayer
+        self.self_attn = MultiHeadAttention(d_model, num_heads)
+        self.norm1 = nn.LayerNorm(d_model) # Layer Normalization
+        self.dropout1 = nn.Dropout(dropout_rate)
+
+        # Feedforward sublayer
+        self.feed_forward = nn.Sequential(
+            nn.Linear(d_model, d_ff),
+            nn.ReLU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(d_ff, d_model)
+        )
+        self.norm2 = nn.LayerNorm(d_model) # Layer Normalization
+        self.dropout2 = nn.Dropout(dropout_rate)
+
+    def forward(self, x, mask=None):
+        # 1. Multi-Head Self-Attention Sublayer
+        # The first input is used for Q, K, and V (Self-Attention)
+        attn_output, _ = self.self_attn(x, x, x, mask)
+        
+        # Add & Norm 1: Add the residual connection and apply Layer Normalization
+        x = self.norm1(x + self.dropout1(attn_output))
+        
+        # 2. Feedforward Sublayer
+        ff_output = self.feed_forward(x)
+        
+        # Add & Norm 2: Add the residual connection and apply Layer Normalization
+        x = self.norm2(x + self.dropout2(ff_output))
+        
+        return x
+
+# --- Example Usage ---
+# Hyperparameters
+D_MODEL = 512    # The size of the vector representation for each token
+NUM_HEADS = 8    # Number of attention heads
+D_FF = 2048      # The size of the intermediate feedforward layer
+BATCH_SIZE = 64
+SEQ_LEN = 50     # Length of the input sequence (e.g., number of words/tokens)
+
+# 1. Instantiate the Encoder Layer
+encoder_layer = TransformerEncoderLayer(
+    d_model=D_MODEL, 
+    num_heads=NUM_HEADS, 
+    d_ff=D_FF
+)
+
+# 2. Create a dummy input tensor
+# Input shape: (Batch Size, Sequence Length, D_model)
+dummy_input = torch.randn(BATCH_SIZE, SEQ_LEN, D_MODEL)
+
+# 3. Forward pass
+output = encoder_layer(dummy_input)
+
+# 4. Print results
+print(f"Input Shape: {dummy_input.shape}")
+print(f"Output Shape: {output.shape}")
+
+# Verify that the output shape is the same as the input shape
+assert dummy_input.shape == output.shape
