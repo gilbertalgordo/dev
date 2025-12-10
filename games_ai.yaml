@@ -1,0 +1,311 @@
+import math
+
+# --- 1. Game Logic Class ---
+class TicTacToe:
+    def __init__(self):
+        # The board is represented as a list of 9 elements (0-8)
+        self.board = [' ' for _ in range(9)]  
+        self.human_player = 'O'
+        self.ai_player = 'X'
+
+    def print_board(self, board):
+        """Prints the Tic-Tac-Toe board."""
+        for row in [board[i*3:(i+1)*3] for i in range(3)]:
+            print('| ' + ' | '.join(row) + ' |')
+        print('-' * 13)
+
+    def available_moves(self, board):
+        """Returns a list of indices of empty squares."""
+        return [i for i, spot in enumerate(board) if spot == ' ']
+
+    def check_winner(self, board, player):
+        """Checks if the given player has won."""
+        # Winning combinations (rows, columns, diagonals)
+        win_conditions = [
+            # Rows
+            [0, 1, 2], [3, 4, 5], [6, 7, 8],
+            # Columns
+            [0, 3, 6], [1, 4, 7], [2, 5, 8],
+            # Diagonals
+            [0, 4, 8], [2, 4, 6]
+        ]
+        
+        for condition in win_conditions:
+            if all(board[i] == player for i in condition):
+                return True
+        return False
+
+    def is_board_full(self, board):
+        """Checks if the board is full (a tie)."""
+        return ' ' not in board
+
+    def make_move(self, board, position, player):
+        """Places the player's marker at the given position."""
+        board[position] = player
+
+# --- 2. Minimax Algorithm (The AI Brain) ---
+
+    def minimax(self, board, is_maximizing_player):
+        """
+        The core recursive algorithm for optimal decision-making.
+
+        is_maximizing_player = True (AI's turn - maximizing score)
+        is_maximizing_player = False (Human's turn - minimizing AI's score)
+        """
+
+        # 1. Base Case: Check for a win/loss/tie state
+        if self.check_winner(board, self.ai_player):
+            return 1  # AI wins (Highest score)
+        if self.check_winner(board, self.human_player):
+            return -1 # Human wins (Lowest score)
+        if self.is_board_full(board):
+            return 0  # Tie (Neutral score)
+
+        # 2. Recursive Step
+        if is_maximizing_player:
+            best_score = -math.inf
+            for move in self.available_moves(board):
+                # Simulate move
+                board[move] = self.ai_player
+                # Recursively call minimax
+                score = self.minimax(board, False)
+                # Undo the move (backtrack)
+                board[move] = ' '
+                # Update best score
+                best_score = max(best_score, score)
+            return best_score
+
+        else: # Minimizing player (Human)
+            best_score = math.inf
+            for move in self.available_moves(board):
+                # Simulate move
+                board[move] = self.human_player
+                # Recursively call minimax
+                score = self.minimax(board, True)
+                # Undo the move (backtrack)
+                board[move] = ' '
+                # Update best score
+                best_score = min(best_score, score)
+            return best_score
+
+    def get_best_move(self):
+        """Finds the optimal move for the AI using Minimax."""
+        best_score = -math.inf
+        best_move = -1
+        
+        # Iterate through all available moves
+        for move in self.available_moves(self.board):
+            # Simulate the AI move
+            self.board[move] = self.ai_player
+            
+            # Get the score from the minimax tree (assuming optimal play from Human)
+            score = self.minimax(self.board, False) # Next turn is Human (minimizing)
+            
+            # Undo the move
+            self.board[move] = ' ' 
+
+            # Update the best move if this move leads to a better score
+            if score > best_score:
+                best_score = score
+                best_move = move
+        
+        return best_move
+
+# --- 3. Game Loop (Putting it all together) ---
+def play_game():
+    game = TicTacToe()
+    
+    print("Welcome to Tic-Tac-Toe!")
+    print(f"You are '{game.human_player}' (O), and the AI is '{game.ai_player}' (X).")
+    print("Use numbers 0-8 to choose your position, starting from top-left.")
+    game.print_board(list(range(9))) # Show position reference
+
+    current_player = game.human_player
+    
+    while not game.check_winner(game.board, game.human_player) and \
+          not game.check_winner(game.board, game.ai_player) and \
+          not game.is_board_full(game.board):
+        
+        print("\n" + "="*5)
+        game.print_board(game.board)
+        
+        if current_player == game.human_player:
+            try:
+                # Get and validate human move
+                move = int(input(f"Your turn ({game.human_player}). Enter move (0-8): "))
+                if move in game.available_moves(game.board):
+                    game.make_move(game.board, move, game.human_player)
+                    current_player = game.ai_player
+                else:
+                    print("Invalid move. Try an empty square (0-8).")
+            except ValueError:
+                print("Invalid input. Please enter a number 0-8.")
+        
+        else: # AI's turn
+            print("AI is thinking...")
+            ai_move = game.get_best_move()
+            game.make_move(game.board, ai_move, game.ai_player)
+            print(f"AI chooses position {ai_move}")
+            current_player = game.human_player
+
+    print("\nFINAL BOARD:")
+    game.print_board(game.board)
+    
+    if game.check_winner(game.board, game.human_player):
+        print("🎉 You Win! (How did you do that?)")
+    elif game.check_winner(game.board, game.ai_player):
+        print("🤖 AI Wins! (As expected!)")
+    else:
+        print("🤝 It's a Tie!")
+
+# Uncomment the line below to run the game in your environment
+# play_game()
+
+
+
+import math
+import random
+from collections import defaultdict
+
+# A simple helper for a Game State object (must be implemented for a real game)
+class GameState:
+    def get_legal_actions(self):
+        """Returns a list of all possible moves from the current state."""
+        raise NotImplementedError
+    def move(self, action):
+        """Returns a new GameState object after applying the action."""
+        raise NotImplementedError
+    def is_game_over(self):
+        """Returns True if the game has ended."""
+        raise NotImplementedError
+    def game_result(self, player):
+        """Returns 1 (win), 0 (tie), or -1 (loss) for the given player."""
+        raise NotImplementedError
+
+class MCTSNode:
+    def __init__(self, state: GameState, parent=None, parent_action=None):
+        self.state = state
+        self.parent = parent
+        self.parent_action = parent_action
+        
+        # Dictionary to track results: {result: count} (e.g., {1: 15, -1: 5})
+        self._results = defaultdict(int) 
+        self._number_of_visits = 0
+        self.children = []
+        
+        # A list of legal actions that haven't been explored yet
+        self._untried_actions = self.state.get_legal_actions() 
+
+    def q(self):
+        """Average reward (wins - losses) for this node."""
+        wins = self._results[1]
+        losses = self._results[-1]
+        return wins - losses # This can be customized (e.g., wins/visits)
+
+    def n(self):
+        """Total number of times this node has been visited."""
+        return self._number_of_visits
+
+    def is_fully_expanded(self):
+        """Checks if all possible moves from this node have been added as children."""
+        return len(self._untried_actions) == 0
+
+    def is_terminal_node(self):
+        """Checks if the game is over at this state."""
+        return self.state.is_game_over()
+
+
+
+class MCTS:
+    def __init__(self, root_state: GameState, c_param=1.4):
+        self.root = MCTSNode(root_state)
+        self.c_param = c_param # Exploration parameter (UCB1 formula)
+
+    def get_best_action(self, iterations):
+        """Runs MCTS for a specified number of iterations and returns the best move."""
+        
+        for _ in range(iterations):
+            # 1. Selection: Find the best node to expand based on UCB1
+            node = self._tree_policy() 
+            
+            # 2. Simulation (Rollout): Play a random game from the selected node
+            reward = self._rollout(node.state) 
+            
+            # 3. Backpropagation: Update statistics up the tree
+            self._backpropagate(node, reward) 
+
+        # Return the move from the root that leads to the child with the highest visit count
+        # (or highest average reward, depending on the game)
+        # We prefer visit count for robustness in MCTS:
+        best_child = max(self.root.children, key=lambda c: c.n())
+        return best_child.parent_action
+
+    def _tree_policy(self):
+        """Selects a node for expansion using the UCB1 formula."""
+        current_node = self.root
+        while not current_node.is_terminal_node():
+            if not current_node.is_fully_expanded():
+                return self._expand(current_node)
+            else:
+                # Select the best child based on the UCB1 formula
+                current_node = self._best_child_uct(current_node, self.c_param)
+        return current_node
+
+    def _expand(self, node: MCTSNode):
+        """Creates a new child node for one of the untried actions."""
+        action = node._untried_actions.pop()
+        next_state = node.state.move(action)
+        child_node = MCTSNode(next_state, parent=node, parent_action=action)
+        node.children.append(child_node)
+        return child_node
+
+    def _best_child_uct(self, node: MCTSNode, c_param):
+        """Uses the UCB1 formula to select the best child node: 
+           $\frac{w_i}{n_i} + c \cdot \sqrt{\frac{\ln N_i}{n_i}}$
+           (Exploitation + Exploration)
+        """
+        
+        choices_weights = []
+        for child in node.children:
+            # Exploitation (Average Reward: Q/N)
+            exploitation_term = child.q() / child.n() 
+            
+            # Exploration (UCT/UCB1 Term)
+            exploration_term = c_param * math.sqrt((2 * math.log(node.n())) / child.n())
+            
+            choices_weights.append(exploitation_term + exploration_term)
+            
+        return node.children[choices_weights.index(max(choices_weights))]
+
+    def _rollout(self, state: GameState):
+        """Simulates a game using a fast, random policy (rollout policy)."""
+        current_rollout_state = state
+        
+        # Player whose turn it is in the current state
+        player_turn = 1 
+        
+        while not current_rollout_state.is_game_over():
+            # Rollout Policy: Choose a move randomly for speed
+            possible_moves = current_rollout_state.get_legal_actions()
+            action = random.choice(possible_moves) 
+            current_rollout_state = current_rollout_state.move(action)
+            player_turn *= -1 # Toggle player turn (1 to -1, or vice versa)
+            
+        # The result is calculated from the perspective of the original player 
+        # that started the search from the root (Player 1)
+        return current_rollout_state.game_result(player=1)
+
+    def _backpropagate(self, node: MCTSNode, reward):
+        """Updates the visit counts and win/loss totals from the leaf back to the root."""
+        current = node
+        while current is not None:
+            current._number_of_visits += 1
+            # Update the results based on whose turn it was at the current node
+            # The reward is relative to the player at the root's first move (Player 1)
+            # You need a way to flip the reward if the player at the current node is Player 2
+            # For simplicity, we assume Player 1 is maximizing the reward:
+            current._results[reward] += 1 
+            
+            current = current.parent
+            # The next level up is the opponent's move, so flip the reward's perspective
+            reward *= -1
