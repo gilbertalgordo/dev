@@ -1,0 +1,234 @@
+pip install wbgapi pandas
+
+
+import wbgapi as wb
+import pandas as pd
+
+# Define the World Bank indicator ID for GDP per capita (current US$)
+# You can use wb.series.info() to search for other indicators
+INDICATOR_ID = 'NY.GDP.PCAP.CD' 
+
+# Define the country codes (ISO-3 codes)
+# You can use wb.country.info() to search for other country codes
+COUNTRIES = ['USA', 'CHN', 'IND'] 
+
+# Define the years for the data
+YEARS = range(2015, 2021)
+
+print(f"🌍 Fetching World Bank Data for Indicator: {INDICATOR_ID}...")
+
+# Use wbgapi.data.DataFrame to fetch the data directly into a pandas DataFrame
+# The columns will be: Time (Year), Economy (Country), and the Indicator Value
+try:
+    df = wb.data.DataFrame(
+        series=INDICATOR_ID, 
+        economy=COUNTRIES, 
+        time=YEARS,
+        # Set the 'Time' and 'Economy' names for clearer columns
+        columns='series', 
+        labels=True
+    )
+    
+    # Clean up the DataFrame for AI/ML preparation
+    
+    # 1. Rename columns
+    df.columns = ['Year', 'Country', 'GDP_Per_Capita']
+    
+    # 2. Reset the index (as it often contains duplicates of Country/Year info)
+    df = df.reset_index(drop=True)
+    
+    # 3. Convert 'Year' column to integer for better analysis
+    df['Year'] = df['Year'].astype(str).str.split('M').str[1].astype(int)
+    
+    # 4. Pivot the table for a cleaner AI/ML feature set
+    # This creates a structure where each row is a year, and each country's GDP is a column
+    pivot_df = df.pivot(index='Year', columns='Country', values='GDP_Per_Capita')
+
+    print("\n✅ Raw Data Preview:")
+    print(df.head(9))
+    
+    print("\n\n📊 AI/ML Ready Data (Pivoted) Preview:")
+    print(pivot_df)
+
+except Exception as e:
+    print(f"\n❌ An error occurred: {e}")
+    print("Please check your internet connection or the indicator/country codes.")
+
+# --- Next Steps for AI/ML ---
+# This 'pivot_df' can now be used as a feature matrix (X) for an ML model.
+# For example, you could try to predict the GDP of one country based on the others.
+
+# Example of preparing X and y for a simple prediction task (e.g., predicting India's GDP)
+if 'IND' in pivot_df.columns:
+    # Features (X): GDP of USA and China
+    X = pivot_df[['CHN', 'USA']]
+    
+    # Target (y): GDP of India (lagged or for the next year, depending on the model)
+    y = pivot_df['IND']
+    
+    print("\n\n🤖 AI/ML Feature and Target Shapes:")
+    print(f"Features (X) shape: {X.shape}")
+    print(f"Target (y) shape: {y.shape}")
+
+
+
+pip install wbgapi pandas statsmodels
+
+
+
+import wbgapi as wb
+import pandas as pd
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+from sklearn.metrics import mean_squared_error
+import matplotlib.pyplot as plt
+import numpy as np
+
+# --- 1. CONFIGURATION ---
+# Indicator: Unemployment, total (% of total labor force) (modeled ILO estimate)
+INDICATOR_ID = 'SL.UEM.TOTL.ZS' 
+COUNTRY_CODE = 'PHL'  # Example: Philippines (you can change this)
+START_YEAR = 1991
+END_YEAR = 2024
+FORECAST_STEPS = 5  # Number of years to forecast into the future
+SARIMA_ORDER = (1, 1, 1)  # (p, d, q) for ARIMA
+SARIMA_SEASONAL_ORDER = (1, 1, 1, 12) # (P, D, Q, S) where S is the seasonal period (e.g., 12 months/periods)
+
+def fetch_and_prepare_data(indicator, country, start_year, end_year):
+    """Fetches World Bank data, cleans it, and prepares it for time series analysis."""
+    print(f"🌍 Fetching data for {country} (Indicator: {indicator}) from {start_year} to {end_year}...")
+    
+    # Fetch data using wbgapi
+    df_raw = wb.data.DataFrame(
+        series=indicator, 
+        economy=[country], 
+        time=range(start_year, end_year + 1),
+        # Labels=True provides readable names, columns='series' makes the indicator the column name
+        labels=True, 
+        columns='series'
+    )
+    
+    # Data Cleaning and Preparation
+    
+    # 1. Reset index to access 'time' and 'economy'
+    df = df_raw.reset_index()
+    
+    # 2. Extract and format the year from the 'time' column
+    # The format is often 'YR2020', so we extract the year part
+    df['Year'] = df['time'].astype(str).str.replace('YR', '').astype(int)
+    df.set_index(df['Year'], inplace=True)
+    df.drop(['time', 'economy', 'Country'], axis=1, inplace=True)
+    
+    # 3. Rename the value column
+    df.rename(columns={indicator: 'Unemployment_Rate'}, inplace=True)
+    
+    # 4. Convert to a proper Time Series (Series object)
+    # SARIMA requires a single series with a time-based index
+    ts = df['Unemployment_Rate'].dropna()
+    
+    # Check for enough data points
+    if len(ts) < 2 * (SARIMA_ORDER[0] + SARIMA_SEASONAL_ORDER[0]):
+        raise ValueError("Not enough data points for robust SARIMA modeling.")
+        
+    print(f"✅ Data points fetched: {len(ts)}")
+    return ts
+
+def train_and_forecast_sarima(ts, order, seasonal_order, steps):
+    """Trains a SARIMA model and generates a forecast."""
+    print(f"\n⚙️ Training SARIMA model with order={order} and seasonal_order={seasonal_order}...")
+    
+    # Split data into training and validation sets
+    train_size = int(len(ts) * 0.8)
+    train, val = ts[:train_size], ts[train_size:]
+    
+    #  - Showing how the SARIMA model decomposes the time series into trend, seasonality, and residual components.
+    
+    # 1. Fit the SARIMA model
+    try:
+        model = SARIMAX(
+            train,
+            order=order,
+            seasonal_order=seasonal_order,
+            enforce_stationarity=False,
+            enforce_invertibility=False
+        )
+        model_fit = model.fit(disp=False)
+        print("Model Summary:")
+        # We print a brief summary as a sign of advanced model completion
+        print(model_fit.summary().tables[1]) 
+    except Exception as e:
+        print(f"❌ SARIMA model fitting failed: {e}")
+        return None, None
+    
+    # 2. Validate the model (In-sample prediction)
+    val_pred = model_fit.predict(start=val.index[0], end=val.index[-1], dynamic=False)
+    mse = mean_squared_error(val, val_pred)
+    print(f"\n📈 Validation Mean Squared Error (MSE): {mse:.4f}")
+    
+    # 3. Generate the future forecast (Out-of-sample prediction)
+    forecast_index = pd.RangeIndex(start=ts.index[-1] + 1, stop=ts.index[-1] + 1 + steps)
+    
+    # Use the full dataset to generate the final forecast
+    final_model = SARIMAX(
+        ts,
+        order=order,
+        seasonal_order=seasonal_order,
+        enforce_stationarity=False,
+        enforce_invertibility=False
+    ).fit(disp=False)
+    
+    # Get the forecast and confidence intervals (c.i.)
+    forecast = final_model.get_forecast(steps=steps)
+    mean_forecast = forecast.predicted_mean
+    conf_int = forecast.conf_int()
+    
+    mean_forecast.index = forecast_index
+    conf_int.index = forecast_index
+    
+    return mean_forecast, conf_int
+
+# --- 3. EXECUTION ---
+try:
+    # 1. Fetch Data
+    time_series = fetch_and_prepare_data(INDICATOR_ID, COUNTRY_CODE, START_YEAR, END_YEAR)
+
+    # 2. Train and Forecast
+    forecast_mean, forecast_conf_int = train_and_forecast_sarima(
+        time_series, 
+        SARIMA_ORDER, 
+        SARIMA_SEASONAL_ORDER, 
+        FORECAST_STEPS
+    )
+
+    if forecast_mean is not None:
+        # --- 4. VISUALIZATION (Advanced Plotting) ---
+        plt.figure(figsize=(12, 6))
+        
+        # Plot Historical Data
+        plt.plot(time_series.index, time_series.values, label='Historical Data', color='blue')
+        
+        # Plot Forecast
+        plt.plot(forecast_mean.index, forecast_mean.values, label='Forecast', color='red', linestyle='--')
+        
+        # Plot Confidence Interval
+        plt.fill_between(
+            forecast_conf_int.index, 
+            forecast_conf_int.iloc[:, 0], 
+            forecast_conf_int.iloc[:, 1], 
+            color='pink', 
+            alpha=0.3, 
+            label='95% Confidence Interval'
+        )
+        
+        plt.title(f'SARIMA Forecast: Unemployment Rate for {COUNTRY_CODE}')
+        plt.xlabel('Year')
+        plt.ylabel('Unemployment Rate (%)')
+        plt.legend()
+        plt.grid(True, linestyle=':', alpha=0.6)
+        plt.show()
+        
+        print("\n🔮 Final Forecast:")
+        print(pd.concat([forecast_mean, forecast_conf_int], axis=1))
+
+except Exception as e:
+    print(f"\n--- CRITICAL ERROR --- \n{e}")
+
