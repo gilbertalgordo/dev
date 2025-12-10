@@ -1,0 +1,145 @@
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+
+# --- 1. Data Augmentation and Preprocessing ---
+# Define parameters for data augmentation (to make the model more robust)
+# rescale=1./255 normalizes pixel values to be between 0 and 1
+train_datagen = ImageDataGenerator(
+    rescale=1./255,
+    shear_range=0.2,
+    zoom_range=0.2,
+    horizontal_flip=True,
+    validation_split=0.2  # 20% of data for validation
+)
+
+# Assume you have a training data directory structured with subfolders for each class
+TRAINING_DIR = 'path/to/chest_xray/train' 
+IMAGE_SIZE = (150, 150)
+BATCH_SIZE = 32
+
+train_generator = train_datagen.flow_from_directory(
+    TRAINING_DIR,
+    target_size=IMAGE_SIZE,
+    batch_size=BATCH_SIZE,
+    class_mode='binary',  # For a two-class classification (Normal/Pneumonia)
+    subset='training'
+)
+
+validation_generator = train_datagen.flow_from_directory(
+    TRAINING_DIR,
+    target_size=IMAGE_SIZE,
+    batch_size=BATCH_SIZE,
+    class_mode='binary',
+    subset='validation'
+)
+
+# --- 2. Build the CNN Model ---
+# [attachment_0](attachment)
+model = Sequential([
+    # Input Layer: Convolution + Pooling
+    Conv2D(32, (3, 3), activation='relu', input_shape=(150, 150, 3)),
+    MaxPooling2D((2, 2)),
+
+    # Hidden Layer 1: Convolution + Pooling
+    Conv2D(64, (3, 3), activation='relu'),
+    MaxPooling2D((2, 2)),
+
+    # Flatten the 3D output to 1D for the Dense layers
+    Flatten(),
+
+    # Fully Connected Layers (Dense)
+    Dense(512, activation='relu'),
+    Dropout(0.5), # Helps prevent overfitting
+
+    # Output Layer: 1 neuron with sigmoid activation for binary classification
+    Dense(1, activation='sigmoid')
+])
+
+# --- 3. Compile the Model ---
+model.compile(
+    optimizer='adam',
+    loss='binary_crossentropy',
+    metrics=['accuracy']
+)
+
+# --- 4. Train the Model ---
+# This part is for training. You will need the actual dataset to run it.
+"""
+history = model.fit(
+    train_generator,
+    steps_per_epoch=train_generator.samples // BATCH_SIZE,
+    epochs=10, # Number of training iterations
+    validation_data=validation_generator,
+    validation_steps=validation_generator.samples // BATCH_SIZE
+)
+"""
+
+# --- 5. Model Summary ---
+model.summary()
+
+
+import torch
+from monai.networks.nets import UNet
+from monai.networks.layers import Norm
+from monai.losses import DiceLoss
+
+# --- 1. Define Model Parameters (Instance Configuration) ---
+# For a 3D medical image (e.g., CT scan)
+SPATIAL_DIMS = 3
+IN_CHANNELS = 1     # Assuming a single-channel grayscale scan (like a CT)
+OUT_CHANNELS = 2    # Background and one target class (e.g., tumor/lesion)
+CHANNELS = (16, 32, 64, 128, 256) # Number of feature maps at each U-Net level
+STRIDES = (2, 2, 2, 2)            # Downsampling strides (Pooling steps)
+
+# --- 2. Instantiate the 3D U-Net Model ---
+# This is the core advanced architecture for 3D volumetric data.
+model = UNet(
+    spatial_dims=SPATIAL_DIMS,
+    in_channels=IN_CHANNELS,
+    out_channels=OUT_CHANNELS,
+    channels=CHANNELS,
+    strides=STRIDES,
+    num_res_units=2,
+    norm=Norm.BATCH,  # Use Batch Normalization
+).to("cuda" if torch.cuda.is_available() else "cpu")
+
+# 
+
+# --- 3. Define Loss Function and Optimizer ---
+# Dice Loss is the standard loss function for medical image segmentation
+# because it handles class imbalance better than standard cross-entropy.
+loss_function = DiceLoss(to_onehot_y=True, softmax=True)
+
+# Adam optimizer is a common choice
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+
+# --- 4. Simulated Data and Forward Pass (Instance Example) ---
+# Simulate a batch of 3D volumetric input data (Batch x Channel x Depth x Height x Width)
+# Example: a batch of 4 volumes, 1 channel, 96x96x96 dimensions
+dummy_input = torch.randn(4, IN_CHANNELS, 96, 96, 96)
+dummy_labels = torch.randint(0, OUT_CHANNELS, (4, 1, 96, 96, 96)).float() # Corresponding ground truth
+
+# Move tensors to the model's device
+device = next(model.parameters()).device
+dummy_input = dummy_input.to(device)
+dummy_labels = dummy_labels.to(device)
+
+# Forward Pass
+output = model(dummy_input)
+
+# Calculate Loss
+loss = loss_function(output, dummy_labels)
+
+print(f"Model successfully loaded onto: {device}")
+print(f"Output shape (Batch, Classes, D, H, W): {output.shape}")
+print(f"Simulated Dice Loss: {loss.item():.4f}")
+
+# --- 5. Backpropagation and Optimization Step ---
+optimizer.zero_grad()
+loss.backward()
+optimizer.step()
+
+# Note: Actual training requires extensive data loading, transformations (using MONAI Transforms),
+# and a proper training loop over multiple epochs.
