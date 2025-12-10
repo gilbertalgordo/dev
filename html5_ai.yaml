@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HTML5 AI Example with TensorFlow.js</title>
+</head>
+<body>
+
+    <h1>TensorFlow.js Simple Prediction</h1>
+    <div id="output">Loading AI model...</div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+
+    <script>
+        async function runModel() {
+            // Placeholder path for a pre-trained model. 
+            // Replace with your actual model URL.
+            const MODEL_URL = 'path/to/your/model/model.json';
+
+            try {
+                // Load the model from the specified URL
+                const model = await tf.loadLayersModel(MODEL_URL);
+                
+                // --- Example of making a prediction ---
+                
+                // 1. Prepare input data (e.g., a simple tensor of shape [1, 1])
+                // This input would typically come from user data, a canvas, or a video feed
+                const inputData = tf.tensor2d([ [5] ]); // Input value is 5
+
+                // 2. Make a prediction using the model
+                const prediction = model.predict(inputData);
+
+                // 3. Get the output value and update the page
+                const predictionValue = prediction.dataSync()[0];
+                document.getElementById('output').innerText = 
+                    `Model loaded and predicted: ${predictionValue.toFixed(4)}`;
+
+            } catch (error) {
+                document.getElementById('output').innerText = 
+                    `Error loading model. Check console for details. (Did you replace the MODEL_URL?)`;
+                console.error("AI Model Error:", error);
+            }
+        }
+
+        // Start the process
+        runModel();
+    </script>
+
+</body>
+</html>
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced TF.js AI (Web Worker)</title>
+    <style>
+        #webcam { display: block; margin: 20px auto; }
+        #output { font-size: 1.5em; text-align: center; }
+        /*  */
+    </style>
+</head>
+<body>
+
+    <h1>Real-Time Image Classification</h1>
+    <video id="webcam" width="300" height="300" autoplay muted></video>
+    <div id="output">Starting camera and loading model...</div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+    
+    <script src="main.js"></script>
+
+</body>
+</html>
+
+
+
+// Check for Web Worker support
+if (!window.Worker) {
+    document.getElementById('output').innerText = "Web Workers not supported. Cannot run advanced AI.";
+}
+
+// 1. Setup the Web Worker
+const worker = new Worker('worker.js');
+const videoElement = document.getElementById('webcam');
+let canvas = document.createElement('canvas'); // Used for sending image data
+
+// 2. Start the camera stream
+async function setupCamera() {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        videoElement.srcObject = stream;
+        
+        // Wait for the video to load metadata
+        await new Promise(resolve => {
+            videoElement.onloadedmetadata = () => resolve(true);
+        });
+
+        // Start the classification loop
+        runClassificationLoop();
+    } catch (err) {
+        document.getElementById('output').innerText = `Error accessing camera: ${err.message}`;
+        console.error("Camera error:", err);
+    }
+}
+
+// 3. Classification Loop
+function runClassificationLoop() {
+    // Set canvas dimensions to match the video feed
+    canvas.width = videoElement.videoWidth;
+    canvas.height = videoElement.videoHeight;
+    const ctx = canvas.getContext('2d');
+    
+    // Draw the current video frame onto the canvas
+    ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+
+    // Get the image data from the canvas
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+    // Send the ImageData and the pixel data buffer to the Worker
+    // Transferrable objects (like imageData.data.buffer) improve performance
+    worker.postMessage({ 
+        msg: 'classify', 
+        pixels: imageData.data.buffer, 
+        width: canvas.width, 
+        height: canvas.height
+    }, [imageData.data.buffer]);
+
+    // Loop the classification at about 30 FPS
+    requestAnimationFrame(runClassificationLoop);
+}
+
+// 4. Handle results from the Web Worker
+worker.onmessage = (event) => {
+    const { prediction, elapsedMs } = event.data;
+    
+    if (prediction && prediction.length > 0) {
+        const topPrediction = prediction[0];
+        document.getElementById('output').innerText = 
+            `Prediction: **${topPrediction.className}** (${(topPrediction.probability * 100).toFixed(2)}%)
+            \n(Inference time: ${elapsedMs.toFixed(1)}ms)`;
+    } else {
+        document.getElementById('output').innerText = 'Model is still loading or failed to classify...';
+    }
+};
+
+setupCamera();
+
+
+
+// Import TensorFlow.js inside the worker
+importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js');
+// Import the pre-trained MobileNet model (or your custom model)
+importScripts('https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0/dist/mobilenet.min.js');
+
+let model = null;
+
+// Load the model asynchronously
+(async function() {
+    try {
+        // Load the MobileNet model, which is a powerful image classification model
+        model = await mobilenet.load();
+        self.postMessage({ msg: 'modelLoaded' });
+    } catch (e) {
+        console.error("Worker failed to load model:", e);
+    }
+})();
+
+// Listener for messages from the main thread
+self.onmessage = async (event) => {
+    const { msg, pixels, width, height } = event.data;
+
+    if (msg === 'classify' && model) {
+        const startTime = performance.now();
+        
+        // 1. Recreate the ImageData object from the received buffer
+        const imageData = new ImageData(new Uint8ClampedArray(pixels), width, height);
+
+        // 2. Convert ImageData to a TensorFlow Tensor
+        const imageTensor = tf.browser.fromPixels(imageData);
+        
+        // 3. Run the prediction (Inference)
+        // Note: The mobilenet.classify() function internally handles resizing and preprocessing
+        const predictions = await model.classify(imageTensor, 3); // Get top 3 predictions
+
+        // 4. Clean up the tensor memory (CRITICAL for performance)
+        tf.dispose(imageTensor);
+        
+        const endTime = performance.now();
+        const elapsedMs = endTime - startTime;
+
+        // 5. Send results back to the main thread
+        self.postMessage({ prediction: predictions, elapsedMs: elapsedMs });
+    }
+};
