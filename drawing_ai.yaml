@@ -1,0 +1,141 @@
+import matplotlib.pyplot as plt
+import numpy as np
+
+def draw_neural_net(ax, left, right, bottom, top, layer_sizes):
+    """
+    Draw a neural network cartoon using matplotlib.
+    
+    :parameters:
+        - ax : matplotlib.axes.AxesSubplot
+        - left, right, bottom, top : float coordinates for the bounding box
+        - layer_sizes : list of ints, number of neurons in each layer
+    """
+    n_layers = len(layer_sizes)
+    v_spacing = (top - bottom)/max(layer_sizes)
+    h_spacing = (right - left)/(n_layers - 1)
+    
+    # Nodes
+    for n, layer_size in enumerate(layer_sizes):
+        layer_top = v_spacing*(layer_size - 1)/2. + (top + bottom)/2.
+        for m in range(layer_size):
+            circle = plt.Circle((n*h_spacing + left, layer_top - m*v_spacing), 
+                                v_spacing/4., color='w', ec='k', zorder=4)
+            ax.add_artist(circle)
+            # Optional: Add text label to node
+            # plt.text(n*h_spacing + left, layer_top - m*v_spacing, str(m+1), 
+            #          ha='center', va='center', fontsize=10)
+
+    # Edges (Connections)
+    for n, (layer_size_a, layer_size_b) in enumerate(zip(layer_sizes[:-1], layer_sizes[1:])):
+        layer_top_a = v_spacing*(layer_size_a - 1)/2. + (top + bottom)/2.
+        layer_top_b = v_spacing*(layer_size_b - 1)/2. + (top + bottom)/2.
+        
+        for m in range(layer_size_a):
+            for o in range(layer_size_b):
+                line = plt.Line2D([n*h_spacing + left, (n + 1)*h_spacing + left],
+                                  [layer_top_a - m*v_spacing, layer_top_b - o*v_spacing], 
+                                  color='k', alpha=0.5)
+                ax.add_artist(line)
+
+# --- Example Usage ---
+fig = plt.figure(figsize=(10, 8))
+ax = fig.gca()
+ax.axis('off')
+
+# Define the architecture: [Input Layer, Hidden Layer 1, Hidden Layer 2, Output Layer]
+# You can change these numbers to see a different network structure.
+network_architecture = [4, 7, 2] 
+
+draw_neural_net(ax, .1, .9, .1, .9, network_architecture)
+
+# Optional: Add layer labels
+ax.text(0.1, 0.05, 'Input Layer', ha='center', fontsize=12, weight='bold')
+ax.text(0.5, 0.05, 'Hidden Layer', ha='center', fontsize=12, weight='bold')
+ax.text(0.9, 0.05, 'Output Layer', ha='center', fontsize=12, weight='bold')
+
+plt.title(f'Neural Network Visualization: {network_architecture[0]}-{network_architecture[1]}-{network_architecture[2]}', fontsize=14)
+plt.show()
+
+
+
+import tensorflow as tf
+from tensorflow import keras
+import numpy as np
+import matplotlib.pyplot as plt
+
+# 1. Load a pre-trained CNN model (VGG16 is common for visualization)
+try:
+    # Use a pre-trained model for this advanced visualization
+    model = keras.applications.VGG16(weights='imagenet', include_top=True)
+    print("VGG16 Model loaded successfully.")
+except Exception as e:
+    print(f"Error loading VGG16 model: {e}")
+    print("Please ensure you have TensorFlow installed correctly.")
+    # Exit or use a dummy model if loading fails
+    # return
+
+# --- Advanced Visualization Function: Activation Maximization ---
+def visualize_filter_activation(model, layer_name, filter_index=0):
+    """
+    Generates an image that maximally activates a specific filter in a layer.
+    
+    :param model: The Keras model to analyze.
+    :param layer_name: The name of the layer containing the filter.
+    :param filter_index: The index of the filter within that layer.
+    """
+    # Find the output tensor of the specified layer
+    layer_output = model.get_layer(layer_name).output
+
+    # Define the loss: maximizing the activation of the selected filter
+    loss = tf.reduce_mean(layer_output[:, :, :, filter_index])
+
+    # Compute the gradient of the input image with respect to this loss
+    # We are looking for the input image that maximizes the filter's output.
+    input_img = model.input
+    grads = tf.gradients(loss, input_img)[0]
+    
+    # Simple normalization of the gradients
+    grads /= (tf.sqrt(tf.reduce_mean(tf.square(grads))) + 1e-5)
+
+    # Gradient Ascent setup (creating a function to perform the steps)
+    iterate = keras.backend.function([input_img], [loss, grads])
+
+    # Start with a random noise image
+    input_data = np.random.uniform(low=0.0, high=1.0, 
+                                   size=(1, 224, 224, 3)) * 20 + 128.
+    input_data = (input_data - 128.) / 128. # Scale to [-1, 1] range
+
+    # Run Gradient Ascent for a few steps to optimize the image
+    for i in range(40): # 40 optimization steps
+        loss_value, grads_value = iterate([input_data])
+        # Update the image by adding the gradient (we are maximizing the loss)
+        input_data += grads_value * 1.0 # Learning rate of 1.0
+
+    # --- Post-processing and Display ---
+    def deprocess_image(x):
+        """Converts the optimized float array back into a displayable image array."""
+        x = x.copy()
+        x -= x.mean()
+        x /= (x.std() + 1e-5)
+        x *= 64
+        x += 128
+        x = np.clip(x, 0, 255).astype('uint8')
+        return x
+
+    img = deprocess_image(input_data[0])
+    
+    # Display the result
+    plt.figure(figsize=(6, 6))
+    plt.imshow(img)
+    plt.title(f'Filter {filter_index} Activation in {layer_name}')
+    plt.axis('off')
+    plt.show()
+
+
+# --- Example Usage (Visualizing a filter in VGG16) ---
+# Let's visualize the 5th filter (index 4) in the first Convolutional layer.
+TARGET_LAYER = 'block1_conv1' 
+TARGET_FILTER = 4 
+
+if 'model' in locals():
+    visualize_filter_activation(model, TARGET_LAYER, TARGET_FILTER)
