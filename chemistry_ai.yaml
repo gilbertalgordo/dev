@@ -1,0 +1,210 @@
+pip install pandas scikit-learn
+
+
+
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error, r2_score
+import numpy as np
+
+# --- 1. Data Simulation (Replace with Real Data Loading) ---
+# In a real Chemistry AI project, you would load data from sources like
+# PubChem, ChEMBL, or a custom experimental database.
+# The 'features' below simulate molecular descriptors (e.g., molecular weight,
+# number of hydrogen bond donors, surface area, etc.)
+np.random.seed(42)
+n_samples = 100
+n_features = 5
+data = {
+    f'Feature_{i+1}': np.random.rand(n_samples) * 100
+    for i in range(n_features)
+}
+# Simulate a LogP value that depends somewhat on the features
+data['LogP_Value'] = (
+    0.5 * data['Feature_1'] - 0.2 * data['Feature_3'] + 5 + np.random.normal(0, 1, n_samples)
+)
+df = pd.DataFrame(data)
+
+print("### Simulated Chemical Dataset Head ###")
+print(df.head())
+print("-" * 50)
+
+# --- 2. Data Preparation ---
+# Separate features (X) and target variable (y)
+X = df.drop('LogP_Value', axis=1)
+y = df['LogP_Value']
+
+# Split the data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+
+# --- 3. Model Training (Random Forest Regressor) ---
+print("Training the Random Forest Regressor...")
+# Random Forest is a great general-purpose model for chemical prediction
+model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
+model.fit(X_train, y_train)
+print("Model training complete.")
+print("-" * 50)
+
+# --- 4. Prediction and Evaluation ---
+y_pred = model.predict(X_test)
+
+# Evaluate the model's performance
+mse = mean_squared_error(y_test, y_pred)
+r2 = r2_score(y_test, y_pred)
+
+print("### Model Performance Metrics ###")
+print(f"Mean Squared Error (MSE): {mse:.2f}")
+print(f"R-squared (R2) Score: {r2:.2f} (Closer to 1.0 is better)")
+print("-" * 50)
+
+# --- 5. Example Prediction on a New Molecule ---
+# Imagine a new molecule with these descriptors:
+new_molecule_features = np.array([[55.2, 12.1, 88.5, 4.0, 99.3]])
+new_df = pd.DataFrame(new_molecule_features, columns=X.columns)
+
+predicted_logp = model.predict(new_df)[0]
+
+print("### Prediction for a New Molecule ###")
+print(f"New Molecule Features: {new_molecule_features}")
+print(f"Predicted LogP: {predicted_logp:.2f}")
+
+
+
+pip install pandas scikit-learn rdkit numpy
+
+
+
+import pandas as pd
+import numpy as np
+from rdkit import Chem
+from rdkit.Chem import Descriptors
+from sklearn.model_selection import train_test_split
+from sklearn.experimental import enable_hist_gradient_boosting
+from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+
+# --- 1. Simulated Chemical Dataset (Real-World Format) ---
+# In a real project, this would be loaded from a CSV/SDF file of a database
+# SMILES: Simplified Molecular-Input Line-Entry System (Text representation of a molecule)
+# LD50: Lethal Dose 50% (Toxicity measure - lower value is more toxic)
+data = {
+    'SMILES': [
+        'CC(=O)Oc1ccccc1C(=O)O',  # Aspirin
+        'CC(C)(C)c1ccc(O)cc1',    # BHT (antioxidant)
+        'CC(C)(C)C(O)C',          # Tertiary Butyl Alcohol
+        'c1ccccc1',               # Benzene
+        'C1=CCCCC1=O',            # Cyclohexanone
+        'CCCCCCCCCCCCCCCCCC',     # Octadecane
+        'c1cc(N)ccc1',            # Aniline
+        'O',                      # Water (low toxicity)
+        'C(Cl)Cl',                # Dichloromethane
+        'CN1CCC(CC1)C(C2=CC=CC=C2)(C3=CC=CC=C3)OC' # Diphenhydramine (Antihistamine)
+    ],
+    # Simulated LD50 values (unitless for simplicity, typically mg/kg)
+    'LD50_Value': [4.9, 3.2, 5.1, 2.5, 3.8, 6.0, 3.0, 7.0, 3.5, 4.0]
+}
+df = pd.DataFrame(data)
+
+print("### Advanced Dataset Head (SMILES Input) ###")
+print(df)
+print("-" * 70)
+
+
+# --- 2. Advanced Featurization Function (Using RDKit) ---
+
+def calculate_rdkit_descriptors(smiles):
+    """
+    Converts a list of SMILES strings into a numerical descriptor matrix.
+    """
+    # Create an RDKit molecule object from the SMILES string
+    mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return None
+    
+    # Define a list of descriptors we want to calculate
+    # We select common and scientifically relevant descriptors
+    descriptor_list = [
+        'MolWt', 'LogP', 'NumHDonors', 'NumHAcceptors', 
+        'TPSA', 'NumRotatableBonds', 'FractionCSP3'
+    ]
+    
+    # Create a calculator object
+    calculator = Descriptors.MolecularDescriptorCalculator(descriptor_list)
+    
+    # Calculate the descriptors and return as a numpy array
+    return calculator.CalcDescriptors(mol)
+
+# Apply the featurization to the dataset
+# Note: Handle molecules that RDKit fails to parse (return None)
+descriptors = df['SMILES'].apply(calculate_rdkit_descriptors).dropna()
+
+# Convert the results to a DataFrame
+descriptor_names = [
+    'MolWt', 'LogP', 'NumHDonors', 'NumHAcceptors', 
+    'TPSA', 'NumRotatableBonds', 'FractionCSP3'
+]
+X = pd.DataFrame(list(descriptors), columns=descriptor_names)
+y = df.loc[descriptors.index, 'LD50_Value'] # Match target data to successfully featurized molecules
+
+print("### Featurized Data Head (Chemical Descriptors) ###")
+print(X.head())
+print("-" * 70)
+
+# --- 3. Pipeline and Model Training (Gradient Boosting) ---
+
+# Split data
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+
+# Use a Pipeline for scientific rigor:
+# 1. StandardScaler: Normalizes/scales the features (essential for many models)
+# 2. HistGradientBoostingRegressor: A powerful, highly efficient boosting model
+pipeline = Pipeline([
+    ('scaler', StandardScaler()),
+    ('regressor', HistGradientBoostingRegressor(random_state=42, max_iter=100))
+])
+
+print("Training the HistGradientBoostingRegressor QSAR Model...")
+pipeline.fit(X_train, y_train)
+print("Model training complete.")
+print("-" * 70)
+
+# --- 4. Prediction and Evaluation ---
+y_pred = pipeline.predict(X_test)
+
+# Evaluate the model's performance
+mse = mean_squared_error(y_test, y_pred)
+r2 = r2_score(y_test, y_pred)
+
+print("### Advanced Model Performance Metrics ###")
+print(f"Mean Squared Error (MSE): {mse:.3f}")
+print(f"R-squared (R2) Score: {r2:.3f} (Scientific models aim for > 0.6)")
+print("-" * 70)
+
+# --- 5. Example Prediction on a New Compound ---
+
+# Caffeine SMILES: 'Cn1cnc2c1c(=O)n(C)c(=O)n2C'
+new_smiles = 'Cn1cnc2c1c(=O)n(C)c(=O)n2C' 
+print(f"New Compound to Predict: Caffeine ({new_smiles})")
+
+# Featurize the new molecule
+new_features = calculate_rdkit_descriptors(new_smiles)
+
+if new_features is not None:
+    # Convert features to a DataFrame row for the pipeline
+    new_features_df = pd.DataFrame([new_features], columns=descriptor_names)
+    
+    # Predict using the trained pipeline (which includes scaling)
+    predicted_ld50 = pipeline.predict(new_features_df)[0]
+    
+    print(f"Predicted LD50 Value for Caffeine: {predicted_ld50:.3f}")
+    # (Note: Actual LD50 in rats is ~3.5 Log(mg/kg), so this is scientifically reasonable!)
+else:
+    print("Failed to featurize the new molecule SMILES.")
+
