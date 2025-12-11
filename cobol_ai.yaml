@@ -1,0 +1,232 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. GET-ACCOUNT-BALANCE.
+       AUTHOR. GEMINI-AI.
+      *
+      * This program simulates a COBOL backend routine.
+      * It would typically be called by CICS, which handles the
+      * communication (e.g., translating a JSON/REST request)
+      * and passing the data in a COMMAREA (or other channel).
+      *
+       ENVIRONMENT DIVISION.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+      * Define a placeholder for the Account Record retrieval.
+       01 WS-ACCOUNT-REC.
+          05 WS-ACCT-KEY            PIC X(10).
+          05 WS-ACCT-NAME           PIC X(30).
+          05 WS-ACCT-BALANCE        PIC S9(9)V99 COMP-3.
+          05 WS-STATUS-CODE         PIC X(02).
+             88 BALANCE-FOUND       VALUE '00'.
+             88 ACCOUNT-NOT-FOUND   VALUE '01'.
+
+       LINKAGE SECTION.
+      * COMMAREA is where CICS passes the request data
+      * and where the COBOL program returns the response data.
+       01 DFHCOMMAREA.
+          05 ACCT-REQUEST-DATA.
+             10 LK-ACCOUNT-ID        PIC X(10).
+          05 ACCT-RESPONSE-DATA.
+             10 LK-ACCOUNT-BALANCE   PIC ZZZ,ZZZ,ZZ9.99.
+             10 LK-RESPONSE-STATUS   PIC X(02).
+
+       PROCEDURE DIVISION.
+           
+      * -----------------------------------------------------------
+      * 1. Check if the input data (COMMAREA) is present.
+      * -----------------------------------------------------------
+           IF LENGTH OF DFHCOMMAREA < 12
+              EXEC CICS RETURN END-EXEC
+           END-IF.
+
+      * -----------------------------------------------------------
+      * 2. Simulate reading the Account ID from the CICS input.
+      * -----------------------------------------------------------
+           MOVE '00' TO LK-RESPONSE-STATUS.
+
+      * -----------------------------------------------------------
+      * 3. Simulate calling the core business logic (e.g., a READ
+      * from a VSAM file or DB2 table) using the input key.
+      * **In a real system, a DB or file I/O call would go here.**
+      * -----------------------------------------------------------
+           IF LK-ACCOUNT-ID = '1234567890'
+               MOVE 'JANE DOE' TO WS-ACCT-NAME
+               MOVE 1500.50 TO WS-ACCT-BALANCE  * In COMP-3 format
+               MOVE '00' TO WS-STATUS-CODE
+           ELSE
+               MOVE ZEROS TO WS-ACCT-BALANCE
+               MOVE '01' TO WS-STATUS-CODE
+           END-IF.
+
+      * -----------------------------------------------------------
+      * 4. Prepare the response for the modern/AI application.
+      * -----------------------------------------------------------
+           IF BALANCE-FOUND
+               MOVE WS-ACCT-BALANCE TO LK-ACCOUNT-BALANCE
+               MOVE 'OK' TO LK-RESPONSE-STATUS
+           ELSE
+               MOVE ZEROS TO LK-ACCOUNT-BALANCE
+               MOVE 'NF' TO LK-RESPONSE-STATUS  * Not Found
+           END-IF.
+
+      * -----------------------------------------------------------
+      * 5. Return control to CICS, which sends the response back
+      * to the modern/AI application (e.g., as JSON).
+      * -----------------------------------------------------------
+           EXEC CICS RETURN END-EXEC.
+
+
+
+import requests
+import json
+
+# --- AI/ML Logic ---
+# Imagine a Machine Learning model determined a specific account needs checking
+account_id_for_check = "1234567890"
+
+# --- Call to COBOL Web Service ---
+api_endpoint = "https://your-mainframe-gateway.com/api/getbalance" 
+
+try:
+    # This JSON payload is translated by CICS/z/OS Connect into the COBOL COMMAREA
+    payload = {"accountId": account_id_for_check}
+    
+    response = requests.post(
+        api_endpoint, 
+        json=payload, 
+        timeout=10
+    )
+    
+    response.raise_for_status() # Raises an exception for bad status codes
+    
+    mainframe_data = response.json()
+    
+    # --- Analyze COBOL Data in the AI Service ---
+    balance = mainframe_data.get("accountBalance")
+    status = mainframe_data.get("responseStatus")
+    
+    if status == "OK":
+        print(f"✅ COBOL returned Balance for {account_id_for_check}: ${balance}")
+        
+        # **This is where your AI would use the data**
+        if float(balance) > 1000.00:
+            print("AI Action: Balance is high, suggesting a premium offer.")
+        else:
+            print("AI Action: Balance is standard, offering a basic package.")
+    else:
+        print(f"❌ Account ID {account_id_for_check} not found by COBOL system.")
+        
+except requests.exceptions.RequestException as e:
+    print(f"Error communicating with mainframe: {e}")
+
+# Output for '1234567890':
+# ✅ COBOL returned Balance for 1234567890: $1,500.50
+# AI Action: Balance is high, suggesting a premium offer.
+
+
+
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. RISK-SCORER.
+       AUTHOR. GEMINI-AI.
+      *
+      * This program simulates a highly advanced COBOL microservice
+      * that uses floating point arithmetic ($COMP-1$) to perform 
+      * a real-time risk scoring calculation based on factors 
+      * provided by a modern AI model.
+      *
+       ENVIRONMENT DIVISION.
+       DATA DIVISION.
+       WORKING-STORAGE SECTION.
+      * -----------------------------------------------------------
+      * AI MODEL COEFFICIENTS (Hardcoded, but could be loaded from file)
+      * -----------------------------------------------------------
+       01 WS-MODEL-CONSTANTS.
+          05 WC-BASE-SCORE         PIC S9(4)V99 VALUE +50.00.
+          05 WC-UTILIZATION-FACTOR PIC S9V9(5) VALUE +1.20000.
+          05 WC-AGE-FACTOR         PIC S9V9(5) VALUE -0.50000.
+
+      * -----------------------------------------------------------
+      * DATA RECEIVED FROM MQ (Simulated Input Parameters)
+      * Note: These would usually be defined to match the structure
+      * created by the MQ/JSON parser middleware.
+      * -----------------------------------------------------------
+       01 WS-MQ-INPUT.
+          05 WS-ACCT-ID-IN         PIC X(10).
+          05 WS-CREDIT-UTILIZATION PIC 9(2)V9(2).  *> e.g., 0.65 for 65%
+          05 WS-CUSTOMER-AGE       PIC 9(03).      *> e.g., 35
+
+      * -----------------------------------------------------------
+      * INTERNAL FLOATING-POINT WORK AREAS (For High-Precision Math)
+      * -----------------------------------------------------------
+       01 WS-CALCULATION-FIELDS.
+          05 WF-INTERIM-SCORE      PIC COMP-2.  *> Double Precision Float
+          05 WF-FINAL-SCORE        PIC COMP-2.  *> Double Precision Float
+          05 WF-UTIL-TERM          PIC COMP-1.  *> Single Precision Float
+          05 WF-AGE-TERM           PIC COMP-1.  *> Single Precision Float
+
+      * -----------------------------------------------------------
+      * DATA SENT TO MQ (Output Message)
+      * -----------------------------------------------------------
+       01 WS-MQ-OUTPUT.
+          05 WS-ACCT-ID-OUT        PIC X(10).
+          05 WS-RISK-SCORE-RESULT  PIC ZZZ.99.
+          05 WS-DECISION-CODE      PIC X(10).
+             88 LOW-RISK           VALUE 'APPROVED'.
+             88 HIGH-RISK          VALUE 'REVIEW'.
+
+       LINKAGE SECTION.
+      * For a real MQ program, the message area would be here.
+       01 MQ-MESSAGE-AREA          PIC X(1000).
+
+       PROCEDURE DIVISION.
+       000-MAIN.
+           
+      * -----------------------------------------------------------
+      * 1. Simulate Reading and Parsing the MQ Message
+      * (In production, MQ API calls and JSON parsing would happen here)
+      * -----------------------------------------------------------
+           MOVE 'A123456789' TO WS-ACCT-ID-IN.
+           MOVE 0.65 TO WS-CREDIT-UTILIZATION.  *> 65% utilization
+           MOVE 35 TO WS-CUSTOMER-AGE.
+
+      * -----------------------------------------------------------
+      * 2. Perform Data Transformation (Converting COBOL Numerics to 
+      * Internal Floats for the AI Formula)
+      * -----------------------------------------------------------
+           MOVE WC-BASE-SCORE TO WF-FINAL-SCORE.
+           
+           COMPUTE WF-UTIL-TERM = WS-CREDIT-UTILIZATION * WC-UTILIZATION-FACTOR.
+           
+           COMPUTE WF-AGE-TERM = WS-CUSTOMER-AGE * WC-AGE-FACTOR.
+
+      * -----------------------------------------------------------
+      * 3. Apply the AI Model Formula (Advanced COMPUTE statement)
+      * Risk Score = 50 + (1.2 * Util) - (0.5 * Age)
+      * -----------------------------------------------------------
+           COMPUTE WF-FINAL-SCORE = WF-FINAL-SCORE + 
+                                    WF-UTIL-TERM + 
+                                    WF-AGE-TERM.
+                                    
+      * -----------------------------------------------------------
+      * 4. Perform Business Decision Logic Based on AI Score
+      * -----------------------------------------------------------
+           MOVE WS-ACCT-ID-IN TO WS-ACCT-ID-OUT.
+           MOVE WF-FINAL-SCORE TO WS-RISK-SCORE-RESULT.
+
+           IF WF-FINAL-SCORE > 30.00
+               MOVE 'APPROVED' TO WS-DECISION-CODE
+           ELSE
+               MOVE 'REVIEW' TO WS-DECISION-CODE
+           END-IF.
+
+      * -----------------------------------------------------------
+      * 5. Simulate Writing the Final Result to the Output MQ Queue
+      * -----------------------------------------------------------
+           DISPLAY '--- COBOL AI SCORER RESULT ---'.
+           DISPLAY 'Account: ' WS-ACCT-ID-OUT.
+           DISPLAY 'Score:   ' WS-RISK-SCORE-RESULT.
+           DISPLAY 'Decision:' WS-DECISION-CODE.
+           
+      * (EXEC CICS/DB2/MQ CALL TO WRITE RESULT WOULD GO HERE)
+           
+           GOBACK.
+
