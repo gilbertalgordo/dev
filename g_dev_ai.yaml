@@ -1,0 +1,219 @@
+pip install google-genai
+
+
+
+import os
+from google import genai
+
+# The client automatically looks for the GEMINI_API_KEY 
+# environment variable.
+try:
+    client = genai.Client()
+except Exception as e:
+    print(f"Error creating client. Make sure GEMINI_API_KEY is set.")
+    print(f"Details: {e}")
+    exit()
+
+# Define the model and the prompt
+MODEL_NAME = "gemini-2.5-flash"
+PROMPT = "Explain how AI works in a few words"
+
+print(f"Sending prompt to model: {MODEL_NAME}")
+print(f"Prompt: '{PROMPT}'\n")
+
+# Make the API call to generate content
+try:
+    response = client.models.generate_content(
+        model=MODEL_NAME,
+        contents=PROMPT,
+    )
+
+    # Print the model's response
+    print("--- Model Response ---")
+    print(response.text)
+    print("----------------------")
+
+except Exception as e:
+    print(f"An error occurred during the API call: {e}")
+
+
+
+npm install @google/genai
+
+
+
+import { GoogleGenAI } from "@google/genai";
+
+// The client automatically uses the GEMINI_API_KEY environment variable
+const ai = new GoogleGenAI({}); 
+
+const MODEL_NAME = "gemini-2.5-flash";
+const PROMPT = "Explain how AI works in a few words";
+
+async function run() {
+  try {
+    console.log(`Sending prompt to model: ${MODEL_NAME}`);
+    console.log(`Prompt: '${PROMPT}'\n`);
+
+    const response = await ai.models.generateContent({
+      model: MODEL_NAME,
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: PROMPT }],
+        },
+      ],
+    });
+
+    console.log("--- Model Response ---");
+    console.log(response.text);
+    console.log("----------------------");
+  } catch (error) {
+    console.error("An error occurred during the API call:", error.message);
+    console.log("Make sure the @google/genai library is installed and GEMINI_API_KEY is set.");
+  }
+}
+
+run();
+
+
+
+import os
+from google import genai
+from google.genai import types
+from datetime import datetime
+import zoneinfo # Standard library for timezones
+
+# --- 1. Define the actual tool/function in Python ---
+def get_current_time(location: str) -> str:
+    """
+    Gets the current time for a given location (city or timezone).
+    
+    This function looks up the time for a known location/timezone.
+    Example locations: 'America/Los_Angeles', 'Europe/London', 'Asia/Tokyo'.
+    """
+    try:
+        # Map a common city name to a standard timezone ID
+        location_map = {
+            "london": "Europe/London",
+            "tokyo": "Asia/Tokyo",
+            "new york": "America/New_York",
+            "philippines": "Asia/Manila",
+            # The model is smart enough to often provide the full zoneinfo ID
+        }
+        
+        # Normalize the location string and get the timezone
+        normalized_location = location.lower().replace(' ', '_')
+        tz_id = location_map.get(normalized_location, location)
+        
+        # Get the timezone object
+        tz = zoneinfo.ZoneInfo(tz_id)
+        
+        # Get the current time in that timezone
+        current_time = datetime.now(tz).strftime("%I:%M:%S %p %Z")
+        return f"Current time in {location} ({tz_id}) is {current_time}"
+        
+    except zoneinfo.ZoneInfoNotFoundError:
+        return f"Error: Could not find a timezone for location '{location}'. Please try a different city or a valid zoneinfo ID."
+
+# --- 2. Configure the Model and Tools ---
+client = genai.Client()
+model = "gemini-2.5-flash"
+
+# Define the function signature (Tool Declaration) for the model
+tool_declaration = types.Tool(
+    function_declarations=[
+        types.FunctionDeclaration(
+            name="get_current_time",
+            description=get_current_time.__doc__.strip(),
+            parameters=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "location": types.Schema(
+                        type=types.Type.STRING,
+                        description="The city or standard timezone ID (e.g., 'America/New_York') to check the time for.",
+                    )
+                },
+                required=["location"],
+            ),
+        )
+    ]
+)
+
+# --- 3. The Two-Step Function Calling Workflow ---
+user_prompt = "What is the current time in Tokyo?"
+print(f"User Prompt: {user_prompt}\n")
+
+# --- Step 1: Send prompt and tools to the model ---
+response = client.models.generate_content(
+    model=model,
+    contents=user_prompt,
+    config=types.GenerateContentConfig(tools=[tool_declaration])
+)
+
+# Check if the model decided to call the function
+if response.function_calls:
+    function_call = response.function_calls[0]
+    func_name = function_call.name
+    func_args = dict(function_call.args)
+
+    print(f"Model decided to call function: {func_name}")
+    print(f"Arguments: {func_args}\n")
+
+    # --- Step 2: Run the actual Python function with the arguments ---
+    if func_name == "get_current_time":
+        function_result = get_current_time(**func_args)
+        
+        print(f"Function Result (Your Code Output): {function_result}\n")
+
+        # --- Step 3: Send the original prompt, model's request, AND the function result back to the model ---
+        final_response = client.models.generate_content(
+            model=model,
+            contents=[
+                types.Content(role="user", parts=[types.Part.from_text(user_prompt)]),
+                types.Content(role="function", parts=[
+                    types.Part.from_function_response(
+                        name=func_name,
+                        response={"result": function_result}
+                    )
+                ])
+            ]
+        )
+        print("--- Final Model Response ---")
+        print(final_response.text)
+        print("----------------------------")
+
+else:
+    print("Model did not request a function call.")
+    print(response.text)
+
+
+
+
+from google import genai
+
+# Use a model supporting long context and chat (gemini-2.5-flash is excellent)
+client = genai.Client()
+model = "gemini-2.5-flash"
+
+# Start a new chat session
+chat = client.chats.create(model=model)
+
+print(f"--- Starting Chat with {model} ---")
+
+# Turn 1: Introduce a fact
+prompt_1 = "My favorite programming language is Python."
+print(f"User: {prompt_1}")
+response_1 = chat.send_message(prompt_1)
+print(f"Gemini: {response_1.text}\n")
+
+# Turn 2: Ask a follow-up question that relies on Turn 1
+prompt_2 = "What is my favorite language?"
+print(f"User: {prompt_2}")
+response_2 = chat.send_message(prompt_2)
+print(f"Gemini: {response_2.text}\n")
+
+# Review the chat history stored by the client
+print("--- Full Chat History ---")
+for message in chat.get_history():
+    print(f"Role: {message.role}, Text: {message.parts[0].text[:50]}...")
