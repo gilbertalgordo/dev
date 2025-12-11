@@ -1,0 +1,159 @@
+import asyncio
+from browser_use import Agent, Browser, ChatBrowserUse
+from typing import List, Dict, Any
+
+# Define the AI task and setup
+async def run_ai_browser_task(url: str, user_task: str) -> List[Dict[str, Any]]:
+    """
+    Initializes a browser-aware AI agent to perform a task on a specific URL.
+
+    Args:
+        url: The starting URL for the browser.
+        user_task: The natural language task for the AI agent to complete.
+
+    Returns:
+        A list of actions/results from the agent's history.
+    """
+    try:
+        # 1. Initialize the browser instance
+        # In a mobile app scenario, this would communicate with a server-side service.
+        browser = Browser() 
+
+        # 2. Initialize the Large Language Model (LLM) client
+        # This is where you connect to your AI model (e.g., Gemini, OpenAI, Claude)
+        llm = ChatBrowserUse() 
+
+        # 3. Define the Agent with the specific task
+        agent = Agent(
+            task=f"Navigate to {url} and then: {user_task}",
+            llm=llm,
+            browser=browser,
+            # Add custom tools here if needed, e.g., 'summarize_text'
+            # tools=[custom_tool], 
+        )
+
+        # 4. Run the agent and get the history (results)
+        history = await agent.run()
+        
+        # 5. Extract the final answer or summary
+        final_result = [
+            {"step": i, "action": h.action, "result": h.result}
+            for i, h in enumerate(history)
+        ]
+        
+        return final_result
+    
+    except Exception as e:
+        return [{"error": str(e)}]
+
+# --- Example Usage (Demonstration) ---
+if __name__ == "__main__":
+    target_url = "https://www.example.com"
+    task_to_perform = "Find the main heading text and summarize the second paragraph."
+    
+    # Running the async function
+    results = asyncio.run(run_ai_browser_task(target_url, task_to_perform))
+    
+    print("--- AI Browser Agent Results ---")
+    for step in results:
+        print(f"Step {step.get('step')}:")
+        print(f"  Action: {step.get('action')}")
+        # print(f"  Result: {step.get('result')[:100]}...") # Print truncated result
+    
+    # In a real app, you would send this 'results' data back to the mobile client
+
+
+
+// --- 1. Android Client (Kotlin) ---
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import okhttp3.*
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.IOException
+
+// Assuming you have a WebView in your layout named 'webView'
+
+fun setupWebViewWithAI(webView: WebView, url: String) {
+    webView.settings.javaScriptEnabled = true
+    webView.webViewClient = object : WebViewClient() {
+        override fun onPageFinished(view: WebView?, url: String?) {
+            super.onPageFinished(view, url)
+            
+            // Inject JavaScript to extract the main text content of the page
+            val jsCode = "javascript: (function() { return document.body.innerText; })();"
+            
+            // Execute the script and handle the result
+            view?.evaluateJavascript(jsCode) { rawContent ->
+                // rawContent will be a JSON-encoded string of the page text
+                val pageText = rawContent.removeSurrounding("\"")
+                
+                // Call the function to send the text to the AI backend
+                // This is where you would get the 'adtcode' of your AI feature!
+                getAISummary(pageText)
+            }
+        }
+    }
+    webView.loadUrl(url)
+}
+
+// Function to communicate with your AI backend service
+fun getAISummary(content: String) {
+    val client = OkHttpClient()
+    val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+    
+    // Structure the data to send to your AI server (which hosts the Gemini logic)
+    val jsonBody = """
+        {
+            "prompt": "Summarize the following webpage content concisely:",
+            "content": "$content"
+        }
+    """.trimIndent().toRequestBody(jsonMediaType)
+
+    val request = Request.Builder()
+        .url("YOUR_BACKEND_AI_ENDPOINT/summarize") // Replace with your server's endpoint
+        .post(jsonBody)
+        .build()
+
+    client.newCall(request).enqueue(object : Callback {
+        override fun onFailure(call: Call, e: IOException) {
+            // Handle error, e.g., show a toast
+        }
+
+        override fun onResponse(call: Call, response: Response) {
+            response.body?.string()?.let { summaryJson ->
+                // Parse the summary from the server and update the UI 
+                // e.g., show the summary in a custom Head-Up Display (HUD) overlay, 
+                // which aligns with your preference for "hud."
+                // Since you prefer clear voices, the prompt ensures the summary is concise.
+                
+                // Example: val summary = parseSummary(summaryJson)
+                // updateUIWithSummary(summary) 
+            }
+        }
+    })
+}
+
+
+
+# --- 2. Backend Server (Python/Flask/FastAPI) ---
+# This server receives the content, uses the Gemini API, and sends the summary back.
+
+# NOTE: Replace with actual Gemini/LLM SDK implementation
+def generate_summary_with_ai(prompt: str, content: str) -> str:
+    """
+    Connects to the LLM (e.g., Gemini) to generate a summary.
+    """
+    # 1. Initialize the LLM client (e.g., Google GenAI SDK)
+    # 2. Construct the final prompt: f"{prompt}\n\nCONTENT:\n{content}"
+    # 3. Call the model: response = model.generate_content(...)
+    
+    # Placeholder for actual AI output:
+    return f"AI Summary: The webpage discusses the conceptual nature of 'adtcode' and provides examples of using AI for web content analysis within mobile apps."
+
+# Your API endpoint function would look something like this:
+# @app.post("/summarize")
+# def summarize_content(data: dict):
+#     # ... handle request
+#     summary = generate_summary_with_ai(data["prompt"], data["content"])
+#     return {"summary": summary}
