@@ -1,0 +1,169 @@
+import time
+import math
+
+class CyclistAI:
+    def __init__(self, rider_name, mass=75, cda=0.32):
+        # Physical Properties
+        self.name = rider_name
+        self.mass = mass  # kg
+        self.cda = cda    # Drag coefficient * Area
+        self.rho = 1.225  # Air density kg/m^3
+        
+        # State Variables
+        self.velocity = 0.0  # m/s
+        self.position = 0.0  # meters
+        self.power_output = 0.0  # Watts
+        self.cadence = 0.0    # RPM
+        self.heart_rate = 80  # BPM
+        
+        # HUD Toggle
+        self.show_hud = True
+
+    def update_physics(self, target_power, delta_time):
+        """Calculates movement based on power input and drag."""
+        self.power_output = target_power
+        
+        # Calculate Drag Force: Fd = 0.5 * rho * v^2 * CdA
+        drag_force = 0.5 * self.rho * (self.velocity**2) * self.cda
+        
+        # Available Force from Power: F = P / v (handling v=0)
+        if self.velocity > 0.1:
+            propulsion_force = self.power_output / self.velocity
+        else:
+            propulsion_force = self.power_output / 0.1 
+            
+        # Net Force: F_net = F_prop - F_drag
+        net_force = propulsion_force - drag_force
+        
+        # Acceleration: a = F / m
+        acceleration = net_force / self.mass
+        
+        # Update Velocity and Position
+        self.velocity += acceleration * delta_time
+        self.velocity = max(0, self.velocity) # Prevent negative speed
+        self.position += self.velocity * delta_time
+        
+        # Simulate Biological Response
+        self._update_vitals()
+
+    def _update_vitals(self):
+        """Simulates heart rate and cadence based on effort."""
+        # Cadence logic (simplified gear simulation)
+        self.cadence = min(120, self.velocity * 4) 
+        # Heart rate logic (drifts toward effort level)
+        target_hr = 80 + (self.power_output / 5)
+        self.heart_rate += (target_hr - self.heart_rate) * 0.1
+
+    def display_hud(self):
+        """Renders the visual HUD for the user."""
+        if not self.show_hud:
+            return
+
+        speed_kmh = self.velocity * 3.6
+        print(f"\n--- [ {self.name.upper()} HUD ] ---")
+        print(f"| SPEED:   {speed_kmh:>6.2f} km/h  |")
+        print(f"| POWER:   {self.power_output:>6.1f} W     |")
+        print(f"| CADENCE: {self.cadence:>6.0f} RPM   |")
+        print(f"| HR:      {self.heart_rate:>6.0f} BPM   |")
+        print(f"| DIST:    {self.position:>6.1f} m     |")
+        print("-" * 25)
+
+# --- Instance Execution ---
+pro_rider = CyclistAI("Pro_Rider_01")
+dt = 1.0 # 1 second intervals
+
+print("Starting AI Cycling Simulation...")
+
+# Simulate a 5-second sprint at 300 Watts
+for t in range(5):
+    pro_rider.update_physics(target_power=300, delta_time=dt)
+    pro_rider.display_hud()
+    time.sleep(0.5)
+
+
+
+import numpy as np
+
+class Environment:
+    def __init__(self, gravity=9.81, air_density=1.225, wind_speed=0.0):
+        self.g = gravity
+        self.rho = air_density
+        self.wind_speed = wind_speed # Positive for headwind
+        self.gradient = 0.0 # 0.05 for 5% climb
+
+class AdvancedRider:
+    def __init__(self, name, weight, cda, crr=0.005):
+        self.name = name
+        self.mass = weight 
+        self.cda_base = cda
+        self.crr = crr
+        
+        # Dynamic State
+        self.pos = 0.0
+        self.vel = 0.0
+        self.energy_kj = 2000.0 # Energy store for "pacing"
+        self.is_drafting = False
+
+    def calculate_resistance(self, env):
+        # 1. Gravity Resistance
+        theta = np.arctan(env.gradient)
+        f_gravity = self.mass * env.g * np.sin(theta)
+        
+        # 2. Rolling Resistance
+        f_rolling = self.crr * self.mass * env.g * np.cos(theta)
+        
+        # 3. Aero Drag (Adjusted for drafting)
+        cda_effective = self.cda_base * (0.65 if self.is_drafting else 1.0)
+        relative_vel = self.vel + env.wind_speed
+        f_drag = 0.5 * env.rho * (relative_vel**2) * cda_effective
+        
+        return f_gravity + f_rolling + f_drag
+
+    def update(self, target_power, env, dt):
+        res_force = self.calculate_resistance(env)
+        
+        # Avoid division by zero
+        v_eff = max(self.vel, 1.0)
+        prop_force = target_power / v_eff
+        
+        accel = (prop_force - res_force) / self.mass
+        self.vel = max(0, self.vel + accel * dt)
+        self.pos += self.vel * dt
+        
+        # Deplete energy based on effort
+        self.energy_kj -= (target_power * dt) / 1000
+
+class PelotonHUD:
+    @staticmethod
+    def render(riders, env):
+        print(f"\n| ENV | Grade: {env.gradient*100}% | Wind: {env.wind_speed} m/s")
+        print("-" * 65)
+        print(f"{'RIDER':<15} | {'SPEED':<10} | {'DIST':<10} | {'STATUS':<10} | {'ENERGY'}")
+        print("-" * 65)
+        for r in riders:
+            status = "DRAFTING" if r.is_drafting else "LEADING"
+            print(f"{r.name:<15} | {r.vel*3.6:>6.1f}kmh | {r.pos:>7.1f}m | {status:<10} | {r.energy_kj:>6.1f}kJ")
+
+# --- Simulation Logic ---
+world = Environment(wind_speed=2.0) # 2m/s headwind
+riders = [
+    AdvancedRider("AI_Lead", 70, 0.32),
+    AdvancedRider("AI_Chaser", 72, 0.32)
+]
+
+# Simple Loop
+for second in range(10):
+    # Determine drafting (If Chaser is within 2m of Lead)
+    dist_gap = riders[0].pos - riders[1].pos
+    riders[1].is_drafting = (0 < dist_gap < 2.5)
+    
+    # AI Strategy: Lead rider pushes 350W, Chaser saves energy at 250W
+    riders[0].update(350, world, 1.0)
+    riders[1].update(250, world, 1.0)
+    
+    # HUD Display
+    PelotonHUD.render(riders, world)
+    
+    # Dynamic Environment change: 3% hill starts at 100m
+    if riders[0].pos > 100: world.gradient = 0.03
+
