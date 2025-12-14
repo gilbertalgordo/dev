@@ -1,0 +1,212 @@
+pip install google-genai
+
+
+
+import os
+from google import genai
+
+# --- Configuration ---
+# Ensure your API key is set as an environment variable: export GEMINI_API_KEY='YOUR_KEY'
+if 'GEMINI_API_KEY' not in os.environ:
+    print("Error: Please set the GEMINI_API_KEY environment variable.")
+    exit()
+
+# The path to your audio file
+AUDIO_FILE_PATH = "path/to/your/audio.mp3" 
+
+# --- Main Logic ---
+
+def generate_audio_overview(file_path: str):
+    """
+    Uploads an audio file and generates a detailed summary and transcript 
+    using the Gemini 2.5 Flash model.
+    """
+    try:
+        # Initialize the client
+        client = genai.Client()
+        
+        # 1. Upload the audio file to the Gemini API
+        print(f"Uploading file: {file_path}...")
+        audio_file = client.files.upload(file=file_path)
+        print(f"File uploaded successfully. URI: {audio_file.uri}")
+
+        # 2. Define the prompt for the audio overview
+        # This prompt asks for specific, structured information (clear voices/speakers and accuracy).
+        prompt = f"""
+        Process the provided audio file and generate a comprehensive overview.
+        
+        Requirements:
+        1. **Detailed Summary:** Provide a concise, high-level summary of the audio's main topic and key takeaways.
+        2. **Transcription with Speakers:** Generate a full transcription, identifying distinct speakers (e.g., Speaker 1, Speaker 2) with the format (Speaker X: Text).
+        3. **Key Moments/Timestamps:** Identify 3-5 of the most important moments and provide their approximate timestamp (e.g., [01:45]).
+        """
+        
+        # 3. Generate content
+        print("Generating audio overview...")
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[
+                prompt, 
+                audio_file # Pass the uploaded file object
+            ]
+        )
+
+        # 4. Display the results
+        print("\n" + "="*50)
+        print("🤖 AI Audio Overview Result 🤖")
+        print("="*50)
+        print(response.text)
+        print("="*50 + "\n")
+
+    except genai.errors.APIError as e:
+        print(f"\nAn API error occurred: {e}")
+        print("Please check your API key and file path.")
+    except Exception as e:
+        print(f"\nAn unexpected error occurred: {e}")
+    finally:
+        # 5. Clean up by deleting the uploaded file
+        if 'audio_file' in locals():
+             client.files.delete(name=audio_file.name)
+             print(f"Clean up complete. Deleted file: {audio_file.name}")
+
+
+if __name__ == "__main__":
+    # --- IMPORTANT: Replace with the actual path to your audio file ---
+    # Example: If your audio is named 'podcast_clip.mp3' and is in the same folder:
+    # generate_audio_overview("podcast_clip.mp3") 
+    # For this example to run, you MUST change the path to a valid audio file.
+    generate_audio_overview(AUDIO_FILE_PATH)
+
+
+
+import os
+import json
+from google import genai
+from google.genai import types
+
+# --- Configuration ---
+if 'GEMINI_API_KEY' not in os.environ:
+    print("Error: Please set the GEMINI_API_KEY environment variable.")
+    exit()
+
+AUDIO_FILE_PATH = "path/to/your/audio.mp3" # <-- CHANGE THIS
+MODEL_NAME = "gemini-2.5-flash" 
+
+# --- Structured Output Schema ---
+# Defines the exact structure the model MUST adhere to for the output.
+# This ensures accuracy and machine-readability.
+audio_analysis_schema = types.Schema(
+    type=types.Type.OBJECT,
+    properties={
+        "high_level_summary": types.Schema(
+            type=types.Type.STRING,
+            description="A 3-sentence summary of the main topic and key conclusions."
+        ),
+        "speakers_identified": types.Schema(
+            type=types.Type.INTEGER,
+            description="The total number of distinct speakers detected in the audio."
+        ),
+        "transcript_segments": types.Schema(
+            type=types.Type.ARRAY,
+            description="A list of transcribed segments, including speaker, timestamp, and emotion.",
+            items=types.Schema(
+                type=types.Type.OBJECT,
+                properties={
+                    "speaker": types.Schema(type=types.Type.STRING, description="The identified speaker (e.g., Speaker 1, Interviewer)."),
+                    "start_time_seconds": types.Schema(type=types.Type.INTEGER, description="The start time of the segment in seconds."),
+                    "end_time_seconds": types.Schema(type=types.Type.INTEGER, description="The end time of the segment in seconds."),
+                    "text": types.Schema(type=types.Type.STRING, description="The transcribed text for this segment."),
+                    "emotion": types.Schema(type=types.Type.STRING, description="The primary emotion detected (e.g., Neutral, Enthusiastic, Concerned).")
+                },
+            ),
+        ),
+        "key_takeaways": types.Schema(
+            type=types.Type.ARRAY,
+            description="A list of the 3 most important scientific or technical points discussed.",
+            items=types.Schema(type=types.Type.STRING)
+        )
+    },
+)
+
+# --- Main Logic ---
+
+def generate_advanced_audio_overview(file_path: str):
+    """
+    Performs multimodal analysis (transcription, diarization, summarization, 
+    and emotion recognition) on an audio file and returns structured JSON.
+    """
+    try:
+        client = genai.Client()
+        
+        # 1. Upload the audio file
+        print(f"Uploading file: {file_path}...")
+        audio_file = client.files.upload(file=file_path)
+        print(f"File uploaded successfully. URI: {audio_file.uri}")
+
+        # 2. Define the advanced prompt and configuration
+        prompt = f"""
+        Analyze this audio file. Your goal is to fill the requested JSON schema 
+        with the highest possible accuracy.
+        - Pay close attention to distinguishing between different speakers 
+          ('clear voices' / Speaker Diarization).
+        - Extract the full transcription, segmenting it by speaker change.
+        - Identify the dominant emotion for each transcribed segment.
+        - Provide accurate scientific or technical reasoning as part of the key takeaways.
+        """
+        
+        config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=audio_analysis_schema,
+        )
+        
+        # 3. Generate content
+        print(f"Generating advanced overview using {MODEL_NAME}...")
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=[prompt, audio_file],
+            config=config,
+        )
+
+        # 4. Display the results
+        # The output is a JSON string, which we load into a Python dict for better display
+        analysis_data = json.loads(response.text)
+        
+        print("\n" + "="*70)
+        print(f"🔬 Advanced AI Audio Overview ({analysis_data.get('speakers_identified', 0)} Speakers Detected) 🔬")
+        print("="*70)
+        print(f"Summary: {analysis_data.get('high_level_summary', 'N/A')}\n")
+        
+        print("--- Key Takeaways ---")
+        for i, takeaway in enumerate(analysis_data.get('key_takeaways', [])):
+            print(f"{i+1}. {takeaway}")
+        print("\n--- Segmented Transcript ---")
+
+        #  
+        # This illustrates the advanced diarization and emotion steps.
+        
+        # Displaying the structured transcript
+        for segment in analysis_data.get('transcript_segments', []):
+            start_min = segment['start_time_seconds'] // 60
+            start_sec = segment['start_time_seconds'] % 60
+            
+            print(f"[{start_min:02}:{start_sec:02}] **{segment['speaker']}** ({segment['emotion']}): {segment['text']}")
+            
+        print("="*70 + "\n")
+
+    except genai.errors.APIError as e:
+        print(f"\nAn API error occurred: {e}")
+        print("Ensure your API key is correct and the audio file path is valid.")
+    except Exception as e:
+        print(f"\nAn unexpected error occurred: {e}")
+    finally:
+        # 5. Clean up by deleting the uploaded file
+        if 'audio_file' in locals():
+             client.files.delete(name=audio_file.name)
+             print(f"Clean up complete. Deleted file: {audio_file.name}")
+
+
+if __name__ == "__main__":
+    # You MUST replace this with the path to your actual audio file (e.g., .mp3, .wav)
+    # generate_advanced_audio_overview("path/to/my_podcast.mp3") 
+    generate_advanced_audio_overview(AUDIO_FILE_PATH)
+
