@@ -1,0 +1,513 @@
+import math
+from typing import Dict, Any
+
+# --- Constants for scientific reasoning ---
+# Mass is a critical factor for 4x4 performance and efficiency.
+VEHICLE_MASS_KG = 2500  # Target vehicle mass (heavy for 4x4/hybrid components)
+GRAVITY_MS2 = 9.81
+AIR_DENSITY_KGM3 = 1.225
+DRAG_COEFFICIENT = 0.35  # Higher for a van body shape
+FRONTAL_AREA_M2 = 3.5  # Large frontal area for a van
+
+class EnergyStorage:
+    """Models the main traction battery."""
+    def __init__(self, capacity_kwh: float = 100.0, max_power_kw: float = 400.0,
+                 initial_soc: float = 0.8):
+        self.capacity_kwh = capacity_kwh
+        self.max_power_kw = max_power_kw
+        self.current_kwh = self.capacity_kwh * initial_soc
+        self.soc = initial_soc
+
+    def draw_power(self, kw_request: float) -> float:
+        """
+        Draws power from the battery.
+        Returns the actual power delivered (kW).
+        """
+        actual_draw = min(kw_request, self.max_power_kw)
+        
+        # Simple capacity check
+        if self.current_kwh * 3600 / (actual_draw * 1000) < 0.01: # less than 1 second of power left
+             actual_draw *= 0.1 # Limit draw if nearly empty
+
+        self.current_kwh -= actual_draw / 3600  # Convert kW to kWh over 1 hour
+        self.soc = self.current_kwh / self.capacity_kwh
+        return actual_draw
+
+    def regen_power(self, kw_regen: float):
+        """Regenerates power back into the battery."""
+        max_regen = self.max_power_kw * 0.7  # Regen is typically less than max discharge
+        actual_regen = min(kw_regen, max_regen)
+
+        # Simple capacity check
+        if self.soc >= 0.99:
+             actual_regen = 0 # Stop charging when full
+
+        self.current_kwh = min(self.capacity_kwh, self.current_kwh + actual_regen / 3600)
+        self.soc = self.current_kwh / self.capacity_kwh
+
+
+class ICEGenerator:
+    """Internal Combustion Engine acting as a range extender/generator."""
+    def __init__(self, max_output_kw: float = 150.0, efficiency: float = 0.35):
+        self.max_output_kw = max_output_kw
+        self.efficiency = efficiency  # Thermal efficiency
+        self.fuel_liters = 50.0  # Fuel tank capacity
+
+    def generate_power(self, kw_request: float) -> float:
+        """
+        Generates electrical power.
+        Returns the actual power generated (kW).
+        """
+        actual_gen = min(kw_request, self.max_output_kw)
+
+        # Fuel consumption calculation (simplified: 1 Liter fuel ~ 9.7 kWh energy content)
+        energy_content_kwh_per_liter = 9.7
+        fuel_needed_liters = (actual_gen / self.efficiency) / (3600 * energy_content_kwh_per_liter)
+        
+        if self.fuel_liters < fuel_needed_liters:
+            actual_gen = 0 # Out of fuel
+            
+        self.fuel_liters -= fuel_needed_liters
+        return actual_gen
+
+class ElectricDrivetrain:
+    """Models the 4x4 electric motors (e.g., one on each axle)."""
+    def __init__(self, max_torque_nm: float = 1200.0, gear_ratio: float = 10.0, 
+                 drivetrain_efficiency: float = 0.95):
+        self.max_torque_nm = max_torque_nm
+        self.gear_ratio = gear_ratio
+        self.efficiency = drivetrain_efficiency
+        self.wheel_radius_m = 0.4  # For 4x4 tires
+
+    def calculate_force(self, motor_power_kw: float, current_speed_ms: float) -> float:
+        """
+        Calculates the tractive force provided by the motors.
+        Power (W) = Torque (Nm) * Angular Speed (rad/s)
+        Power (W) = Force (N) * Linear Speed (m/s)
+        """
+        motor_power_w = motor_power_kw * 1000
+
+        # Max Force (Tractive Effort) limited by max torque/gear ratio
+        max_force_nm = self.max_torque_nm * self.gear_ratio / self.wheel_radius_m
+
+        if current_speed_ms > 0:
+            # Force required to generate the requested power at the current speed
+            force_from_power = motor_power_w / current_speed_ms
+            tractive_force = min(force_from_power, max_force_nm) * self.efficiency
+        else:
+            # At 0 speed, max force is determined by max torque
+            tractive_force = max_force_nm * self.efficiency
+
+        return tractive_force
+
+
+class HybridVan4x4:
+    """
+    The main vehicle class: Hybrid Van 4x4 (Future)
+    Represents an **instance** of the vehicle concept.
+    """
+    def __init__(self, codename: str = "Future"):
+        self.codename = codename
+        self.mass = VEHICLE_MASS_KG
+        
+        # Components
+        self.battery = EnergyStorage()
+        self.generator = ICEGenerator()
+        self.drivetrain = ElectricDrivetrain()
+        
+        # State variables (hud)
+        self.speed_ms = 0.0
+        self.distance_m = 0.0
+        self.acceleration_ms2 = 0.0
+        self.time_s = 0.0
+
+    def calculate_resistive_forces(self) -> float:
+        """Calculates aerodynamic and rolling resistance (scientific reasoning)."""
+        
+        # 1. Aerodynamic Drag Force (N): F_drag = 0.5 * rho * Cd * A * v^2
+        f_drag = 0.5 * AIR_DENSITY_KGM3 * DRAG_COEFFICIENT * FRONTAL_AREA_M2 * (self.speed_ms ** 2)
+
+        # 2. Rolling Resistance Force (N): F_roll = Crr * m * g
+        rolling_resistance_coefficient = 0.015  # Typical for van/truck tires
+        f_roll = rolling_resistance_coefficient * self.mass * GRAVITY_MS2
+
+        return f_drag + f_roll
+
+    def simulate_step(self, target_power_kw: float, duration_s: float = 1.0) -> Dict[str, Any]:
+        """
+        Simulates one time step of the vehicle movement.
+        """
+        
+        # 1. Determine Power Source (Prioritize Battery)
+        power_from_battery_kw = self.battery.draw_power(target_power_kw)
+        
+        power_deficit_kw = target_power_kw - power_from_battery_kw
+        if power_deficit_kw > 0 and self.battery.soc < 0.6: # Turn on generator if SOC is low
+             power_from_generator_kw = self.generator.generate_power(power_deficit_kw)
+             # Use generated power to recharge battery, not directly to motors (Series Hybrid)
+             self.battery.regen_power(power_from_generator_kw)
+
+        # 2. Calculate Tractive Force (using the power we successfully drew)
+        actual_power_to_motors_kw = power_from_battery_kw # Power drawn from battery is the power for motors
+        tractive_force_n = self.drivetrain.calculate_force(actual_power_to_motors_kw, self.speed_ms)
+
+        # 3. Calculate Net Force and Acceleration
+        resistive_force_n = self.calculate_resistive_forces()
+        
+        net_force_n = tractive_force_n - resistive_force_n
+        
+        # F = m * a => a = F / m
+        acceleration_ms2 = net_force_n / self.mass
+        self.acceleration_ms2 = acceleration_ms2
+        
+        # 4. Update State Variables (Kinematics)
+        
+        # New speed (v = u + at)
+        self.speed_ms += acceleration_ms2 * duration_s
+        self.speed_ms = max(0.0, self.speed_ms) # Speed cannot be negative
+        
+        # Distance moved (d = ut + 0.5at^2)
+        distance_moved = (self.speed_ms * duration_s) + (0.5 * acceleration_ms2 * (duration_s ** 2))
+        self.distance_m += distance_moved
+        
+        self.time_s += duration_s
+        
+        # 5. Return HUD (Head-Up Display) information
+        hud_data = {
+            "Time (s)": round(self.time_s, 2),
+            "Speed (km/h)": round(self.speed_ms * 3.6, 1),
+            "Acceleration (m/s^2)": round(self.acceleration_ms2, 2),
+            "Battery SOC (%)": round(self.battery.soc * 100, 1),
+            "Generator Fuel (L)": round(self.generator.fuel_liters, 2),
+            "Tractive Force (kN)": round(tractive_force_n / 1000, 2),
+            "Resistive Force (kN)": round(resistive_force_n / 1000, 2),
+            "Distance Traveled (km)": round(self.distance_m / 1000, 3)
+        }
+        
+        return hud_data
+
+# --- Execution Example ---
+if __name__ == "__main__":
+    # Create an **instance** of the Hybrid Van
+    future_van = HybridVan4x4()
+    
+    print(f"--- Simulating {future_van.codename} Hybrid Van Initial State ---")
+    
+    # Simulation Parameters
+    SIMULATION_DURATION_S = 100
+    TIME_STEP_S = 1.0
+    POWER_REQUEST_KW = 300.0  # Constant high power request for acceleration/cruising
+    
+    steps = int(SIMULATION_DURATION_S / TIME_STEP_S)
+    
+    # Header for the HUD data
+    print(" | ".join(future_van.simulate_step(0).keys()))
+    print("-" * 150)
+    
+    # Run simulation
+    for i in range(steps):
+        hud = future_van.simulate_step(POWER_REQUEST_KW, TIME_STEP_S)
+        
+        # Display the HUD every 10 seconds (for clarity)
+        if (i * TIME_STEP_S) % 10 == 0:
+            print(" | ".join([str(v).ljust(len(k)) for k, v in hud.items()]))
+            
+    print("-" * 150)
+    print("\nSimulation Complete.")
+
+
+
+import math
+from typing import Dict, Any
+
+# --- Race-Spec Constants (Higher performance, lower efficiency tolerances) ---
+VEHICLE_MASS_KG = 2400.0  # Lighter due to Race Corp's use of advanced composites
+GRAVITY_MS2 = 9.81
+AIR_DENSITY_KGM3 = 1.225
+DRAG_COEFFICIENT = 0.32 # Improved aerodynamics for high-speed runs
+FRONTAL_AREA_M2 = 3.3
+TIME_STEP_S = 0.1 # Finer simulation granularity for accuracy
+
+# Thermal constants (Simplified Heat Transfer Model)
+C_BATTERY_J_K = 50000.0  # Thermal Capacity of Battery (J/K)
+C_MOTOR_J_K = 8000.0     # Thermal Capacity of Motors (J/K)
+T_AMB_K = 293.15         # Ambient Temperature (20°C)
+
+class ThermalManagement:
+    """Advanced component for managing heat flows, critical for performance."""
+    def __init__(self, initial_temp_k: float = T_AMB_K):
+        self.temp_battery_k = initial_temp_k
+        self.temp_motors_k = initial_temp_k
+        self.max_battery_power_factor = 1.0
+        self.max_motor_power_factor = 1.0
+
+    def update_temps(self, power_loss_bat_w: float, power_loss_mot_w: float, duration_s: float):
+        """
+        Updates component temperatures based on energy loss (heat).
+        Uses a simple first-order thermal model: dQ/dt = C * dT/dt
+        """
+        # 1. Battery Thermal Update (Loss and Cooling)
+        # Power Loss: P_loss = Heat_gen_W
+        heat_gen_bat_j = power_loss_bat_w * duration_s
+        heat_loss_bat_j = 0.05 * (self.temp_battery_k - T_AMB_K) * duration_s # Simple radiative/convective cooling
+        
+        delta_t_bat = (heat_gen_bat_j - heat_loss_bat_j) / C_BATTERY_J_K
+        self.temp_battery_k += delta_t_bat
+        
+        # 2. Motor Thermal Update (Loss and Cooling)
+        heat_gen_mot_j = power_loss_mot_w * duration_s
+        heat_loss_mot_j = 0.1 * (self.temp_motors_k - T_AMB_K) * duration_s
+        
+        delta_t_mot = (heat_gen_mot_j - heat_loss_mot_j) / C_MOTOR_J_K
+        self.temp_motors_k += delta_t_mot
+
+    def check_limits(self):
+        """Adjusts max power factors based on thermal stress."""
+        
+        # Battery Degradation Check (e.g., max operating temp is 320K / 47°C)
+        if self.temp_battery_k > 320.0:
+            self.max_battery_power_factor = max(0.1, 1.0 - (self.temp_battery_k - 320.0) * 0.1)
+        elif self.temp_battery_k < 280.0:
+            self.max_battery_power_factor = 0.8 # Cold batteries deliver less power
+        else:
+            self.max_battery_power_factor = 1.0
+
+        # Motor Degradation Check (e.g., max operating temp is 380K / 107°C)
+        if self.temp_motors_k > 380.0:
+            self.max_motor_power_factor = max(0.1, 1.0 - (self.temp_motors_k - 380.0) * 0.05)
+        else:
+            self.max_motor_power_factor = 1.0
+
+
+class RaceEnergyStorage:
+    """Race-spec battery with resistance and thermal awareness."""
+    def __init__(self, capacity_kwh: float = 80.0, max_power_kw: float = 500.0, 
+                 initial_soc: float = 0.9):
+        self.capacity_kwh = capacity_kwh
+        self.max_power_kw = max_power_kw
+        self.current_kwh = self.capacity_kwh * initial_soc
+        self.soc = initial_soc
+        self.internal_resistance_ohm = 0.01  # Low resistance for race discharge
+
+    def draw_power(self, kw_request: float, thermal_factor: float) -> tuple[float, float]:
+        """
+        Draws power, considering thermal limits and efficiency loss.
+        Returns (actual_power_delivered_kw, power_loss_w).
+        """
+        max_draw_kw = self.max_power_kw * thermal_factor
+        actual_draw = min(kw_request, max_draw_kw)
+        
+        # Power Loss (Heat Gen) Model: P_loss = I^2 * R. Simplified to P_loss ~ P_draw^2
+        i_approx = actual_draw * 1000 / 400.0 # Approximation using nominal voltage 400V
+        power_loss_w = (i_approx ** 2) * self.internal_resistance_ohm * 0.5 # W
+        
+        self.current_kwh -= actual_draw / 3600.0 # kWh
+        self.soc = self.current_kwh / self.capacity_kwh
+        
+        if self.soc < 0.01:
+            actual_draw = 0.0
+            
+        return actual_draw, power_loss_w
+
+
+class AdvancedE_Motor:
+    """Motor model that includes efficiency curves and thermal loss."""
+    def __init__(self, max_power_kw: float = 300.0):
+        self.max_power_kw = max_power_kw
+        
+    def get_efficiency(self, power_kw: float) -> float:
+        """
+        Simplified efficiency map: best at mid-power, dropping at extremes.
+        """
+        normalized_power = power_kw / self.max_power_kw
+        # Efficiency is highest around 50% power (e.g., 96%)
+        eff = 0.85 + 0.2 * normalized_power - 0.2 * (normalized_power ** 2)
+        return min(0.97, max(0.70, eff)) # Clamped efficiency
+
+    def calculate_output(self, power_in_kw: float, thermal_factor: float) -> tuple[float, float, float]:
+        """
+        Calculates output torque and power loss.
+        Returns (tractive_force_n, power_in_kw, power_loss_w).
+        """
+        # Limit power based on motor's thermal state and max rating
+        actual_input_kw = min(power_in_kw, self.max_power_kw * thermal_factor)
+        
+        efficiency = self.get_efficiency(actual_input_kw)
+        power_out_kw = actual_input_kw * efficiency
+        
+        power_loss_w = (actual_input_kw - power_out_kw) * 1000
+        
+        return power_out_kw, actual_input_kw, power_loss_w
+
+
+class RaceHybridVan4x4:
+    """
+    The main vehicle class by Race Corporation, featuring:
+    - Integrated Thermal Management
+    - Adaptive 4x4 Torque Vectoring
+    - Power-Split Logic
+    """
+    def __init__(self, codename: str = "Future"):
+        self.codename = codename
+        self.mass = VEHICLE_MASS_KG
+        self.wheel_radius_m = 0.45
+        self.final_drive_ratio = 8.0 # High torque gearing for 4x4
+
+        # Components (Instances)
+        self.thermal_manager = ThermalManagement()
+        self.battery = RaceEnergyStorage()
+        self.ice_generator = self._init_ice_generator()
+        self.motor_front = AdvancedE_Motor(max_power_kw=250.0) # 250kW Front
+        self.motor_rear = AdvancedE_Motor(max_power_kw=350.0)  # 350kW Rear (Rear biased for race performance)
+        
+        # State variables (hud)
+        self.speed_ms = 0.0
+        self.distance_m = 0.0
+        self.power_mode = "EV"
+
+    def _init_ice_generator(self):
+        """Initializes a race-spec ICE generator (range extender)."""
+        class RaceICEGenerator:
+            def __init__(self, max_output_kw: float = 200.0, target_eff: float = 0.4):
+                self.max_output_kw = max_output_kw
+                self.efficiency = target_eff
+                self.fuel_liters = 60.0
+                self.fuel_use_lph = 0.0
+            
+            def generate_power(self, kw_request: float) -> float:
+                actual_gen = min(kw_request, self.max_output_kw)
+                # Fuel consumption calculation (simplified)
+                energy_content_kwh_per_liter = 9.7
+                fuel_needed_liters = (actual_gen / self.efficiency) / (3600 * energy_content_kwh_per_liter) * TIME_STEP_S
+                self.fuel_use_lph = fuel_needed_liters / TIME_STEP_S * 3600
+                self.fuel_liters -= fuel_needed_liters
+                return actual_gen
+
+        return RaceICEGenerator()
+        
+    def _calculate_resistive_forces(self) -> float:
+        """Calculates aerodynamic and rolling resistance."""
+        f_drag = 0.5 * AIR_DENSITY_KGM3 * DRAG_COEFFICIENT * FRONTAL_AREA_M2 * (self.speed_ms ** 2)
+        rolling_resistance_coefficient = 0.012 # Race-spec tires
+        f_roll = rolling_resistance_coefficient * self.mass * GRAVITY_MS2
+        return f_drag + f_roll
+
+    def _torque_vectoring_distribution(self, total_power_kw: float, current_speed_ms: float) -> tuple[float, float]:
+        """
+        Adaptive 4x4 distribution based on speed (simulating traction needs).
+        - Low speed (0-10 m/s): 50/50 for max off-road traction.
+        - Mid speed (10-30 m/s): Rear-biased (40/60) for handling/performance.
+        - High speed (>30 m/s): Rear-biased with less front involvement (20/80)
+        """
+        if current_speed_ms < 10.0:
+            front_ratio = 0.5
+        elif current_speed_ms < 30.0:
+            front_ratio = 0.4
+        else:
+            front_ratio = 0.2
+            
+        power_front = total_power_kw * front_ratio
+        power_rear = total_power_kw * (1.0 - front_ratio)
+        return power_front, power_rear
+
+    def simulate_step(self, target_power_kw: float) -> Dict[str, Any]:
+        """
+        Simulates one time step with power management and thermal loops.
+        """
+        
+        # 1. Thermal Pre-Check
+        self.thermal_manager.check_limits()
+        bat_factor = self.thermal_manager.max_battery_power_factor
+        mot_factor = self.thermal_manager.max_motor_power_factor
+        
+        # 2. Adaptive Power Management (State Machine)
+        power_for_motors_kw = target_power_kw
+        generator_charge_kw = 0.0
+        
+        if self.battery.soc < 0.25:
+            # Low SOC: Prioritize charging battery (Series Hybrid Mode)
+            self.power_mode = "CHARGE"
+            generator_charge_kw = self.ice_generator.generate_power(self.ice_generator.max_output_kw)
+        elif self.battery.soc < 0.4 and target_power_kw > 100:
+             # Medium SOC + High Demand: Generator assists motors (Parallel Hybrid Mode)
+             self.power_mode = "BOOST"
+             power_for_motors_kw += self.ice_generator.generate_power(target_power_kw / 2.0)
+        else:
+            self.power_mode = "EV"
+            
+        # Add generated power back to the battery (Simplification for Series/Charge Mode)
+        self.battery.current_kwh += generator_charge_kw / 3600.0 * TIME_STEP_S
+
+        # 3. Power Draw and Component Loss
+        power_from_battery_kw, loss_bat_w = self.battery.draw_power(power_for_motors_kw, bat_factor)
+        power_to_draw = min(power_for_motors_kw, power_from_battery_kw)
+
+        # 4. Torque Vectoring and Motor Force
+        power_front_in, power_rear_in = self._torque_vectoring_distribution(power_to_draw, self.speed_ms)
+        
+        # Motor Calculations
+        power_front_out, _, loss_front_w = self.motor_front.calculate_output(power_front_in, mot_factor)
+        power_rear_out, _, loss_rear_w = self.motor_rear.calculate_output(power_rear_in, mot_factor)
+        
+        total_motor_force_n = (power_front_out + power_rear_out) * 1000 / (self.speed_ms + 1e-6) # Add small epsilon to avoid div by zero
+        total_motor_force_n = total_motor_force_n * self.final_drive_ratio / self.wheel_radius_m # Convert to tractive force at wheel
+
+        # 5. Physics Update
+        resistive_force_n = self._calculate_resistive_forces()
+        net_force_n = total_motor_force_n - resistive_force_n
+        
+        self.acceleration_ms2 = net_force_n / self.mass
+        self.speed_ms += self.acceleration_ms2 * TIME_STEP_S
+        self.speed_ms = max(0.0, self.speed_ms)
+        self.distance_m += self.speed_ms * TIME_STEP_S
+        self.time_s += TIME_STEP_S
+        
+        # 6. Thermal Update
+        total_loss_motor_w = loss_front_w + loss_rear_w
+        self.thermal_manager.update_temps(loss_bat_w, total_loss_motor_w, TIME_STEP_S)
+
+        # 7. Generate HUD (Head-Up Display)
+        hud_data = {
+            "Time (s)": round(self.time_s, 1),
+            "Mode": self.power_mode,
+            "Speed (km/h)": round(self.speed_ms * 3.6, 1),
+            "Accel (m/s^2)": round(self.acceleration_ms2, 2),
+            "SOC (%)": round(self.battery.soc * 100, 1),
+            "Bat Temp (°C)": round(self.thermal_manager.temp_battery_k - 273.15, 1),
+            "Mot Temp (°C)": round(self.thermal_manager.temp_motors_k - 273.15, 1),
+            "Fuel (L)": round(self.ice_generator.fuel_liters, 2),
+            "F-Ratio": round(power_front_in / (power_front_in + power_rear_in + 1e-6), 2)
+        }
+        
+        return hud_data
+
+# --- Execution Example ---
+if __name__ == "__main__":
+    # Create an **instance** of the Race Corporation Hybrid Van
+    race_van = RaceHybridVan4x4()
+    
+    print(f"--- Simulating Race Corporation {race_van.codename} Van (Advanced Power-Split Hybrid) ---")
+    
+    # Simulation Parameters
+    SIMULATION_DURATION_S = 120
+    POWER_REQUEST_KW = 450.0  # High, sustained power demand for performance testing
+    
+    steps = int(SIMULATION_DURATION_S / TIME_STEP_S)
+    
+    # Initialize HUD format
+    header = race_van.simulate_step(0.0)
+    
+    print(" | ".join([k.center(10) for k in header.keys()]))
+    print("-" * 100)
+    
+    # Run simulation
+    for i in range(steps):
+        hud = race_van.simulate_step(POWER_REQUEST_KW)
+        
+        # Display the HUD every 5 seconds (50 steps)
+        if i % 50 == 0:
+            print(" | ".join([str(v).center(10) for v in hud.values()]))
+            
+    print("-" * 100)
+    print("\nSimulation Complete. Check Battery and Motor Temperatures for Thermal Throttling effects.")
+
