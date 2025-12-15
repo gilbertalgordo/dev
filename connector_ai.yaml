@@ -1,0 +1,300 @@
+import os
+import requests
+from typing import Dict, Optional
+
+# --- Configuration (Read from environment variables for security) ---
+# This aligns with the principle of not hardcoding secrets in code.
+CLIENT_ID = os.environ.get("AI_CONNECTOR_CLIENT_ID")
+CLIENT_SECRET = os.environ.get("AI_CONNECTOR_CLIENT_SECRET")
+AUTH_URL = "https://auth.example-ai.com/authorize"
+TOKEN_URL = "https://auth.example-ai.com/token"
+REDIRECT_URI = "http://localhost:8000/callback"
+
+class SecretManager:
+    """Conceptual class for securely storing and retrieving credentials."""
+    
+    def __init__(self):
+        # In a real application, this would interface with AWS Secrets Manager,
+        # Google Secret Manager, or an encrypted local vault (like macOS Keychain).
+        self._tokens: Dict[str, str] = {} 
+
+    def get_token(self, user_id: str) -> Optional[str]:
+        """Retrieve the securely stored access token for a user."""
+        return self._tokens.get(user_id)
+
+    def store_token(self, user_id: str, token: str) -> None:
+        """Store the access token securely."""
+        self._tokens[user_id] = token
+        print(f"✅ Token stored securely for user: {user_id}")
+        
+
+class AIAccountConnector:
+    """
+    Instance of a secure connector using OAuth 2.0 to link a user account
+    to an external AI service API.
+    """
+    def __init__(self, secret_manager: SecretManager):
+        if not all([CLIENT_ID, CLIENT_SECRET]):
+            raise ValueError("Authentication secrets not configured.")
+        self.secret_manager = secret_manager
+        
+    def get_authorization_url(self, user_id: str, scope: str = "read write code_access") -> str:
+        """
+        Step 1: Generates the URL to redirect the user for login and consent.
+        The state parameter is critical for security (CSRF protection).
+        """
+        state = f"user_{user_id}_unique_state" # Placeholder for a real CSRF token
+        return (
+            f"{AUTH_URL}?"
+            f"response_type=code&"
+            f"client_id={CLIENT_ID}&"
+            f"redirect_uri={REDIRECT_URI}&"
+            f"scope={scope}&"
+            f"state={state}"
+        )
+
+    def exchange_code_for_token(self, auth_code: str, user_id: str) -> Optional[str]:
+        """
+        Step 2: Exchanges the short-lived authorization code for a long-lived access token.
+        This must happen server-side, never in the client's browser.
+        """
+        print("⏳ Attempting to exchange authorization code for access token...")
+        
+        headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+        payload = {
+            'grant_type': 'authorization_code',
+            'code': auth_code,
+            'redirect_uri': REDIRECT_URI,
+            'client_id': CLIENT_ID,
+            'client_secret': CLIENT_SECRET
+        }
+
+        try:
+            response = requests.post(TOKEN_URL, data=payload, headers=headers)
+            response.raise_for_status() # Raises an exception for bad status codes (4xx or 5xx)
+            token_data = response.json()
+            
+            access_token = token_data.get('access_token')
+            if access_token:
+                self.secret_manager.store_token(user_id, access_token)
+                return access_token
+            else:
+                print(f"❌ Error: Token exchange failed. Response: {token_data}")
+                return None
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Error during token exchange API call: {e}")
+            return None
+
+    def check_connection_status(self, user_id: str) -> bool:
+        """
+        Confirms if a user has a valid stored token.
+        """
+        return self.secret_manager.get_token(user_id) is not None
+
+# --- End of AIAccountConnector Class ---
+
+
+
+# --- Setup Environment (Conceptual) ---
+# NOTE: In a real environment, you must set these as actual secure environment variables.
+os.environ["AI_CONNECTOR_CLIENT_ID"] = "dummy_client_id_123"
+os.environ["AI_CONNECTOR_CLIENT_SECRET"] = "dummy_secret_xyz_456"
+
+# 1. Initialize the components
+secure_vault = SecretManager()
+ai_connector_instance = AIAccountConnector(secure_vault)
+user_session_id = "user_789"
+
+print(f"Connection Status Before: {ai_connector_instance.check_connection_status(user_session_id)}")
+
+# 2. Get the Authorization URL (what the user clicks in the app)
+auth_link = ai_connector_instance.get_authorization_url(user_session_id)
+print(f"\nClick this link to authorize the AI: \n{auth_link}")
+print("--- (User logs in and grants permission) ---")
+
+# 3. Simulate the Callback (The service receives the authorization code)
+# This code is received by your server at the REDIRECT_URI
+simulated_auth_code = "faks_auth_code_98765" 
+
+# NOTE: The real request.post() call in a production system would exchange this
+# for a live token, but for this example, the request will fail since the URLs are fake.
+# We'll simulate a successful outcome for demonstration:
+if simulated_auth_code:
+    # In a real environment, you'd call:
+    # final_token = ai_connector_instance.exchange_code_for_token(simulated_auth_code, user_session_id)
+    
+    # --- SIMULATION of a successful token acquisition ---
+    final_token = "securely_acquired_access_token_A1B2C3"
+    secure_vault.store_token(user_session_id, final_token) 
+    # --- END SIMULATION ---
+    
+    print(f"\nFinal Token (Stored Securely): {'***' + final_token[-4:]}")
+    
+# 4. Check Final Status
+print(f"Connection Status After: {ai_connector_instance.check_connection_status(user_session_id)}")
+
+
+
+
+import os
+import requests
+import time
+from typing import Dict, Optional, Tuple
+
+# --- Configuration (Same as before, loaded securely) ---
+CLIENT_ID = os.environ.get("AI_CONNECTOR_CLIENT_ID", "dummy_client_id_123")
+CLIENT_SECRET = os.environ.get("AI_CONNECTOR_CLIENT_SECRET", "dummy_secret_xyz_456")
+TOKEN_URL = "https://auth.example-ai.com/token"
+
+class SecureTokenVault:
+    """
+    Conceptual: Represents a secure, persistent storage (e.g., encrypted DB,
+    Vault service) for tokens. Stores access and long-lived refresh tokens.
+    """
+    def __init__(self):
+        # In a production system, this data would be encrypted at rest.
+        # Key: user_id | Value: (access_token, refresh_token, expiry_timestamp)
+        self._tokens: Dict[str, Tuple[str, str, int]] = {} 
+        
+    def get_token_data(self, user_id: str) -> Optional[Tuple[str, str, int]]:
+        """Retrieves all token data for a user."""
+        return self._tokens.get(user_id)
+
+    def store_token_data(self, user_id: str, access_token: str, refresh_token: str, expires_in: int) -> None:
+        """Stores or updates the token set."""
+        expiry_time = int(time.time()) + expires_in - 60  # Expire 60s early for safety
+        self._tokens[user_id] = (access_token, refresh_token, expiry_time)
+        print(f"✅ Tokens stored/updated securely for user {user_id}. Access token expires at: {expiry_time}")
+        
+
+class AdvancedAIAccountConnector:
+    """
+    Instance: Handles the OAuth 2.0 Authorization and Token Refresh flows
+    to maintain persistent, secure API access for the AI.
+    """
+    def __init__(self, vault: SecureTokenVault):
+        if not all([CLIENT_ID, CLIENT_SECRET]):
+            raise ValueError("Authentication secrets not configured.")
+        self.vault = vault
+
+    # ... (exchange_code_for_token method from previous response would go here) ...
+
+    def exchange_code_for_token(self, auth_code: str, user_id: str) -> Optional[str]:
+        """Exchanges authorization code for access and refresh tokens."""
+        # This is a simulation for a successful OAuth response
+        try:
+            # --- SIMULATION of a successful token acquisition from API ---
+            # In a real environment, this would be a requests.post to TOKEN_URL
+            token_data = {
+                'access_token': 'new_access_token_A1B2C3',
+                'refresh_token': 'long_lived_refresh_token_X4Y5Z6',
+                'expires_in': 3600 # 1 hour
+            }
+            # --- END SIMULATION ---
+
+            access_token = token_data['access_token']
+            refresh_token = token_data['refresh_token']
+            expires_in = token_data['expires_in']
+            
+            self.vault.store_token_data(user_id, access_token, refresh_token, expires_in)
+            return access_token
+
+        except Exception as e:
+            print(f"❌ Error during initial token exchange: {e}")
+            return None
+
+
+    def refresh_access_token(self, user_id: str, refresh_token: str) -> Optional[str]:
+        """
+        Action: Uses the long-lived refresh token to silently obtain a new
+        short-lived access token, ensuring continuous service.
+        """
+        print(f"⏳ Refreshing expired access token for user {user_id}...")
+        
+        headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+        payload = {
+            'grant_type': 'refresh_token',
+            'refresh_token': refresh_token,
+            'client_id': CLIENT_ID,
+            'client_secret': CLIENT_SECRET
+        }
+
+        try:
+            # In a real application, this is the API call:
+            # response = requests.post(TOKEN_URL, data=payload, headers=headers)
+            # response.raise_for_status()
+
+            # --- SIMULATION of a successful token refresh from API ---
+            # Most secure OAuth servers issue a *new* refresh token on every refresh.
+            refreshed_data = {
+                'access_token': f'refreshed_token_{int(time.time())}',
+                'refresh_token': f'new_refresh_token_{int(time.time())}', # Token Rotation
+                'expires_in': 3600
+            }
+            # --- END SIMULATION ---
+
+            new_access_token = refreshed_data['access_token']
+            new_refresh_token = refreshed_data['refresh_token']
+            new_expires_in = refreshed_data['expires_in']
+            
+            self.vault.store_token_data(user_id, new_access_token, new_refresh_token, new_expires_in)
+            return new_access_token
+        
+        except Exception as e:
+            print(f"❌ Critical Error: Refresh token failed or was revoked. User must re-authenticate: {e}")
+            return None
+
+    def get_access_token(self, user_id: str) -> Optional[str]:
+        """
+        Core Connection Logic: Checks token status and auto-refreshes if needed.
+        This provides a reliable, persistent connection for the AI.
+        """
+        token_data = self.vault.get_token_data(user_id)
+
+        if not token_data:
+            print("🛑 No token found. User must complete initial authorization.")
+            return None
+        
+        access_token, refresh_token, expiry_time = token_data
+
+        # 1. Check if the current token is still valid
+        if time.time() < expiry_time:
+            print(f"✔️ Token is valid. Time remaining: {expiry_time - int(time.time())}s")
+            return access_token
+
+        # 2. Token is expired or near expiration -> initiate refresh
+        new_token = self.refresh_access_token(user_id, refresh_token)
+        return new_token
+
+# --- End of AdvancedAIAccountConnector Class ---
+
+
+
+# --- Setup Environment (Conceptual) ---
+# NOTE: Using dummy keys from os.environ.get defaults for this example
+secure_vault = SecureTokenVault()
+advanced_connector = AdvancedAIAccountConnector(secure_vault)
+TEST_USER = "dev_agent_001"
+TEST_AUTH_CODE = "initial_login_code"
+
+# --- SCENARIO 1: Initial Login ---
+print("--- SCENARIO 1: Initial Authorization ---")
+advanced_connector.exchange_code_for_token(TEST_AUTH_CODE, TEST_USER)
+
+# --- SCENARIO 2: Accessing the API (Valid Token) ---
+print("\n--- SCENARIO 2: Accessing API with Valid Token ---")
+valid_token = advanced_connector.get_access_token(TEST_USER)
+
+# --- SCENARIO 3: Accessing the API (Expired Token -> Auto-Refresh) ---
+print("\n--- SCENARIO 3: Simulating Expiration and Auto-Refresh ---")
+
+# Manually expire the token in the vault for the simulation
+# In a real system, the clock handles this.
+current_token, current_refresh, _ = secure_vault.get_token_data(TEST_USER)
+secure_vault._tokens[TEST_USER] = (current_token, current_refresh, int(time.time()) - 5) # Set expiry 5 seconds in the past
+
+refreshed_token = advanced_connector.get_access_token(TEST_USER)
+if refreshed_token:
+    print(f"SUCCESS: AI continued working with token: {'***' + refreshed_token[-8:]}")
+else:
+    print("FAILURE: Connection lost.")
