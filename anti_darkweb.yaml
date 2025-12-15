@@ -1,0 +1,174 @@
+pip install pandas scikit-learn
+
+
+
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import classification_report
+
+## --- 1. Conceptual Data Setup ---
+# In a real scenario, this data would be scraped, cleaned, and manually labeled
+# from dark web sources (forums, marketplaces, etc.) by human analysts.
+# Labels: 0 for Benign (general discussion), 1 for Malicious (threat/illicit activity)
+data = {
+    'post_text': [
+        "Looking for a reliable way to encrypt my communications.", # Benign
+        "Selling a list of 10k credit card numbers, message for price.", # Malicious
+        "Does anyone know a good onion search engine?", # Benign
+        "Need a custom malware script for remote access. Paying well.", # Malicious
+        "Discussing the latest vulnerabilities in common web browsers.", # Benign
+        "Fresh database dump from a major retail chain is now available.", # Malicious
+        "How to use TOR browser safely and maintain anonymity?", # Benign
+        "Offering DDoS services for hire, take down any target.", # Malicious
+        "General discussion on cryptocurrency privacy tools." # Benign
+    ],
+    'is_malicious': [0, 1, 0, 1, 0, 1, 0, 1, 0]
+}
+
+df = pd.DataFrame(data)
+print("--- Data Sample ---")
+print(df.head())
+
+## --- 2. Data Preparation ---
+X = df['post_text']
+y = df['is_malicious']
+
+# Split data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+## --- 3. Build the AI Pipeline (Vectorizer + Classifier) ---
+# TfidfVectorizer: Converts text into numerical features (Term Frequency-Inverse Document Frequency)
+# LogisticRegression: A good, fast classifier for text data
+text_clf = Pipeline([
+    ('tfidf', TfidfVectorizer(stop_words='english')),
+    ('clf', LogisticRegression(random_state=42)),
+])
+
+# 
+
+## --- 4. Train the Model ---
+print("\n--- Training Model ---")
+text_clf.fit(X_train, y_train)
+print("Training Complete.")
+
+## --- 5. Evaluate the Model ---
+print("\n--- Model Evaluation ---")
+predictions = text_clf.predict(X_test)
+
+# Report showing Precision, Recall, and F1-score for each class
+print(classification_report(y_test, predictions, target_names=['Benign (0)', 'Malicious (1)']))
+
+## --- 6. Live Prediction Example (The 'Anti-Darkweb' Action) ---
+print("\n--- New Post Analysis ---")
+new_posts = [
+    "I am looking for python scripts to automate web scraping.",
+    "Selling access to a botnet capable of sending 50k requests per second."
+]
+
+# Use the trained model to predict the class of the new posts
+predicted_labels = text_clf.predict(new_posts)
+
+for post, label in zip(new_posts, predicted_labels):
+    threat_status = "MALICIOUS" if label == 1 else "BENIGN"
+    print(f"\nPost: '{post}'")
+    print(f"Predicted Status: {threat_status} (Label: {label})")
+
+
+
+# Note: In a real implementation, you would need access to the DarkBERT model
+# weights/API and use a library like Hugging Face's Transformers.
+
+import torch
+# from transformers import DarkBertTokenizer, DarkBertForTokenClassification
+
+# --- 1. Define Specialized Entities for the Dark Web ---
+# A real system would have hundreds of these labels
+DARKWEB_ENTITIES = {
+    "MALWARE": "Types of malicious software (e.g., 'Zeus', 'Ransomware')",
+    "CREDENTIALS": "Leaked accounts, full data sets ('dumps', 'fullz')",
+    "CURRENCY": "Cryptocurrency or payment method references (e.g., 'BTC', 'XMR', 'Paypal')",
+    "THREAT_ACTOR": "Known criminal group names, aliases, or usernames ('AlphaBayAdmin', 'Hackerman')",
+    "IO_C": "Technical Indicators of Compromise (IPs, domains, hashes)",
+    "MARKET": "Marketplace or forum reference ('Hydra', 'WallStreet Market')"
+}
+
+def analyze_post_with_darkbert_ner(post_text):
+    """
+    Simulates using a DarkBERT-based NER model to tag relevant entities in text.
+    In reality, this would involve tokenizing and running a forward pass.
+    """
+    # Placeholder for the DarkBERT output (Entity, Text Span)
+    # The model identifies the label for each word/token.
+    simulated_entities = [
+        ("Looking to trade 50 **BTC** (CURRENCY) for a fresh **Zeus** (MALWARE) source code.", post_text),
+        ("User **ShadowBroker** (THREAT_ACTOR) has access to a new 0-day **RDP vulnerability** (MALWARE).", post_text),
+        ("Selling a list of 10k **fullz** (CREDENTIALS) from the **Shopify** (MARKET) dump.", post_text)
+    ]
+
+    extracted_data = []
+    print(f"Post: '{post_text}'")
+    for entity, _ in simulated_entities:
+        # Simple extraction logic from the placeholder
+        parts = entity.split()
+        for i in range(len(parts)):
+            if parts[i].endswith(")") and "(" in parts[i]:
+                value = parts[i].replace("**", "").split('(')[0].strip()
+                label = parts[i].split('(')[1].replace(')', '').strip()
+                extracted_data.append({'entity_type': label, 'value': value})
+
+    return extracted_data
+
+# --- Advanced Usage Example ---
+advanced_post = "I need a large batch of verified fullz from a US bank. Contact me via Jabber: cryptoking@jabber.net. Payment in XMR only."
+entities = analyze_post_with_darkbert_ner(advanced_post)
+
+print("\n--- Extracted Threat Entities ---")
+for entity in entities:
+    print(f"  [{entity['entity_type']}]: {entity['value']}")
+
+
+# Using a Graph Database library (e.g., Py2neo for Neo4j) to model relationships
+
+from collections import defaultdict
+
+# --- 1. Ingest Extracted Entities (from Part 1) ---
+# Simulating extracted data from several posts
+extracted_entity_set = [
+    {'source': 'User_A', 'target': 'Zeus', 'relation': 'SEEKING'},
+    {'source': 'User_A', 'target': 'BTC', 'relation': 'PAYS_IN'},
+    {'source': 'User_B', 'target': 'Ransomware', 'relation': 'OFFERING'},
+    {'source': 'User_B', 'target': 'User_C', 'relation': 'PARTNERED_WITH'},
+    {'source': 'User_C', 'target': 'Zeus', 'relation': 'OFFERING'},
+    {'source': 'User_C', 'target': 'XMR', 'relation': 'PAYS_IN'}
+]
+
+# --- 2. Construct the Graph Structure ---
+graph_data = defaultdict(list)
+
+# Nodes: Threat Actors, Malware, Currencies
+# Edges: Relationships defined by the text (SEEKING, PAYS_IN, etc.)
+for item in extracted_entity_set:
+    # Add nodes (unique entities)
+    graph_data['nodes'].extend([item['source'], item['target']])
+    
+    # Add edge (relationship)
+    graph_data['edges'].append({
+        'source': item['source'], 
+        'target': item['target'], 
+        'label': item['relation']
+    })
+
+graph_data['nodes'] = list(set(graph_data['nodes'])) # Deduplicate nodes
+
+print("\n--- Conceptual Threat Graph Structure ---")
+print(f"Nodes (Entities): {graph_data['nodes']}")
+print(f"Edges (Relationships):")
+for edge in graph_data['edges']:
+    print(f"  - ({edge['source']}) -[{edge['label']}]-> ({edge['target']})")
+
+# In an advanced setup, a GNN would analyze this structure to assign a
+# risk score to each node and discover hidden communities.
+
