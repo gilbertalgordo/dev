@@ -1,0 +1,207 @@
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&family=Lora:ital@0;1&display=swap" rel="stylesheet">
+
+
+
+/* Use the primary font for headings */
+h1, h2, h3 {
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 700; /* Example weight */
+}
+
+/* Use the secondary/pairing font for body text */
+p, a, li {
+  font-family: 'Lora', serif;
+  font-weight: 400; /* Example weight */
+}
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AI Generated Font Example</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        /* 2. The AI provides the CSS rule to apply the font */
+        body {
+            font-family: 'Roboto Mono', monospace;
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+    <h1>This text uses Roboto Mono (Title)</h1>
+    <p>This is a paragraph of text, also using the monospaced font suggested by the AI.</p>
+</body>
+</html>
+
+
+
+import requests
+import json
+import os
+
+# --- Configuration ---
+# Get your API key from environment variables for security
+API_KEY = os.environ.get("GOOGLE_FONTS_API_KEY", "$YOUR_API_KEY") 
+API_ENDPOINT = "https://www.googleapis.com/webfonts/v1/webfonts"
+
+# --- Advanced Query Parameters ---
+# Get all fonts, sorted by POPULARITY (a key input for a recommender system)
+# Capability: VF (Variable Fonts) is a modern, advanced feature
+params = {
+    'key': API_KEY,
+    'sort': 'popularity',
+    'capability': 'VF', 
+    # Use 'category': 'serif' or other parameters for targeted data
+}
+
+def fetch_google_fonts_catalog():
+    """Fetches the complete font catalog data from the Google Fonts Developer API."""
+    
+    print("Fetching Google Fonts catalog data...")
+    try:
+        response = requests.get(API_ENDPOINT, params=params)
+        response.raise_for_status() # Raise an HTTPError for bad responses (4xx or 5xx)
+        
+        data = response.json()
+        
+        # Save the raw JSON data for the AI model to process
+        with open('google_fonts_catalog.json', 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+        
+        print(f"Successfully fetched and saved {len(data.get('items', []))} font families.")
+        return data
+        
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching data: {e}")
+        return None
+
+if __name__ == "__main__":
+    font_data = fetch_google_fonts_catalog()
+    # Now the AI component can load 'google_fonts_catalog.json'
+
+
+
+
+# Assuming font_data is loaded from 'google_fonts_catalog.json'
+
+def generate_font_vector(font_metadata):
+    """
+    CONCEPT: Converts font features into a numerical vector (embedding).
+    An AI model is trained to generate these vectors.
+    Features might include: 
+    - Popularity score
+    - Numeric mapping of category (serif=0.1, sans-serif=0.9, etc.)
+    - Character-set coverage (Latin, Cyrillic, etc.)
+    - Avg. x-height, stroke width, or other visual metrics (advanced)
+    """
+    # Placeholder: In a real system, this is a trained ML model output.
+    # We'll use a simple proxy for contrast/similarity for this example:
+    category_map = {'serif': 0.1, 'sans-serif': 0.9, 'display': 0.5, 'monospace': 0.3}
+    vector = [
+        font_metadata.get('popularity', 0) / 1000,
+        category_map.get(font_metadata.get('category', 'display'), 0.5)
+    ]
+    return vector
+
+def find_ai_font_pairing(target_font_name, font_catalog):
+    """
+    CONCEPT: Finds the best contrasting/complementary font for a target font.
+    This uses a distance metric (e.g., Cosine Similarity or Euclidean Distance) 
+    in the high-dimensional font vector space.
+    """
+    target_font = next((f for f in font_catalog['items'] if f['family'] == target_font_name), None)
+    if not target_font:
+        return None
+
+    target_vector = generate_font_vector(target_font)
+    best_pairing = None
+    max_contrast_score = -1
+
+    for font in font_catalog['items']:
+        if font['family'] == target_font_name:
+            continue
+
+        pairing_vector = generate_font_vector(font)
+        
+        # Calculate a conceptual "contrast score"
+        # High contrast for pairing: e.g., Sans-serif with Serif, or Monospace with Display
+        contrast_score = abs(target_vector[1] - pairing_vector[1]) # Difference in category map value
+
+        if contrast_score > max_contrast_score:
+            max_contrast_score = contrast_score
+            best_pairing = font['family']
+            
+    return best_pairing, max_contrast_score
+
+# Example usage (assuming 'font_data' is loaded from Step 1)
+# primary_font = 'Montserrat'
+# pairing_font, score = find_ai_font_pairing(primary_font, font_data) 
+# print(f"AI Pairing for {primary_font}: {pairing_font} (Contrast Score: {score:.2f})")
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI-Optimized Variable Font Example</title>
+
+    <link href="https://fonts.googleapis.com/css2?
+        family=Inter:wght@100..900&
+        text=AIBOOKS&
+        display=swap" 
+        rel="stylesheet">
+
+    <style>
+        :root {
+            /* Define CSS Variables for AI-selected Variable Font weights */
+            --font-heading-weight: 850;  /* Custom "Extra Bold" weight from AI */
+            --font-body-weight: 350;     /* Custom "Light-Regular" weight from AI */
+        }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 40px;
+            color: #1A1A1A;
+        }
+
+        /* ADVANCED: Using the Variable Font axes directly */
+        h1 {
+            /* font-variation-settings allows precise control over Variable Font axes */
+            font-weight: 900; /* Fallback */
+            font-variation-settings: 'wght' var(--font-heading-weight); 
+            font-size: 3.5rem;
+            margin-bottom: 0.2em;
+        }
+
+        h2 {
+            font-size: 1.8rem;
+            font-weight: 700;
+        }
+
+        p {
+            font-weight: 400; /* Fallback */
+            font-variation-settings: 'wght' var(--font-body-weight);
+            line-height: 1.6;
+        }
+
+    </style>
+</head>
+<body>
+    <h1>AI BOOKS</h1>
+    <h2>Advanced Font Optimization and Design</h2>
+    <p>
+        The AI-driven font selection engine recommends this variable font, 
+        'Inter', with a custom weight range (100-900). This approach minimizes 
+        network requests while providing maximum typographic flexibility, 
+        leveraging the cutting-edge capabilities of modern web browsers and CSS.
+    </p>
+</body>
+</html>
