@@ -1,0 +1,120 @@
+-- Prerequisites:
+-- 1. Grant EXECUTE on DBMS_CLOUD_AI to your schema.
+-- 2. Enable OCI resource principal authentication.
+-- 3. Create an AI profile (e.g., 'OCI_GENAI') to connect to the OCI Generative AI Service.
+
+-- Example PL/SQL block to generate a SQL query from natural language
+DECLARE
+  v_prompt VARCHAR2(4000) := 'Show me the names and salaries of all employees in the Sales department, ordered by salary descending.';
+  v_sql_query CLOB;
+BEGIN
+  -- Call the GENERATE function to get the generated SQL query
+  v_sql_query := DBMS_CLOUD_AI.GENERATE(
+    prompt => v_prompt,
+    profile_name => 'OCI_GENAI' -- Replace with your actual AI profile name
+  );
+
+  -- Output the generated SQL (in a real scenario, you might then EXECUTE IMMEDIATE it)
+  DBMS_OUTPUT.PUT_LINE('Generated SQL Query:');
+  DBMS_OUTPUT.PUT_LINE(v_sql_query);
+END;
+/
+
+-- The generated SQL might look something like this (depending on the LLM and schema):
+-- SELECT e.employee_name, e.salary
+-- FROM employees e
+-- JOIN departments d ON e.department_id = d.department_id
+-- WHERE d.department_name = 'Sales'
+-- ORDER BY e.salary DESC;
+
+
+
+-- Function to convert a HEX color code (like #FF0000) into a 3-dimensional VECTOR
+CREATE OR REPLACE FUNCTION hex_to_vector(p_hex_string VARCHAR2)
+RETURN VECTOR
+AS
+  v_hex VARCHAR2(7);
+  v_r NUMBER;
+  v_g NUMBER;
+  v_b NUMBER;
+BEGIN
+  -- Remove the '#' prefix and convert hex pairs to decimal numbers
+  v_hex := LTRIM(p_hex_string, '#');
+
+  IF LENGTH(v_hex) != 6 THEN
+    RAISE_APPLICATION_ERROR(-20001, 'Invalid hex code length.');
+  END IF;
+
+  v_r := TO_NUMBER(SUBSTR(v_hex, 1, 2), 'XX'); -- Red component
+  v_g := TO_NUMBER(SUBSTR(v_hex, 3, 2), 'XX'); -- Green component
+  v_b := TO_NUMBER(SUBSTR(v_hex, 5, 2), 'XX'); -- Blue component
+
+  -- Return the RGB vector [R, G, B]
+  RETURN VECTOR('[ ' || v_r || ', ' || v_g || ', ' || v_b || ' ]');
+
+EXCEPTION
+  WHEN OTHERS THEN
+    RAISE_APPLICATION_ERROR(-20002, 'Error converting hex to vector: ' || SQLERRM);
+END;
+/
+
+
+
+import oci
+from langchain_community.llms import OCIGenAI
+
+# --- OCI Configuration ---
+# NOTE: Replace these placeholder values with your actual OCI configuration.
+# Authentication is typically handled via OCI SDK configuration files or Instance Principals.
+COMPARTMENT_OCID = "ocid1.compartment.oc1..xxxxxx"
+GENAI_ENDPOINT = "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com" # Check your region
+
+# --- Color Data Input ---
+# This simulates the "ColorShift" data input for the AI analysis
+COLOR_NAME = "Celestial Blue"
+HEX_CODE = "#1A759F"
+
+# --- Prompt Engineering for Advanced Output ---
+# A structured, multi-part prompt to guide the LLM's output and tone.
+ADVANCED_PROMPT = f"""
+You are a creative advertising copywriter. Based on the following color data,
+generate a compelling marketing slogan and a detailed, emotional product description.
+
+Color Name: {COLOR_NAME}
+HEX Code: {HEX_CODE}
+
+--- OUTPUT FORMAT ---
+**Slogan:** [Catchy, short slogan]
+**Description:** [A 3-4 sentence paragraph that evokes feelings of depth, calm, and luxury, referencing the color's hexadecimal value subtly for technical appeal.]
+"""
+
+# --- Initialize OCI Generative AI LLM ---
+try:
+    # 
+    # Initialize the LLM client, specifying the model and configuration
+    llm = OCIGenAI(
+        model_id="cohere.command-light",
+        service_endpoint=GENAI_ENDPOINT,
+        compartment_id=COMPARTMENT_OCID,
+        # Further control the generation with model parameters (temperature for creativity)
+        model_kwargs={"temperature": 0.8, "max_tokens": 512}
+    )
+
+    # --- Invoke the LLM for Inference ---
+    print(f"--- Analyzing Color: {COLOR_NAME} ({HEX_CODE}) ---")
+    response = llm.invoke(ADVANCED_PROMPT)
+    print("\n" + response)
+
+except oci.exceptions.ServiceError as e:
+    print(f"OCI Service Error: {e.code}. Check your OCI credentials, compartment OCID, and endpoint.")
+except Exception as e:
+    print(f"An unexpected error occurred: {e}")
+
+# Example of potential AI-generated output:
+#
+# --- Analyzing Color: Celestial Blue (#1A759F) ---
+#
+# **Slogan:** Dive Deeper. See the Horizon.
+# **Description:** Experience the profound calm of the deep ocean, where light meets mystery. This hue, rooted in the technical precision of #1A759F, is a statement of cool, sophisticated luxury. It evokes a sense of trust, stability, and boundless potential, transforming any space into an elegant sanctuary.
+
+
