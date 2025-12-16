@@ -1,0 +1,212 @@
+pip install pandas scikit-learn
+
+
+
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report, accuracy_score
+import numpy as np
+
+## --- 1. DATA SIMULATION (In a real firewall, this would come from a packet sniffer/feature extractor) ---
+
+# Simulate features extracted from network packets:
+# 1. packet_length: Avg packet size (bytes)
+# 2. duration: Connection duration (seconds)
+# 3. failed_attempts: Number of failed connection attempts
+# 4. source_port_entropy: A measure of port randomness (low for common, high for scans)
+# The 'label' is the target: 0 for Normal, 1 for Malicious
+
+data = {
+    'packet_length': [500, 1500, 450, 1400, 300, 600, 100, 2000, 550, 150, 1600, 480],
+    'duration': [10.5, 5.2, 12.0, 4.5, 0.1, 8.8, 0.05, 3.1, 11.1, 0.2, 2.5, 9.5],
+    'failed_attempts': [0, 0, 0, 1, 15, 0, 50, 2, 0, 20, 3, 0],
+    'source_port_entropy': [0.1, 0.05, 0.2, 0.5, 0.95, 0.15, 0.99, 0.6, 0.1, 0.88, 0.7, 0.25],
+    'label': [0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 0] # 0 = Normal, 1 = Malicious
+}
+
+df = pd.DataFrame(data)
+
+# Separate features (X) and target (y)
+X = df.drop('label', axis=1)
+y = df['label']
+
+# Split data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+## --- 2. MODEL TRAINING (The "AI" part) ---
+
+print("Training the Random Forest Classifier...")
+# Initialize the Random Forest model
+model = RandomForestClassifier(n_estimators=100, random_state=42)
+
+# Train the model on the training data
+model.fit(X_train, y_train)
+print("Training complete.\n")
+
+## --- 3. MODEL EVALUATION ---
+
+# Make predictions on the test set
+y_pred = model.predict(X_test)
+
+print("### Model Evaluation ###")
+print(f"Accuracy: {accuracy_score(y_test, y_pred):.2f}")
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred))
+
+## --- 4. REAL-TIME PREDICTION SIMULATION (The Firewall Decision) ---
+
+print("### Live Traffic Test ###")
+
+# Simulate a new, suspicious packet's features (High failed attempts, high entropy)
+suspicious_traffic = np.array([[100, 0.02, 35, 0.98]]) # Low length, very short duration, high fails, high entropy (like a port scan)
+
+# Simulate a new, normal packet's features
+normal_traffic = np.array([[550, 11.5, 0, 0.12]]) # Avg length, long duration, zero fails, low entropy
+
+# Predict the label for the suspicious traffic
+suspicious_prediction = model.predict(suspicious_traffic)
+# Predict the label for the normal traffic
+normal_prediction = model.predict(normal_traffic)
+
+# The Firewall Decision Logic
+def firewall_action(prediction):
+    if prediction[0] == 1:
+        return "DENY (Malicious Traffic Detected)"
+    else:
+        return "ALLOW (Normal Traffic)"
+
+print(f"Suspicious Traffic Prediction: {suspicious_prediction[0]} -> Action: {firewall_action(suspicious_prediction)}")
+print(f"Normal Traffic Prediction: {normal_prediction[0]} -> Action: {firewall_action(normal_prediction)}")
+
+
+
+pip install numpy pandas tensorflow scikit-learn
+
+
+
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.utils import to_categorical
+
+# --- 1. DATA PREPARATION (Advanced Feature Engineering & Sequencing) ---
+
+# Define the number of time steps (packets/flows) to look back (sequence length)
+TIME_STEPS = 10
+# Define the number of features per time step
+N_FEATURES = 4
+# Total number of sequences to generate for the dataset
+N_SAMPLES = 1000
+
+# Function to generate a synthetic sequential dataset
+def generate_sequence_data(n_samples, time_steps, n_features):
+    X = []
+    Y = []
+    
+    # Generate Normal Traffic (Label 0): Features vary smoothly
+    X_normal = np.random.randn(n_samples // 2, time_steps, n_features) * 0.1 + 0.5
+    Y_normal = np.zeros(n_samples // 2)
+
+    # Generate Malicious Traffic (Label 1): High variance, sudden spikes in feature 3 (e.g., failed attempts)
+    X_malicious = np.random.randn(n_samples // 2, time_steps, n_features) * 0.5 + 0.5
+    # Inject a 'malicious' spike in the last feature
+    X_malicious[:, time_steps // 2:, 3] += np.random.rand(n_samples // 2, time_steps - time_steps // 2) * 2.0
+    Y_malicious = np.ones(n_samples // 2)
+
+    X = np.concatenate([X_normal, X_malicious], axis=0)
+    Y = np.concatenate([Y_normal, Y_malicious], axis=0)
+    
+    # Shuffle the data
+    permutation = np.random.permutation(X.shape[0])
+    X = X[permutation]
+    Y = Y[permutation]
+    
+    # Normalize features to [0, 1] for better DL performance
+    # Reshape X to 2D for scaling, then back to 3D
+    X_scaled = MinMaxScaler().fit_transform(X.reshape(-1, N_FEATURES))
+    X_scaled = X_scaled.reshape(N_SAMPLES, TIME_STEPS, N_FEATURES)
+    
+    # Convert labels to categorical (for binary classification, [0, 1] or [1, 0])
+    Y_categorical = to_categorical(Y, num_classes=2)
+    
+    return X_scaled, Y_categorical
+
+X, Y = generate_sequence_data(N_SAMPLES, TIME_STEPS, N_FEATURES)
+
+# Split data
+X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=42)
+
+print(f"X_train shape: {X_train.shape}")
+print(f"Y_train shape: {Y_train.shape}")
+
+## --- 2. DEEP LEARNING MODEL (RNN-LSTM) ---
+# 
+
+print("\nBuilding the LSTM Model...")
+
+model = Sequential([
+    # LSTM layer captures time-series dependencies in the sequence of 10 packets
+    LSTM(units=64, activation='relu', input_shape=(TIME_STEPS, N_FEATURES), return_sequences=False),
+    
+    # Dropout layer to prevent overfitting
+    Dropout(0.2),
+    
+    # Dense layer for feature reduction
+    Dense(32, activation='relu'),
+    
+    # Output layer for classification (2 classes: Normal/Malicious)
+    Dense(2, activation='softmax') 
+])
+
+# Compile the model
+model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+
+model.summary()
+
+## --- 3. MODEL TRAINING AND EVALUATION ---
+
+print("\nTraining the model...")
+
+# Train the model
+history = model.fit(
+    X_train, Y_train,
+    epochs=10,
+    batch_size=32,
+    validation_split=0.1,
+    verbose=1
+)
+
+# Evaluate on the test set
+loss, accuracy = model.evaluate(X_test, Y_test, verbose=0)
+print(f"\n### Model Evaluation ###")
+print(f"Test Loss: {loss:.4f}")
+print(f"Test Accuracy: {accuracy*100:.2f}%")
+
+## --- 4. REAL-TIME PREDICTION SIMULATION ---
+
+# 1. Simulate a Normal 10-packet sequence (low variance)
+normal_sequence = np.random.rand(1, TIME_STEPS, N_FEATURES) * 0.1 + 0.5
+
+# 2. Simulate a Malicious 10-packet sequence (high spike in feature 3 - e.g., a SYN flood attempt)
+malicious_sequence = np.random.rand(1, TIME_STEPS, N_FEATURES) * 0.1 + 0.5
+malicious_sequence[:, 5:, 3] = np.random.rand(1, 5) * 5.0  # Spike in last 5 steps of feature 3
+
+# Predict
+normal_pred = model.predict(normal_sequence)
+malicious_pred = model.predict(malicious_sequence)
+
+# Get the predicted class (index with highest probability)
+normal_class = np.argmax(normal_pred, axis=1)[0]
+malicious_class = np.argmax(malicious_pred, axis=1)[0]
+
+# Decision logic
+labels = {0: "ALLOW (Normal)", 1: "DENY (Malicious)"}
+
+print("\n### Live Traffic Decision ###")
+print(f"Normal Sequence Prediction: Class {normal_class} ({labels[normal_class]})")
+print(f"Malicious Sequence Prediction: Class {malicious_class} ({labels[malicious_class]})")
+
