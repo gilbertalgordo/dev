@@ -1,0 +1,131 @@
+nohup python your_ai_script.py &
+
+
+from fastapi import FastAPI, BackgroundTasks
+import time
+
+app = FastAPI()
+
+# This is your "AI" function that takes a long time
+def run_ai_task(data: str):
+    # Simulate a long-running AI operation (e.g., 5 seconds)
+    time.sleep(5) 
+    print(f"AI task finished processing: {data}")
+    # In a real scenario, you'd save the result to a database or file
+
+@app.post("/process_data/")
+async def process_data(data: str, background_tasks: BackgroundTasks):
+    # 1. Immediately add the long-running function to the background
+    background_tasks.add_task(run_ai_task, data)
+    
+    # 2. Return an immediate response to the user
+    return {"message": "AI task started in the background. Check logs later."}
+
+
+
+from celery import Celery
+
+# Configure Celery to connect to your message broker (e.g., Redis)
+app = Celery('my_ai_app', broker='redis://localhost:6379/0')
+
+@app.task
+def process_data_with_ai(input_data):
+    # This is where your heavy AI model loading and processing would go
+    print(f"Starting AI process for: {input_data}")
+    time.sleep(10) # Simulating a 10-second model run
+    output = f"AI result for {input_data} is complete."
+    print(output)
+    return output
+
+
+
+celery -A tasks worker --loglevel=info
+
+
+
+from tasks import process_data_with_ai
+
+# Call the task asynchronously. This returns immediately.
+# The actual execution happens on the Celery worker.
+result = process_data_with_ai.delay("user_query_123")
+
+print(f"Task ID is: {result.id}")
+# You can check the status or get the result later using this ID
+
+
+
+from celery import Celery
+import time
+# Import your AI model/library here (e.g., from transformers import pipeline)
+
+# 1. Configure Celery (replace with your broker URL, e.g., Redis or RabbitMQ)
+app = Celery('ai_tasks', broker='redis://localhost:6379/0') 
+
+# Configure task scheduling for periodic AI runs (Celery Beat)
+app.conf.update(
+    # Optional: Define how long to keep task results in the backend
+    result_expires=3600, 
+    # Schedule a task to run every hour, for example
+    beat_schedule={
+        'cleanup-database-every-hour': {
+            'task': 'tasks.clean_old_ai_data',
+            'schedule': 3600.0, # Run every 3600 seconds (1 hour)
+        },
+    }
+)
+
+# 2. Define the heavy AI task
+@app.task(bind=True, max_retries=3)
+def process_data_with_ai(self, user_id: int, data_uri: str):
+    """
+    Simulates a long-running, CPU/GPU-bound AI task.
+    """
+    try:
+        print(f"Starting AI process for User: {user_id}, Data URI: {data_uri}")
+        
+        # --- Advanced AI Logic Here ---
+        # 1. Load data from the URI
+        # 2. Run the AI model (e.g., fine-tuning, large inference, etc.)
+        time.sleep(10) # Simulating a 10-second model run
+        
+        output = f"AI result for {user_id} is complete."
+        print(output)
+        return {"status": "success", "result": output}
+
+    except Exception as exc:
+        # Handle transient errors by retrying the task
+        raise self.retry(exc=exc, countdown=2**self.request.retries)
+
+@app.task
+def clean_old_ai_data():
+    """Scheduled task to run periodically (via Celery Beat)."""
+    print("Running scheduled database cleanup of old AI logs...")
+    # Add your database cleanup logic here
+
+
+
+celery -A tasks worker --loglevel=info
+
+
+
+celery -A tasks beat
+
+
+
+from tasks import process_data_with_ai
+from fastapi import FastAPI
+
+api = FastAPI()
+
+@api.post("/submit_ai_job/")
+def submit_job(user_id: int, file_path: str):
+    # The .delay() method immediately sends the function call to the Message Broker
+    task_result = process_data_with_ai.delay(user_id, file_path)
+    
+    # Return an immediate response to the user with the Task ID
+    return {
+        "message": "AI job successfully submitted.",
+        "task_id": task_result.id,
+        "status_url": f"/tasks/{task_result.id}" 
+    }
+
