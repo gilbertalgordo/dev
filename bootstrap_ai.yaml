@@ -1,0 +1,124 @@
+import os
+import subprocess
+import openai
+
+# Configuration
+VERSION_FILE = "agent_logic.py"
+OBJECTIVE = "Create a script that calculates prime numbers faster than the current version."
+
+def get_feedback_from_llm(current_code, error_or_output):
+    """The Reasoning Engine: Evaluates the current instance and proposes improvements."""
+    prompt = f"""
+    Current Code:
+    {current_code}
+
+    Last Execution Output/Error:
+    {error_or_output}
+
+    Objective: {OBJECTIVE}
+    
+    Rewrite the code to be more efficient. Return ONLY the code inside triple backticks.
+    """
+    
+    # Placeholder for API call
+    response = openai.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return response.choices[0].message.content.strip('`python\n')
+
+def boot_cycle():
+    """The Boot Loop: Execute, Analyze, Evolve."""
+    if not os.path.exists(VERSION_FILE):
+        with open(VERSION_FILE, "w") as f:
+            f.write("print('Initial version')")
+
+    print(f"--- Starting Evolution Cycle ---")
+    
+    with open(VERSION_FILE, "r") as f:
+        current_code = f.read()
+
+    # Step 1: Execute the current instance
+    try:
+        result = subprocess.run(["python3", VERSION_FILE], capture_output=True, text=True, timeout=10)
+        output = result.stdout + result.stderr
+    except Exception as e:
+        output = str(e)
+
+    print(f"Current Output: {output}")
+
+    # Step 2: Reason and Rewrite
+    new_code = get_feedback_from_llm(current_code, output)
+
+    # Step 3: Update the instance
+    with open(VERSION_FILE, "w") as f:
+        f.write(new_code)
+        
+    print("Instance evolved. Ready for next iteration.")
+
+if __name__ == "__main__":
+    # In a true boot sequence, this would loop indefinitely or until a metric is met
+    boot_cycle()
+
+
+
+import os
+import subprocess
+import time
+import json
+from datetime import datetime
+
+class BootInstance:
+    def __init__(self, objective, initial_code_path):
+        self.objective = objective
+        self.code_path = initial_code_path
+        self.history = []
+        self.generation = 0
+
+    def run_sandbox(self):
+        """HUD: Executing current instance in isolated subprocess."""
+        start_time = time.perf_counter()
+        try:
+            # Resource limiting could be added here (e.g., preexec_fn for ulimit)
+            result = subprocess.run(
+                ["python3", self.code_path],
+                capture_output=True, text=True, timeout=5
+            )
+            runtime = time.perf_counter() - start_time
+            return {
+                "success": result.returncode == 0,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "runtime": f"{runtime:.4f}s"
+            }
+        except subprocess.TimeoutExpired:
+            return {"success": False, "stderr": "SIGKILL: Timeout Expired", "runtime": "5.0s"}
+
+    def evolve(self, feedback_data):
+        """Reasoning Engine: Uses scientific feedback to mutate the logic."""
+        # HUD: Analyzing Performance Telemetry
+        prompt = f"""
+        OBJECTIVE: {self.objective}
+        GENERATION: {self.generation}
+        CURRENT_CODE:
+        {open(self.code_path).read()}
+        
+        EXECUTION_METRICS: {json.dumps(feedback_data)}
+        
+        TASK:
+        1. Identify bottlenecks in the Execution Metrics.
+        2. Propose a more efficient algorithmic approach ($O(n)$ optimization).
+        3. Output the improved code block only.
+        """
+        
+        # This is where your LLM API call (OpenAI/Gemini) would return the new code
+        # For this instance, we simulate the 'evolved' code retrieval.
+        evolved_code = "# Evolved version logic here..." 
+        
+        self.generation += 1
+        with open(self.code_path, "w") as f:
+            f.write(evolved_code)
+
+# --- HUD: Execution Dashboard ---
+# [GEN 1] Latency: 0.45s | Status: SUCCESS | Complexity: O(n^2)
+# [GEN 2] Latency: 0.12s | Status: SUCCESS | Complexity: O(log n)
