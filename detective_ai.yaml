@@ -1,0 +1,275 @@
+# Define the game's locations (rooms) and possible exits
+rooms = {
+    'Office': {
+        'description': 'You are in a dimly lit detective\'s office. A single desk sits in the middle.',
+        'exits': {'north': 'Hallway'},
+        'item': 'Magnifying_Glass'
+    },
+    'Hallway': {
+        'description': 'A long, carpeted hallway with doors to the north and south.',
+        'exits': {'south': 'Office', 'north': 'Crime_Scene', 'east': 'Kitchen'},
+        'item': None
+    },
+    'Crime_Scene': {
+        'description': 'The victim\'s study. The room is in disarray. You see a large safe.',
+        'exits': {'south': 'Hallway'},
+        'item': 'Clue' # The item you need to find
+    },
+    'Kitchen': {
+        'description': 'A surprisingly tidy kitchen. The air smells faintly of burnt toast.',
+        'exits': {'west': 'Hallway'},
+        'item': 'Notebook'
+    }
+}
+
+# Initial state
+current_room = 'Office'
+inventory = []
+
+def show_status():
+    """Prints the current location and inventory."""
+    print('-' * 30)
+    print(f"You are in the **{current_room}**.")
+    print(rooms[current_room]['description'])
+    print("Inventory:", ', '.join(inventory) if inventory else "empty")
+    print("Exits:", ', '.join(rooms[current_room]['exits'].keys()))
+    if rooms[current_room]['item']:
+        print(f"You see a **{rooms[current_room]['item']}** here.")
+    print('-' * 30)
+
+def main():
+    """The main game loop."""
+    print("Welcome, Detective! A mystery awaits...")
+    
+    while True:
+        show_status()
+        
+        # Check for win condition
+        if 'Clue' in inventory and current_room == 'Office':
+            print("You return to your office with the Clue! Mystery Solved. You Win!")
+            break
+
+        # Get player action
+        command = input("What do you do? (e.g., go north, get item, quit) ").lower().split()
+        
+        if not command:
+            continue
+
+        action = command[0]
+        
+        if action == 'quit':
+            print("Exiting game. The case remains cold...")
+            break
+        
+        elif action == 'go':
+            if len(command) > 1 and command[1] in rooms[current_room]['exits']:
+                global current_room
+                current_room = rooms[current_room]['exits'][command[1]]
+            else:
+                print("Invalid direction or move.")
+
+        elif action == 'get':
+            item_in_room = rooms[current_room]['item']
+            if item_in_room:
+                inventory.append(item_in_room)
+                rooms[current_room]['item'] = None # Remove item from the room
+                print(f"You picked up the **{item_in_room}**.")
+            else:
+                print("There is nothing to pick up here.")
+                
+        else:
+            print("Invalid command. Try 'go [direction]' or 'get [item]' or 'quit'.")
+
+if __name__ == "__main__":
+    main()
+
+
+
+# --- 1. Data Structures (Classes) ---
+
+class Clue:
+    """Represents a piece of evidence the detective can find."""
+    def __init__(self, name, description, reveals=None):
+        self.name = name
+        self.description = description
+        self.reveals = reveals  # Clue name that this evidence points toward
+
+class Suspect:
+    """Represents a person with dialogue and an associated hidden truth."""
+    def __init__(self, name, location, initial_dialogue, hidden_truth_dialogue, truth_clue):
+        self.name = name
+        self.location = location
+        self.dialogue = initial_dialogue
+        self.hidden_truth_dialogue = hidden_truth_dialogue
+        self.truth_clue = truth_clue  # The clue needed to unlock the hidden dialogue
+        self.is_confronted = False
+
+    def get_dialogue(self, inventory):
+        """Returns dialogue based on clues held by the detective."""
+        if self.truth_clue in inventory:
+            self.is_confronted = True
+            return self.hidden_truth_dialogue
+        else:
+            return self.dialogue
+
+# --- 2. Game Setup ---
+
+# Define all game elements
+GAME_CLUES = {
+    'Victim_Note': Clue('Victim_Note', 'A cryptic, torn note found in the victim\'s hand. Mentions a "watch."', 'Pocket_Watch'),
+    'Pocket_Watch': Clue('Pocket_Watch', 'A valuable engraved watch found hidden under a floorboard. It stopped at 1:00 AM.', 'Footprints_Mug'),
+    'Footprints_Mug': Clue('Footprints_Mug', 'A chipped ceramic mug with mud on the bottom, found near the fireplace.', None) # Final clue
+}
+
+SUSPECTS = {
+    'Butler': Suspect(
+        'Butler', 'Kitchen', 
+        "I was polishing silver all night. I heard nothing.",
+        "Yes, I saw a watch, but I panicked and hid it! It wasn't mine.",
+        'Victim_Note' # Requires Victim_Note to confess about the watch
+    ),
+    'Heiress': Suspect(
+        'Heiress', 'Lounge', 
+        "I was reading in the Lounge. My alibi is impeccable.",
+        "Fine, I lied! I went outside for a moment, but I only saw the gardener near the mud.",
+        'Pocket_Watch' # Requires Pocket_Watch to mention the gardener and mud
+    )
+}
+
+ROOMS = {
+    'Foyer': {'exits': {'north': 'Lounge'}, 'clue': None},
+    'Lounge': {'exits': {'south': 'Foyer', 'east': 'Kitchen'}, 'clue': 'Victim_Note'},
+    'Kitchen': {'exits': {'west': 'Lounge', 'north': 'Study'}, 'clue': None},
+    'Study': {'exits': {'south': 'Kitchen'}, 'clue': 'Pocket_Watch'}
+}
+
+# Initial State
+current_room = 'Foyer'
+inventory = set()
+# The *final* solution is that the gardener (not a defined suspect yet) is the culprit, proven by the Footprints_Mug
+
+# --- 3. Game Logic Functions ---
+
+def show_status():
+    """Prints the current location, inventory, and visible suspects/clues."""
+    print("\n" + "=" * 50)
+    print(f"Location: **{current_room}**")
+    print(f"Inventory: {', '.join(inventory) if inventory else 'Nothing'}")
+    
+    # Check for suspects in the room
+    suspect_here = [s.name for s in SUSPECTS.values() if s.location == current_room]
+    if suspect_here:
+        print(f"**Suspects Present:** {', '.join(suspect_here)}")
+
+    # Check for clues in the room
+    room_clue_name = ROOMS[current_room].get('clue')
+    if room_clue_name and room_clue_name not in inventory:
+        print(f"You see the clue: **{room_clue_name}**")
+        
+    print(f"Exits: {', '.join(ROOMS[current_room]['exits'].keys())}")
+    print("=" * 50)
+
+def handle_talk(suspect_name):
+    """Manages dialogue with suspects."""
+    if suspect_name not in SUSPECTS:
+        print(f"There is no one named {suspect_name} here.")
+        return
+
+    suspect = SUSPECTS[suspect_name]
+    if suspect.location != current_room:
+        print(f"{suspect.name} is not in the {current_room}.")
+        return
+
+    dialogue = suspect.get_dialogue(inventory)
+    print(f"\n**{suspect.name}:** \"{dialogue}\"")
+    
+    # Logic for finding new clues via dialogue
+    if suspect.is_confronted and suspect.truth_clue in inventory:
+        clue_to_reveal = GAME_CLUES[suspect.truth_clue].reveals
+        if clue_to_reveal and clue_to_reveal not in inventory:
+            # We automatically add the revealed clue to the game's locations or inventory if needed.
+            # In this advanced example, let's just add it directly to inventory for simplicity, 
+            # assuming the dialogue points to its exact location.
+            print(f"**DEDUCTION:** Based on this confession, you locate the **{clue_to_reveal}**!")
+            inventory.add(clue_to_reveal)
+
+
+def handle_accuse(suspect_name):
+    """The final deduction check."""
+    if suspect_name not in SUSPECTS:
+        print("That is not a valid suspect.")
+        return
+
+    # Advanced deduction check: Requires the final clue (Footprints_Mug)
+    # The true culprit is the Gardener, but we check if the player can use the evidence on the SUSPECTS
+    if suspect_name == 'Butler':
+        print("You accuse the Butler. The evidence (Footprints_Mug) doesn't directly point to him. He denies it and the case goes cold.")
+    elif suspect_name == 'Heiress':
+        print("You accuse the Heiress. The evidence (Footprints_Mug) doesn't directly point to her. She denies it and the case goes cold.")
+    else:
+        # Win condition: player must have found the final evidence and correctly deduce the culprit.
+        if 'Footprints_Mug' in inventory and suspect_name.lower() == 'gardener':
+            print("\n*** CASE CLOSED! ***")
+            print("You successfully pieced together the clues:")
+            print("- The note led to the watch.")
+            print("- The watch led the Heiress to expose the muddy mug.")
+            print("- The muddy mug proves the **Gardener** was at the scene despite his denials.")
+            return True
+        else:
+            print("Your evidence is incomplete, Detective. You need all the clues to make a sound accusation.")
+    return False
+
+# --- 4. Main Game Loop ---
+
+def main():
+    """Handles the core command processing."""
+    global current_room
+
+    print("--- Detective AI: The Case of the Missing Heirloom ---")
+    print("Commands: go [direction], get clue, talk [suspect], accuse [person], quit")
+
+    while True:
+        if handle_accuse('placeholder') == True:
+            break
+            
+        show_status()
+        
+        command = input("> ").lower().split()
+        if not command: continue
+        
+        action = command[0]
+
+        if action == 'quit':
+            print("Game over. The mystery remains unsolved.")
+            break
+            
+        elif action == 'go' and len(command) > 1:
+            direction = command[1]
+            if direction in ROOMS[current_room]['exits']:
+                current_room = ROOMS[current_room]['exits'][direction]
+            else:
+                print("You cannot go that way.")
+
+        elif action == 'get' and len(command) > 1 and command[1] == 'clue':
+            clue_name = ROOMS[current_room].get('clue')
+            if clue_name and clue_name not in inventory:
+                inventory.add(clue_name)
+                # Remove clue from the room so it can't be picked up again
+                ROOMS[current_room]['clue'] = None 
+                print(f"**Clue Found:** You secured the **{clue_name}**.")
+            else:
+                print("No obvious clues to pick up here.")
+                
+        elif action == 'talk' and len(command) > 1:
+            handle_talk(command[1].title()) # Capitalize name for dictionary lookup
+            
+        elif action == 'accuse' and len(command) > 1:
+            if handle_accuse(command[1].title()):
+                break
+                
+        else:
+            print("Invalid command.")
+
+if __name__ == "__main__":
+    main()
+
