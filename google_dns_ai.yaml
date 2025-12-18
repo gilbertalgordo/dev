@@ -1,0 +1,135 @@
+pip install google-cloud-dns google-cloud-aiplatform
+
+
+
+import os
+from google.cloud import dns
+from google.cloud import aiplatform
+import vertexai
+from vertexai.generative_models import GenerativeModel
+
+# --- Configuration ---
+PROJECT_ID = "your-gcp-project-id"
+ZONE_NAME = "my-public-zone"  # The name of your Managed Zone in GCP
+DNS_NAME = "app.example.com." # Must end with a period
+PRIMARY_IP = "1.2.3.4"
+FAILOVER_IP = "5.6.7.8"
+
+# Initialize Vertex AI
+vertexai.init(project=PROJECT_ID, location="us-central1")
+model = GenerativeModel("gemini-1.5-flash")
+
+def get_ai_decision(status_report):
+    """
+    Asks Gemini to analyze a status report and decide on the target IP.
+    """
+    prompt = f"""
+    Analyze the following server status report: "{status_report}"
+    If the server is healthy, respond ONLY with 'PRIMARY'. 
+    If the server is critical or failing, respond ONLY with 'FAILOVER'.
+    """
+    response = model.generate_content(prompt)
+    return response.text.strip()
+
+def update_dns_record(new_ip):
+    """
+    Updates the A record in Google Cloud DNS.
+    """
+    client = dns.Client(project=PROJECT_ID)
+    zone = client.zone(ZONE_NAME)
+    
+    # 1. Find existing record to delete it (GCP requires transaction-style updates)
+    records = zone.list_resource_record_sets()
+    old_record = None
+    for r in records:
+        if r.name == DNS_NAME and r.record_type == 'A':
+            old_record = r
+            break
+
+    # 2. Start a change request
+    changes = zone.changes()
+    
+    if old_record:
+        if old_record.rrdatas[0] == new_ip:
+            print(f"DNS is already pointing to {new_ip}. No update needed.")
+            return
+        changes.add_record_set(old_record) # Remove the old one
+        changes.delete_record_set(old_record)
+
+    # 3. Add the new record
+    new_record = zone.resource_record_set(DNS_NAME, 'A', 300, [new_ip])
+    changes.add_record_set(new_record)
+    
+    # 4. Execute
+    changes.create()
+    print(f"DNS Update Sent: {DNS_NAME} -> {new_ip}")
+
+# --- Execution Logic ---
+report = "Server CPU is at 99% and latency is 5000ms. Disk space is critical."
+decision = get_ai_decision(report)
+
+if decision == "FAILOVER":
+    update_dns_record(FAILOVER_IP)
+else:
+    update_dns_record(PRIMARY_IP)
+
+
+
+import time
+from google.cloud import dns
+from google.cloud import aiplatform
+import vertexai
+from vertexai.generative_models import GenerativeModel, Tool, FunctionDeclaration
+
+# --- Config ---
+PROJECT_ID = "your-gcp-id"
+ZONE_NAME = "prod-zone"
+DNS_NAME = "api.example.com."
+
+# Initialize GCP Clients
+dns_client = dns.Client(project=PROJECT_ID)
+vertexai.init(project=PROJECT_ID, location="us-central1")
+
+# 1. Define the DNS Update Tool for the AI
+update_dns_func = FunctionDeclaration(
+    name="update_dns_weight",
+    description="Updates DNS weighted record sets based on health",
+    parameters={
+        "type": "object",
+        "properties": {
+            "primary_weight": {"type": "number", "description": "Weight for Region A (0.0 to 1.0)"},
+            "backup_weight": {"type": "number", "description": "Weight for Region B (0.0 to 1.0)"},
+            "reason": {"type": "string", "description": "Justification for the change"}
+        }
+    }
+)
+
+dns_tool = Tool(function_declarations=[update_dns_func])
+model = GenerativeModel("gemini-1.5-pro", tools=[dns_tool])
+
+def execute_dns_change(primary_weight, backup_weight):
+    """Execution logic for the AI's decision."""
+    zone = dns_client.zone(ZONE_NAME)
+    # Advanced: Using Weighted Round Robin (WRR) 
+    # Logic here to update ResourceRecordSet with 'routingPolicy'
+    print(f"HUD: Adjusting Traffic Split -> Primary: {primary_weight*100}%, Backup: {backup_weight*100}%")
+
+# 2. The AI Reasoning Loop
+def autonomous_dns_manager(telemetry_data):
+    prompt = f"System Telemetry: {telemetry_data}. Adjust DNS traffic to optimize uptime."
+    
+    response = model.generate_content(prompt)
+    
+    # Check if AI wants to call the tool
+    if response.candidates[0].function_calls:
+        call = response.candidates[0].function_calls[0]
+        if call.name == "update_dns_weight":
+            execute_dns_change(
+                call.args["primary_weight"], 
+                call.args["backup_weight"]
+            )
+            print(f"AI Reason: {call.args['reason']}")
+
+# --- Simulation ---
+telemetry = "Region A is experiencing 15% packet loss and 400ms jitter. Region B is stable."
+autonomous_dns_manager(telemetry)
