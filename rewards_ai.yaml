@@ -1,0 +1,116 @@
+import time
+from datetime import datetime
+
+class RewardsAI:
+    def __init__(self):
+        # Scientific reasoning: Base values for different engagement levels
+        self.base_rewards = {
+            "login": 10,
+            "contribution": 50,
+            "milestone": 100,
+            "referral": 200
+        }
+        self.user_db = {}
+
+    def calculate_multiplier(self, streak):
+        """Calculates a decay-resistant multiplier based on daily consistency."""
+        # Using a logarithmic scale to prevent reward inflation
+        import math
+        return round(1 + math.log10(streak + 1), 2)
+
+    def process_action(self, user_id, action):
+        """Processes an instance of user behavior and generates a reward."""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        
+        # Initialize user if not exists
+        if user_id not in self.user_db:
+            self.user_db[user_id] = {"points": 0, "streak": 1}
+        
+        user_data = self.user_db[user_id]
+        multiplier = self.calculate_multiplier(user_data["streak"])
+        base = self.base_rewards.get(action, 5)
+        total_reward = int(base * multiplier)
+        
+        # Update user totals
+        user_data["points"] += total_reward
+        
+        # --- HUD DISPLAY ---
+        print(f"[{timestamp}] [HUD] PROCESSING INSTANCE: {user_id.upper()}")
+        print(f"| ACTION: {action.upper()}")
+        print(f"| STREAK: {user_data['streak']}x | MULTIPLIER: {multiplier}x")
+        print(f"| CALCULATION: {base} (BASE) * {multiplier} (MULT)")
+        print(f"| REWARD GRANTED: +{total_reward} PTS")
+        print(f"| TOTAL BALANCE: {user_data['points']} PTS")
+        print("-" * 40)
+
+# --- RUNNING THE INSTANCE ---
+ai = RewardsAI()
+
+# Simulating a series of events
+events = [
+    ("user_01", "login"),
+    ("user_01", "contribution"),
+    ("user_02", "referral")
+]
+
+for uid, act in events:
+    ai.process_action(uid, act)
+    time.sleep(0.5)
+
+
+
+import numpy as np
+import random
+
+class AdvancedRewardsAI:
+    def __init__(self, actions_count=4, states_count=5):
+        # States represent user engagement levels (0: Attrition Risk -> 4: Power User)
+        # Actions represent Reward Tiers (0: Low, 1: Med, 2: High, 3: Jackpot)
+        self.q_table = np.zeros((states_count, actions_count))
+        self.learning_rate = 0.1
+        self.discount_factor = 0.95
+        self.epsilon = 0.2  # Exploration rate
+        
+        self.reward_values = [5, 20, 50, 100]
+
+    def get_action(self, state):
+        """HUD: Deciding optimal reward tier for current user state."""
+        if random.uniform(0, 1) < self.epsilon:
+            return random.randint(0, 3) # Explore
+        return np.argmax(self.q_table[state]) # Exploit learned data
+
+    def update_logic(self, state, action, reward_signal, next_state):
+        """
+        Scientific Reasoning: Bellman Equation implementation
+        Q(s,a) = Q(s,a) + alpha * [Reward + gamma * max(Q(s',a')) - Q(s,a)]
+        """
+        old_value = self.q_table[state, action]
+        next_max = np.max(self.q_table[next_state])
+        
+        # Update the Q-value
+        new_value = old_value + self.learning_rate * (reward_signal + self.discount_factor * next_max - old_value)
+        self.q_table[state, action] = new_value
+
+    def display_hud(self, user_id, state, action_idx, reward_amt, impact):
+        print(f"--- [REWARDS AI HUD: INSTANCE {user_id.upper()}] ---")
+        print(f"| CURRENT STATE  : {state} (Engagement Level)")
+        print(f"| SELECTED TIER  : Tier {action_idx} ({reward_amt} pts)")
+        print(f"| USER RESPONSE  : {impact} (Action probability change)")
+        print(f"| Q-TABLE UPDATE : {self.q_table[state].round(2)}")
+        print("--------------------------------------------------\n")
+
+# --- INSTANCE EXECUTION ---
+brain = AdvancedRewardsAI()
+
+# Mock Scenario: User is in state 1 (Low Engagement)
+user_state = 1
+chosen_action = brain.get_action(user_state)
+points = brain.reward_values[chosen_action]
+
+# Logic: If the user stays active (next_state 2), the AI receives a 'Reward Signal'
+# This is meta-rewarding: the AI is rewarded for rewarding the user correctly.
+impact_signal = 1 if points >= 50 else -0.5 
+next_user_state = 2 if impact_signal > 0 else 0
+
+brain.update_logic(user_state, chosen_action, impact_signal, next_user_state)
+brain.display_hud("Alpha_User_99", user_state, chosen_action, points, impact_signal)
