@@ -1,0 +1,110 @@
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor
+from datetime import datetime
+
+# 1. Simulated Dataset (Instance: Home Energy Usage)
+# Features: Hour of day, Outside Temperature, Previous Hour Usage
+data = {
+    'hour': [0, 1, 2, 8, 9, 10, 12, 17, 18, 19, 21],
+    'temp': [70, 68, 65, 72, 75, 80, 85, 90, 88, 82, 75],
+    'usage_kwh': [0.5, 0.4, 0.3, 1.2, 1.5, 2.0, 2.8, 3.5, 3.8, 3.0, 1.5]
+}
+
+df = pd.DataFrame(data)
+
+# 2. Training the "Anti-Bill" Brain
+X = df[['hour', 'temp']]
+y = df['usage_kwh']
+
+model = RandomForestRegressor(n_estimators=100)
+model.fit(X, y)
+
+# 3. HUD-Style Monitoring Function
+def check_efficiency(current_hour, current_temp):
+    prediction = model.predict([[current_hour, current_temp]])[0]
+    
+    print(f"--- ENERGY HUD ---")
+    print(f"Status: MONITORING")
+    print(f"Predicted Load: {prediction:.2f} kWh")
+    
+    # Logic for Anti-Bill Action
+    if prediction > 2.5:
+        return "ACTION REQUIRED: High Cost Window. Dimming lights and cycling HVAC."
+    else:
+        return "STATUS: Optimal Efficiency."
+
+# Example Execution
+print(check_efficiency(18, 92))
+
+
+
+import numpy as np
+import torch
+import torch.nn as nn
+from torch.distributions import Normal
+
+# 1. THE NEURAL HUD (Policy Network)
+# This network takes environmental data and outputs 'Confidence' for actions
+class EnergyPolicy(nn.Module):
+    def __init__(self, input_dim, action_dim):
+        super(EnergyPolicy, self).__init__()
+        self.network = nn.Sequential(
+            nn.Linear(input_dim, 128),
+            nn.LeakyReLU(),
+            nn.Linear(128, 64),
+            nn.LeakyReLU(),
+            nn.Linear(64, action_dim),
+            nn.Softmax(dim=-1) # Probabilities of shifting loads
+        )
+        
+    def forward(self, state):
+        return self.network(state)
+
+# 2. THE ENERGY ENVIRONMENT (Instance Simulation)
+class SmartHomeEnv:
+    def __init__(self):
+        self.peak_hours = range(14, 20) # 2 PM to 8 PM
+        self.state = np.array([12, 75, 0.15]) # [Hour, Temp, Price]
+        
+    def step(self, action):
+        # Action: 0 = Normal, 1 = Eco Mode (-20% Load), 2 = Deep Sleep (-50% Load)
+        load_modifiers = [1.0, 0.8, 0.5]
+        hour, temp, price = self.state
+        
+        # Calculate Cost
+        base_load = 2.5 if hour in self.peak_hours else 0.8
+        actual_load = base_load * load_modifiers[action]
+        cost = actual_load * price
+        
+        # Transition State
+        new_hour = (hour + 1) % 24
+        new_price = 0.45 if new_hour in self.peak_hours else 0.12
+        self.state = np.array([new_hour, temp, new_price])
+        
+        # Reward is Negative Cost (AI wants to maximize Reward)
+        reward = -cost
+        return self.state, reward
+
+# 3. HUD TELEMETRY INITIALIZATION
+agent = EnergyPolicy(3, 3)
+env = SmartHomeEnv()
+optimizer = torch.optim.Adam(agent.parameters(), lr=0.001)
+
+def run_telemetry_loop():
+    print("--- [ADVANCED ENERGY HUD] ---")
+    state = torch.FloatTensor(env.state)
+    
+    for t in range(5):
+        action_probs = agent(state)
+        action = torch.argmax(action_probs).item()
+        
+        next_state, reward = env.step(action)
+        
+        # LOGGING INSTANCE DATA
+        status = ["NORMAL", "ECO_MODE", "CRITICAL_SHAVE"][action]
+        print(f"T+{t}h | Price: ${state[2]:.2f}/kWh | Mode: {status} | Reward: {reward:.2f}")
+        
+        state = torch.FloatTensor(next_state)
+
+run_telemetry_loop()
