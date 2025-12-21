@@ -1,0 +1,119 @@
+import numpy as np
+import random
+
+class AILoadBalancer:
+    def __init__(self, servers):
+        self.servers = servers
+        # Q-Table: [State (Server Load Level), Action (Select Server Index)]
+        # We simplify state into 3 levels: 0: Low, 1: Med, 2: High
+        self.q_table = np.zeros((3, len(servers)))
+        self.learning_rate = 0.1
+        self.discount_factor = 0.95
+        self.exploration_rate = 0.2  # 20% chance to try a new path
+
+    def get_system_state(self, server_metrics):
+        """HUD: Translates raw metrics into a discrete state."""
+        avg_load = sum(server_metrics) / len(server_metrics)
+        if avg_load < 30: return 0  # Low Load
+        if avg_load < 70: return 1  # Medium Load
+        return 2                    # High Load
+
+    def choose_server(self, state):
+        """Epsilon-greedy selection."""
+        if random.uniform(0, 1) < self.exploration_rate:
+            return random.randint(0, len(self.servers) - 1)
+        return np.argmax(self.q_table[state])
+
+    def update_ai(self, state, action, reward, next_state):
+        """Update logic for reinforcement learning."""
+        best_next_action = np.max(self.q_table[next_state])
+        td_target = reward + self.discount_factor * best_next_action
+        self.q_table[state, action] += self.learning_rate * (td_target - self.q_table[state, action])
+
+# --- Simulation Example ---
+servers = ["Server_A", "Server_B", "Server_C"]
+agent = AILoadBalancer(servers)
+
+# Mock server metrics (CPU %)
+current_metrics = [10, 85, 40] 
+state = agent.get_system_state(current_metrics)
+
+# AI Decides
+selected_index = agent.choose_server(state)
+print(f"AI HUD State: {state} | Routing to: {servers[selected_index]}")
+
+# Reward Logic: If server was fast and low-load, reward = +10. If it timed out, reward = -100.
+reward = 10 if current_metrics[selected_index] < 50 else -10
+agent.update_ai(state, selected_index, reward, state)
+
+
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
+import random
+from collections import deque
+
+# Neural Network: The "Brain" of the Load Balancer
+class LoadBalancerBrain(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(LoadBalancerBrain, self).__init__()
+        self.fc1 = nn.Linear(input_dim, 64)
+        self.fc2 = nn.Linear(64, 64)
+        self.fc3 = nn.Linear(64, output_dim) # Output: Q-value for each server
+
+    def forward(self, x):
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
+        return self.fc3(x)
+
+class AdvancedAILoadBalancer:
+    def __init__(self, server_count):
+        self.server_count = server_count
+        self.memory = deque(maxlen=2000)
+        self.gamma = 0.95       # Discount factor
+        self.epsilon = 1.0      # Exploration rate
+        self.epsilon_min = 0.01
+        self.epsilon_decay = 0.995
+        
+        # HUD Input: 3 metrics per server (Load, Latency, Errors)
+        self.model = LoadBalancerBrain(server_count * 3, server_count)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
+        self.criterion = nn.MSELoss()
+
+    def get_action(self, state):
+        """Predicts the best server instance to use."""
+        if np.random.rand() <= self.epsilon:
+            return random.randrange(self.server_count)
+        
+        state_tensor = torch.FloatTensor(state).unsqueeze(0)
+        with torch.no_grad():
+            q_values = self.model(state_tensor)
+        return torch.argmax(q_values).item()
+
+    def train(self, batch_size=32):
+        if len(self.memory) < batch_size:
+            return
+
+        batch = random.sample(self.memory, batch_size)
+        for state, action, reward, next_state, done in batch:
+            state = torch.FloatTensor(state)
+            next_state = torch.FloatTensor(next_state)
+            
+            target = reward
+            if not done:
+                target += self.gamma * torch.max(self.model(next_state)).item()
+            
+            target_f = self.model(state)
+            # Adjust the Q-value for the action taken
+            target_f[action] = target
+            
+            # Optimization step
+            self.optimizer.zero_grad()
+            loss = self.criterion(self.model(state), target_f)
+            loss.backward()
+            self.optimizer.step()
+
+        if self.epsilon > self.epsilon_min:
+            self.epsilon *= self.epsilon_decay
