@@ -1,0 +1,185 @@
+import numpy as np
+from sentence_transformers import SentenceTransformer
+import faiss
+
+class BookAIInstance:
+    def __init__(self, model_name='all-MiniLM-L6-v2'):
+        # Accurate scientific reasoning requires high-quality embeddings
+        self.model = SentenceTransformer(model_name)
+        self.index = None
+        self.book_content = []
+
+    def ingest_book(self, text_chunks):
+        """
+        Processes text into vector space for retrieval.
+        """
+        self.book_content = text_chunks
+        embeddings = self.model.encode(text_chunks)
+        
+        # Initialize FAISS index
+        dimension = embeddings.shape[1]
+        self.index = faiss.IndexFlatL2(dimension)
+        self.index.add(np.array(embeddings).astype('float32'))
+        print(f"HUD: Ingested {len(text_chunks)} data instances.")
+
+    def query(self, question, top_k=3):
+        """
+        Retrieves the most relevant passages for a query.
+        """
+        question_embedding = self.model.encode([question])
+        distances, indices = self.index.search(np.array(question_embedding).astype('float32'), top_k)
+        
+        results = [self.book_content[i] for i in indices[0]]
+        return results
+
+# --- Example Execution ---
+# Define book chapters/passages as instances
+chapters = [
+    "The laws of thermodynamics dictate that energy cannot be created or destroyed.",
+    "In the heart of the nebula, new stars are born from collapsing gas clouds.",
+    "Quantum entanglement suggests particles remain connected regardless of distance."
+]
+
+# Initialize and Run
+ai_book = BookAIInstance()
+ai_book.ingest_book(chapters)
+
+# User Query
+query_text = "How are stars formed?"
+context = ai_book.query(query_text)
+
+print(f"\n--- HUD DISPLAY ---")
+print(f"Query: {query_text}")
+print(f"Top Instance Found: {context[0]}")
+
+
+
+import numpy as np
+from rank_bm25 import BM25Okapi
+from sentence_transformers import SentenceTransformer, CrossEncoder
+import faiss
+
+class AdvancedBookAI:
+    def __init__(self):
+        # 1. Bi-Encoder for fast initial retrieval
+        self.bi_encoder = SentenceTransformer('all-MiniLM-L6-v2')
+        # 2. Cross-Encoder for high-accuracy reranking (Scientific Precision)
+        self.reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+        self.index = None
+        self.passages = []
+        self.bm25 = None
+
+    def ingest(self, text_list):
+        self.passages = text_list
+        # Prepare BM25 (Keyword search)
+        tokenized_corpus = [p.lower().split() for p in text_list]
+        self.bm25 = BM25Okapi(tokenized_corpus)
+        
+        # Prepare FAISS (Vector search)
+        embeddings = self.bi_encoder.encode(text_list, convert_to_tensor=True).cpu().numpy()
+        self.index = faiss.IndexFlatL2(embeddings.shape[1])
+        self.index.add(embeddings.astype('float32'))
+        print(f"HUD: System Loaded | Instances: {len(text_list)} | Engines: Hybrid + Rerank")
+
+    def retrieve(self, query, top_k=10):
+        # Step 1: Vector Search
+        q_emb = self.bi_encoder.encode([query], convert_to_tensor=True).cpu().numpy()
+        _, vec_indices = self.index.search(q_emb.astype('float32'), top_k)
+        vec_hits = [self.passages[i] for i in vec_indices[0]]
+
+        # Step 2: Keyword Search (BM25)
+        bm25_hits = self.bm25.get_top_n(query.lower().split(), self.passages, n=top_k)
+        
+        # Step 3: Combine and Rerank
+        all_hits = list(set(vec_hits + bm25_hits))
+        sentence_pairs = [[query, hit] for hit in all_hits]
+        scores = self.reranker.predict(sentence_pairs)
+        
+        # Sort by reranker score
+        reranked_results = [hit for _, hit in sorted(zip(scores, all_hits), reverse=True)]
+        return reranked_results[:3]
+
+# --- Deployment Instance ---
+scientific_texts = [
+    "The Second Law of Thermodynamics states entropy in an isolated system always increases.",
+    "A star's lifecycle is determined by its initial mass, leading to a supernova or white dwarf.",
+    "Entropy is often misunderstood as 'disorder', but it is a measure of energy dispersal.",
+    "Nuclear fusion in the sun converts hydrogen into helium, releasing massive energy."
+]
+
+book_ai = AdvancedBookAI()
+book_ai.ingest(scientific_texts)
+
+# Querying for scientific reasoning
+query = "Explain the relationship between entropy and energy dispersal."
+top_passages = book_ai.retrieve(query)
+
+print(f"\n--- SCIENTIFIC HUD ---")
+print(f"Target Query: {query}")
+print(f"Primary Instance: {top_passages[0]}")
+
+
+
+import numpy as np
+import faiss
+from sentence_transformers import SentenceTransformer
+
+class AgenticBookAI:
+    def __init__(self):
+        self.encoder = SentenceTransformer('all-MiniLM-L6-v2')
+        self.index = None
+        self.vault = []
+        self.threshold = 0.7  # Scientific accuracy threshold
+
+    def load_library(self, documents):
+        self.vault = documents
+        embeddings = self.encoder.encode(documents)
+        self.index = faiss.IndexFlatIP(embeddings.shape[1]) # Inner Product for cosine similarity
+        faiss.normalize_L2(embeddings)
+        self.index.add(embeddings.astype('float32'))
+        print(f"HUD: [SYSTEM_READY] Instances Loaded: {len(documents)}")
+
+    def agentic_reasoning_loop(self, query, max_retries=2):
+        """
+        The Agentic Loop: Search -> Evaluate -> Correct -> Respond
+        """
+        current_query = query
+        for attempt in range(max_retries + 1):
+            # 1. RETRIEVE
+            context, score = self._retrieve(current_query)
+            
+            # 2. EVALUATE (Scientific HUD Check)
+            print(f"HUD: [ATTEMPT {attempt+1}] Confidence Score: {score:.2f}")
+            
+            if score >= self.threshold:
+                return self._generate_response(query, context)
+            
+            # 3. SELF-CORRECT (Query Expansion)
+            print(f"HUD: [REASONING] Low confidence. Expanding query parameters...")
+            current_query = f"{query} detailed scientific explanation and theory"
+            
+        return "HUD: [ERROR] No high-confidence scientific data found in library."
+
+    def _retrieve(self, query):
+        q_emb = self.encoder.encode([query])
+        faiss.normalize_L2(q_emb)
+        distances, indices = self.index.search(q_emb.astype('float32'), 1)
+        return self.vault[indices[0][0]], distances[0][0]
+
+    def _generate_response(self, query, context):
+        # In a full production system, this would call an LLM (GPT-4/Gemini)
+        return f"Final Answer based on Library Instance: {context}"
+
+# --- Advanced Data Instances ---
+library = [
+    "General Relativity describes gravity as the curvature of spacetime.",
+    "The Schwarzschild radius defines the event horizon of a black hole.",
+    "Photosynthesis converts light energy into chemical energy in plants."
+]
+
+bot = AgenticBookAI()
+bot.load_library(library)
+
+# Test high-accuracy reasoning
+result = bot.agentic_reasoning_loop("How does gravity work in space?")
+print(f"\n{result}")
