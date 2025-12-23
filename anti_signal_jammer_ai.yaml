@@ -1,0 +1,105 @@
+import numpy as np
+import random
+
+class AntiJammingEnv:
+    def __init__(self, num_channels=10):
+        self.num_channels = num_channels
+        self.state = 0  # Current operating channel
+        self.jammer_channel = random.randint(0, num_channels - 1)
+
+    def step(self, action):
+        # The AI chooses a channel (action)
+        self.state = action
+        
+        # Simulating a dynamic jammer (moves 20% of the time)
+        if random.random() < 0.2:
+            self.jammer_channel = random.randint(0, self.num_channels - 1)
+        
+        # Reward Logic: High reward for avoiding the jammer
+        if self.state == self.jammer_channel:
+            reward = -10  # Jammed!
+        else:
+            reward = 1     # Clear signal
+            
+        return self.state, reward
+
+# --- Q-Learning Agent ---
+num_channels = 10
+q_table = np.zeros(num_channels)
+learning_rate = 0.1
+discount_factor = 0.9
+epsilon = 0.2 # Exploration rate
+
+env = AntiJammingEnv(num_channels)
+
+print("Training AI to bypass interference...")
+
+for episode in range(1000):
+    # Epsilon-greedy channel selection
+    if random.uniform(0, 1) < epsilon:
+        action = random.randint(0, num_channels - 1)
+    else:
+        action = np.argmax(q_table)
+    
+    next_state, reward = env.step(action)
+    
+    # Update Q-value for the chosen channel
+    q_table[action] = q_table[action] + learning_rate * (reward - q_table[action])
+
+print(f"Optimized Channel Map: {q_table}")
+print(f"Recommended Channel: {np.argmax(q_table)}")
+
+
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
+
+# --- Dueling Deep Q-Network Architecture ---
+class AntiJammingBrain(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(AntiJammingBrain, self).__init__()
+        # Shared Feature Extractor
+        self.feature_layer = nn.Sequential(
+            nn.Linear(input_dim, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU()
+        )
+        
+        # Value Stream (Is this frequency environment safe?)
+        self.value_stream = nn.Linear(128, 1)
+        
+        # Advantage Stream (Which channel is the best move?)
+        self.advantage_stream = nn.Linear(128, output_dim)
+
+    def forward(self, state):
+        features = self.feature_layer(state)
+        value = self.value_stream(features)
+        advantages = self.advantage_stream(features)
+        # Combine streams: Q(s,a) = V(s) + (A(s,a) - mean(A))
+        q_values = value + (advantages - advantages.mean())
+        return q_values
+
+# --- AI Decision Engine ---
+class SignalProtector:
+    def __init__(self, channels=64):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = AntiJammingBrain(channels, channels).to(self.device)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=1e-4)
+        self.loss_fn = nn.MSELoss()
+        
+    def select_evasive_action(self, spectrum_state, epsilon=0.1):
+        """HUD-driven decision making"""
+        if np.random.rand() < epsilon:
+            return np.random.randint(0, 64) # Forced Frequency Hopping
+        
+        state_t = torch.FloatTensor(spectrum_state).to(self.device)
+        with torch.no_grad():
+            q_values = self.model(state_t)
+        return torch.argmax(q_values).item()
+
+# Example Usage:
+# spectrum_state = Get_FFT_Data_From_SDR() 
+# best_channel = SignalProtector.select_evasive_action(spectrum_state)
