@@ -1,0 +1,114 @@
+import datetime
+import random
+
+class OrderInstance:
+    """Represents a unique shopping order instance."""
+    def __init__(self, order_id, item_name, status="Processing"):
+        self.order_id = order_id
+        self.item_name = item_name
+        self.status = status
+        self.timestamp = datetime.datetime.now()
+        self.eta_days = random.randint(2, 7)
+
+    def get_hud_display(self):
+        """Returns a HUD-style formatted status string."""
+        border = "=" * 40
+        return (
+            f"\n{border}\n"
+            f" [SYSTEM HUD - ORDER TRACKER]\n"
+            f" ORDER_ID: {self.order_id}\n"
+            f" ITEM:     {self.item_name}\n"
+            f" STATUS:   {self.status.upper()}\n"
+            f" EST_DELV: {self.eta_days} Days\n"
+            f"{border}"
+        )
+
+class OrderTrackerAI:
+    """AI Logic to process queries and manage order states."""
+    def __init__(self):
+        # Initializing instances of active orders
+        self.database = {
+            "TX101": OrderInstance("TX101", "Haptic Gloves", "In Transit"),
+            "TX102": OrderInstance("TX102", "Neural Link Cable", "Processing")
+        }
+
+    def process_query(self, user_input):
+        """Simple NLP logic to extract intent and ID."""
+        user_input = user_input.lower()
+        
+        # Identify the order instance from the query
+        target_id = None
+        for oid in self.database.keys():
+            if oid.lower() in user_input:
+                target_id = oid
+        
+        if not target_id:
+            return "ERR: Order ID not found in query. Please provide a valid ID (e.g., TX101)."
+
+        # Return the HUD for the specific instance
+        order = self.database[target_id]
+        return order.get_hud_display()
+
+# --- Execution ---
+tracker_ai = OrderTrackerAI()
+
+# Simulating user interaction
+print(tracker_ai.process_query("Where is my order TX101?"))
+print(tracker_ai.process_query("Status update for TX102 please."))
+
+
+
+import datetime
+import time
+
+class OrderInstance:
+    """Represents a discrete shipping instance with telemetry data."""
+    def __init__(self, order_id, product, weight_kg, destination):
+        self.order_id = order_id
+        self.product = product
+        self.weight = weight_kg
+        self.destination = destination
+        self.created_at = datetime.datetime.now()
+        self.status_log = ["Order Received"]
+        self.coordinates = {"lat": 34.0522, "lon": -118.2437} # Default Origin
+
+    def update_status(self, new_status):
+        self.status_log.append(new_status)
+
+    def generate_hud(self):
+        """Generates a high-visibility HUD readout for the instance."""
+        border = "◆" + "═" * 45 + "◆"
+        print(border)
+        print(f"  SYSTEM_ID: {self.order_id} | STATUS: {self.status_log[-1].upper()}")
+        print(f"  CARGO:     {self.product} ({self.weight}kg)")
+        print(f"  DEST:      {self.destination}")
+        print(f"  TIME_LOG:  {self.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"  LAT/LON:   {self.coordinates['lat']} / {self.coordinates['lon']}")
+        print(border)
+
+class TrackerAI:
+    """The AI engine that manages multiple order instances."""
+    def __init__(self):
+        self.active_instances = {}
+
+    def create_order(self, order_id, product, weight, dest):
+        new_order = OrderInstance(order_id, product, weight, dest)
+        self.active_instances[order_id] = new_order
+        return f"SUCCESS: Instance {order_id} initialized."
+
+    def get_update(self, order_id):
+        if order_id in self.active_instances:
+            return self.active_instances[order_id].generate_hud()
+        return "ERROR: Instance ID not found in active database."
+
+# --- SIMULATION ---
+ai_core = TrackerAI()
+
+# Initialize Instance 001
+ai_core.create_order("ORD-882", "Quantum Processor", 0.45, "Sector 7G")
+
+# Initialize Instance 002
+ai_core.create_order("ORD-901", "Liquid Cooling Array", 1.2, "Research Lab B")
+
+# Request HUD Readout
+ai_core.get_update("ORD-882")
