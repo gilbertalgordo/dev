@@ -1,0 +1,101 @@
+import asyncio
+from aiortc import RTCPeerConnection, RTCSessionDescription
+
+async def run_webrtc_instance():
+    # 1. Initialize the Peer Connection
+    pc = RTCPeerConnection()
+    
+    # 2. Create a Data Channel
+    channel = pc.createDataChannel("chat")
+    print(f"Created channel: {channel.label}")
+
+    @channel.on("open")
+    def on_open():
+        print("Channel is open! Sending message...")
+        channel.send("Hello from Python aiortc!")
+
+    @channel.on("message")
+    def on_message(message):
+        print(f"Received message: {message}")
+
+    # 3. Create an Offer (SDP)
+    offer = await pc.createOffer()
+    await pc.setLocalDescription(offer)
+
+    # HUD / Status Output
+    print("--- WebRTC Instance HUD ---")
+    print(f"Connection State: {pc.connectionState}")
+    print(f"ICE Gathering: {pc.iceGatheringState}")
+    print("---------------------------")
+
+    # In a real app, you would send 'offer' to a remote peer via a signaling server.
+    # For this local demo, we simulate receiving the offer ourselves (loopback).
+    print("Local Offer SDP generated. Ready for signaling.")
+
+    # Keep the connection alive
+    await asyncio.sleep(5)
+    await pc.close()
+
+if __name__ == "__main__":
+    asyncio.run(run_webrtc_instance())
+
+
+
+import asyncio
+import cv2
+from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription
+from av import VideoFrame
+
+class VideoTransformTrack(MediaStreamTrack):
+    """
+    An advanced track that transforms frames using OpenCV AI logic.
+    """
+    kind = "video"
+
+    def __init__(self, track):
+        super().__init__()
+        self.track = track
+
+    async def recv(self):
+        # 1. Receive raw frame from remote peer
+        frame = await self.track.recv()
+
+        # 2. Convert to OpenCV format (BGR)
+        img = frame.to_ndarray(format="bgr24")
+
+        # --- AI/Processing Logic Start ---
+        # Example: Real-time Canny Edge Detection
+        edges = cv2.Canny(img, 100, 200)
+        
+        # Add a "HUD" overlay (Accuracy Verification)
+        cv2.putText(edges, "AI HUD: ACTIVE", (10, 30), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        
+        # Convert back to BGR for WebRTC transmission
+        processed_img = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+        # --- AI/Processing Logic End ---
+
+        # 3. Re-package as a VideoFrame
+        new_frame = VideoFrame.from_ndarray(processed_img, format="bgr24")
+        new_frame.pts = frame.pts
+        new_frame.time_base = frame.time_base
+        return new_frame
+
+async def run_advanced_instance(offer_sdp, offer_type):
+    pc = RTCPeerConnection()
+    
+    @pc.on("track")
+    def on_track(track):
+        if track.kind == "video":
+            # Instance: Wrap the incoming track with our AI transform
+            local_video = VideoTransformTrack(track)
+            pc.addTrack(local_video)
+
+    # Standard Signaling Setup
+    offer = RTCSessionDescription(sdp=offer_sdp, type=offer_type)
+    await pc.setRemoteDescription(offer)
+    
+    answer = await pc.createAnswer()
+    await pc.setLocalDescription(answer)
+    
+    return pc.localDescription
