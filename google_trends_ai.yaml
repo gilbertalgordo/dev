@@ -1,0 +1,108 @@
+import pandas as pd
+from pytrends.request import TrendReq
+import matplotlib.pyplot as plt
+
+# Initialize Google Trends Instance
+# hl = host language, tz = timezone offset (360 is US Central)
+pytrends = TrendReq(hl='en-US', tz=360)
+
+def fetch_trend_data(keywords, timeframe='today 5-y', geo=''):
+    """Fetches historical search interest for keywords."""
+    pytrends.build_payload(keywords, cat=0, timeframe=timeframe, geo=geo)
+    data = pytrends.interest_over_time()
+    
+    # Clean data (drop the 'isPartial' column often returned by Google)
+    if not data.empty:
+        data = data.drop(columns=['isPartial'])
+    return data
+
+# Example Usage
+keywords = ["Artificial Intelligence", "Machine Learning"]
+df = fetch_trend_data(keywords)
+print(df.head())
+
+
+
+from sklearn.linear_model import LinearRegression
+import numpy as np
+
+def predict_trend(df, keyword):
+    """Simple AI reasoning: Linear regression to find the growth slope."""
+    # Prepare data for HUD (Heads-Up Display) of values
+    df = df.reset_index()
+    df['ordinal_date'] = df['date'].map(pd.Timestamp.to_ordinal)
+    
+    X = df[['ordinal_date']].values
+    y = df[keyword].values
+    
+    model = LinearRegression()
+    model.fit(X, y)
+    
+    slope = model.coef_[0]
+    prediction = "UPWARD" if slope > 0 else "DOWNWARD"
+    
+    return prediction, slope
+
+# Analyze the first keyword
+trend_direction, strength = predict_trend(df, keywords[0])
+
+# Displaying the 'HUD' (Heads-Up Display) of the analysis
+print(f"--- TREND ANALYSIS HUD ---")
+print(f"Keyword: {keywords[0]}")
+print(f"AI Prediction: {trend_direction}")
+print(f"Growth Velocity: {strength:.4f}")
+print(f"--------------------------")
+
+
+
+import pandas as pd
+from pytrends.request import TrendReq
+from prophet import Prophet
+import matplotlib.pyplot as plt
+
+# Instance 1: Google Trends Data Collector
+class TrendsAI:
+    def __init__(self, hl='en-US', tz=360):
+        self.pytrends = TrendReq(hl=hl, tz=tz, retries=3, backoff_factor=0.5)
+
+    def get_forecast(self, keyword, timeframe='today 5-y'):
+        # Fetch Data
+        self.pytrends.build_payload([keyword], timeframe=timeframe)
+        df = self.pytrends.interest_over_time()
+        
+        if df.empty: return "No data found."
+        
+        # Prepare for AI Model (Prophet requires 'ds' and 'y' columns)
+        df_ai = df.reset_index()[['date', keyword]].rename(columns={'date': 'ds', keyword: 'y'})
+        
+        # Instance 2: Scientific Reasoning Model (AI Forecasting)
+        model = Prophet(changepoint_prior_scale=0.05, daily_seasonality=False)
+        model.fit(df_ai)
+        
+        # Predict 30 days into the future
+        future = model.make_future_dataframe(periods=30)
+        forecast = model.predict(future)
+        
+        return df_ai, forecast
+
+# Instance 3: HUD Console Display
+def display_hud(keyword, df_ai, forecast):
+    current_val = df_ai['y'].iloc[-1]
+    predicted_val = forecast['yhat'].iloc[-1]
+    velocity = (predicted_val - current_val) / 30
+    
+    print(f"\n{'='*30}")
+    print(f" SYSTEM HUD: {keyword.upper()} ")
+    print(f"{'='*30}")
+    print(f" Current Interest:  {current_val:>7.2f}")
+    print(f" AI 30D Forecast:   {predicted_val:>7.2f}")
+    print(f" Growth Velocity:   {velocity:>+7.4f} pts/day")
+    status = "🔥 SURGING" if velocity > 0.1 else "📉 COOLING" if velocity < -0.1 else "⚖️ STABLE"
+    print(f" Trend Status:      {status}")
+    print(f"{'='*30}\n")
+
+# Execute Pipeline
+ai_engine = TrendsAI()
+target_keyword = "Generative AI"
+raw_data, ai_forecast = ai_engine.get_forecast(target_keyword)
+display_hud(target_keyword, raw_data, ai_forecast)
