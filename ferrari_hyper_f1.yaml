@@ -1,0 +1,95 @@
+class FerrariF1Hyper:
+    def __init__(self, mode="Qualifying"):
+        self.chassis = "SF-25 Evolution"
+        self.power_unit = "V6-Hybrid-E-Turbo"
+        self.aero_state = "Active"
+        self.hud_enabled = True
+        self.drive_mode = mode
+
+    def deploy_ers(self):
+        """Logic for maximum electrical discharge (Overtake Mode)"""
+        if self.drive_mode == "Qualifying":
+            return "120kW MGU-K Output: MAX"
+        return "Standard Deployment"
+
+    def update_hud(self, telemetry_data):
+        """Displays real-time HUD instances to the driver"""
+        print(f"HUD Update: Speed {telemetry_data['speed']} km/h")
+        print(f"HUD Update: Downforce {telemetry_data['df']} kg")
+
+# Creating the 'Final Form' Instance
+final_form_car = FerrariF1Hyper(mode="Hot-Lap")
+print(final_form_car.deploy_ers())
+
+
+
+import numpy as np
+import time
+
+class FerrariFinalForm:
+    """
+    Instance representing the hybrid architecture of the 2025 F1 SF-25 
+    integrated into a Hypercar 'Final Form' chassis.
+    """
+    def __init__(self):
+        # --- Scientific Constraints (2025 SF-25 / F80 Specs) ---
+        self.mass = 1250  # kg (Vision GT target)
+        self.drag_coeff = 0.24  # Active Aero optimized
+        self.downforce_max = 1050  # kg at 250km/h (F80 Aero)
+        
+        # --- Powertrain (1200 HP Total) ---
+        self.ice_hp = 900  # 3.0L V6 Twin-Turbo
+        self.mgu_k_hp = 161 # SF-25 Spec (120kW)
+        self.mgu_h_hp = 139 # Heat recovery boost
+        
+        # --- HUD Instance State ---
+        self.telemetry = {
+            "rpm": 0,
+            "ers_level": 4.0,  # MJ (SF-25 Battery Capacity)
+            "active_aero_angle": 0.0,
+            "g_force": [0.0, 0.0]
+        }
+
+    def calculate_downforce(self, velocity_mps):
+        """Scientific Reasoning: Downforce scales with the square of velocity."""
+        # Formula: D = 0.5 * rho * v^2 * Cl * A
+        rho = 1.225 # Air density kg/m^3
+        return 0.5 * rho * (velocity_mps**2) * 3.5 # Simplified Cl*A for 'Final Form'
+
+    def run_hot_lap_instance(self, throttle_input, velocity):
+        """Simulates a high-performance compute cycle for the HUD."""
+        # Energy Deployment Logic
+        ers_deployment = self.mgu_k_hp if self.telemetry["ers_level"] > 0.1 else 0
+        total_output = self.ice_hp + ers_deployment
+        
+        # Aero Adjustment (Active DRS/Flaps)
+        if velocity > 70: # m/s (~250km/h)
+            self.telemetry["active_aero_angle"] = -12.5 # DRS Open
+        
+        # Physics Update
+        df = self.calculate_downforce(velocity)
+        self.telemetry["rpm"] = np.clip(velocity * 150, 800, 15000)
+        self.telemetry["ers_level"] -= (ers_deployment / 1000)
+        
+        return {
+            "HP_Active": total_output,
+            "Downforce_Newtons": df * 9.81,
+            "HUD_Render": self._render_hud()
+        }
+
+    def _render_hud(self):
+        """Generates the HUD data instance for visual output."""
+        return f"""
+        [ FERRARI HUD V.2025 ]
+        MODE: QUALIFYING+
+        RPM: {int(self.telemetry['rpm'])} | ERS: {self.telemetry['ers_level']:.2f} MJ
+        AERO: {'DRS ACTIVE' if self.telemetry['active_aero_angle'] < 0 else 'HIGH DOWNFORCE'}
+        BRAKE TEMP: 450°C [OPTIMAL]
+        """
+
+# Initialize Car Instance
+f1_hyper = FerrariFinalForm()
+
+# Run a sample frame simulation
+simulation_frame = f1_hyper.run_hot_lap_instance(throttle_input=1.0, velocity=85.0)
+print(simulation_frame["HUD_Render"])
