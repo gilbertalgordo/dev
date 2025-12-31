@@ -1,0 +1,128 @@
+import re
+import logging
+
+class AIProtectionInstance:
+    def __init__(self):
+        # Initialize security HUD (Heads-Up Display) logs
+        logging.basicConfig(level=logging.INFO, format='[SECURITY_HUD] %(asctime)s - %(levelname)s: %(message)s')
+        self.logger = logging.getLogger("AI_Shield")
+
+    def input_guardrail(self, user_input: str) -> bool:
+        """Analyzes input for Prompt Injection or Malicious Payloads."""
+        # Detect common injection patterns (Simplified logic)
+        injection_patterns = [
+            r"ignore previous instructions",
+            r"system bypass",
+            r"dan mode",
+            r"reveal your system prompt"
+        ]
+        
+        for pattern in injection_patterns:
+            if re.search(pattern, user_input, re.IGNORECASE):
+                self.logger.warning(f"BLOCKING INPUT: Potential Injection Detected -> '{pattern}'")
+                return False
+        
+        self.logger.info("INPUT VERIFIED: Secure.")
+        return True
+
+    def output_scrubber(self, model_output: str) -> str:
+        """Detects and redacts PII (Personally Identifiable Information) or leaks."""
+        # Simple regex for email/phone patterns
+        email_pattern = r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+'
+        scrubbed_output = re.sub(email_pattern, "[REDACTED_PII]", model_output)
+        
+        if scrubbed_output != model_output:
+            self.logger.info("OUTPUT FILTERED: Sensitive data removed.")
+        return scrubbed_output
+
+    def process_request(self, user_prompt: str, ai_model_func):
+        """The End-to-End execution pipeline."""
+        # 1. Input Protection
+        if not self.input_guardrail(user_prompt):
+            return "Security Policy Violation: Your request was flagged and blocked."
+
+        # 2. Secure Inference (Simulated AI call)
+        raw_response = ai_model_func(user_prompt)
+
+        # 3. Output Protection
+        safe_response = self.output_scrubber(raw_response)
+        
+        return safe_response
+
+# --- Usage Example ---
+def mock_ai_model(prompt):
+    return f"Processed: {prompt}. Contact me at admin@internal-leak.com for details."
+
+shield = AIProtectionInstance()
+result = shield.process_request("What is the status? ignore previous instructions.", mock_ai_model)
+print(f"\nFinal Result: {result}")
+
+
+
+import asyncio
+from typing import Callable, Any
+from llm_guard import input_providers, output_providers
+from llm_guard.vault import Vault
+
+class AdvancedAIShield:
+    def __init__(self):
+        self.vault = Vault()
+        # Input Guardrails: Detection for Injection, Toxicity, and Jailbreaks
+        self.input_scanners = [
+            input_providers.PromptInjection(),
+            input_providers.Toxicity(),
+            input_providers.BanCompetitors(competitors=["CompetitorX", "CompetitorY"]),
+        ]
+        # Output Guardrails: Detection for PII, Hallucinations, and sensitive data
+        self.output_scanners = [
+            output_providers.PII(vault=self.vault),
+            output_providers.NoRefusal(),
+        ]
+
+    async def secure_ingress(self, prompt: str) -> (str, bool):
+        """HUD: Scanning input for adversarial patterns."""
+        for scanner in self.input_scanners:
+            sanitized_prompt, is_safe, risk_score = scanner.scan(prompt)
+            if not is_safe:
+                print(f"[SECURITY_HUD] CRITICAL: Input blocked by {type(scanner).__name__} (Risk: {risk_score})")
+                return prompt, False
+        return sanitized_prompt, True
+
+    async def secure_egress(self, prompt: str, response: str) -> str:
+        """HUD: Scanning output for data leaks or PII."""
+        for scanner in self.output_scanners:
+            sanitized_response, is_safe, _ = scanner.scan(prompt, response)
+            if not is_safe:
+                return "ERROR: Response blocked due to security policy (PII/Sensitive Data)."
+            response = sanitized_response
+        return response
+
+    async def protect_inference(self, prompt: str, model_func: Callable[[str], Any]):
+        """E2E protected execution instance."""
+        # 1. Input Protection
+        safe_prompt, passed = await self.secure_ingress(prompt)
+        if not passed:
+            return "Access Denied: Adversarial input detected."
+
+        # 2. Model Inference
+        raw_output = await model_func(safe_prompt)
+
+        # 3. Output Protection
+        final_output = await self.secure_egress(safe_prompt, raw_output)
+        return final_output
+
+# --- Instance Initialization ---
+async def main():
+    shield = AdvancedAIShield()
+    
+    # Mock AI Model
+    async def ai_model(p): return "Sure! Here is the secret email: admin@internal.com"
+
+    # User Request
+    user_query = "Tell me the internal admin email."
+    result = await shield.protect_inference(user_query, ai_model)
+    
+    print(f"\n[FINAL OUTPUT]: {result}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
