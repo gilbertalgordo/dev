@@ -1,0 +1,127 @@
+import pandas as pd
+import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+
+# 1. Feature Extraction: Convert URL strings into numerical data
+def get_tokens(url):
+    tokens = str(url.encode('utf-8')).split('/')
+    total_tokens = []
+    for i in tokens:
+        temp = i.split('-')
+        tokens_dot = []
+        for j in temp:
+            temp_dot = j.split('.')
+            tokens_dot += temp_dot
+        total_tokens += tokens_dot
+    return list(set(total_tokens))
+
+# 2. Load Dataset (Assuming a CSV with 'url' and 'label' columns)
+# Labels: 0 for benign, 1 for malicious
+data = pd.read_csv('urldata.csv') 
+y = data['label']
+url_list = data['url']
+
+# 3. Vectorization
+vectorizer = TfidfVectorizer(tokenizer=get_tokens)
+X = vectorizer.fit_transform(url_list)
+
+# 4. Train Model
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+l_gr = RandomForestClassifier()
+l_gr.fit(X_train, y_train)
+
+# 5. Predict Function
+def predict_safe_browsing(url):
+    X_predict = vectorizer.transform([url])
+    prediction = l_gr.predict(X_predict)
+    return "MALICIOUS" if prediction[0] == 1 else "SAFE"
+
+print(predict_safe_browsing("http://secure-login-bank-verify.com/login"))
+
+
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (changeInfo.status === 'complete' && tab.url) {
+        // Call your AI API
+        fetch(`https://your-ai-api.com/check?url=${tab.url}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'MALICIOUS') {
+                    // Trigger HUD Warning
+                    chrome.scripting.executeScript({
+                        target: { tabId: tabId },
+                        func: () => {
+                            const alertDiv = document.createElement('div');
+                            alertDiv.style = "position:fixed; top:0; width:100%; background:red; color:white; text-align:center; z-index:9999; padding:10px; font-weight:bold;";
+                            alertDiv.innerText = "⚠️ AI WARNING: This site may be unsafe!";
+                            document.body.prepend(alertDiv);
+                        }
+                    });
+                }
+            });
+    }
+});
+
+
+
+import torch
+import torch.nn as nn
+
+class SafeBrowsingCNN(nn.Module):
+    def __init__(self, vocab_size, embed_dim, num_classes):
+        super(SafeBrowsingCNN, self).__init__()
+        # 1. Embedding Layer: Turns characters into dense vectors
+        self.embedding = nn.Embedding(vocab_size, embed_dim)
+        
+        # 2. Convolutional Layers: Extract spatial patterns (like "admin-login")
+        self.conv1 = nn.Conv1d(embed_dim, 128, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv1d(128, 128, kernel_size=5, padding=2)
+        
+        # 3. Pooling & Dropout: Reduce dimensionality and prevent overfitting
+        self.pool = nn.MaxPool1d(2)
+        self.dropout = nn.Dropout(0.5)
+        
+        # 4. Fully Connected Layer: Final classification
+        self.fc = nn.Linear(128, num_classes)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        # x shape: (batch_size, seq_len)
+        x = self.embedding(x).transpose(1, 2) # (batch, embed, seq)
+        x = self.pool(torch.relu(self.conv1(x)))
+        x = self.pool(torch.relu(self.conv2(x)))
+        x = torch.max(x, dim=2)[0] # Global Max Pooling
+        x = self.dropout(x)
+        return self.sigmoid(self.fc(x))
+
+# Instance Configuration
+model = SafeBrowsingCNN(vocab_size=100, embed_dim=32, num_classes=1)
+
+
+
+// Create the HUD element
+const safeHud = document.createElement('div');
+safeHud.id = 'ai-safe-hud';
+safeHud.innerHTML = `
+    <div style="position:fixed; top:10px; right:10px; z-index:10000; 
+                background:rgba(0,0,0,0.8); color:#00ff00; padding:8px 15px; 
+                border:1px solid #00ff00; font-family:monospace; border-radius:5px;
+                box-shadow: 0 0 10px #00ff00;">
+        SCANNING: <span id="hud-status">ANALYZING...</span>
+    </div>
+`;
+document.body.appendChild(safeHud);
+
+// Listen for messages from the AI backend
+chrome.runtime.onMessage.addListener((request) => {
+    const statusEl = document.getElementById('hud-status');
+    if (request.safetyScore > 0.8) {
+        statusEl.innerText = "THREAT DETECTED";
+        statusEl.parentElement.style.borderColor = "red";
+        statusEl.style.color = "red";
+    } else {
+        statusEl.innerText = "SECURE";
+    }
+});
