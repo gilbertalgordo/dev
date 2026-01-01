@@ -1,0 +1,130 @@
+import subprocess
+import json
+import os
+
+# --- MOCK AI ANALYZER ---
+# In a real scenario, you'd use openai.ChatCompletion or a local Llama model
+def ai_verify_vulnerability(snippet, issue_text):
+    """
+    Simulates sending code to an AI to check if a vulnerability is exploitable.
+    """
+    prompt = f"Analyze this code for {issue_text}:\n\n{snippet}\n\nIs this a real threat?"
+    
+    # Mocked AI reasoning
+    if "os.system" in snippet and "input" in snippet:
+        return "CRITICAL: Valid Command Injection found. User input flows directly into shell."
+    return "LOW: Potential false positive. Context suggests sanitized input."
+
+def run_security_scan(target_dir):
+    print("="*50)
+    print("🛡️  AI SECURITY SCANNER HUD")
+    print(f"📍 Target: {target_dir}")
+    print("="*50)
+
+    # 1. Run traditional static analysis (Bandit)
+    # Outputting to JSON for machine readability
+    result = subprocess.run(
+        ["bandit", "-r", target_dir, "-f", "json"], 
+        capture_output=True, text=True
+    )
+    
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        print("❌ Error: No valid code found or Bandit failed.")
+        return
+
+    # 2. Process findings with AI Layer
+    instances = data.get("results", [])
+    
+    print(f"🔍 Found {len(instances)} potential issues. Verifying with AI...\n")
+
+    for idx, issue in enumerate(instances):
+        severity = issue['issue_severity']
+        file_path = issue['filename']
+        line = issue['line_number']
+        code_snippet = issue['code']
+        
+        # HUD View for each Instance
+        print(f"--- [INSTANCE {idx+1}] ---")
+        print(f"FILE: {file_path}:{line}")
+        print(f"BASE SEVERITY: {severity}")
+        
+        # AI Verification Step
+        ai_verdict = ai_verify_vulnerability(code_snippet, issue['issue_text'])
+        
+        print(f"🤖 AI VERDICT: {ai_verdict}")
+        print(f"📜 CODE: {code_snippet.strip()}")
+        print("-" * 30)
+
+if __name__ == "__main__":
+    # Ensure bandit is installed: pip install bandit
+    run_security_scan("./my_project_folder")
+
+
+
+import ast
+import json
+import requests # For LLM API or Local Inference (Ollama/LocalAI)
+
+class AISecurityPro:
+    def __init__(self, target_file):
+        self.target_file = target_file
+        self.findings = []
+        with open(target_file, "r") as f:
+            self.source_code = f.read()
+
+    def get_function_slices(self):
+        """Extracts individual function bodies using AST for targeted AI analysis."""
+        tree = ast.parse(self.source_code)
+        slices = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef):
+                slices.append({
+                    "name": node.name,
+                    "code": ast.get_source_segment(self.source_code, node),
+                    "line": node.lineno
+                })
+        return slices
+
+    def ai_analyze(self, code_slice):
+        """Advanced inference using a security-tuned LLM or transformer."""
+        # Example API call to a local security-tuned model
+        payload = {
+            "model": "codellama-security",
+            "prompt": f"Analyze this function for CWE vulnerabilities. Return JSON only:\n{code_slice}",
+            "stream": False
+        }
+        # Response = requests.post("http://localhost:11434/api/generate", json=payload)
+        # Mocking the AI's deep reasoning for this instance:
+        return {"vulnerable": True, "reason": "Unsanitized input in 'exec' call", "cwe": "CWE-94"}
+
+    def run_scan(self):
+        print(f"📡 SCANNING: {self.target_file}")
+        slices = self.get_function_slices()
+        
+        for item in slices:
+            verdict = self.ai_analyze(item['code'])
+            if verdict["vulnerable"]:
+                self.findings.append({
+                    "func": item['name'],
+                    "line": item['line'],
+                    "analysis": verdict["reason"]
+                })
+
+    def display_hud(self):
+        """Displays a high-fidelity HUD for scan results."""
+        print("\n" + "═"*60)
+        print("🟢 AI SECURITY SCANNER - SYSTEM STATUS: COMPLETE")
+        print("═"*60)
+        for f in self.findings:
+            print(f" [!] VULNERABILITY FOUND")
+            print(f" ├─ Function: {f['func']}")
+            print(f" ├─ Line:     {f['line']}")
+            print(f" └─ Reason:   {f['analysis']}")
+        print("═"*60)
+
+if __name__ == "__main__":
+    scanner = AISecurityPro("app.py")
+    scanner.run_scan()
+    scanner.display_hud()
