@@ -1,0 +1,106 @@
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+
+# --- STEP 1: GENERATE SYNTHETIC DATA ---
+def generate_data(n_samples=1000):
+    np.random.seed(42)
+    base_price = np.random.uniform(50, 500, n_samples)
+    demand = np.random.uniform(10, 100, n_samples)
+    inventory = np.random.uniform(5, 200, n_samples)
+    comp_price = base_price * np.random.uniform(0.8, 1.1, n_samples)
+    
+    # Logic: Higher inventory + Lower demand + Lower comp_price = Higher Discount needed
+    optimal_discount = (inventory / 200) * 0.2 + (1 - demand / 100) * 0.15 
+    optimal_discount += np.where(comp_price < base_price, 0.1, 0)
+    optimal_discount = np.clip(optimal_discount, 0, 0.5) # Max 50% discount
+
+    df = pd.DataFrame({
+        'base_price': base_price,
+        'demand_score': demand,
+        'inventory_level': inventory,
+        'competitor_price': comp_price,
+        'optimal_discount': optimal_discount
+    })
+    return df
+
+# --- STEP 2: TRAIN THE AI ---
+df = generate_data()
+X = df.drop('optimal_discount', axis=1)
+y = df['optimal_discount']
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+
+# Using Random Forest for non-linear reasoning
+model = RandomForestRegressor(n_estimators=100)
+model.fit(X_train, y_train)
+
+# --- STEP 3: PREDICTION FUNCTION ---
+def suggest_discount(base, demand, stock, comp):
+    features = pd.DataFrame([[base, demand, stock, comp]], 
+                            columns=['base_price', 'demand_score', 'inventory_level', 'competitor_price'])
+    prediction = model.predict(features)[0]
+    return round(prediction * 100, 2)
+
+# Example Usage
+current_discount = suggest_discount(199.99, 30, 150, 185.00)
+
+print(f"--- AI DISCOUNT HUD ---")
+print(f"Base Price: $199.99 | Competitor: $185.00")
+print(f"Demand: Low (30/100) | Stock: High (150 units)")
+print(f"------------------------")
+print(f"RECOMMENDED DISCOUNT: {current_discount}%")
+print(f"NEW SALES PRICE: ${round(199.99 * (1 - current_discount/100), 2)}")
+
+
+
+import numpy as np
+import pandas as pd
+
+class DiscountAI:
+    def __init__(self, states_range, actions):
+        # Actions: 0 = No Discount, 1 = 10% Off, 2 = 25% Off, 3 = 50% Off
+        self.q_table = np.zeros((states_range, len(actions)))
+        self.actions = actions
+        self.learning_rate = 0.1
+        self.discount_factor = 0.95
+        self.epsilon = 0.2  # Exploration rate
+
+    def get_state(self, inventory, demand):
+        # Convert continuous variables into discrete 'Instances' for the AI
+        inv_bin = min(inventory // 20, 4)  # 5 levels of inventory
+        dem_bin = min(demand // 20, 4)     # 5 levels of demand
+        return int(inv_bin * 5 + dem_bin)
+
+    def choose_action(self, state):
+        if np.random.uniform(0, 1) < self.epsilon:
+            return np.random.choice(len(self.actions))  # Explore
+        return np.argmax(self.q_table[state])           # Exploit
+
+    def update_ai(self, state, action, reward, next_state):
+        # The Bellman Equation: Scientific reasoning for value iteration
+        predict = self.q_table[state, action]
+        target = reward + self.discount_factor * np.max(self.q_table[next_state])
+        self.q_table[state, action] += self.learning_rate * (target - predict)
+
+# --- SIMULATION INSTANCE ---
+ai = DiscountAI(states_range=25, actions=[0, 0.10, 0.25, 0.50])
+
+# Scenario: High Stock (100), Low Demand (10)
+current_inv = 100
+current_dem = 10
+state = ai.get_state(current_inv, current_dem)
+
+# AI Decides Action
+action_idx = ai.choose_action(state)
+chosen_discount = ai.actions[action_idx]
+
+# Calculate Reward (Logic: High discount on low demand = moving stock, but lower margin)
+sales_volume = (current_dem * (1 + chosen_discount * 2)) 
+reward = sales_volume * (1 - chosen_discount) 
+
+print(f"--- ADVANCED AI HUD ---")
+print(f"Current State ID: {state}")
+print(f"AI Decision: {chosen_discount*100}% Discount")
+print(f"Projected Reward Score: {round(reward, 2)}")
