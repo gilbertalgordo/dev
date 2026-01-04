@@ -1,0 +1,122 @@
+import numpy as np
+from pyboy import PyBoy
+
+class EmulatorAI:
+    def __init__(self, rom_path):
+        # Initialize the emulator instance
+        self.pyboy = PyBoy(rom_path, window_type="headless") 
+        self.pyboy.set_emulation_speed(0) # Run as fast as possible
+        
+    def get_hud_state(self):
+        """
+        Extracts the visual 'HUD' data for the AI.
+        This represents the screen pixels as a normalized array.
+        """
+        screen_data = np.array(self.pyboy.botsupport_manager().screen().screen_ndarray())
+        # Normalize pixel values to [0, 1] for scientific accuracy in training
+        return screen_data.astype(np.float32) / 255.0
+
+    def get_memory_instance(self, address):
+        """Read specific RAM values (e.g., Player Health, Score)"""
+        return self.pyboy.get_memory_value(address)
+
+    def perform_action(self, action_id):
+        """Maps AI output to emulator button presses"""
+        # 0: Left, 1: Right, 2: A, 3: B, etc.
+        actions = ["left", "right", "a", "b", "start", "select"]
+        button = actions[action_id]
+        
+        self.pyboy.send_input(f"press_{button}")
+        self.pyboy.tick() # Advance 1 frame
+        self.pyboy.send_input(f"release_{button}")
+
+
+
+# Setup
+env = EmulatorAI("game_rom.gb")
+running = True
+
+while running:
+    # 1. Get the current HUD (Visuals)
+    current_view = env.get_hud_state()
+    
+    # 2. Get internal state (e.g., Memory address 0xD355 for Player X-Pos)
+    player_x = env.get_memory_instance(0xD355)
+    
+    # 3. AI Decision (Placeholder for your Model.predict logic)
+    # For this example, we'll just move 'Right'
+    action = 1 
+    
+    # 4. Execute
+    env.perform_action(action)
+    
+    # Check for 'Game Over' or HUD changes
+    if env.get_memory_instance(0xFF00) == 0: # Hypothetical end state
+        running = False
+
+
+
+import tensorflow as tf
+from tensorflow.keras import layers
+
+def build_ai_model(input_shape, action_space):
+    """
+    Creates a Deep Q-Network.
+    Input: Normalized HUD pixels.
+    Output: Expected 'Reward' for each possible button press.
+    """
+    model = tf.keras.Sequential([
+        # Feature Extraction (Visual HUD analysis)
+        layers.Conv2D(32, (8, 8), strides=4, activation='relu', input_shape=input_shape),
+        layers.Conv2D(64, (4, 4), strides=2, activation='relu'),
+        layers.Conv2D(64, (3, 3), strides=1, activation='relu'),
+        layers.Flatten(),
+        
+        # Decision Making (Dense layers)
+        layers.Dense(512, activation='relu'),
+        layers.Dense(action_space, activation='linear') # Output Q-values
+    ])
+    
+    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.00025), loss='mse')
+    return model
+
+
+
+import random
+from collections import deque
+
+class AdvancedTrainer:
+    def __init__(self, action_size):
+        self.memory = deque(maxlen=20000) # Experience Replay Buffer
+        self.gamma = 0.95    # Discount rate for future rewards
+        self.epsilon = 1.0   # Exploration rate (randomness)
+        self.epsilon_min = 0.01
+        self.epsilon_decay = 0.995
+        self.model = build_ai_model((160, 144, 3), action_size)
+
+    def remember(self, state, action, reward, next_state, done):
+        """Store the instance of experience"""
+        self.memory.append((state, action, reward, next_state, done))
+
+    def act(self, state):
+        """Epsilon-greedy policy for scientific exploration"""
+        if np.random.rand() <= self.epsilon:
+            return random.randrange(6) # Return random button
+        act_values = self.model.predict(state, verbose=0)
+        return np.argmax(act_values[0]) # Return best predicted button
+
+    def replay(self, batch_size):
+        """Train the model using a random sample of past HUD states"""
+        minibatch = random.sample(self.memory, batch_size)
+        for state, action, reward, next_state, done in minibatch:
+            target = reward
+            if not done:
+                # Bellman Equation: r + gamma * max(Q')
+                target = (reward + self.gamma * np.amax(self.model.predict(next_state, verbose=0)[0]))
+            
+            target_f = self.model.predict(state, verbose=0)
+            target_f[0][action] = target
+            self.model.fit(state, target_f, epochs=1, verbose=0)
+            
+        if self.epsilon > self.epsilon_min:
+            self.epsilon *= self.epsilon_decay
