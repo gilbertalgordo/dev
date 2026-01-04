@@ -1,0 +1,87 @@
+import psutil
+import time
+
+# Configuration for "Demonic" behavior thresholds
+CPU_THRESHOLD = 80.0  # Percentage
+SUSPICIOUS_NAMES = ['miner', 'worm', 'hidden_daemon', 'botnet']
+
+def exorcise_process(proc):
+    """Terminates a suspicious background process."""
+    try:
+        print(f"[!] Alert: Terminating suspicious process {proc.name()} (PID: {proc.pid})")
+        proc.terminate()
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        pass
+
+def monitor_system():
+    print("[-] Sentinel AI: Monitoring background daemons...")
+    while True:
+        for proc in psutil.process_iter(['pid', 'name', 'cpu_percent']):
+            try:
+                # 1. Check for suspicious naming conventions
+                if any(bad_word in proc.info['name'].lower() for bad_word in SUSPICIOUS_NAMES):
+                    exorcise_process(proc)
+
+                # 2. Check for resource exhaustion (Signature of malicious daemons)
+                if proc.info['cpu_percent'] > CPU_THRESHOLD:
+                    print(f"[?] High Resource Usage Detected: {proc.info['name']}")
+                    # Additional logic can be added here to verify process path
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        
+        time.sleep(5) # Scan interval
+
+if __name__ == "__main__":
+    monitor_system()
+
+
+
+import psutil
+import pandas as pd
+from sklearn.ensemble import IsolationForest
+import time
+
+class AntiDemonicSentinel:
+    def __init__(self):
+        # The 'Brain': Detecting anomalies in a multi-dimensional space
+        self.model = IsolationForest(contamination=0.05) # Assume 5% of processes might be 'demonic'
+        self.registry = []
+
+    def collect_system_pulse(self):
+        """Captures a snapshot of current background daemon activity."""
+        data = []
+        for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'num_threads']):
+            try:
+                # We focus on the 'vitals' of the process
+                data.append(proc.info)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        return data
+
+    def exorcise_demons(self):
+        """Identifies and isolates malicious background processes."""
+        snapshot = self.collect_system_pulse()
+        if len(snapshot) < 10: return # Need a baseline
+        
+        df = pd.DataFrame(snapshot)
+        # Features for the AI to analyze: CPU, RAM, and Thread count
+        features = df[['cpu_percent', 'memory_percent', 'num_threads']]
+        
+        # Fit and predict: -1 is an anomaly (Demonic), 1 is normal
+        df['integrity_score'] = self.model.fit_predict(features)
+        
+        demons = df[df['integrity_score'] == -1]
+        
+        for _, demon in demons.iterrows():
+            print(f"[!] EXORCISM REQUIRED: {demon['name']} (PID: {demon['pid']})")
+            # Logic for quarantine or termination would go here
+            
+    def run_hud_monitor(self):
+        print("--- SENTINEL HUD ACTIVE ---")
+        while True:
+            self.exorcise_demons()
+            time.sleep(10)
+
+if __name__ == "__main__":
+    sentinel = AntiDemonicSentinel()
+    sentinel.run_hud_monitor()
