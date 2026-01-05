@@ -1,0 +1,134 @@
+import os
+import requests
+import google.generativeai as genai
+from datetime import datetime
+
+# --- CONFIGURATION ---
+WEATHER_API_KEY = "YOUR_OPENWEATHER_API_KEY"
+GEMINI_API_KEY = "YOUR_GEMINI_API_KEY"
+
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash')
+
+def get_weather_data(city):
+    """Fetches real-time weather data for a specific city."""
+    base_url = "http://api.openweathermap.org/data/2.5/weather"
+    params = {
+        'q': city,
+        'appid': WEATHER_API_KEY,
+        'units': 'metric'  # Use 'imperial' for Fahrenheit
+    }
+    
+    response = requests.get(base_url, params=params)
+    if response.status_code == 200:
+        return response.json()
+    return None
+
+def weather_ai_assistant(user_prompt):
+    """Uses AI to understand the city and generate a friendly response."""
+    
+    # Step 1: Use AI to extract the city name from the prompt
+    extraction_prompt = f"Extract only the city name from this text: '{user_prompt}'. If no city is found, return 'None'."
+    city_name = model.generate_content(extraction_prompt).text.strip()
+    
+    if "None" in city_name:
+        return "I'm sorry, I couldn't figure out which city you're asking about."
+
+    # Step 2: Get real-time data
+    data = get_weather_data(city_name)
+    
+    if not data:
+        return f"I couldn't find weather data for {city_name}."
+
+    # Step 3: Let AI format the final response
+    context = f"""
+    The current weather in {city_name} is:
+    - Temperature: {data['main']['temp']}°C
+    - Condition: {data['weather'][0]['description']}
+    - Humidity: {data['main']['humidity']}%
+    - Wind Speed: {data['wind']['speed']} m/s
+    
+    Answer the user's question: '{user_prompt}' using this data. 
+    Be helpful and mention if they should bring an umbrella or a coat!
+    """
+    
+    final_response = model.generate_content(context)
+    return final_response.text
+
+# --- RUNNING THE AI ---
+if __name__ == "__main__":
+    print("Weather AI: Hello! Ask me about the weather anywhere.")
+    query = input("You: ")
+    print(f"AI: {weather_ai_assistant(query)}")
+
+
+
+import plotly.graph_objects as go
+import pandas as pd
+import numpy as np
+import requests
+from sklearn.ensemble import RandomForestRegressor
+
+class AdvancedWeatherAI:
+    def __init__(self, api_key):
+        self.api_key = api_key
+        self.model = RandomForestRegressor(n_estimators=100)
+        
+    def fetch_historical_mock(self, city):
+        """In a real scenario, use OpenWeather History API. 
+        Here we generate synthetic 'learning' data for the AI."""
+        data = {
+            'temp': np.random.normal(20, 5, 100),
+            'humidity': np.random.normal(50, 10, 100),
+            'pressure': np.random.normal(1013, 2, 100)
+        }
+        df = pd.DataFrame(data)
+        # Target: Predict next temp based on current temp/humidity/pressure
+        df['target_temp'] = df['temp'].shift(-1).fillna(df['temp'].mean())
+        return df
+
+    def train_predictive_ai(self, city):
+        df = self.fetch_historical_mock(city)
+        X = df[['temp', 'humidity', 'pressure']]
+        y = df['target_temp']
+        self.model.fit(X, y)
+        print(f"AI Model Trained for {city} logic.")
+
+    def create_3d_hud(self, city_lat, city_lon, temp):
+        """Generates a 3D HUD Visualization."""
+        fig = go.Figure()
+
+        # Create a 3D Sphere (The Earth)
+        phi = np.linspace(0, 2*np.pi, 100)
+        theta = np.linspace(0, np.pi, 100)
+        xm = np.outer(np.cos(phi), np.sin(theta))
+        ym = np.outer(np.sin(phi), np.sin(theta))
+        zm = np.outer(np.ones(np.size(phi)), np.cos(theta))
+
+        # Base Globe
+        fig.add_trace(go.Surface(x=xm, y=ym, z=zm, 
+                                 colorscale='Blues', 
+                                 showscale=False, 
+                                 opacity=0.3))
+
+        # Weather 'HUD' Marker
+        fig.add_trace(go.Scatter3d(
+            x=[1], y=[0], z=[0.5], # Relative position
+            mode='markers+text',
+            marker=dict(size=10, color='cyan', symbol='diamond'),
+            text=[f"SYSTEM ACTIVE: {temp}°C"],
+            textposition="top center"
+        ))
+
+        fig.update_layout(
+            title=f"HUD: GLOBAL WEATHER INTEL - {city_lat}, {city_lon}",
+            template="plotly_dark",
+            scene=dict(xaxis_showgrid=False, yaxis_showgrid=False, zaxis_showgrid=False)
+        )
+        fig.show()
+
+# --- Execution ---
+# Replace with your key
+WAI = AdvancedWeatherAI("YOUR_API_KEY")
+WAI.train_predictive_ai("New York")
+WAI.create_3d_hud(40.71, -74.00, 22.5)
