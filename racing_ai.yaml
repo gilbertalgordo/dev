@@ -1,0 +1,91 @@
+import numpy as np
+
+class RacingAI:
+    def __init__(self, position, max_speed=100.0, max_force=5.0):
+        self.position = np.array(position, dtype=float) # [x, y, z]
+        self.velocity = np.zeros(3)
+        self.max_speed = max_speed
+        self.max_force = max_force # Turning agility
+        self.look_ahead_distance = 15.0
+
+    def calculate_steering(self, target_waypoint):
+        # 1. Calculate Desired Velocity
+        desired = target_waypoint - self.position
+        distance = np.linalg.norm(desired)
+        
+        # Normalize and scale to max speed
+        desired = (desired / distance) * self.max_speed
+        
+        # 2. Steering = Desired - Current Velocity
+        steering = desired - self.velocity
+        
+        # Limit steering force (Simulates grip/traction)
+        mag = np.linalg.norm(steering)
+        if mag > self.max_force:
+            steering = (steering / mag) * self.max_force
+            
+        return steering
+
+    def update(self, target, dt):
+        force = self.calculate_steering(target)
+        self.velocity += force * dt
+        
+        # Cap speed
+        speed = np.linalg.norm(self.velocity)
+        if speed > self.max_speed:
+            self.velocity = (self.velocity / speed) * self.max_speed
+            
+        self.position += self.velocity * dt
+        return self.position
+
+
+
+def avoid_obstacles(self, obstacles):
+    avoidance_force = np.zeros(3)
+    for obs in obstacles:
+        dist = np.linalg.norm(obs.position - self.position)
+        if dist < self.look_ahead_distance:
+            # Create a force pushing away from the obstacle
+            push_away = self.position - obs.position
+            avoidance_force += (push_away / dist**2) # Stronger force when closer
+    return avoidance_force
+
+
+
+class AdvancedRacingAI:
+    def __init__(self, kp=0.5, ki=0.01, kd=0.1):
+        # PID Gains
+        self.kp = kp  # Proportional: Sharpness of turn
+        self.ki = ki  # Integral: Corrects steady-state drift
+        self.kd = kd  # Derivative: Prevents oversteering/oscillations
+        
+        self.prev_error = 0
+        self.integral = 0
+
+    def get_steering_angle(self, current_pos, target_pos, current_heading, dt):
+        # 1. Calculate Cross-Track Error (CTE)
+        # Difference between target angle and current angle
+        desired_heading = np.arctan2(target_pos[1] - current_pos[1], 
+                                     target_pos[0] - current_pos[0])
+        error = desired_heading - current_heading
+        
+        # Normalize error to [-pi, pi]
+        error = (error + np.pi) % (2 * np.pi) - np.pi
+        
+        # 2. PID Logic
+        self.integral += error * dt
+        derivative = (error - self.prev_error) / dt
+        
+        steering = (self.kp * error) + (self.ki * self.integral) + (self.kd * derivative)
+        
+        self.prev_error = error
+        return np.clip(steering, -1.0, 1.0) # Output for steering rack
+
+
+
+def calculate_target_speed(self, track_curvature_radius, friction_coeff=1.2):
+    gravity = 9.81
+    # Physics-based grip limit
+    max_safe_speed = np.sqrt(friction_coeff * gravity * track_curvature_radius)
+    return max_safe_speed
+
