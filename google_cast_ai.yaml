@@ -1,0 +1,164 @@
+// In your OptionsProvider class
+class CastOptionsProvider : OptionsProvider {
+    override fun getCastOptions(context: Context): CastOptions {
+        return CastOptions.Builder()
+            .setReceiverApplicationId(context.getString(R.string.app_id)) // Your Receiver ID
+            .build()
+    }
+
+    override fun getAdditionalSessionProviders(context: Context): List<SessionProvider>? {
+        return null
+    }
+}
+
+
+
+// AI Assistant to resolve natural language into Castable Media
+suspend fun resolveMediaRequest(userPrompt: String): MediaInfo {
+    val genModel = Firebase.vertexAI.generativeModel("gemini-1.5-pro")
+    
+    val systemInstruction = "Extract the movie title and stream URL from the user's request. Return JSON."
+    val response = genModel.generateContent(userPrompt)
+    
+    // Logic to parse the AI response and fetch the actual stream URL
+    val videoUrl = parseUrlFromAI(response.text) 
+    
+    return MediaInfo.Builder(videoUrl)
+        .setStreamType(MediaInfo.STREAM_TYPE_BUFFERED)
+        .setContentType("video/mp4")
+        .setMetadata(MediaMetadata(MediaMetadata.MEDIA_TYPE_MOVIE).apply {
+            putString(MediaMetadata.KEY_TITLE, "AI Recommended Content")
+        })
+        .build()
+}
+
+
+
+fun playAiContent(mediaInfo: MediaInfo) {
+    val castSession = CastContext.getSharedInstance(context).sessionManager.currentCastSession
+    
+    if (castSession != null && castSession.isConnected) {
+        val remoteMediaClient = castSession.remoteMediaClient
+        val loadRequestData = MediaLoadRequestData.Builder()
+            .setMediaInfo(mediaInfo)
+            .setAutoplay(true)
+            .build()
+            
+        remoteMediaClient?.load(loadRequestData)
+    } else {
+        // Prompt user to connect to a device first
+    }
+}
+
+
+
+// Example of the 2026 Suggester API
+val suggestionRequest = CastDeviceSuggestionRequest.Builder()
+    .setContextualSignal(CastSignal.MEDIA_BROWSED)
+    .build()
+
+castContext.getDeviceStatus(suggestionRequest).addOnSuccessListener { suggestion ->
+    if (suggestion.hasNearbyDevice()) {
+        showOneTapTransferHUD(suggestion.deviceName)
+    }
+}
+
+
+
+// Android Sender using Vertex AI for Gemini
+class IntelligentCastManager(private val context: Context) {
+    
+    private val model = Firebase.vertexAI.generativeModel("gemini-2.5-flash")
+
+    suspend fun processAndCast(userPrompt: String) {
+        // AI analyzes the request and returns structured media data
+        val aiResponse = model.generateContent("""
+            User wants: $userPrompt. 
+            Return JSON: { "title": "string", "url": "url", "description": "string", "3d_hud_style": "string" }
+        """.trimIndent())
+
+        val mediaData = parseJson(aiResponse.text)
+
+        // Create Media Metadata with custom 'HUD' instructions
+        val metadata = MediaMetadata(MediaMetadata.MEDIA_TYPE_MOVIE).apply {
+            putString(MediaMetadata.KEY_TITLE, mediaData.title)
+            // Custom data sent to the receiver to render the HUD
+            val customData = JSONObject().apply {
+                put("hud_mode", mediaData.hudStyle) // e.g., "minimalist_3d"
+                put("ai_summary", mediaData.description)
+            }
+            loadMedia(mediaData.url, metadata, customData)
+        }
+    }
+
+    private fun loadMedia(url: String, metadata: MediaMetadata, customData: JSONObject) {
+        val castSession = CastContext.getSharedInstance(context).sessionManager.currentCastSession
+        val remoteMediaClient = castSession?.remoteMediaClient
+
+        val loadRequestData = MediaLoadRequestData.Builder()
+            .setMediaInfo(MediaInfo.Builder(url)
+                .setStreamType(MediaInfo.STREAM_TYPE_BUFFERED)
+                .setMetadata(metadata)
+                .setCustomData(customData)
+                .build())
+            .setAutoplay(true)
+            .build()
+
+        remoteMediaClient?.load(loadRequestData)
+    }
+}
+
+
+
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+    <style>
+        #hud-overlay {
+            position: absolute;
+            top: 10%; left: 5%;
+            color: cyan;
+            font-family: 'Orbitron', sans-serif;
+            text-shadow: 0 0 10px rgba(0, 255, 255, 0.8);
+            transform: perspective(500px) rotateY(10deg); /* 3D Perspective Effect */
+            opacity: 0;
+            transition: opacity 1s;
+        }
+    </style>
+</head>
+<body>
+    <cast-media-player></cast-media-player>
+    <div id="hud-overlay">
+        <h2 id="ai-title">AI ANALYSIS ACTIVE</h2>
+        <p id="ai-description"></p>
+    </div>
+
+    <script>
+        const context = cast.framework.CastReceiverContext.getInstance();
+        const playerManager = context.getPlayerManager();
+
+        // Listen for the custom data from our AI Sender
+        playerManager.setMessageInterceptor(
+            cast.framework.messages.MessageType.LOAD,
+            loadRequestData => {
+                const customData = loadRequestData.media.customData;
+                if (customData && customData.hud_mode) {
+                    show3DHUD(customData.ai_summary);
+                }
+                return loadRequestData;
+            }
+        );
+
+        function show3DHUD(summary) {
+            const hud = document.getElementById('hud-overlay');
+            document.getElementById('ai-description').innerText = summary;
+            hud.style.opacity = '1';
+            // Auto-hide HUD after 10 seconds
+            setTimeout(() => { hud.style.opacity = '0'; }, 10000);
+        }
+
+        context.start();
+    </script>
+</body>
+</html>
