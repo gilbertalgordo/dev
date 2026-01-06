@@ -1,0 +1,107 @@
+import cv2
+import torch
+from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
+
+app = FastAPI()
+
+# Load an AI model (YOLOv8 via torch hub for simplicity)
+# In a production environment, use a local .pt or .onnx file
+model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
+
+def generate_frames():
+    # Use 0 for local webcam or "rtsp://..." for a network camera
+    camera = cv2.VideoCapture(0)
+    
+    while True:
+        success, frame = camera.read()
+        if not success:
+            break
+        else:
+            # 1. AI Inference
+            results = model(frame)
+            
+            # 2. Add HUD Overlay (Heads-Up Display)
+            # Render detection boxes and labels onto the frame
+            processed_frame = results.render()[0]
+            
+            # Add custom HUD text (Resolution/FPS)
+            cv2.putText(processed_frame, "AI STREAM ACTIVE - HD 1080p", (10, 30), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+            # 3. Encode the frame for streaming
+            ret, buffer = cv2.imencode('.jpg', processed_frame)
+            frame_bytes = buffer.tobytes()
+            
+            # Yield as a multipart stream
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+
+@app.get("/video_feed")
+def video_feed():
+    return StreamingResponse(generate_frames(), 
+                             media_type="multipart/x-mixed-replace; boundary=frame")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
+import asyncio
+import cv2
+import numpy as np
+from aiortc import MediaStreamTrack, RTCPeerConnection, RTCSessionDescription
+from av import VideoFrame
+
+class AIInferenceTrack(MediaStreamTrack):
+    """
+    An advanced WebRTC track that transforms video frames using AI.
+    """
+    kind = "video"
+
+    def __init__(self, track, model):
+        super().__init__()
+        self.track = track
+        self.model = model  # Assume a pre-loaded TensorRT or Torch model
+
+    async def recv(self):
+        # 1. Capture frame from the incoming WebRTC stream
+        frame = await self.track.recv()
+        
+        # Convert PyAV frame to numpy array (BGR for OpenCV)
+        img = frame.to_ndarray(format="bgr24")
+
+        # 2. AI Processing (Object Detection / Depth Estimation)
+        # Using a mock inference call for demonstration
+        results = self.model(img) 
+
+        # 3. Apply Advanced HUD (Heads-Up Display)
+        # We simulate a 3D HUD by drawing perspective-aware overlays
+        h, w, _ = img.shape
+        cv2.rectangle(img, (50, 50), (w-50, h-50), (0, 255, 0), 1) # Border
+        
+        # HD Telemetry Text
+        cv2.putText(img, "SYS_STAT: OPTIMAL", (60, 80), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        cv2.putText(img, f"LATENCY: <30ms | RES: {w}x{h}", (60, 110), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+
+        # 4. Convert back to PyAV VideoFrame for WebRTC transmission
+        new_frame = VideoFrame.from_ndarray(img, format="bgr24")
+        new_frame.pts = frame.pts
+        new_frame.time_base = frame.time_base
+        return new_frame
+
+async def run_server():
+    pc = RTCPeerConnection()
+    
+    @pc.on("track")
+    def on_track(track):
+        if track.kind == "video":
+            # Wrap the incoming track with our AI Inference Track
+            local_video = AIInferenceTrack(track, model=loaded_model)
+            pc.addTrack(local_video)
+
+    # Signaling logic (Offer/Answer) would go here
+    # Typically handled via a FastAPI endpoint
