@@ -1,0 +1,161 @@
+import cv2
+import numpy as np
+
+class AIAdBlocker:
+    def __init__(self, model_weights):
+        # Load a pre-trained model (e.g., YOLOv8) 
+        # trained specifically on web-ad datasets
+        self.net = cv2.dnn.readNet(model_weights)
+        self.classes = ["advertisement"]
+
+    def detect_ads(self, frame):
+        height, width = frame.shape[:2]
+        # Pre-process image for the AI model
+        blob = cv2.dnn.blobFromImage(frame, 1/255, (416, 416), (0,0,0), swapRB=True, crop=False)
+        self.net.setInput(blob)
+        
+        # Run inference
+        layer_names = self.net.getUnconnectedOutLayersNames()
+        outputs = self.net.forward(layer_names)
+        
+        ad_coordinates = []
+        for output in outputs:
+            for detection in output:
+                scores = detection[5:]
+                class_id = np.argmax(scores)
+                confidence = scores[class_id]
+                
+                # Accuracy Threshold: Only hide if > 85% certain
+                if confidence > 0.85:
+                    center_x = int(detection[0] * width)
+                    center_y = int(detection[1] * height)
+                    w = int(detection[2] * width)
+                    h = int(detection[3] * height)
+                    
+                    x = int(center_x - w / 2)
+                    y = int(center_y - h / 2)
+                    ad_coordinates.append((x, y, w, h))
+                    
+        return ad_coordinates
+
+    def hide_ads(self, frame, coordinates):
+        for (x, y, w, h) in coordinates:
+            # Apply a Gaussian blur or solid fill to the ad instance
+            frame[y:y+h, x:x+w] = (255, 255, 255) 
+        return frame
+
+
+
+// Function to scan the DOM and hide ad instances
+async function hideAdsAI() {
+    const model = await tf.loadGraphModel('model_url/model.json');
+    const images = document.querySelectorAll('img, iframe, div[class*="ad"]');
+
+    images.forEach(async (el) => {
+        const tensor = tf.browser.fromPixels(el);
+        const prediction = await model.predict(tensor.expandDims(0));
+        
+        // Scientific reasoning: Check probability of 'Ad' class
+        if (prediction.dataSync()[0] > 0.90) {
+            el.style.display = 'none'; // Automatic hide
+            console.log("AI hidden an ad instance.");
+        }
+    });
+}
+
+
+
+/**
+ * Advanced Perceptual Ad Blocker Instance
+ * Uses a Convolutional Neural Network (CNN) to detect ad patterns.
+ */
+class PerceptualAdBlocker {
+    constructor() {
+        this.model = null;
+        this.threshold = 0.88; // High accuracy requirement
+        this.init();
+    }
+
+    async init() {
+        // Load a pre-trained weights file specialized in web elements
+        this.model = await tf.loadGraphModel('https://ai-models.storage/web_ad_detector/model.json');
+        this.observeDOM();
+    }
+
+    async analyzeElement(element) {
+        if (element.offsetWidth < 10 || element.offsetHeight < 10) return;
+
+        // Scientific Reasoning: Capture the pixel data of the element instance
+        const tensor = tf.browser.fromPixels(element)
+            .resizeNearestNeighbor([224, 224])
+            .toFloat()
+            .expandDims();
+
+        const prediction = await this.model.predict(tensor).data();
+        
+        // If the AI identifies the instance as an ad with high confidence
+        if (prediction[0] > this.threshold) {
+            this.hideInstance(element, prediction[0]);
+        }
+    }
+
+    hideInstance(el, confidence) {
+        // Apply a visual HUD style for feedback
+        el.style.filter = "blur(20px)";
+        el.style.opacity = "0.1";
+        el.style.pointerEvents = "none";
+        el.setAttribute('data-ai-blocked', `Confidence: ${(confidence * 100).toFixed(2)}%`);
+    }
+
+    observeDOM() {
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach(mutation => {
+                mutation.addedNodes.forEach(node => {
+                    if (node.nodeType === 1) this.analyzeElement(node);
+                });
+            });
+        });
+
+        observer.observe(document.body, { childList: true, subtree: true });
+    }
+}
+
+new PerceptualAdBlocker();
+
+
+
+/* AI Scanning HUD */
+[data-ai-blocked] {
+    position: relative;
+    border: 2px solid #00f2ff !important;
+    transition: all 0.5s ease;
+}
+
+[data-ai-blocked]::before {
+    content: "AD INSTANCE DETECTED: " attr(data-ai-blocked);
+    position: absolute;
+    top: -25px;
+    left: 0;
+    background: rgba(0, 242, 255, 0.9);
+    color: #000;
+    font-family: 'Courier New', monospace;
+    font-size: 10px;
+    font-weight: bold;
+    padding: 2px 8px;
+    clip-path: polygon(0% 0%, 95% 0%, 100% 50%, 95% 100%, 0% 100%);
+    z-index: 9999;
+}
+
+/* 3D Scanning Animation */
+@keyframes scan-line {
+    0% { transform: translateY(-100%); }
+    100% { transform: translateY(100%); }
+}
+
+[data-ai-blocked]::after {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: linear-gradient(transparent, rgba(0, 242, 255, 0.2), transparent);
+    animation: scan-line 2s linear infinite;
+}
