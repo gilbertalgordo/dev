@@ -1,0 +1,115 @@
+using UnityEngine;
+
+[CreateAssetMenu(fileName = "New Card", menuName = "MagicGame/Card")]
+public class CardData : ScriptableObject
+{
+    public string cardName;
+    public int manaCost;
+    public int attack;
+    public int health;
+    public Sprite artwork;
+    [TextArea] public string description;
+}
+
+
+
+using UnityEngine;
+using TMPro;
+
+public class CardDisplay : MonoBehaviour
+{
+    public CardData card;
+
+    [Header("HUD Elements")]
+    public TextMeshPro nameText;
+    public TextMeshPro manaText;
+    public TextMeshPro statsText; // e.g., "5 / 5"
+    public MeshRenderer artworkRenderer;
+
+    void Start()
+    {
+        UpdateCardUI();
+    }
+
+    public void UpdateCardUI()
+    {
+        nameText.text = card.cardName;
+        manaText.text = card.manaCost.ToString();
+        statsText.text = $"{card.attack} / {card.health}";
+        
+        // Apply 3D texture for HD artwork
+        artworkRenderer.material.mainTexture = card.artwork.texture;
+    }
+}
+
+
+
+using System.Collections.Generic;
+using UnityEngine;
+
+public abstract class CardEffect : ScriptableObject {
+    public abstract void Resolve(GamePlayer caster, GamePlayer opponent);
+}
+
+[CreateAssetMenu(menuName = "Magic/Effects/DamageTarget")]
+public class DamageEffect : CardEffect {
+    public int amount;
+    public override void Resolve(GamePlayer caster, GamePlayer opponent) {
+        // Logic for target selection and damage calculation
+        opponent.ApplyDamage(amount);
+        Debug.Log($"Applied {amount} damage to {opponent.playerName}");
+    }
+}
+
+
+
+using UnityEngine;
+using TMPro;
+
+public class AdvancedHUDController : MonoBehaviour {
+    [SerializeField] private CanvasGroup hudAlpha;
+    [SerializeField] private TextMeshProUGUI playerHealthText;
+    [SerializeField] private RectTransform manaBarFill;
+    
+    private float targetHealth;
+    private float currentHealth;
+
+    public void SyncState(int health, int mana, int maxMana) {
+        targetHealth = health;
+        // Accurate HUD scaling based on mana percentage
+        float manaPercent = (float)mana / maxMana;
+        manaBarFill.localScale = new Vector3(manaPercent, 1, 1);
+    }
+
+    void Update() {
+        // Smooth HD transition for health numbers
+        currentHealth = Mathf.Lerp(currentHealth, targetHealth, Time.deltaTime * 5f);
+        playerHealthText.text = Mathf.RoundToInt(currentHealth).ToString();
+    }
+}
+
+
+
+public class DuelManager : MonoBehaviour {
+    public static DuelManager Instance; // Singleton for global access
+    public List<GamePlayer> players;
+    public int activePlayerIndex;
+
+    public bool TryPlayCard(int playerId, CardData card) {
+        GamePlayer p = players[playerId];
+        
+        // Scientific validation of game state
+        if (playerId != activePlayerIndex) return false;
+        if (p.CurrentMana < card.manaCost) return false;
+
+        ExecuteCardLogic(p, card);
+        return true;
+    }
+
+    private void ExecuteCardLogic(GamePlayer p, CardData card) {
+        p.ConsumeMana(card.manaCost);
+        foreach (var effect in card.effects) {
+            effect.Resolve(p, players[1 - activePlayerIndex]);
+        }
+    }
+}
