@@ -1,0 +1,118 @@
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error
+
+# 1. Data Generation (Simulating Real-World Variables)
+def generate_salary_data(n_samples=1000):
+    np.random.seed(42)
+    experience = np.random.uniform(0, 20, n_samples)
+    education_level = np.random.randint(1, 4, n_samples) # 1: Bach, 2: Mast, 3: PhD
+    skill_score = np.random.uniform(1, 10, n_samples)
+    
+    # Scientific Reasoning: Salary isn't linear; it's often exponential/multiplicative
+    # Base + (Exp * 5000) + (Edu * 15000) + (Skills * 3000) + Noise
+    salary = (50000 + (experience ** 1.2 * 4000) + 
+              (education_level * 12000) + 
+              (skill_score * 2500) + 
+              np.random.normal(0, 5000, n_samples))
+    
+    return pd.DataFrame({
+        'Experience': experience,
+        'Education': education_level,
+        'SkillScore': skill_score,
+        'Salary': salary
+    })
+
+# 2. Model Training
+data = generate_salary_data()
+X = data[['Experience', 'Education', 'SkillScore']]
+y = data['Salary']
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+
+model = RandomForestRegressor(n_estimators=100, random_state=42)
+model.fit(X_train, y_train)
+
+# 3. Prediction Interface
+def predict_salary(exp, edu, skill):
+    input_data = np.array([[exp, edu, skill]])
+    prediction = model.predict(input_data)
+    return prediction[0]
+
+# Quick Test
+sample_pred = predict_salary(5, 2, 8)
+print(f"Predicted Salary for 5yrs Exp, Masters, 8/10 Skill: ${sample_pred:,.2f}")
+
+
+import numpy as np
+import pandas as pd
+import xgboost as xgb
+from sklearn.model_selection import KFold
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.metrics import mean_squared_error
+
+# 1. Advanced Synthetic Data Generation
+def generate_advanced_data(n=5000):
+    np.random.seed(42)
+    # Scientific Reasoning: Job market value is highly non-linear
+    experience = np.random.gamma(shape=2, scale=5, size=n) # Realistic skewed exp
+    edu_years = np.random.choice([12, 16, 18, 22], n) # HS, Bach, Mast, PhD
+    skill_density = np.random.beta(a=2, b=5, size=n) * 10 # Rare skills are harder to get
+    
+    # Target: Base + Exp interaction with Skill + Education multiplier
+    salary = (45000 + (experience * 3500) * (1 + skill_density/10) + 
+              (edu_years * 2000) + np.random.normal(0, 3000, n))
+    
+    return pd.DataFrame({
+        'Experience': experience,
+        'EducationYears': edu_years,
+        'SkillDensity': skill_density,
+        'MarketIndex': np.random.uniform(0.8, 1.2, n),
+        'Salary': salary
+    })
+
+# 2. HUD-Style Processing Interface
+print(">>> INITIALIZING SALARY_AI CORE...")
+df = generate_advanced_data()
+print(f"[STATUS] Data Hydrated: {df.shape[0]} records ingested.")
+
+# Feature Engineering
+X = df.drop('Salary', axis=1)
+y = df['Salary']
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+# 3. XGBoost Hyper-Parameters (The "Scientific" Tuning)
+params = {
+    'objective': 'reg:squarederror',
+    'colsample_bytree': 0.3,
+    'learning_rate': 0.05,
+    'max_depth': 6,
+    'alpha': 10,
+    'n_estimators': 500
+}
+
+# Training with Cross-Validation
+print("[STATUS] Optimizing weights via Gradient Boosting...")
+model = xgb.XGBRegressor(**params)
+model.fit(X_scaled, y)
+
+# 4. HUD Output Prediction
+def predict_hud(exp, edu, skill, market):
+    input_raw = np.array([[exp, edu, skill, market]])
+    input_scaled = scaler.transform(input_raw)
+    prediction = model.predict(input_scaled)[0]
+    
+    # Real-time HUD formatting
+    print("-" * 30)
+    print(f"   SALARY AI ANALYSIS")
+    print("-" * 30)
+    print(f" EXP: {exp}yrs | EDU: {edu}yrs")
+    print(f" SKILL DENSITY: {skill:.1f}/10")
+    print(f" PREDICTED VAL: ${prediction:,.2f}")
+    print("-" * 30)
+
+predict_hud(8, 18, 7.5, 1.05)
+
