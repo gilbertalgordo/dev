@@ -1,0 +1,137 @@
+import json
+from typing import List, Optional
+from pydantic import BaseModel, Field
+
+# 1. Define the Financial Data Structure
+class Transaction(BaseModel):
+    date: str
+    vendor: str
+    amount: float
+    category: str = Field(description="Taxonomy: e.g., Utilities, Payroll, Software")
+    tax_deductible: bool = False
+
+class FinancialReport(BaseModel):
+    total_revenue: float
+    total_expenses: float
+    net_profit: float
+    transactions: List[Transaction]
+
+# 2. Logic Engine: Automated Categorization
+class AccountantAI:
+    def __init__(self, business_name: str):
+        self.business_name = business_name
+        self.ledger = []
+
+    def process_invoice(self, raw_text: str):
+        """
+        In a production environment, this would call an LLM (like Gemini)
+        to extract structured JSON from a scanned image or PDF.
+        """
+        # Simulated high-accuracy extraction logic
+        extracted_data = self._mock_llm_extraction(raw_text)
+        self.ledger.append(extracted_data)
+        return f"Processed: {extracted_data.vendor} - ${extracted_data.amount}"
+
+    def _mock_llm_extraction(self, text: str) -> Transaction:
+        # Example of internal reasoning/categorization
+        return Transaction(
+            date="2026-01-08",
+            vendor="AWS Cloud Services",
+            amount=450.00,
+            category="Infrastructure",
+            tax_deductible=True
+        )
+
+    def generate_summary(self) -> FinancialReport:
+        expenses = sum(t.amount for t in self.ledger)
+        # Assuming static revenue for this example
+        revenue = 5000.00 
+        return FinancialReport(
+            total_revenue=revenue,
+            total_expenses=expenses,
+            net_profit=revenue - expenses,
+            transactions=self.ledger
+        )
+
+# --- Execution ---
+ai_accountant = AccountantAI("TechCorp Solutions")
+ai_accountant.process_invoice("Invoice from AWS for $450 dated Jan 8")
+
+report = ai_accountant.generate_summary()
+print(report.json(indent=2))
+
+
+
+import datetime
+from enum import Enum
+from typing import List, Dict
+from pydantic import BaseModel, validator
+
+# 1. Define Account Types for Scientific Accuracy
+class AccountType(str, Enum):
+    ASSET = "Asset"
+    LIABILITY = "Liability"
+    EQUITY = "Equity"
+    REVENUE = "Revenue"
+    EXPENSE = "Expense"
+
+class JournalEntry(BaseModel):
+    account_id: str
+    account_type: AccountType
+    debit: float = 0.0
+    credit: float = 0.0
+    timestamp: datetime.datetime = datetime.datetime.now()
+
+    @validator("credit")
+    def validate_balanced_entry(cls, v, values):
+        if v > 0 and values.get("debit", 0) > 0:
+            raise ValueError("An entry cannot have both a debit and a credit.")
+        return v
+
+# 2. Advanced AI Accountant Engine
+class AdvancedAccountantAI:
+    def __init__(self):
+        self.ledger: List[JournalEntry] = []
+        self.accounts_balance: Dict[str, float] = {}
+
+    def record_transaction(self, entries: List[JournalEntry]):
+        """
+        Ensures the Fundamental Accounting Equation:
+        Assets = Liabilities + Equity
+        """
+        total_debits = sum(e.debit for e in entries)
+        total_credits = sum(e.credit for e in entries)
+
+        # Scientific Validation: The Law of Conservation of Value
+        if abs(total_debits - total_credits) > 1e-9:
+            raise ArithmeticError(f"Unbalanced Transaction: Δ {total_debits - total_credits}")
+
+        for entry in entries:
+            self.ledger.append(entry)
+            current = self.accounts_balance.get(entry.account_id, 0.0)
+            
+            # Logic based on normal balances
+            if entry.account_type in [AccountType.ASSET, AccountType.EXPENSE]:
+                self.accounts_balance[entry.account_id] = current + entry.debit - entry.credit
+            else:
+                self.accounts_balance[entry.account_id] = current + entry.credit - entry.debit
+
+    def detect_anomalies(self, threshold_z_score: float = 3.0):
+        """
+        Heuristic-based anomaly detection for fraud prevention.
+        Identifies transactions that deviate significantly from historical patterns.
+        """
+        # Logic for statistical outlier detection would go here
+        pass
+
+# --- Example: Purchasing Cloud Infrastructure ---
+accountant = AdvancedAccountantAI()
+
+# Recording a $1000 purchase: Debit Expense, Credit Cash (Asset)
+transaction = [
+    JournalEntry(account_id="AWS_Expense", account_type=AccountType.EXPENSE, debit=1000.0),
+    JournalEntry(account_id="Bank_Main", account_type=AccountType.ASSET, credit=1000.0)
+]
+
+accountant.record_transaction(transaction)
+print(f"Current Ledger State: {accountant.accounts_balance}")
