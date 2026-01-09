@@ -1,0 +1,127 @@
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import IsolationForest
+from sklearn.preprocessing import StandardScaler
+
+class FintechPredictor:
+    def __init__(self):
+        # Contamination represents the expected % of fraudulent transactions
+        self.model = IsolationForest(contamination=0.01, random_state=42)
+        self.scaler = StandardScaler()
+
+    def train_model(self, data):
+        """
+        Standardizes financial features and trains the anomaly detector.
+        """
+        # Features: [amount, time_of_day, velocity, location_risk_score]
+        scaled_data = self.scaler.fit_transform(data)
+        self.model.fit(scaled_data)
+        print("Model trained: Ready for real-time inference.")
+
+    def predict_risk(self, transaction):
+        """
+        Returns a risk score. -1 indicates anomaly (High Risk), 1 is Normal.
+        """
+        scaled_tx = self.scaler.transform([transaction])
+        prediction = self.model.predict(scaled_tx)
+        score = self.model.decision_function(scaled_tx)
+        
+        return {
+            "status": "FLAGGED" if prediction[0] == -1 else "APPROVED",
+            "confidence_score": round(abs(score[0]), 4),
+            "threat_level": "High" if prediction[0] == -1 else "Low"
+        }
+
+# Example Usage
+# Data: [Amount, Frequency, Avg_Spend_Delta]
+sample_data = np.random.rand(1000, 3) 
+ai_engine = FintechPredictor()
+ai_engine.train_model(sample_data)
+
+# Test a suspicious transaction (Large amount, high delta)
+print(ai_engine.predict_risk([50000.0, 0.9, 0.95]))
+
+
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+
+app = FastAPI(title="Fintech_AI_HUD_Core")
+
+class Transaction(BaseModel):
+    amount: float
+    frequency: float
+    risk_delta: float
+
+@app.post("/v1/analyze-transaction")
+async def analyze(tx: Transaction):
+    # In a real scenario, this calls the FintechPredictor instance
+    result = ai_engine.predict_risk([tx.amount, tx.frequency, tx.risk_delta])
+    
+    # HUD-style structured response
+    return {
+        "telemetry": {
+            "origin": "AI_PREDICT_ENGINE_01",
+            "timestamp": "2026-01-10T04:00:00Z",
+            "sensor_readings": tx.dict()
+        },
+        "analysis": result,
+        "action_required": True if result["status"] == "FLAGGED" else False
+    }
+
+
+
+import torch
+import torch.nn.functional as F
+from torch_geometric.nn import GATConv  # Graph Attention Network
+
+class FintechGNN(torch.nn.Module):
+    def __init__(self, in_channels, hidden_channels, out_channels):
+        super(FintechGNN, self).__init__()
+        # GAT allows the AI to "attend" to more important neighbors (e.g., high-risk IPs)
+        self.conv1 = GATConv(in_channels, hidden_channels, heads=4)
+        self.conv2 = GATConv(hidden_channels * 4, out_channels, heads=1)
+
+    def forward(self, x, edge_index):
+        # x: Account features (balance, velocity, risk_score)
+        # edge_index: Transaction links between accounts
+        x = self.conv1(x, edge_index)
+        x = F.elu(x) # Exponential Linear Unit for better gradient flow
+        x = F.dropout(x, p=0.2, training=self.training)
+        x = self.conv2(x, edge_index)
+        return F.log_softmax(x, dim=1)
+
+# HUD Telemetry Output Mock
+def get_hud_telemetry(node_id, prediction):
+    return {
+        "CORE_ID": f"GNN_NODE_{node_id}",
+        "VECTORS_ANALYZED": 512,
+        "ANOMALY_PROBABILITY": f"{prediction:.4%}",
+        "STATUS": "CRITICAL" if prediction > 0.8 else "STABLE"
+    }
+
+
+
+import shap
+import xgboost as xgb
+
+# 1. Train a high-performance Gradient Boosting model
+model = xgb.XGBClassifier().fit(X_train, y_train)
+
+# 2. Initialize the Explainer for the HUD
+explainer = shap.TreeExplainer(model)
+shap_values = explainer.shap_values(X_test)
+
+def generate_hud_explanation(transaction_index):
+    """
+    Generates a HUD-ready explanation of why a transaction was flagged.
+    """
+    feature_importance = dict(zip(feature_names, shap_values[transaction_index]))
+    # Sort by impact
+    sorted_impact = sorted(feature_importance.items(), key=lambda x: abs(x[1]), reverse=True)
+    
+    return {
+        "PRIMARY_RISK_DRIVER": sorted_impact[0][0],
+        "SECONDARY_RISK_DRIVER": sorted_impact[1][0],
+        "AI_REASONING": f"Flagged due to high {sorted_impact[0][0]} variance."
+    }
