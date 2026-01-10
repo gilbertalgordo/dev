@@ -1,0 +1,157 @@
+/* Anti-Wikipedia Visual Style */
+body {
+    background-color: #000000 !important;
+    color: #00ff41 !important; /* Matrix/Terminal Green */
+    font-family: 'Courier New', Courier, monospace;
+}
+
+/* Invert the Sidebar and Header */
+#mw-panel, #mw-head, #p-logo {
+    background-color: #1a1a1a !important;
+    border-right: 1px solid #333;
+}
+
+/* Redact/Strike-through standard Wikipedia links */
+a {
+    color: #ff4500 !important; /* Warning Orange */
+    text-decoration: line-through;
+}
+
+a:hover {
+    text-decoration: none;
+    background-color: #ff4500;
+    color: #000 !important;
+}
+
+/* HUD-style borders for content blocks */
+#content {
+    background-color: #0d0d0d !important;
+    border: 2px solid #00ff41 !important;
+    border-radius: 10px;
+    box-shadow: 0 0 15px #00ff41;
+}
+
+
+
+import wikipedia
+import re
+
+def generate_anti_content(topic):
+    try:
+        # Fetch real data
+        page = wikipedia.page(topic)
+        original_text = page.summary
+        
+        # "Anti" Logic: Replace truths with oppositional phrasing
+        # This is a basic example of string manipulation
+        replacements = {
+            " is ": " is arguably not ",
+            " was ": " was never ",
+            "known for": "infamous for",
+            "successful": "catastrophic",
+            "the": "the so-called",
+            "proven": "fabricated"
+        }
+        
+        anti_text = original_text
+        for word, replacement in replacements.items():
+            anti_text = anti_text.replace(word, replacement)
+            
+        return {
+            "title": f"The Un-Truth About {page.title}",
+            "content": anti_text,
+            "source_id": page.pageid
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
+
+# Example Usage
+print(generate_anti_content("Internet"))
+
+
+
+version: '3'
+services:
+  mediawiki:
+    image: mediawiki:latest
+    ports:
+      - "8080:80"
+    environment:
+      - MW_DB_NAME=anti_wiki
+      - MW_DB_USER=admin
+    volumes:
+      - ./images:/var/www/html/images
+
+
+
+import React, { useRef } from 'react';
+import { Canvas, useFrame } from '@react-three/fiber';
+import { OrbitControls, Sphere, MeshDistortMaterial } from '@react-three/drei';
+
+// Individual Article Node
+function AntiNode({ position, color, label }) {
+  const mesh = useRef();
+  useFrame((state) => (mesh.current.rotation.x = mesh.current.rotation.y += 0.01));
+
+  return (
+    <mesh position={position} ref={mesh}>
+      <sphereGeometry args={[0.5, 32, 32]} />
+      <MeshDistortMaterial 
+        color={color} 
+        speed={2} 
+        distort={0.4} 
+        wireframe={true} // HUD aesthetic
+      />
+    </mesh>
+  );
+}
+
+export default function AntiWikiHUD() {
+  return (
+    <div style={{ height: "100vh", background: "#050505" }}>
+      <Canvas camera={{ position: [0, 0, 5] }}>
+        <ambientLight intensity={0.5} />
+        <pointLight position={[10, 10, 10]} color="#ff0000" />
+        
+        {/* Generative Instances of Data Nodes */}
+        <AntiNode position={[-2, 1, 0]} color="#00ff41" label="The Real History" />
+        <AntiNode position={[2, -1, 0]} color="#ff4500" label="Redacted Files" />
+        
+        <OrbitControls />
+      </Canvas>
+    </div>
+  );
+}
+
+
+
+import spacy
+from textblob import TextBlob
+
+# Load NLP Model
+nlp = spacy.load("en_core_web_sm")
+
+def deconstruct_consensus(text):
+    doc = nlp(text)
+    anti_narrative = []
+    
+    for token in doc:
+        # Identify verbs and adjectives to invert
+        if token.pos_ == "VERB" and token.dep_ == "ROOT":
+            anti_narrative.append(f"allegedly failed to {token.text}")
+        elif token.pos_ == "ADJ":
+            # Reverse sentiment: 'excellent' -> 'deplorable'
+            blob = TextBlob(token.text)
+            sentiment = blob.sentiment.polarity
+            if sentiment > 0:
+                anti_narrative.append("questionable")
+            else:
+                anti_narrative.append(token.text)
+        else:
+            anti_narrative.append(token.text)
+            
+    return " ".join(anti_narrative)
+
+# Input: "The scientist discovered a cure."
+# Output: "The scientist allegedly failed to discovered a questionable cure."
