@@ -1,0 +1,130 @@
+import torch
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+
+class AntiGaslightEngine:
+    def __init__(self):
+        # Using a high-accuracy RoBERTa model fine-tuned for emotional manipulation
+        self.model_name = "samantha-storm/tether-roberta-base" 
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self.model = AutoModelForSequenceClassification.from_pretrained(self.model_name)
+        
+        # Scientific categories of manipulation
+        self.labels = [
+            "Reality Distortion", "Blame Shifting", "Minimization", 
+            "DARVO", "Guilt Tripping", "Healthy Communication"
+        ]
+
+    def analyze_interaction(self, text):
+        inputs = self.tokenizer(text, return_tensors="pt", truncation=True, padding=True)
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+        
+        probabilities = torch.nn.functional.softmax(outputs.logits, dim=-1)
+        conf_score, label_idx = torch.max(probabilities, dim=1)
+        
+        return {
+            "tactic": self.labels[label_idx],
+            "confidence": conf_score.item(),
+            "raw_scores": probabilities.tolist()[0]
+        }
+
+# Example Usage
+engine = AntiGaslightEngine()
+sample_text = "I never said that, you're just imagining things because you're stressed."
+analysis = engine.analyze_interaction(sample_text)
+
+
+
+def generate_hud_data(analysis):
+    """
+    Formulating data for a 3D HUD holographic projection.
+    """
+    tactic = analysis['tactic']
+    confidence = analysis['confidence']
+    
+    hud_output = {
+        "status": "MANIPULATION DETECTED" if tactic != "Healthy Communication" else "CLEAR",
+        "hud_elements": {
+            "primary_vector": f"VECTOR_ALPHA_{tactic.upper()}",
+            "3d_coordinates": {
+                "x": round(analysis['raw_scores'][0] * 10, 2), # Logic Distortion
+                "y": round(analysis['raw_scores'][1] * 10, 2), # Aggression
+                "z": round(analysis['raw_scores'][2] * 10, 2)  # History Conflict
+            },
+            "alert_level": "CRITICAL" if confidence > 0.85 else "CAUTION"
+        },
+        "scientific_note": f"Detected {tactic} with {confidence*100:.1f}% accuracy."
+    }
+    return hud_output
+
+# Output to your HUD
+print(generate_hud_data(analysis))
+
+
+
+import torch
+import numpy as np
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from typing import Dict, List
+
+class AdvancedAntiGaslightAI:
+    def __init__(self):
+        # Initializing the model with a focus on psychological abuse patterns
+        self.model_name = "samantha-storm/tether-roberta-base"
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self.model = AutoModelForSequenceClassification.from_pretrained(self.model_name)
+        
+        # Mapping tactical motifs based on clinical psychological definitions
+        self.motifs = {
+            0: "Reality Distortion (Gaslighting)",
+            1: "DARVO (Deny, Attack, Reverse Victim/Offender)",
+            2: "Emotional Invalidation",
+            3: "Blame Shifting",
+            4: "Healthy/Constructive Dialogue"
+        }
+
+    def compute_gaslight_index(self, text: str, history: List[str] = None) -> Dict:
+        """
+        Analyzes the text for manipulation while tracking 'Consistency Delta' 
+        against previous interaction history.
+        """
+        inputs = self.tokenizer(text, return_tensors="pt", padding=True, truncation=True)
+        outputs = self.model(**inputs)
+        
+        # Softmax for probability distribution
+        probs = torch.nn.functional.softmax(outputs.logits, dim=-1).detach().numpy()[0]
+        primary_motif_idx = np.argmax(probs)
+        
+        # Scientific Logic Check: Detecting 'The Fog' (Ambiguity + Invalidation)
+        certainty = float(probs[primary_motif_idx])
+        
+        return {
+            "primary_tactic": self.motifs[primary_motif_idx],
+            "threat_score": 1.0 - probs[4],  # Inverse of healthy dialogue probability
+            "confidence": certainty,
+            "distribution": {self.motifs[i]: float(probs[i]) for i in range(len(self.motifs))}
+        }
+
+
+
+def generate_hud_vectors(analysis: Dict):
+    """
+    Translates NLP scores into 3D HUD vectors.
+    X = Logic Inconsistency | Y = Emotional Volatility | Z = Pattern Repetition
+    """
+    threat = analysis['threat_score']
+    
+    # Calculate HUD alert colors based on threat level (HEX for 3D shaders)
+    alert_color = "#00FF00" if threat < 0.3 else "#FFA500" if threat < 0.7 else "#FF0000"
+    
+    hud_metadata = {
+        "visual_status": "MONITORING" if threat < 0.5 else "CRITICAL_ANOMALY",
+        "hologram_vectors": {
+            "x_axis_logic": analysis['distribution'].get("Reality Distortion", 0) * 10,
+            "y_axis_emotion": analysis['distribution'].get("Emotional Invalidation", 0) * 10,
+            "z_axis_history": analysis['distribution'].get("DARVO", 0) * 10
+        },
+        "display_color": alert_color,
+        "active_overlay": f"DETECTED_PATTERN: {analysis['primary_tactic'].upper()}"
+    }
+    return hud_metadata
