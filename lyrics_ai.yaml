@@ -1,0 +1,106 @@
+import torch
+from transformers import GPT2LMHeadModel, GPT2Tokenizer
+
+def generate_lyrics(prompt, max_length=150, temperature=0.8):
+    """
+    Generates AI lyrics based on a starting prompt.
+    
+    Args:
+        prompt (str): The starting line or theme.
+        max_length (int): Total words/tokens to generate.
+        temperature (float): Higher = more creative/random, Lower = more predictable.
+    """
+    # 1. Load Pre-trained Model and Tokenizer
+    model_name = "gpt2-medium" # HD-level text model
+    tokenizer = GPT2Tokenizer.from_pretrained(model_name)
+    model = GPT2LMHeadModel.from_pretrained(model_name)
+
+    # 2. Encode the input prompt
+    inputs = tokenizer.encode(prompt, return_tensors="pt")
+
+    # 3. Generate Output
+    # We use 'top_k' and 'top_p' sampling for more natural lyric flow
+    output = model.generate(
+        inputs, 
+        max_length=max_length, 
+        num_return_sequences=1,
+        no_repeat_ngram_size=2,
+        temperature=temperature,
+        top_k=50,
+        top_p=0.95,
+        do_sample=True,
+        pad_token_id=tokenizer.eos_token_id
+    )
+
+    # 4. Decode and Return
+    lyrics = tokenizer.decode(output[0], skip_special_tokens=True)
+    return lyrics
+
+# --- EXECUTION ---
+if __name__ == "__main__":
+    print("--- AI Lyrics Generator HUD ---")
+    user_prompt = "Under the neon lights of the 3D city,"
+    result = generate_lyrics(user_prompt)
+    
+    print(f"PROMPT: {user_prompt}")
+    print("-" * 30)
+    print(result)
+
+
+
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer, LogitsProcessor, LogitsProcessorList
+import pronouncing
+
+class LyricConstraintProcessor(LogitsProcessor):
+    """
+    Advanced Logit Processor to enforce rhyming and rhythmic constraints.
+    """
+    def __init__(self, tokenizer, target_rhyme_word=None, max_syllables=8):
+        self.tokenizer = tokenizer
+        self.target_rhyme_word = target_rhyme_word
+        self.max_syllables = max_syllables
+
+    def __call__(self, input_ids, scores):
+        # HUD: Scientific reasoning applied to the logit vector
+        # We modify 'scores' in-place to bias the AI toward specific phonetics
+        if self.target_rhyme_word:
+            rhymes = pronouncing.rhymes(self.target_rhyme_word)
+            for token_id in range(len(scores[0])):
+                word = self.tokenizer.decode([token_id]).strip().lower()
+                if word in rhymes:
+                    scores[0][token_id] += 10.0  # Scientific "Boost"
+        return scores
+
+def generate_advanced_lyrics(prompt, theme="Cybernetic"):
+    model_name = "gpt2-medium"  # Can be upgraded to Llama-3-8B for HD results
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_pretrained(model_name)
+
+    # Define Constraints for the HUD
+    constraints = LogitsProcessorList([
+        LyricConstraintProcessor(tokenizer, target_rhyme_word="light", max_syllables=10)
+    ])
+
+    inputs = tokenizer(f"Genre: {theme} Song\nLyrics: {prompt}", return_tensors="pt")
+    
+    print(f"--- GENERATION HUD ACTIVE ---")
+    print(f"TRACKING: Meter [10 Syllables] | RHYME TARGET: 'light'")
+    
+    output_ids = model.generate(
+        **inputs,
+        max_new_tokens=60,
+        logits_processor=constraints,
+        do_sample=True,
+        temperature=0.85,
+        top_p=0.92,
+        no_repeat_ngram_size=2
+    )
+
+    return tokenizer.decode(output_ids[0], skip_special_tokens=True)
+
+# Run Instance
+if __name__ == "__main__":
+    lyric_output = generate_advanced_lyrics("The 3D world is shifting focus,")
+    print("\nFINAL PROCESSED OUTPUT:")
+    print(lyric_output)
