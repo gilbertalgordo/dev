@@ -1,0 +1,77 @@
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+
+# Sample Data Structure: Leading Indicators
+# Indicators: [10Y-2Y Spread, Unemployment_Delta, Manufacturing_Index, Sentiment_Score]
+data = {
+    'spread': [-0.5, 0.1, 45.2, 0.2], 
+    'unemp_chg': [0.05, 0.02, 0.08, 0.01],
+    'mfg_pmi': [48.5, 52.1, 44.0, 55.0],
+    'recession': [1, 0, 1, 0]  # 1 = Recession, 0 = Growth
+}
+
+df = pd.DataFrame(data)
+
+# Features and Target
+X = df.drop('recession', axis=1)
+y = df['recession']
+
+# Initialize the "Anti-Recession" Model
+model = RandomForestClassifier(n_estimators=100, random_state=42)
+model.fit(X, y)
+
+def predict_risk(current_metrics):
+    risk_prob = model.predict_proba([current_metrics])[0][1]
+    return f"Recession Risk Score: {risk_prob * 100:.2f}%"
+
+# Example Input: Negative spread and low manufacturing activity
+print(predict_risk([-0.3, 0.04, 47.0]))
+
+
+
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+
+# Architecture for the "Deep-Signal" Predictor
+def build_advanced_model(input_shape):
+    model = Sequential([
+        # Layer 1: Captures short-term volatility (128 units)
+        LSTM(128, return_sequences=True, input_shape=input_shape),
+        Dropout(0.2),
+        
+        # Layer 2: Synthesizes long-term economic cycles
+        LSTM(64, return_sequences=False),
+        Dropout(0.2),
+        
+        # Output: Probability of recession within next 6 months
+        Dense(32, activation='relu'),
+        Dense(1, activation='sigmoid') 
+    ])
+    
+    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+    return model
+
+# Expected Input: [Samples, Time_Steps, Features]
+# Features include: Yield Spread, Crude Oil Price, CPI, and Sentiment Index
+
+
+
+class RecessionShieldEnv:
+    def __init__(self, data):
+        self.data = data
+        self.current_step = 0
+        
+    def step(self, action):
+        # Action 0: Hold, Action 1: Liquidity Injection, Action 2: De-leveraging
+        reward = self._calculate_economic_stability(action)
+        self.current_step += 1
+        done = self.current_step >= len(self.data) - 1
+        return self._get_obs(), reward, done, {}
+
+    def _calculate_economic_stability(self, action):
+        # Scientific Reasoning: Reward the agent for minimizing 
+        # the "Misery Index" (Unemployment + Inflation)
+        pass
