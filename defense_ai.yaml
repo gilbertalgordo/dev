@@ -1,0 +1,124 @@
+import numpy as np
+
+class DefenseAI:
+    def __init__(self):
+        self.active_threats = {}  # Tracking instances of threats
+        self.intercept_threshold = 500.0  # Meters
+        self.hud_data = []
+
+    def track_instance(self, threat_id, position, velocity):
+        """
+        Updates the 3D position and calculates Time to Impact (TTI).
+        """
+        # Scientific reasoning: TTI = Distance / Radial Velocity
+        distance = np.linalg.norm(position)
+        speed = np.linalg.norm(velocity)
+        tti = distance / speed if speed > 0 else float('inf')
+        
+        self.active_threats[threat_id] = {
+            "pos": position,
+            "vel": velocity,
+            "tti": tti,
+            "priority": self._calculate_priority(distance, tti)
+        }
+
+    def _calculate_priority(self, dist, tti):
+        # Higher priority for lower TTI and distance
+        return 1.0 / (dist * tti + 0.01)
+
+    def get_hud_overlay(self):
+        """
+        Generates data for the 3D HUD interface.
+        """
+        self.hud_data = [
+            f"ID: {tid} | TTI: {data['tti']:.2f}s | PRIO: {data['priority']:.4f}"
+            for tid, data in self.active_threats.items()
+        ]
+        return self.hud_data
+
+# Example Instance
+ai = DefenseAI()
+ai.track_instance("BOGEY_01", np.array([1000, 500, 2000]), np.array([-50, -20, -100]))
+print(ai.get_hud_overlay())
+
+
+
+{
+  "instance_id": "BOGEY_01",
+  "render_type": "3D_BOUNDING_BOX",
+  "color_hex": "#FF0000",
+  "coordinates": {"x": 1000, "y": 500, "z": 2000},
+  "vector_line": {"x": -50, "y": -20, "z": -100},
+  "status": "LOCKED"
+}
+
+
+
+import numpy as np
+
+class AdvancedDefenseAI:
+    def __init__(self):
+        # State: [x, y, z, vx, vy, vz]
+        self.state_estimate = np.zeros(6)
+        self.covariance = np.eye(6) * 10.0
+        self.dt = 0.1  # Update frequency
+        
+        # HUD Elements for HD Rendering
+        self.hud_instances = []
+
+    def predict_step(self):
+        """Predicts the next 3D position based on physics (Newtonian motion)."""
+        F = np.array([
+            [1, 0, 0, self.dt, 0, 0],
+            [0, 1, 0, 0, self.dt, 0],
+            [0, 0, 1, 0, 0, self.dt],
+            [0, 0, 0, 1, 0, 0],
+            [0, 0, 0, 0, 1, 0],
+            [0, 0, 0, 0, 0, 1]
+        ])
+        self.state_estimate = F @ self.state_estimate
+        self.covariance = F @ self.covariance @ F.T + np.eye(6) * 0.01
+
+    def update_step(self, measurement):
+        """Updates the instance state with new HD radar/lidar data."""
+        H = np.array([
+            [1, 0, 0, 0, 0, 0],
+            [0, 1, 0, 0, 0, 0],
+            [0, 0, 1, 0, 0, 0]
+        ])
+        z = np.array(measurement)
+        y = z - (H @ self.state_estimate)  # Innovation
+        S = H @ self.covariance @ H.T + np.eye(3) * 0.5
+        K = self.covariance @ H.T @ np.linalg.inv(S) # Kalman Gain
+        
+        self.state_estimate = self.state_estimate + K @ y
+        self.covariance = (np.eye(6) - K @ H) @ self.covariance
+
+    def get_intercept_vector(self, interceptor_pos, interceptor_speed):
+        """Calculates the 3D intercept point using Proportional Navigation."""
+        target_pos = self.state_estimate[:3]
+        target_vel = self.state_estimate[3:]
+        
+        rel_pos = target_pos - interceptor_pos
+        dist = np.linalg.norm(rel_pos)
+        
+        # Scientific reasoning: Time to Intercept (approximate)
+        tti = dist / interceptor_speed
+        
+        # Predicted intercept point (PIP)
+        pip = target_pos + (target_vel * tti)
+        return pip
+
+
+
+def threat_logic(target_instance, asset_pos):
+    # Vector from target to asset
+    vec_to_asset = asset_pos - target_instance['pos']
+    vel_vector = target_instance['vel']
+    
+    # Dot product determines if it's moving toward us
+    alignment = np.dot(vec_to_asset, vel_vector) / (np.linalg.norm(vec_to_asset) * np.linalg.norm(vel_vector))
+    
+    if alignment > 0.85:  # High confidence of approach
+        return "CRITICAL_INTERCEPT_AUTH"
+    return "MONITOR_INSTANCE"
