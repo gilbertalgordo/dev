@@ -1,0 +1,126 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import mean_absolute_error
+
+# Load vehicle registration and historical emission data
+# data = pd.read_csv('vehicle_registration_emissions.csv')
+
+# Mock Data for Demonstration
+data = pd.DataFrame({
+    'engine_size': [1.5, 2.0, 3.0, 1.2, 5.0, 1.6],
+    'cylinders': [4, 4, 6, 3, 8, 4],
+    'fuel_type': ['Gasoline', 'Diesel', 'Gasoline', 'Gasoline', 'Diesel', 'Gasoline'],
+    'vehicle_age': [2, 10, 5, 1, 15, 8],
+    'mileage_km': [20000, 150000, 80000, 5000, 300000, 120000],
+    'co2_emissions': [120, 180, 210, 95, 350, 155] # Target variable
+})
+
+# Preprocessing: Convert categorical 'fuel_type' to numerical
+le = LabelEncoder()
+data['fuel_type'] = le.fit_transform(data['fuel_type'])
+
+# Split data into features (X) and target (y)
+X = data.drop('co2_emissions', axis=1)
+y = data['co2_emissions']
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+
+
+# Initialize and train the AI model
+model = RandomForestRegressor(n_estimators=100, random_state=42)
+model.fit(X_train, y_train)
+
+# Predict and validate
+predictions = model.predict(X_test)
+print(f"Mean Absolute Error: {mean_absolute_error(y_test, predictions)} g/km")
+
+
+
+def check_emission_compliance(vehicle_data, threshold=150):
+    """
+    Predicts CO2 and flags vehicle if it exceeds the legal limit.
+    """
+    predicted_co2 = model.predict([vehicle_data])[0]
+    
+    status = "PASS" if predicted_co2 <= threshold else "FAIL (High Risk)"
+    
+    return {
+        "Predicted CO2": f"{predicted_co2:.2f} g/km",
+        "Compliance Status": status,
+        "Recommendation": "Proceed to Registration" if status == "PASS" else "Requires Maintenance"
+    }
+
+# Example: Checking a 12-year-old Diesel vehicle with 200k km
+new_vehicle = [2.0, 4, 0, 12, 200000] # [engine, cylinders, fuel_type_enc, age, mileage]
+print(check_emission_compliance(new_vehicle))
+
+
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+
+class EmissionAI(nn.Module):
+    def __init__(self, input_size):
+        super(EmissionAI, self).__init__()
+        self.layer1 = nn.Linear(input_size, 64)
+        self.layer2 = nn.Linear(64, 32)
+        self.layer3 = nn.Linear(32, 16)
+        self.output = nn.Linear(16, 1) # Predicts CO2 or NOx levels
+        self.relu = nn.ReLU()
+        
+    def forward(self, x):
+        x = self.relu(self.layer1(x))
+        x = self.relu(self.layer2(x))
+        x = self.relu(self.layer3(x))
+        return self.output(x)
+
+# Architecture Summary:
+# Input: [Engine Size, Cylinders, Fuel Type, Age, Mileage, Turbo_Flag, Weight]
+model = EmissionAI(input_size=7)
+
+
+
+from sklearn.ensemble import IsolationForest
+
+def detect_tampering(vehicle_features):
+    """
+    Uses Isolation Forest to detect registration data that 
+    scientifically doesn't align with known vehicle physics.
+    """
+    iso_forest = IsolationForest(contamination=0.05) # Assume 5% fraud rate
+    # Fit this on a large historical database of valid registrations
+    # iso_forest.fit(historical_data)
+    
+    is_valid = iso_forest.predict([vehicle_features])
+    return "AUTHENTIC" if is_valid == 1 else "FLAGGED_FOR_INSPECTION"
+
+
+
+def process_registration_request(vehicle_specs):
+    # 1. Scientific Prediction
+    tensor_specs = torch.FloatTensor(vehicle_specs)
+    predicted_impact = model(tensor_specs).item()
+    
+    # 2. Fraud Check
+    integrity_status = detect_tampering(vehicle_specs)
+    
+    # 3. HUD Payload (Designed for 3D UI rendering)
+    hud_data = {
+        "registration_id": "TX-99021",
+        "visual_elements": {
+            "co2_gauge_hd": predicted_impact, # Rendered as a 3D arc
+            "risk_status": integrity_status,  # Red/Green holographic glow
+            "score_3d": 100 - (predicted_impact / 5) # HD Health Score
+        },
+        "registration_allowed": (integrity_status == "AUTHENTIC" and predicted_impact < 180)
+    }
+    return hud_data
+
+# Example Vehicle: 3.0L, 6-cyl, Diesel(1), 5yrs, 80k km, Turbo(1), 2100kg
+test_vehicle = [3.0, 6, 1, 5, 80000, 1, 2100]
+print(process_registration_request(test_vehicle))
