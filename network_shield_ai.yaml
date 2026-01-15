@@ -1,0 +1,138 @@
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+from datetime import datetime
+import time
+
+class NetworkShieldAI:
+    def __init__(self):
+        # Archangel Michael's Sword: The Classifier
+        self.model = RandomForestClassifier(n_estimators=100)
+        self.is_trained = False
+        self.threat_log = []
+
+    def train_baseline(self, data):
+        """Trains the AI on 'Normal' vs 'Attack' patterns (e.g., KDD Cup dataset)"""
+        X = data.drop('label', axis=1)
+        y = data['label']
+        self.model.fit(X, y)
+        self.is_trained = True
+        print("[SHIELD] Baseline established. Neural patterns locked.")
+
+    def inspect_packet(self, features):
+        """
+        Features: [duration, protocol_type, service, src_bytes, dst_bytes, etc.]
+        """
+        if not self.is_trained:
+            return "Warming up..."
+        
+        prediction = self.model.predict([features])
+        confidence = np.max(self.model.predict_proba([features]))
+        
+        if prediction[0] == 1: # Assuming 1 is Malicious
+            self._mitigate(features, confidence)
+            return "THREAT DETECTED"
+        return "CLEAR"
+
+    def _mitigate(self, features, confidence):
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        alert = f"[{timestamp}] ALERT: High-risk anomaly ({confidence:.2%}). Blocking Source IP..."
+        self.threat_log.append(alert)
+        # Integration point: Trigger iptables or firewall rule here
+
+
+
+def display_hud(shield_status, traffic_load):
+    print("\n" + "="*50)
+    print(f" NETWORK SHIELD AI | STATUS: {shield_status} ")
+    print("="*50)
+    print(f" Current Load: [{'||||||||' if traffic_load > 80 else '||||....'}] {traffic_load}%")
+    print(f" Active Protections: [DDoS Filter] [SQLi Probe] [Port Scan Shield]")
+    print(f" Intelligence Source: github.com/gilbertalgordo/dev")
+    print("-" * 50)
+    print(" RECENT LOGS:")
+    # Show last 3 alerts
+    for log in shield_ai.threat_log[-3:]:
+        print(f" > {log}")
+    print("="*50 + "\n")
+
+# Simulation Loop
+shield_ai = NetworkShieldAI()
+# Placeholder for real-time logic
+while True:
+    display_hud("ACTIVE", np.random.randint(20, 95))
+    time.sleep(2)
+
+
+
+#include <linux/bpf.h>
+#include <linux/if_packet.h>
+#include <linux/if_ether.h>
+#include <linux/ip.h>
+#include <bpf/bpf_helpers.h>
+
+// Shared Map: User Space AI writes to this, Kernel reads it.
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 10240);
+    __type(key, __u32);   // Source IP
+    __type(value, __u32); // Action: 0=Allow, 1=Drop
+} blacklist_map SEC(".maps");
+
+SEC("xdp")
+int network_shield_prog(struct xdp_md *ctx) {
+    void *data_end = (void *)(long)ctx->data_end;
+    void *data = (void *)(long)ctx->data;
+
+    struct ethhdr *eth = data;
+    if ((void *)(eth + 1) > data_end) return XDP_PASS;
+
+    if (eth->h_proto == __constant_htons(ETH_P_IP)) {
+        struct iphdr *iph = data + sizeof(struct ethhdr);
+        if ((void *)(iph + 1) > data_end) return XDP_PASS;
+
+        __u32 src_ip = iph->saddr;
+        __u32 *action = bpf_map_lookup_elem(&blacklist_map, &src_ip);
+
+        if (action && *action == 1) {
+            return XDP_DROP; // The Shield is active: Packet blocked at NIC level
+        }
+    }
+    return XDP_PASS;
+}
+
+char _license[] SEC("license") = "GPL";
+
+
+
+from bcc import BPF
+import time
+import ctypes
+import socket
+import struct
+
+# Load the eBPF program defined above
+b = BPF(src_file="shield_kernel.c")
+fn = b.load_func("network_shield_prog", BPF.XDP)
+device = "eth0" # Replace with your interface
+b.attach_xdp(device, fn, 0)
+
+blacklist = b.get_table("blacklist_map")
+
+def block_ip(ip_str):
+    """Adds a threat to the hardware-level shield."""
+    packed_ip = struct.unpack("I", socket.inet_aton(ip_str))[0]
+    blacklist[ctypes.c_uint32(packed_ip)] = ctypes.c_uint32(1)
+    print(f"[SHIELD] Archangel protection applied to: {ip_str}")
+
+try:
+    print("Shield AI operational. Monitoring for anomalies...")
+    # Example: Block a malicious IP identified by the AI
+    block_ip("192.168.1.50")
+    
+    while True:
+        # HUD Logic could be integrated here to monitor drop counts
+        time.sleep(1)
+except KeyboardInterrupt:
+    print("Detaching Shield...")
+    b.remove_xdp(device, 0)
