@@ -1,0 +1,76 @@
+class FerrariVisionGT:
+    def __init__(self):
+        # Internal Combustion Engine (ICE) - 120 degree V6
+        self.ice_power_cv = 1030  # at 9000 rpm
+        self.ice_torque_nm = 900   # at 5500 rpm
+        
+        # Hybrid System (3 Electric Motors)
+        self.mgu_total_power_kw = 240
+        self.mgu_power_cv = 326
+        
+        # Physical Attributes
+        self.dry_weight_kg = 1250
+        self.weight_dist = {"front": 0.435, "rear": 0.565}
+        
+    @property
+    def total_system_output(self):
+        return self.ice_power_cv + self.mgu_power_cv
+
+    def calculate_performance(self):
+        return {
+            "top_speed": "> 350 km/h",
+            "0_to_100": "< 2.0 s",
+            "0_to_200": "< 5.0 s",
+            "fiorano_lap": "< 1'10\""
+        }
+
+# Initializing the Vision GT Simulation
+vgt = FerrariVisionGT()
+print(f"Total Output: {vgt.total_system_output} CV")
+
+
+
+import numpy as np
+
+class VisionGTPowertrain:
+    """
+    Advanced Ferrari Vision GT Hybrid Controller
+    Architecture: 120-degree V6 + 3 MGU Units (2 Front, 1 Rear)
+    """
+    def __init__(self):
+        # ICE Parameters (120-degree V6 Twin-Turbo)
+        self.max_ice_power_cv = 1030.0
+        self.max_ice_torque_nm = 900.0
+        self.rev_limit = 9000
+        
+        # Hybrid Parameters (3 Motors)
+        self.mgu_front_cv = 163.0  # Combined 326 CV / 2
+        self.mgu_rear_cv = 163.0
+        self.battery_soc = 1.0     # State of Charge (0.0 to 1.0)
+
+    def calculate_torque_vectoring(self, steering_angle, throttle, velocity):
+        """
+        Implements Dynamic Torque Distribution for AWD stability.
+        Uses a simplified PID logic for lateral g-force compensation.
+        """
+        # Base Request
+        total_request = throttle * (self.max_ice_torque_nm + 600) # Est. hybrid torque
+        
+        # Front Axle Logic (Pure Electric Vectoring)
+        # Outside wheel gets more torque to pivot the nose (Kaizen optimization)
+        yaw_moment = np.sin(steering_angle) * (velocity / 100.0)
+        front_left_tq = (total_request * 0.2) * (1 - yaw_moment)
+        front_right_tq = (total_request * 0.2) * (1 + yaw_moment)
+        
+        # Rear Axle Logic (ICE + MGU-K)
+        rear_tq = (total_request * 0.6)
+        
+        return {
+            "FL": front_left_tq, "FR": front_right_tq, 
+            "Rear": rear_tq, "ICE_RPM": throttle * self.rev_limit
+        }
+
+# Example Telemetry Execution
+ferrari_vgt = VisionGTPowertrain()
+telemetry = ferrari_vgt.calculate_torque_vectoring(steering_angle=0.15, throttle=1.0, velocity=250)
+print(f"HUD Status: Front Left Torque: {telemetry['FL']:.2f} Nm | ICE RPM: {telemetry['ICE_RPM']}")
