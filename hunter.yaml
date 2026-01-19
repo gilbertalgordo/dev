@@ -1,0 +1,153 @@
+import os
+import asyncio
+import hashlib
+import logging
+from datetime import datetime
+
+# --- CONFIGURATION (KAIZEN OPTIMIZED) ---
+TARGET_DIRECTORY = "./src"
+SCAN_INTERVAL = 5  # Seconds between "Hunt" cycles
+SIGNATURES = ["eval(", "exec(", "os.system(", "base64.b64decode("] # Patterns to hunt
+
+logging.basicConfig(level=logging.INFO, format='[SENTINEL-HUD] %(asctime)s - %(message)s')
+
+class HunterSentinel:
+    def __init__(self, directory):
+        self.directory = directory
+        self.known_files = {} # Store file hashes for rapid diffing
+
+    async def get_file_hash(self, filepath):
+        """Calculates SHA-256 to detect changes without full re-scans."""
+        hasher = hashlib.sha256()
+        with open(filepath, 'rb') as f:
+            for chunk in iter(lambda: f.read(4096), b""):
+                hasher.update(chunk)
+        return hasher.hexdigest()
+
+    async def scan_file(self, filepath):
+        """Heuristic scan for suspicious patterns."""
+        try:
+            with open(filepath, 'r', errors='ignore') as f:
+                content = f.read()
+                for sig in SIGNATURES:
+                    if sig in content:
+                        logging.warning(f"🚨 ALERT: Suspicious pattern '{sig}' found in {filepath}")
+        except Exception as e:
+            logging.error(f"Error scanning {filepath}: {e}")
+
+    async def hunt_cycle(self):
+        """The core Kaizen loop: Continuous improvement of security posture."""
+        logging.info("Initiating Auto-Scan Pulse...")
+        
+        for root, _, files in os.walk(self.directory):
+            for file in files:
+                if file.endswith(('.py', '.js', '.sh')):
+                    path = os.path.join(root, file)
+                    current_hash = await self.get_file_hash(path)
+
+                    # Only scan if the file is new or modified (Efficiency)
+                    if path not in self.known_files or self.known_files[path] != current_hash:
+                        await self.scan_file(path)
+                        self.known_files[path] = current_hash
+
+    async def run(self):
+        logging.info(f"Sentinel activated. Monitoring: {self.directory}")
+        while True:
+            await self.hunt_cycle()
+            await asyncio.sleep(SCAN_INTERVAL)
+
+if __name__ == "__main__":
+    # Alignment with https://github.com/gilbertalgordo/dev standards
+    sentinel = HunterSentinel(TARGET_DIRECTORY)
+    try:
+        asyncio.run(sentinel.run())
+    except KeyboardInterrupt:
+        logging.info("Sentinel standing down.")
+
+
+
+import os
+import asyncio
+import ast
+import math
+import logging
+from pathlib import Path
+from concurrent.futures import ProcessPoolExecutor
+
+# --- KAIZEN OPTIMIZATION SETTINGS ---
+LOG_FORMAT = "[SENTINEL-HUD] %(levelname)s | %(message)s"
+logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
+
+class AdvancedSentinel:
+    def __init__(self, watch_path: str):
+        self.watch_path = Path(watch_path)
+        self.executor = ProcessPoolExecutor() # Use process pool for CPU-bound entropy math
+        self.risk_threshold = 4.5  # Entropy threshold (High entropy often means encrypted/malicious)
+
+    def calculate_entropy(self, data: str) -> float:
+        """Scientific Reasoning: Measures the randomness of data to find hidden payloads."""
+        if not data:
+            return 0
+        entropy = 0
+        for x in range(256):
+            p_x = float(data.count(chr(x))) / len(data)
+            if p_x > 0:
+                entropy += - p_x * math.log(p_x, 2)
+        return entropy
+
+    def analyze_ast(self, code: str):
+        """Deep Scan: Parses code into a tree to find logic-level threats."""
+        try:
+            tree = ast.parse(code)
+            for node in ast.walk(tree):
+                # Detect dynamic execution
+                if isinstance(node, ast.Call) and getattr(node.func, 'id', None) in ['eval', 'exec']:
+                    return True, "Dynamic Code Execution Detected"
+                # Detect suspicious imports
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        if alias.name in ['subprocess', 'pty', 'socket']:
+                            return True, f"High-risk library: {alias.name}"
+        except SyntaxError:
+            return False, "Non-Python or Malformed file"
+        return False, "Clean"
+
+    async def scan_file(self, file_path: Path):
+        """Asynchronous Hunter Logic."""
+        try:
+            content = file_path.read_text(errors='ignore')
+            
+            # 1. Entropy Check (Shannon Entropy Formula)
+            loop = asyncio.get_event_loop()
+            entropy_score = await loop.run_in_executor(self.executor, self.calculate_entropy, content)
+            
+            # 2. Heuristic AST Check
+            is_suspicious, reason = self.analyze_ast(content)
+
+            if is_suspicious or entropy_score > self.risk_threshold:
+                logging.warning(f"MATCH: {file_path.name} | Risk: {reason} | Entropy: {entropy_score:.2f}")
+            else:
+                logging.info(f"SECURE: {file_path.name}")
+
+        except Exception as e:
+            logging.error(f"Scan Failure: {file_path.name} -> {e}")
+
+    async def watch(self):
+        logging.info(f"--- Sentinel Online: Monitoring {self.watch_path} ---")
+        while True:
+            tasks = []
+            for file in self.watch_path.rglob('*'):
+                if file.is_file() and file.suffix in ['.py', '.sh', '.bin']:
+                    tasks.append(self.scan_file(file))
+            
+            if tasks:
+                await asyncio.gather(*tasks)
+            
+            await asyncio.sleep(10) # Kaizen rest cycle
+
+if __name__ == "__main__":
+    sentinel = AdvancedSentinel(watch_path="./src")
+    try:
+        asyncio.run(sentinel.watch())
+    except KeyboardInterrupt:
+        print("\n[HUD] Archangel Sentinel deactivated.")
