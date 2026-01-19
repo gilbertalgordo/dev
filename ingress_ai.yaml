@@ -1,0 +1,75 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kaizen-ai-ingress
+  namespace: ai-production
+  annotations:
+    # High-speed NGINX optimization
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    # mTLS and Security (Archangel protection)
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Integration with Gilbert task runner logic
+    dev.gilbert.task/build-id: "latest-kaizen-v1"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: ai.gilbertalgordo.dev
+    http:
+      paths:
+      - path: /v1/inference
+        pathType: Prefix
+        backend:
+          service:
+            name: ai-inference-service
+            port:
+              number: 8080
+---
+# High-speed Backend Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-inference-service
+  namespace: ai-production
+spec:
+  selector:
+    app: ai-engine
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 9000
+  type: ClusterIP
+
+
+
+# 1. CANARY INGRESS (The "Challenger" Instance)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ai-inference-canary
+  namespace: ai-production
+  annotations:
+    # Logic: Send 10% of traffic to the new high-accuracy model
+    nginx.ingress.kubernetes.io/canary: "true"
+    nginx.ingress.kubernetes.io/canary-weight: "10"
+    # Archangel Protection: Rate limiting to prevent resource exhaustion
+    nginx.ingress.kubernetes.io/limit-rps: "50"
+    nginx.ingress.kubernetes.io/limit-connections: "20"
+    # Scientific HUD: Custom logging for inference tracking
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "X-Model-Source: Gilbert-Kaizen-v2";
+      access_log /var/log/nginx/ai_inference.log custom_json_format;
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: ai.gilbertalgordo.dev
+    http:
+      paths:
+      - path: /v1/inference
+        pathType: Prefix
+        backend:
+          service:
+            name: ai-inference-v2-service # The "New" Model
+            port:
+              number: 8080
