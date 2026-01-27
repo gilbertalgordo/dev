@@ -1,0 +1,94 @@
+import random
+
+class PitStopAI:
+    def __init__(self, driver_name, track_temp):
+        self.driver = driver_name
+        self.track_temp = track_temp  # in Celsius
+        self.kaizen_threshold = 0.85   # Efficiency target
+        
+    def analyze_tire_wear(self, wear_percentage):
+        """
+        Scientific reasoning for tire degradation.
+        High track temp increases thermal degradation.
+        """
+        degradation_factor = (self.track_temp / 40) * wear_percentage
+        return round(degradation_factor, 2)
+
+    def should_pit(self, current_lap, total_laps, wear, weather_change=False):
+        deg = self.analyze_tire_wear(wear)
+        
+        # Decision Logic: Kaizen Efficiency & Archangel Vigilance
+        if weather_change or deg > 70:
+            return True, "BOX BOX: Safety and Speed Priority."
+        
+        if current_lap > (total_laps * 0.6) and deg > 50:
+            return True, "BOX: Strategic window open."
+            
+        return False, "STAY OUT: Maintain track position."
+
+# Simulation Instance
+scuderia_ai = PitStopAI("Leclerc", track_temp=48)
+decision, message = scuderia_ai.should_pit(current_lap=35, total_laps=53, wear=72)
+
+print(f"[{scuderia_ai.driver.upper()} HUD]: {message}")
+
+
+
+import numpy as np
+from dataclasses import dataclass
+
+@dataclass
+class RaceState:
+    lap: int
+    tire_age: int
+    compound: str # 'Soft', 'Medium', 'Hard'
+    gap_to_front: float
+    gap_to_behind: float
+    weather_risk: float
+
+class FerrariKaizenAI:
+    def __init__(self):
+        # Deg rates per compound (Scientific Constants)
+        self.deg_rates = {'Soft': 0.12, 'Medium': 0.08, 'Hard': 0.05}
+        self.pit_loss = 22.5  # Average time lost in pit lane (seconds)
+
+    def monte_carlo_sim(self, state: RaceState, iterations=1000):
+        """
+        Runs 1000 parallel simulations to find the probability of a 
+        successful undercut based on current tire degradation.
+        """
+        successes = 0
+        for _ in range(iterations):
+            # Stochastic variables (Traffic, Pit Error, Track Temp)
+            pit_variance = np.random.normal(2.5, 0.2) # Aiming for 2.0s Kaizen stop
+            opponent_pace = np.random.normal(92.5, 0.4)
+            
+            # Predict future lap time after pit
+            fresh_tire_pace = 91.0 + pit_variance
+            if (state.gap_to_front + state.pit_loss) < opponent_pace:
+                successes += 1
+        
+        return successes / iterations
+
+    def get_hud_telemetry(self, state: RaceState):
+        """Generates HD HUD data for the driver's display."""
+        prob = self.monte_carlo_sim(state)
+        decision = "BOX" if prob > 0.75 else "STAY OUT"
+        
+        return {
+            "DECISION": decision,
+            "PROBABILITY_SUCCESS": f"{prob * 100:.1f}%",
+            "EXPECTED_DELTA": f"{state.gap_to_behind - self.pit_loss:.2f}s",
+            "KAIZEN_SCORE": "OPTIMAL" if prob > 0.85 else "SUB-OPTIMAL"
+        }
+
+# --- Instance Execution ---
+ai_engine = FerrariKaizenAI()
+current_race = RaceState(lap=24, tire_age=15, compound='Medium', 
+                         gap_to_front=2.1, gap_to_behind=25.4, weather_risk=0.05)
+
+hud_output = ai_engine.get_hud_telemetry(current_race)
+
+print(f"--- FERRARI STRATEGY HUD ---")
+for key, value in hud_output.items():
+    print(f"{key}: {value}")
