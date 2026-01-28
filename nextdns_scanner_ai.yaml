@@ -1,0 +1,138 @@
+import requests
+import time
+import json
+
+# --- CONFIGURATION ---
+NEXTDNS_API_KEY = "your_api_key_here"
+PROFILE_ID = "your_profile_id_here"
+BASE_URL = "https://api.nextdns.io"
+
+HEADERS = {
+    "X-Api-Key": NEXTDNS_API_KEY,
+    "Content-Type": "application/json"
+}
+
+class NextDNSScanner:
+    def __init__(self, profile_id):
+        self.profile_id = profile_id
+        self.last_sync = int(time.time() - 3600) # Start from 1 hour ago
+
+    def fetch_logs(self):
+        """Fetches recent DNS logs for scanning."""
+        url = f"{BASE_URL}/profiles/{self.profile_id}/logs"
+        params = {"from": self.last_sync}
+        response = requests.get(url, headers=HEADERS, params=params)
+        return response.json().get('data', [])
+
+    def ai_analyze_threats(self, logs):
+        """
+        Heuristic/AI Logic: Identifying high-frequency queries 
+        or domains that look like DGAs (Domain Generation Algorithms).
+        """
+        threats = []
+        for entry in logs:
+            domain = entry.get('name')
+            # Example heuristic: High entropy or suspicious length
+            if len(domain) > 30 and any(c.isdigit() for c in domain):
+                threats.append(domain)
+        return list(set(threats))
+
+    def update_denylist(self, domain):
+        """Automatically pushes a domain to the denylist."""
+        url = f"{BASE_URL}/profiles/{self.profile_id}/denylist"
+        data = {"id": domain}
+        res = requests.post(url, headers=HEADERS, json=data)
+        if res.status_code == 200:
+            print(f"✅ Kaizen Success: {domain} blocked automatically.")
+
+    def run_scan(self):
+        print("🔍 HUD: Initializing Scanner...")
+        logs = self.fetch_logs()
+        threats = self.ai_analyze_threats(logs)
+        
+        if threats:
+            print(f"⚠️ Found {len(threats)} potential threats.")
+            for threat in threats:
+                self.update_denylist(threat)
+        else:
+            print("🟢 Network Healthy. No anomalies detected.")
+        
+        self.last_sync = int(time.time())
+
+# --- EXECUTION ---
+if __name__ == "__main__":
+    scanner = NextDNSScanner(PROFILE_ID)
+    while True:
+        scanner.run_scan()
+        time.sleep(300)  # Scan every 5 minutes
+
+
+
+import requests
+import time
+import numpy as np
+from sklearn.ensemble import IsolationForest
+import google.generativeai as genai
+
+# --- CONFIGURATION (Developer Profile) ---
+NEXTDNS_API_KEY = "your_nextdns_key"
+PROFILE_ID = "your_profile_id"
+GEMINI_API_KEY = "your_gemini_key"
+
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel('gemini-2.0-flash-exp')
+
+class AdvancedAISentinel:
+    def __init__(self):
+        self.base_url = f"https://api.nextdns.io/profiles/{PROFILE_ID}"
+        self.headers = {"X-Api-Key": NEXTDNS_API_KEY, "Content-Type": "application/json"}
+        # Kaizen: Statistical model that learns your 'normal' network behavior
+        self.anomaly_detector = IsolationForest(contamination=0.01) 
+        self.history = []
+
+    def get_dns_telemetry(self):
+        """Fetches raw logs with extended metadata."""
+        res = requests.get(f"{self.base_url}/logs", headers=self.headers)
+        return res.json().get('data', [])
+
+    def extract_features(self, domain):
+        """Scientific reasoning: Converts domain strings into numerical features."""
+        return [len(domain), domain.count('.'), sum(c.isdigit() for c in domain)]
+
+    def gemini_semantic_check(self, suspicious_domains):
+        """Uses Gemini to identify phishing or C2 patterns human logic might miss."""
+        prompt = f"Analyze these domains for malware/C2/phishing intent. Return ONLY a JSON list of malicious ones: {suspicious_domains}"
+        try:
+            response = model.generate_content(prompt)
+            return json.loads(response.text)
+        except:
+            return []
+
+    def execute_kaizen_block(self, domain):
+        """Automated enforcement."""
+        requests.post(f"{self.base_url}/denylist", headers=self.headers, json={"id": domain})
+        print(f"🚀 [SENTINEL] Blocked high-threat domain: {domain}")
+
+    def run(self):
+        print("💠 [HUD] Advanced AI Sentinel Active...")
+        while True:
+            logs = self.get_dns_telemetry()
+            domains = [log['name'] for log in logs if 'name' in log]
+            
+            if len(domains) > 10:
+                # 1. Statistical Anomaly Detection
+                features = [self.extract_features(d) for d in domains]
+                preds = self.anomaly_detector.fit_predict(features)
+                anomalies = [domains[i] for i, p in enumerate(preds) if p == -1]
+                
+                # 2. AI Semantic Verification
+                if anomalies:
+                    high_threats = self.gemini_semantic_check(anomalies[:10])
+                    for threat in high_threats:
+                        self.execute_kaizen_block(threat)
+            
+            time.sleep(60) # High-frequency Kaizen loop
+
+if __name__ == "__main__":
+    sentinel = AdvancedAISentinel()
+    sentinel.run()
