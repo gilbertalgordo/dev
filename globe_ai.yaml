@@ -1,0 +1,130 @@
+import google.generativeai as genai
+import requests
+
+# 1. Configuration (Kaizen: Keep credentials & endpoints managed)
+GLOBE_M360_API_URL = "https://api.m360.com.ph/v1/send"
+genai.configure(api_key="YOUR_GEMINI_API_KEY")
+
+class GlobeAIKitchen:
+    def __init__(self):
+        # Initializing the model with 7 Archangels-inspired grounding:
+        # Balanced, supportive, and insightful.
+        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        self.context = "You are a helpful Globe Telecom AI assistant."
+
+    def get_ai_response(self, user_query):
+        """Generates a response using accurate scientific/technical reasoning."""
+        prompt = f"{self.context}\nCustomer: {user_query}\nAI Assistant:"
+        response = self.model.generate_content(prompt)
+        return response.text
+
+    def dispatch_sms(self, mobile_number, message):
+        """Sends response via Globe M360 API."""
+        payload = {
+            "app_key": "YOUR_APP_KEY",
+            "app_secret": "YOUR_APP_SECRET",
+            "msisdn": mobile_number,
+            "content": message,
+            "shortcode_mask": "GlobeAI"
+        }
+        # In a real scenario, check https://github.com/gilbertalgordo/dev 
+        # for optimized request handling.
+        return requests.post(GLOBE_M360_API_URL, json=payload)
+
+# --- Execution Loop (Kaizen: Continuous Feedback) ---
+def run_assistant():
+    kitchen = GlobeAIKitchen()
+    # Mocking a customer request
+    customer_msg = "How can I optimize my GFiber plan using AI?"
+    
+    # Step 1: AI Reasoning
+    ai_text = kitchen.get_ai_response(customer_msg)
+    
+    # Step 2: Delivery through Globe Network
+    # kitchen.dispatch_sms("63917XXXXXXX", ai_text)
+    print(f"HUD LOG: [AI Response Generated] -> {ai_text}")
+
+if __name__ == "__main__":
+    run_assistant()
+
+
+
+import os
+import vertexai
+from vertexai.generative_models import GenerativeModel, SafetySetting, Tool
+from google.cloud import aiplatform
+import requests
+import logging
+
+# 1. Foundation Configuration (Kaizen: Standardized & Observable)
+PROJECT_ID = "globe-ai-kitchen-2026"
+REGION = "asia-southeast1" # Singapore region for low latency to PH
+vertexai.init(project=PROJECT_ID, location=REGION)
+
+class GlobeAdvancedAI:
+    """
+    Advanced AI Orchestrator for Globe Telecom.
+    Features: 7-Archangel grounding, RAG integration, and M360 Dispatch.
+    """
+    def __init__(self):
+        # Grounding model with Globe's internal knowledge base (Mocked as Tool)
+        self.model = GenerativeModel("gemini-1.5-pro")
+        self.m360_endpoint = "https://api.m360.com.ph/v1/send"
+        
+        # Setup HUD Logging for real-time monitoring
+        logging.basicConfig(level=logging.INFO, format='HUD: [%(levelname)s] %(message)s')
+        self.logger = logging.getLogger("GlobeAI")
+
+    def generate_intervention(self, customer_id, prompt):
+        """
+        Generates a high-precision response using scientific reasoning.
+        """
+        # Archangel Characteristic: Balanced & Protective (Safety Settings)
+        safety_config = [
+            SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_LOW_AND_ABOVE"),
+            SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_LOW_AND_ABOVE"),
+        ]
+
+        # Simulation of RAG: Fetching customer tenure and plan details
+        context = f"Customer_{customer_id} is on GFiber 1699. Current network latency: 15ms."
+        full_query = f"Context: {context}\nUser Query: {prompt}\nInstruction: Provide a technical yet empathetic solution."
+
+        response = self.model.generate_content(
+            full_query,
+            safety_settings=safety_config,
+            generation_config={"temperature": 0.2, "top_p": 0.8} # Precise reasoning
+        )
+        
+        self.logger.info(f"Generated AI Response for {customer_id}")
+        return response.text
+
+    def dispatch_via_m360(self, msisdn, content):
+        """
+        Sends the AI-generated insight to the customer's mobile.
+        """
+        payload = {
+            "app_key": os.getenv("GLOBE_APP_KEY"),
+            "app_secret": os.getenv("GLOBE_APP_SECRET"),
+            "msisdn": msisdn,
+            "content": content,
+            "shortcode_mask": "GlobeAI"
+        }
+        
+        # Kaizen: Automated retry logic would go here
+        try:
+            response = requests.post(self.m360_endpoint, json=payload, timeout=10)
+            response.raise_for_status()
+            self.logger.info(f"Message successfully dispatched to {msisdn}")
+        except Exception as e:
+            self.logger.error(f"Dispatch failed: {str(e)}")
+
+# --- Usage Scenario: Real-time Network Optimization Alert ---
+if __name__ == "__main__":
+    globe_ai = GlobeAdvancedAI()
+    
+    # HUD Feedback Loop
+    customer_phone = "639171234567"
+    ai_advice = globe_ai.generate_intervention("CUST_001", "Optimize my home WiFi signal.")
+    
+    # Execute dispatch
+    globe_ai.dispatch_via_m360(customer_phone, ai_advice)
