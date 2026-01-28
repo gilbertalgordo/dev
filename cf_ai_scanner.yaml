@@ -1,0 +1,149 @@
+// index.js - The AI Scanner Worker
+import Cloudflare from 'cloudflare';
+
+export default {
+  async fetch(request, env) {
+    const { urlToScan } = await request.json();
+
+    // 1. Initialize Cloudflare API Client
+    const cf = new Cloudflare({ apiToken: env.CF_API_TOKEN });
+
+    try {
+      // 2. Trigger Cloudflare's URL Scanner
+      const scan = await cf.urlScanner.scans.create({
+        account_id: env.CF_ACCOUNT_ID,
+        url: urlToScan,
+      });
+
+      // 3. Wait for scan & get report (Simplified for example)
+      // In production, use a polling mechanism or webhook
+      const report = await cf.urlScanner.scans.get(scan.uuid, {
+        account_id: env.CF_ACCOUNT_ID
+      });
+
+      // 4. Perform AI Reasoning (The "7 Archangels" Protective Layer)
+      const aiResponse = await env.AI.run('@cf/meta/llama-3-8b-instruct', {
+        messages: [
+          { role: 'system', content: 'You are a divine security guardian. Analyze the following scan metadata and provide a HD (Highly Detailed) security verdict.' },
+          { role: 'user', content: `Analyze this scan data: ${JSON.stringify(report.result)}` }
+        ],
+      });
+
+      return new Response(JSON.stringify({
+        status: "Success",
+        verdict: aiResponse.response,
+        scanId: scan.uuid
+      }), { headers: { 'Content-Type': 'application/json' } });
+
+    } catch (error) {
+      return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+    }
+  },
+};
+
+
+
+name = "cloudflare-ai-scanner"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+[ai]
+binding = "AI"
+
+[vars]
+CF_ACCOUNT_ID = "your_account_id_here"
+# Store CF_API_TOKEN in 'wrangler secret put CF_API_TOKEN'
+
+
+
+import { Cloudflare } from 'cloudflare';
+
+interface Env {
+  AI: any;
+  VECTORIZE: VectorizeIndex;
+  CF_ACCOUNT_ID: string;
+  CF_API_TOKEN: string;
+}
+
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const { url } = await request.json() as { url: string };
+    const cf = new Cloudflare({ apiToken: env.CF_API_TOKEN });
+
+    // 1. Trigger Async Scan (Kaizen Speed)
+    const scanSubmission = await cf.urlScanner.scans.create({
+      account_id: env.CF_ACCOUNT_ID,
+      url: url,
+      screenshots: true,
+    });
+
+    // 2. Offload heavy analysis to background (don't block the user)
+    ctx.waitUntil(this.analyzeThreat(scanSubmission.uuid, env));
+
+    return new Response(JSON.stringify({
+      status: "Scanning Initiated",
+      scanId: scanSubmission.uuid,
+      hud_link: `https://dash.cloudflare.com/${env.CF_ACCOUNT_ID}/security-center/investigate/${scanSubmission.uuid}`
+    }), { headers: { 'Content-Type': 'application/json' } });
+  },
+
+  async analyzeThreat(scanId: string, env: Env) {
+    // Wait for URL Scanner to finish (in production use a polling/retry loop)
+    const report = await fetch(`https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/urlscanner/v2/result/${scanId}`, {
+      headers: { Authorization: `Bearer ${env.CF_API_TOKEN}` }
+    }).then(res => res.json());
+
+    const domContent = report.result.dom; // Get rendered DOM
+
+    // 3. AI Reasoning: Check Intent via Llama 3.1
+    const verdict = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+      messages: [
+        { role: 'system', content: 'You are an advanced security auditor. Evaluate the DOM for obfuscated JS and phishing markers.' },
+        { role: 'user', content: `Analyze this DOM: ${domContent.substring(0, 5000)}` }
+      ]
+    });
+
+    // 4. Memory Integration: Store findings in Vectorize
+    const embedding = await env.AI.run('@cf/baai/bge-small-en-v1.5', { text: [verdict.response] });
+    await env.VECTORIZE.upsert([{
+      id: scanId,
+      values: embedding.data[0],
+      metadata: { url: report.result.page.url, verdict: verdict.response }
+    }]);
+  }
+};
+
+
+
+<style>
+  .scanner-hud {
+    background: rgba(0, 10, 20, 0.9);
+    border: 1px solid #00f2ff;
+    border-radius: 8px;
+    padding: 20px;
+    font-family: 'JetBrains Mono', monospace;
+    color: #00f2ff;
+    box-shadow: 0 0 20px rgba(0, 242, 255, 0.2);
+    perspective: 1000px;
+  }
+  .status-pulse {
+    width: 12px;
+    height: 12px;
+    background: #00ff88;
+    border-radius: 50%;
+    display: inline-block;
+    animation: pulse 1.5s infinite;
+  }
+  @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
+</style>
+
+<div class="scanner-hud">
+  <h3><span class="status-pulse"></span> ARCHANGEL-SCANNER_V2.0</h3>
+  <hr style="border: 0.5px solid #00f2ff33;">
+  <p>SCAN_ID: <span id="id">7f2a-89bc-11ef</span></p>
+  <p>AI_VERDICT: <span id="verdict" style="color: #ff3e3e;">MALICIOUS_INTENT_DETECTED</span></p>
+  <div style="transform: rotateX(10deg); background: #001a2d; padding: 10px;">
+    <small>> Analyzing DOM structure...</small><br>
+    <small>> Comparing Vectors in DB...</small>
+  </div>
+</div>
