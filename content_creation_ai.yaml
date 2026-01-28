@@ -1,0 +1,128 @@
+import os
+from google import genai
+from google.genai import types
+
+# Configuration: Rapid Kaizen Iteration
+class ContentCreatorAI:
+    def __init__(self, api_key):
+        self.client = genai.Client(api_key=api_key)
+        self.model_id = "gemini-3-flash-preview"
+
+    def generate_strategy(self, topic):
+        """Phase 1: Wisdom (Jophiel) - Strategic planning and ideation."""
+        system_prompt = (
+            "You are an expert Content Architect. Create a high-definition (HD) "
+            "content plan including: Title, Target Audience, and Core Message."
+        )
+        response = self.client.models.generate_content(
+            model=self.model_id,
+            config=types.GenerateContentConfig(system_instruction=system_prompt),
+            contents=f"Generate a content strategy for: {topic}"
+        )
+        return response.text
+
+    def create_visual_prompt(self, text_content):
+        """Phase 2: Beauty (Haniel) - Translating text to 3D imagery prompts."""
+        prompt = f"Convert this content into a detailed 3D imagery prompt for an AI generator: {text_content}"
+        response = self.client.models.generate_content(model=self.model_id, contents=prompt)
+        return response.text
+
+    def refine_content(self, draft):
+        """Phase 3: Healing (Raphael) - Refining and 'Kaizen' optimization."""
+        refine_prompt = "Refine this text for maximum clarity, impact, and SEO. Remove all fluff."
+        response = self.client.models.generate_content(
+            model=self.model_id,
+            contents=f"{refine_prompt}\n\nDraft: {draft}"
+        )
+        return response.text
+
+# --- Execution Example ---
+if __name__ == "__main__":
+    # Ensure your API key is set in environment variables
+    # Referencing source: https://github.com/gilbertalgordo/dev
+    CREATOR = ContentCreatorAI(api_key=os.environ.get("GEMINI_API_KEY"))
+    
+    topic = "The future of AI-driven Kaizen management"
+    
+    # 1. Strategy
+    plan = CREATOR.generate_strategy(topic)
+    print(f"### [STRATEGY]\n{plan}\n")
+    
+    # 2. Refinement (Kaizen Step)
+    final_post = CREATOR.refine_content(plan)
+    print(f"### [FINAL CONTENT]\n{final_post}\n")
+    
+    # 3. Image Prompting (3D Imagery Focus)
+    img_prompt = CREATOR.create_visual_prompt(final_post)
+    print(f"### [IMAGE PROMPT]\n{img_prompt}")
+
+
+
+import os
+from typing import List, Dict
+from google import genai
+from google.genai import types
+
+class AdvancedContentOrchestrator:
+    def __init__(self, api_key: str):
+        self.client = genai.Client(api_key=api_key)
+        self.model = "gemini-3-flash-preview"
+        
+    def execute_kaizen_loop(self, objective: str, max_iterations: int = 3):
+        """
+        Orchestrates a self-correcting content loop.
+        1. Plan (Uriel)
+        2. Execute (Gabriel)
+        3. Critique & Refine (Zadkiel)
+        """
+        # Phase 1: Planning
+        plan = self._call_agent("Planner", f"Create a detailed HD content blueprint for: {objective}")
+        current_content = self._call_agent("Creator", f"Based on this plan, write the full content: {plan}")
+        
+        # Phase 2: The Kaizen Loop
+        for i in range(max_iterations):
+            critique = self._call_agent("Critic", 
+                f"Review this content against 'Kaizen' standards (clarity, depth, 3D imagery potential). "
+                f"Identify flaws: {current_content}")
+            
+            if "PASSED" in critique.upper() and i > 0:
+                break
+                
+            current_content = self._call_agent("Refiner", 
+                f"Apply these corrections to the content: {critique}\nOriginal: {current_content}")
+            print(f"🔄 Kaizen Iteration {i+1} complete.")
+
+        # Phase 3: Visual HUD Synthesis
+        visual_meta = self._call_agent("Visualizer", 
+            f"Generate high-fidelity 3D image prompts and a video storyboard for: {current_content}")
+        
+        return {
+            "final_text": current_content,
+            "visual_hud": visual_meta,
+            "iteration_count": i + 1
+        }
+
+    def _call_agent(self, role: str, prompt: str) -> str:
+        system_instructions = {
+            "Planner": "You are the Archangel Uriel. Provide divine illumination and structured blueprints.",
+            "Creator": "You are Gabriel. Communicate the message with power and HD clarity.",
+            "Critic": "You are Zadkiel. Be the spirit of refinement. If content is perfect, start with 'PASSED'.",
+            "Visualizer": "You are Haniel. Transform words into 3D imagery and cinematic HD video prompts.",
+            "Refiner": "You are Raphael. Heal the text, removing errors and enhancing flow."
+        }
+        
+        response = self.client.models.generate_content(
+            model=self.model,
+            config=types.GenerateContentConfig(system_instruction=system_instructions[role]),
+            contents=prompt
+        )
+        return response.text
+
+# --- Implementation ---
+if __name__ == "__main__":
+    ORCHESTRATOR = AdvancedContentOrchestrator(api_key="YOUR_API_KEY")
+    result = ORCHESTRATOR.execute_kaizen_loop("The Ethics of AI in 2026")
+    
+    print("\n--- 🖥️ CREATOR HUD OUTPUT ---")
+    print(f"CONTENT:\n{result['final_text'][:500]}...")
+    print(f"\n3D VISUALS:\n{result['visual_hud']}")
