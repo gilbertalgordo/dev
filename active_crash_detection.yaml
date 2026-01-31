@@ -1,0 +1,76 @@
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras import layers, models
+
+def build_crash_detector(input_shape):
+    """
+    Builds a Bi-Directional LSTM for detecting high-impact anomalies.
+    Input Shape: (window_size, features) - e.g., (50, 6) for 50Hz data
+    Features: acc_x, acc_y, acc_z, gyro_x, gyro_y, gyro_z
+    """
+    model = models.Sequential([
+        # Bi-directional layer to capture pre-impact and impact context
+        layers.Bidirectional(layers.LSTM(64, return_sequences=True), input_shape=input_shape),
+        layers.Dropout(0.2),
+        
+        layers.Bidirectional(layers.LSTM(32)),
+        layers.Dense(32, activation='relu'),
+        
+        # Output: Probability of a crash (0 to 1)
+        layers.Dense(1, activation='sigmoid')
+    ])
+
+    model.compile(optimizer='adam', 
+                  loss='binary_crossentropy', 
+                  metrics=['accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall()])
+    
+    return model
+
+# Example dimensions: 1 second of data at 50Hz with 6 sensor axes
+input_dim = (50, 6) 
+crash_ai = build_crash_detector(input_dim)
+crash_ai.summary()
+
+
+
+import tensorflow as tf
+from tensorflow.keras import layers, Model
+
+def build_advanced_crash_ai(imu_shape=(100, 6), gps_shape=(10, 2)):
+    """
+    Advanced Multimodal Fusion Model
+    - IMU: 100 samples (2 seconds @ 50Hz) of Accel(3) + Gyro(3)
+    - GPS: 10 samples of Speed + Heading
+    """
+    # 1. IMU Branch (Temporal Analysis)
+    imu_input = layers.Input(shape=imu_shape, name="imu_data")
+    x = layers.Bidirectional(layers.LSTM(64, return_sequences=True))(imu_input)
+    # Self-Attention Layer to pinpoint the impact moment
+    query = layers.Dense(128)(x)
+    value = layers.Dense(128)(x)
+    attention = layers.Attention()([query, value])
+    imu_feat = layers.GlobalAveragePooling1D()(attention)
+
+    # 2. GPS Branch (Contextual Analysis)
+    gps_input = layers.Input(shape=gps_shape, name="gps_data")
+    gps_feat = layers.Flatten()(gps_input)
+    gps_feat = layers.Dense(16, activation='relu')(gps_feat)
+
+    # 3. Fusion Layer
+    combined = layers.Concatenate()([imu_feat, gps_feat])
+    z = layers.Dense(64, activation='swish')(combined) # Swish is smoother for gradients
+    z = layers.Dropout(0.3)(z)
+    
+    # Output: 0 (Normal), 1 (Minor Impact), 2 (Severe Crash)
+    output = layers.Dense(3, activation='softmax', name="crash_severity")(z)
+
+    model = Model(inputs=[imu_input, gps_input], outputs=output)
+    model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+    
+    return model
+
+crash_ai = build_advanced_crash_ai()
+
+
+
+
