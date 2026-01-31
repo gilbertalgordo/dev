@@ -1,0 +1,165 @@
+import os
+import json
+import requests
+from openai import OpenAI
+from dotenv import load_dotenv
+
+# Initialize configurations
+load_dotenv()
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+WEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
+
+def get_weather(location):
+    """Fetch real-time weather data for a specific city."""
+    url = f"http://api.openweathermap.org/data/2.5/weather?q={location}&appid={WEATHER_API_KEY}&units=metric"
+    response = requests.get(url)
+    if response.status_code == 200:
+        data = response.json()
+        return {
+            "temp": data["main"]["temp"],
+            "description": data["weather"][0]["description"],
+            "humidity": data["main"]["humidity"]
+        }
+    return {"error": "Location not found"}
+
+def run_weather_ai(user_prompt):
+    # Define the tool for the AI
+    tools = [{
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Get the current weather for a city",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string", "description": "The city name, e.g., Tokyo"}
+                },
+                "required": ["location"]
+            }
+        }
+    }]
+
+    messages = [{"role": "user", "content": user_prompt}]
+    
+    # First Pass: AI determines if it needs the tool
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=messages,
+        tools=tools,
+        tool_choice="auto"
+    )
+    
+    response_message = response.choices[0].message
+    tool_calls = response_message.tool_calls
+
+    if tool_calls:
+        # Second Pass: If tool is called, execute it and send results back
+        messages.append(response_message)
+        for tool_call in tool_calls:
+            function_args = json.loads(tool_call.function.arguments)
+            weather_data = get_weather(function_args.get("location"))
+            
+            messages.append({
+                "tool_call_id": tool_call.id,
+                "role": "tool",
+                "name": "get_weather",
+                "content": json.dumps(weather_data)
+            })
+        
+        # Final response with data context
+        final_response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages
+        )
+        return final_response.choices[0].message.content
+    
+    return response_message.content
+
+# Example Execution
+if __name__ == "__main__":
+    query = "Should I wear a coat in Paris today?"
+    print(f"User: {query}")
+    print(f"AI: {run_weather_ai(query)}")
+
+
+
+pip install -U langgraph langchain_openai langchain_community requests
+
+
+
+import operator
+from typing import Annotated, TypedDict, Union, List
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage
+from langchain_core.tools import tool
+from langgraph.graph import StateGraph, START, END
+from langgraph.prebuilt import ToolNode
+import requests
+import os
+
+# Define the State
+class AgentState(TypedDict):
+    messages: Annotated[List[BaseMessage], operator.add]
+
+# --- 🛠️ STEP 1: Define Tools ---
+@tool
+def fetch_weather(city: str):
+    """Fetches real-time weather and UV index data."""
+    api_key = os.getenv("OPENWEATHER_API_KEY")
+    url = f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={api_key}&units=metric"
+    res = requests.get(url).json()
+    return {
+        "temp": res["main"]["temp"],
+        "condition": res["weather"][0]["description"],
+        "wind_speed": res["wind"]["speed"],
+        "location": city
+    }
+
+tools = [fetch_weather]
+tool_node = ToolNode(tools)
+
+# --- 🧠 STEP 2: Define Agents ---
+model = ChatOpenAI(model="gpt-4o", streaming=True).bind_tools(tools)
+
+def archangel_guardian(state: AgentState):
+    """The Logic Node: Reasons with the data and applies safety protocols."""
+    messages = state['messages']
+    response = model.invoke(messages)
+    return {"messages": [response]}
+
+def should_continue(state: AgentState):
+    """Determines if more data is needed or if safety logic is satisfied."""
+    last_message = state['messages'][-1]
+    if last_message.tool_calls:
+        return "tools"
+    return END
+
+# --- 🕸️ STEP 3: Build the Graph ---
+workflow = StateGraph(AgentState)
+
+workflow.add_node("guardian", archangel_guardian)
+workflow.add_node("tools", tool_node)
+
+workflow.add_edge(START, "guardian")
+workflow.add_conditional_edges("guardian", should_continue, {"tools": "tools", END: END})
+workflow.add_edge("tools", "guardian")
+
+app = workflow.compile()
+
+
+
+def display_hud(response_text):
+    print("\n" + "="*50)
+    print("🛰️ ACTIVE WEATHER AI - HUD OVERLAY")
+    print("="*50)
+    # Simple logic to extract key phrases for the 'HUD'
+    print(f"ANALYSIS: {response_text}")
+    print("="*50 + "\n")
+
+# Run Example
+inputs = {"messages": [HumanMessage(content="Analyze the storm risk in Manila and suggest safety measures.")]}
+for output in app.stream(inputs):
+    for key, value in output.items():
+        if key == "guardian":
+            display_hud(value["messages"][-1].content)
+
