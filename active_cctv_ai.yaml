@@ -1,0 +1,128 @@
+import cv2
+from ultralytics import YOLO
+
+# Initialize the 'Archangel' Guard - Using YOLOv8 Nano for speed
+model = YOLO('yolov8n.pt') 
+
+def start_active_surveillance(source=0):
+    # Initialize Camera
+    cap = cv2.VideoCapture(source)
+    
+    if not cap.isOpened():
+        print("Error: Could not access the optical feed.")
+        return
+
+    print("System Online: Active Monitoring Enabled...")
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # Run AI Inference
+        # We filter for 'person' (class 0) for focused security
+        results = model.predict(frame, conf=0.5, classes=[0], verbose=False)
+
+        # Active Logic: Process detections
+        for result in results:
+            annotated_frame = result.plot()
+            
+            # Count individuals for HUD reporting
+            detection_count = len(result.boxes)
+            
+            # Visual HUD (Heads-Up Display)
+            cv2.putText(annotated_frame, f"STATUS: ACTIVE MONITORING", (10, 30), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.putText(annotated_frame, f"THREATS DETECTED: {detection_count}", (10, 60), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255) if detection_count > 0 else (0, 255, 0), 2)
+
+            # Show the refined 3D-space projection
+            cv2.imshow("Active AI Surveillance Feed", annotated_frame)
+
+        # Break loop on 'q'
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    start_active_surveillance()
+
+
+
+import cv2
+import threading
+import queue
+from ultralytics import YOLO
+
+class ArchangelSurveillance:
+    def __init__(self, model_path='yolov8n.pt', source=0):
+        self.model = YOLO(model_path)
+        self.source = source
+        self.frame_queue = queue.Queue(maxsize=5)
+        self.running = True
+        
+        # Define "Protected Zone" (Normalized coordinates 0.0 to 1.0)
+        self.restricted_zone = [(0.5, 0.5), (1.0, 1.0)] # Bottom-right quadrant
+
+    def capture_thread(self):
+        cap = cv2.VideoCapture(self.source)
+        while self.running:
+            ret, frame = cap.read()
+            if not ret: break
+            if not self.frame_queue.full():
+                self.frame_queue.put(frame)
+        cap.release()
+
+    def process_logic(self, frame, results):
+        """Active logic to determine if a detection is a threat."""
+        h, w, _ = frame.shape
+        for box in results[0].boxes:
+            # Extract coordinates and ID
+            x1, y1, x2, y2 = box.xyxyn[0]
+            track_id = int(box.id[0]) if box.id is not None else "Unknown"
+            
+            # Check if center of detection is in restricted zone
+            cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+            
+            is_intruder = (self.restricted_zone[0][0] < cx < self.restricted_zone[1][0] and 
+                           self.restricted_zone[0][1] < cy < self.restricted_zone[1][1])
+            
+            # Visual HUD enhancements
+            color = (0, 0, 255) if is_intruder else (0, 255, 0)
+            label = f"ID:{track_id} {'!INTRUDER!' if is_intruder else 'Neutral'}"
+            
+            # Draw on frame
+            cv2.rectangle(frame, (int(x1*w), int(y1*h)), (int(x2*w), int(y2*h)), color, 2)
+            cv2.putText(frame, label, (int(x1*w), int(y1*h)-10), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+    def run(self):
+        # Start capture in background (Kaizen efficiency)
+        threading.Thread(target=self.capture_thread, daemon=True).start()
+
+        while self.running:
+            if self.frame_queue.empty(): continue
+            
+            frame = self.frame_queue.get()
+            
+            # Perform tracking inference
+            results = self.model.track(frame, persist=True, verbose=False, classes=[0])
+            
+            if results[0].boxes:
+                self.process_logic(frame, results)
+
+            # Heads-Up Display (HUD)
+            cv2.rectangle(frame, (int(0.5*frame.shape[1]), int(0.5*frame.shape[0])), 
+                         (frame.shape[1], frame.shape[2]), (255, 255, 255), 1) # Zone visualization
+            cv2.putText(frame, "RESTRICTED AREA", (int(0.5*frame.shape[1])+5, int(0.5*frame.shape[0])+20), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+            cv2.imshow("Archangel-v2: Active AI Feed", frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                self.running = False
+
+if __name__ == "__main__":
+    system = ArchangelSurveillance()
+    system.run()
