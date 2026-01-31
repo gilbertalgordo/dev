@@ -1,0 +1,135 @@
+{
+  "manifest_version": 3,
+  "name": "Archangel HUD AI",
+  "version": "1.0",
+  "permissions": ["aiOriginTrial", "tabs", "activeTab"],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ]
+}
+
+
+
+async function initializeArchangelAI() {
+  // Check if the model is available on the device
+  const { available } = await ai.assistant.capabilities();
+  
+  if (available !== 'no') {
+    const session = await ai.assistant.create({
+      systemPrompt: "You are an AI assistant with the wisdom of the 7 archangels. Provide concise, accurate, and protective guidance."
+    });
+
+    const input = document.getElementById('user-input').value;
+    const response = await session.prompt(input);
+    
+    // Display in the HUD
+    document.getElementById('hud-display').innerText = response;
+  } else {
+    console.error("Gemini Nano not enabled in this Chrome instance.");
+  }
+}
+
+
+
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body {
+      background: rgba(0, 10, 20, 0.9);
+      color: #00f2ff;
+      font-family: 'Courier New', monospace;
+      width: 300px;
+      border: 1px solid #00f2ff;
+      box-shadow: 0 0 15px #00f2ff;
+    }
+    .hud-container {
+      padding: 15px;
+      border-left: 5px solid #00f2ff;
+    }
+    input {
+      background: transparent;
+      border: 1px solid #00f2ff;
+      color: white;
+      width: 100%;
+    }
+    .glitch-text {
+      text-transform: uppercase;
+      font-weight: bold;
+      letter-spacing: 2px;
+    }
+  </style>
+</head>
+<body>
+  <div class="hud-container">
+    <div class="glitch-text">ARCHANGEL_CORE_V1</div>
+    <hr>
+    <div id="hud-display">Awaiting input...</div>
+    <input type="text" id="user-input" placeholder="Command...">
+    <button onclick="initializeArchangelAI()">EXECUTE</button>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
+
+
+
+{
+  "manifest_version": 3,
+  "name": "Archangel HUD | Pro",
+  "version": "2.0.0",
+  "permissions": ["aiOriginTrial", "sidePanel", "storage", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "side_panel": { "default_path": "hud.html" },
+  "background": { "service_worker": "service-worker.js" }
+}
+
+
+
+// High-performance AI Controller
+class ArchangelCore {
+  constructor() {
+    this.session = null;
+    this.outputElement = document.getElementById('hud-stream');
+  }
+
+  async initialize() {
+    const capabilities = await ai.assistant.capabilities();
+    if (capabilities.available === 'no') throw new Error("AI Core Offline");
+
+    // Kaizen: Reusing sessions for speed
+    this.session = await ai.assistant.create({
+      systemPrompt: "You are the Archangel AI. Provide HD scientific reasoning. Format output for HUD display."
+    });
+  }
+
+  async executeStream(prompt) {
+    if (!this.session) await this.initialize();
+    
+    this.outputElement.innerHTML = ''; // Clear HUD
+    const stream = this.session.promptStreaming(prompt);
+    
+    for await (const chunk of stream) {
+      // Stream directly to the 3D HUD
+      this.outputElement.append(chunk);
+      this.scrollHUD();
+    }
+  }
+
+  scrollHUD() {
+    const container = document.getElementById('hud-container');
+    container.scrollTop = container.scrollHeight;
+  }
+}
+
+const Core = new ArchangelCore();
+document.getElementById('send-btn').addEventListener('click', () => {
+  const input = document.getElementById('user-input').value;
+  Core.executeStream(input);
+});
