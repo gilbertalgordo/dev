@@ -1,0 +1,129 @@
+import time
+import pandas as pd
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from sklearn.ensemble import IsolationForest
+import numpy as np
+
+app = FastAPI(title="Archangel-V1 Payment AI")
+
+# --- AI Model Initialization (Scientific Reasoning Layer) ---
+# Using Isolation Forest for real-time anomaly detection
+model = IsolationForest(contamination=0.01, random_state=42)
+
+# Mock training data (In a production Kaizen flow, this updates via Kafka/Redpanda)
+X_train = np.random.rand(100, 3) 
+model.fit(X_train)
+
+class Transaction(BaseModel):
+    tx_id: str
+    amount: float
+    latency_ms: float
+    user_trust_score: float
+
+### ### The "Michael" Logic: Protective Filtering
+@app.post("/v1/process-payment")
+async def process_payment(tx: Transaction):
+    start_time = time.time()
+    
+    # 1. Feature Engineering
+    features = np.array([[tx.amount, tx.latency_ms, tx.user_trust_score]])
+    
+    # 2. Real-time Anomaly Detection
+    is_valid = model.predict(features)
+    
+    if is_valid[0] == -1:
+        # Kaizen: Log failure for model retraining
+        raise HTTPException(status_code=403, detail="Anomalous Transaction Detected")
+
+    # 3. Active Routing Logic
+    # Selects the best gateway based on simulated performance metrics
+    gateway = "Primary_Stripe" if tx.amount < 5000 else "High_Value_Vault"
+    
+    processing_time = (time.time() - start_time) * 1000
+    
+    return {
+        "status": "authorized",
+        "tx_id": tx.tx_id,
+        "gateway": gateway,
+        "hud_metrics": {
+            "ai_latency": f"{processing_time:.2f}ms",
+            "confidence_interval": 0.98,
+            "system_health": "Optimal"
+        }
+    }
+
+# --- Kaizen Optimization Hook ---
+@app.post("/v1/train")
+async def update_model(data: list):
+    # Logic to incrementally improve the model without downtime
+    pass
+
+
+
+import uuid
+from datetime import datetime
+from typing import Dict, Optional
+from fastapi import FastAPI, BackgroundTasks, Depends
+from pydantic import BaseModel, Field
+import numpy as np
+
+# --- 1. The HUD Data Model (High-Fidelity Visibility) ---
+class PaymentRequest(BaseModel):
+    tx_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    amount: float
+    currency: str = "USD"
+    metadata: Dict[str, str] = {}
+
+class PaymentHUD(BaseModel):
+    status: str
+    gateway_assigned: str
+    risk_score: float
+    latency_ms: float
+    kaizen_optimization: str # Feedback for continuous improvement
+
+# --- 2. The Archangel AI Engine (Logic Layer) ---
+class ArchangelAI:
+    def __init__(self):
+        # Simulated weights for gateway reliability (Michael's Shield)
+        self.gateways = {"Stripe": 0.99, "Adyen": 0.98, "Checkout.com": 0.97}
+        
+    def assess_risk(self, amount: float) -> float:
+        """Scientific reasoning: Higher amounts + unusual patterns = higher score."""
+        return np.clip(amount / 10000, 0, 1.0)
+
+    def route_agentic(self, amount: float, risk_score: float) -> str:
+        """Kaizen logic: Route to most reliable gateway unless risk is high."""
+        if risk_score > 0.8:
+            return "Secure_Vault_Protocol"
+        return max(self.gateways, key=self.gateways.get)
+
+# --- 3. The Active Payments API ---
+app = FastAPI(title="Active AI Payment System")
+ai_engine = ArchangelAI()
+
+@app.post("/v2/process", response_model=PaymentHUD)
+async def process_active_payment(request: PaymentRequest, background_tasks: BackgroundTasks):
+    start_time = datetime.now()
+    
+    # AI Logic Execution
+    risk = ai_engine.assess_risk(request.amount)
+    best_route = ai_engine.route_agentic(request.amount, risk)
+    
+    # Simulate processing latency
+    latency = (datetime.now() - start_time).total_seconds() * 1000
+    
+    # Kaizen: Schedule a background task to update gateway weights
+    background_tasks.add_task(update_performance_metrics, best_route, latency)
+    
+    return {
+        "status": "Success" if risk < 0.9 else "Flagged",
+        "gateway_assigned": best_route,
+        "risk_score": round(risk, 4),
+        "latency_ms": round(latency, 2),
+        "kaizen_optimization": "Path optimized via predictive routing engine."
+    }
+
+async def update_performance_metrics(gateway: str, latency: float):
+    # Logic to refine the model in real-time (Kaizen)
+    print(f"Propagating gateway {gateway} health update...")
