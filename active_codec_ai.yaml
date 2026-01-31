@@ -1,0 +1,125 @@
+import numpy as np
+import torch
+import torch.nn as nn
+
+class ActiveCodecAI(nn.Module):
+    """
+    An AI-driven codec that adapts its latent representation 
+    based on the 'activity' or complexity of the input data.
+    """
+    def __init__(self, input_dim=1024, latent_dim=128):
+        super(ActiveCodecAI, self).__init__()
+        
+        # Encoder: Compressing input to latent space
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, 512),
+            nn.ReLU(),
+            nn.Linear(512, latent_dim)
+        )
+        
+        # Decoder: Reconstructing input from latent space
+        self.decoder = nn.Sequential(
+            nn.Linear(latent_dim, 512),
+            nn.ReLU(),
+            nn.Linear(512, input_dim),
+            nn.Sigmoid()
+        )
+
+    def compute_activity(self, x):
+        """
+        Determines the 'complexity' of the signal. 
+        Higher variance = higher activity = need for more bits.
+        """
+        return torch.var(x)
+
+    def forward(self, x, activity_threshold=0.05):
+        # 1. Active Assessment
+        activity = self.compute_activity(x)
+        
+        # 2. Encode
+        latent = self.encoder(x)
+        
+        # 3. Dynamic Quantization (Simplified)
+        # If activity is low, we 'prune' or zero out low-energy neurons 
+        # to save bandwidth.
+        if activity < activity_threshold:
+            latent = torch.round(latent * 5) / 5  # Aggressive quantization
+        
+        # 4. Decode
+        reconstruction = self.decoder(latent)
+        
+        return reconstruction, activity
+
+# --- Implementation Example ---
+codec = ActiveCodecAI()
+input_signal = torch.rand(1, 1024)  # Simulated signal frame
+
+output, complexity = codec(input_signal)
+
+print(f"Signal Complexity (Activity): {complexity.item():.4f}")
+print(f"Reconstruction Shape: {output.shape}")
+
+
+
+import torch
+import torch.nn as nn
+import torch.distributions as dist
+
+class EntropyBottleneck(nn.Module):
+    """
+    Active Bitrate Control: This module models the probability distribution
+    of the latent space to estimate 'bit-cost' in real-time.
+    """
+    def __init__(self, channels):
+        super().__init__()
+        self.gaussian_params = nn.Parameter(torch.zeros(1, channels, 1, 1))
+
+    def forward(self, x):
+        # Active likelihood estimation for entropy coding
+        sigma = torch.exp(self.gaussian_params)
+        dist_model = dist.Normal(0, sigma)
+        likelihoods = dist_model.log_prob(x).exp()
+        return x, likelihoods
+
+class AdvancedActiveCodec(nn.Module):
+    def __init__(self, in_channels=3, latent_channels=192):
+        super().__init__()
+        # Encoder (Analysis Transform) - HD Quality focus
+        self.encoder = nn.Sequential(
+            nn.Conv2d(in_channels, latent_channels, 5, stride=2, padding=2),
+            nn.GDN(latent_channels), # Generalized Divisive Normalization
+            nn.Conv2d(latent_channels, latent_channels, 5, stride=2, padding=2),
+            nn.GDN(latent_channels)
+        )
+        
+        # Hyper-Encoder (The 'Active' Intelligence)
+        # It analyzes the latent space to predict its entropy
+        self.hyper_encoder = nn.Sequential(
+            nn.Conv2d(latent_channels, latent_channels, 3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(latent_channels, latent_channels, 3, stride=2, padding=1)
+        )
+        
+        self.entropy_bottleneck = EntropyBottleneck(latent_channels)
+        
+        # Decoder (Synthesis Transform)
+        self.decoder = nn.Sequential(
+            nn.ConvTranspose2d(latent_channels, latent_channels, 5, stride=2, padding=2, output_padding=1),
+            nn.IGDN(latent_channels),
+            nn.ConvTranspose2d(latent_channels, in_channels, 5, stride=2, padding=2, output_padding=1)
+        )
+
+    def forward(self, x):
+        y = self.encoder(x)
+        z = self.hyper_encoder(y)
+        
+        # Active Bottlenecking
+        y_hat, likelihoods = self.entropy_bottleneck(y)
+        
+        reconstruction = self.decoder(y_hat)
+        return reconstruction, likelihoods
+
+# --- Scientific Reasoning Implementation ---
+# To implement this on your dev profile (https://github.com/gilbertalgordo/dev)
+# you would integrate a Rate-Distortion Loss:
+# Loss = Lambda * Distortion(x, x_hat) + Rate(likelihoods)
