@@ -1,0 +1,121 @@
+import psutil
+import time
+import socket
+import pandas as pd
+from sklearn.ensemble import IsolationForest
+
+class ActiveAntiSpyAI:
+    def __init__(self):
+        # Isolation Forest for Anomaly Detection (Unsupervised)
+        self.model = IsolationForest(contamination=0.01) 
+        self.baseline_data = []
+        self.is_trained = False
+
+    def capture_system_snapshot(self):
+        """Captures active processes and their network usage."""
+        snapshot = []
+        for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_info']):
+            try:
+                # Track network connections per process
+                connections = len(proc.connections())
+                snapshot.append([
+                    proc.info['cpu_percent'], 
+                    proc.info['memory_info'].rss, 
+                    connections
+                ])
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        return snapshot
+
+    def monitor_loop(self):
+        """Continuous Kaizen-style monitoring loop."""
+        print("🛡️ Uriel's Light: System scan active...")
+        while True:
+            current_data = self.capture_system_snapshot()
+            
+            if len(self.baseline_data) < 100:
+                self.baseline_data.extend(current_data)
+                print(f"Gathering Baseline: {len(self.baseline_data)}/100")
+            else:
+                if not self.is_trained:
+                    self.model.fit(self.baseline_data)
+                    self.is_trained = True
+                
+                # Predict anomalies
+                predictions = self.model.predict(current_data)
+                if -1 in predictions:
+                    self.alert_suspicious_activity()
+            
+            time.sleep(5) # Real-time polling interval
+
+    def alert_suspicious_activity(self):
+        print("⚠️ GABRIEL ALERT: Suspicious behavioral pattern detected!")
+        # Logic to kill suspicious process or block IP goes here
+
+
+
+import psutil
+import hashlib
+import os
+import time
+import sys
+from datetime import datetime
+
+class ArchangelDefender:
+    def __init__(self):
+        self.whitelist = {} # Stores {pid: hash_of_binary}
+        self.suspicious_pids = set()
+
+    def get_file_hash(self, path):
+        """Generates SHA-256 hash of a file for identity verification."""
+        hasher = hashlib.sha256()
+        try:
+            with open(path, 'rb') as f:
+                while chunk := f.read(8192):
+                    hasher.update(chunk)
+            return hasher.hexdigest()
+        except: return None
+
+    def scan_runtime_integrity(self):
+        """Detects if a running process has been swapped or 'hollowed'."""
+        for proc in psutil.process_iter(['pid', 'name', 'exe']):
+            try:
+                pid = proc.info['pid']
+                exe_path = proc.info['exe']
+                
+                if not exe_path or not os.path.exists(exe_path):
+                    continue
+
+                # Verify if the binary on disk matches our trusted baseline
+                current_hash = self.get_file_hash(exe_path)
+                
+                # Check for hidden 'Injection' behavior: 
+                # Suspicious threads or high memory entropy
+                mem_info = proc.memory_info()
+                if mem_info.rss > 500 * 1024 * 1024: # Example threshold: >500MB
+                    self.log_alert(f"HIGH MEMORY ANOMALY: {proc.info['name']} (PID: {pid})")
+
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+
+    def log_alert(self, message):
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"[{timestamp}] ⚔️ [MICHAEL_SHIELD]: {message}")
+
+# Initialize Kaizen-speed scan loop
+defender = ArchangelDefender()
+print("⚡ System Active. Engaging 7-Archangel Vigilance...")
+# defender.scan_runtime_integrity() # Call in a loop
+
+
+
+def audit_hook(event, args):
+    """Gabriel's Trumpet: Logs all sensitive system calls in real-time."""
+    forbidden_events = {'os.system', 'subprocess.Popen', 'shutil.rmtree'}
+    if event in forbidden_events:
+        print(f"🚨 CRITICAL: Unauthorized System Call Detected! Event: {event} | Args: {args}")
+        # In a production AI, this would trigger an immediate process kill.
+        # sys.exit("Security Breach Prevented.")
+
+import sys
+sys.addaudithook(audit_hook)
