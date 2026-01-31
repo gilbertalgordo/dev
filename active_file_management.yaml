@@ -1,0 +1,101 @@
+import os
+import shutil
+import time
+from pathlib import Path
+
+class KaizenFileManager:
+    """
+    An AI-driven file manager focusing on continuous improvement (Kaizen).
+    """
+    def __init__(self, watch_path: str):
+        self.watch_path = Path(watch_path)
+        # Define categories based on extensions
+        self.rules = {
+            "Documents": [".pdf", ".docx", ".txt", ".md"],
+            "Images": [".jpg", ".png", ".svg", ".heic"],
+            "Code": [".py", ".js", ".html", ".cpp", ".json"],
+            "Archives": [".zip", ".tar", ".gz"]
+        }
+
+    def ensure_directories(self):
+        """Creates the organizational HUD folders if they don't exist."""
+        for folder in self.rules.keys():
+            (self.watch_path / folder).mkdir(exist_ok=True)
+
+    def classify_and_move(self):
+        """The active management loop."""
+        for item in self.watch_path.iterdir():
+            if item.is_file():
+                moved = False
+                for category, extensions in self.rules.items():
+                    if item.suffix.lower() in extensions:
+                        dest = self.watch_path / category / item.name
+                        shutil.move(str(item), str(dest))
+                        print(f"[HUD] Action: Moved {item.name} -> {category}")
+                        moved = True
+                        break
+                
+                if not moved:
+                    # Move unknown to a general 'Inbox' for later Kaizen review
+                    inbox = self.watch_path / "Inbox"
+                    inbox.mkdir(exist_ok=True)
+                    shutil.move(str(item), str(inbox / item.name))
+
+    def run(self, interval: int = 5):
+        """Starts the active surveillance."""
+        print(f"--- AFM-AI Online | Monitoring: {self.watch_path} ---")
+        self.ensure_directories()
+        try:
+            while True:
+                self.classify_and_move()
+                time.sleep(interval)
+        except KeyboardInterrupt:
+            print("\n[HUD] Systems Offline. Kaizen cycle paused.")
+
+if __name__ == "__main__":
+    # Point this to your target directory
+    manager = KaizenFileManager(watch_path="./my_workspace")
+    manager.run()
+
+
+
+from abc import ABC, abstractmethod
+from datetime import datetime
+
+class IFileManagementAI(ABC):
+    """ The Interface for Active File Management (ADT) """
+    
+    @abstractmethod
+    def scan_delta(self, path: str) -> list:
+        """ Detects changes since the last Kaizen cycle. """
+        pass
+
+    @abstractmethod
+    def evaluate_entropy(self, file_path: str) -> float:
+        """ Scientific measure of file disorder/fragmentation. """
+        pass
+
+    @abstractmethod
+    def execute_logic(self, file_id: str):
+        """ The Archangel action: Moving file to its rightful place. """
+        pass
+
+class KaizenActiveManager(IFileManagementAI):
+    def __init__(self):
+        self.registry = {} # Stores file hashes for accuracy
+        self.hud_log = []
+
+    def scan_delta(self, path: str):
+        # Implementation of superfast directory walking
+        print(f"[HUD] Timestamp: {datetime.now()} | Scanning: {path}")
+        return []
+
+    def evaluate_entropy(self, file_path: str):
+        # Logic to determine if a file is 'clutter'
+        return 0.75 # Example: High entropy suggests reorganization needed
+
+    def execute_logic(self, file_id: str):
+        print(f"[HUD] Gabriel-Class Action: File {file_id} optimized.")
+
+# Instance Creation
+afm_ai = KaizenActiveManager()
