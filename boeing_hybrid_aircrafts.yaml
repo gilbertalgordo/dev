@@ -1,0 +1,123 @@
+class BoeingSugarVolt:
+    def __init__(self):
+        # Configuration based on Boeing/NASA SUGAR Volt specs
+        self.fuel_energy_density = 12000.0  # Wh/kg (Jet-A)
+        self.battery_energy_density = 750.0  # Wh/kg (Target for 2030-2050)
+        self.battery_capacity_kwh = 1500.0   # Battery size in kWh
+        self.soc = 1.0                       # 100% State of Charge
+        self.engine_efficiency = 0.35        # Turbofan thermal efficiency
+        self.motor_efficiency = 0.92         # Electric motor efficiency
+        
+    def calculate_mission_power(self, phase):
+        """Standard mission power requirements in kW"""
+        phases = {
+            "takeoff": 5000, 
+            "climb": 3500, 
+            "cruise": 2200, 
+            "landing": 800
+        }
+        return phases.get(phase, 0)
+
+    def simulate_flight_segment(self, phase, duration_min, hybrid_ratio):
+        """
+        hybrid_ratio: 0.0 (Pure Fuel) to 1.0 (Pure Electric)
+        Boeing SUGAR Volt uses ~0.3 to 0.5 during cruise.
+        """
+        power_req = self.calculate_mission_power(phase)
+        elec_power = power_req * hybrid_ratio
+        fuel_power = power_req * (1 - hybrid_ratio)
+        
+        # Energy Consumed (kWh)
+        elec_used = (elec_power / self.motor_efficiency) * (duration_min / 60)
+        fuel_used_kwh = (fuel_power / self.engine_efficiency) * (duration_min / 60)
+        
+        # Update Battery SoC
+        self.soc -= (elec_used / self.battery_capacity_kwh)
+        fuel_mass_kg = fuel_used_kwh / (self.fuel_energy_density / 1000)
+        
+        return {
+            "Phase": phase,
+            "Fuel Consumed (kg)": round(fuel_mass_kg, 2),
+            "Remaining SoC": f"{max(0, self.soc * 100):.1f}%"
+        }
+
+# Execution
+aircraft = BoeingSugarVolt()
+mission_profile = [
+    ("takeoff", 5, 0.2), # 20% electric boost
+    ("climb", 20, 0.1),  # 10% electric boost
+    ("cruise", 120, 0.6) # High electric utilization at cruise
+]
+
+print(f"{'Phase':<10} | {'Fuel (kg)':<10} | {'SoC':<10}")
+print("-" * 35)
+for phase, duration, ratio in mission_profile:
+    result = aircraft.simulate_flight_segment(phase, duration, ratio)
+    print(f"{result['Phase']:<10} | {result['Fuel Consumed (kg)']:<10} | {result['Remaining SoC']:<10}")
+
+
+
+import numpy as np
+
+class AdvancedHybridPropulsion:
+    def __init__(self):
+        # Constants for a SUGAR Volt-class narrowbody
+        self.MTOW = 70000  # Max Takeoff Weight in kg
+        self.battery_energy_density = 550  # Wh/kg (Advanced Li-S or Solid State)
+        self.motor_specific_power = 13.0   # kW/kg (High-performance permanent magnet)
+        
+    def get_thrust_lapse(self, altitude_ft, mach):
+        """Calculates engine thrust decay at altitude."""
+        sigma = (1 - 6.875e-6 * altitude_ft)**5.2561
+        return sigma * (1 + 0.7 * mach**2)
+
+    def compute_dynamics(self, phase_params):
+        """
+        Calculates fuel burn and energy consumption using a parallel 
+        hybrid power-split logic.
+        """
+        alt = phase_params['alt']
+        mach = phase_params['mach']
+        req_thrust = phase_params['thrust_kn'] * 1000 # N
+        doh = phase_params['doh'] # Degree of Hybridization (0 to 1)
+        
+        # 1. Total Power Required (P = T * V)
+        velocity = mach * 340.29 * np.sqrt((1 - 6.875e-6 * alt))
+        power_total_watts = req_thrust * velocity
+        
+        # 2. Power Split
+        p_electric = power_total_watts * doh
+        p_fuel = power_total_watts * (1 - doh)
+        
+        # 3. Component Weights (The "Weight Spiral")
+        # Motor weight based on peak power required
+        motor_weight = (p_electric / 1000) / self.motor_specific_power
+        
+        # 4. SFC Calculation (Simplified adaptation of a turbofan map)
+        # Fuel flow increases with thrust but decreases as electric assist takes over
+        base_sfc = 15.0e-6 # kg/N/s
+        fuel_flow = (req_thrust * (1 - doh)) * base_sfc
+        
+        return {
+            "fuel_flow_kgs": fuel_flow,
+            "elec_load_kw": p_electric / 1000,
+            "motor_mass_kg": motor_weight
+        }
+
+# --- Mission Execution Example ---
+sim = AdvancedHybridPropulsion()
+
+# Mission Segments: (Altitude, Mach, Required Thrust kN, DoH)
+segments = {
+    "Takeoff": {"alt": 0, "mach": 0.25, "thrust_kn": 220, "doh": 0.15},
+    "Climb":   {"alt": 15000, "mach": 0.5, "thrust_kn": 120, "doh": 0.05},
+    "Cruise":  {"alt": 35000, "mach": 0.78, "thrust_kn": 45, "doh": 0.40}
+}
+
+print(f"{'Segment':<10} | {'Fuel Flow (kg/s)':<18} | {'Elec Power (kW)':<15}")
+print("-" * 50)
+
+for name, params in segments.items():
+    res = sim.compute_dynamics(params)
+    print(f"{name:<10} | {res['fuel_flow_kgs']:<18.4f} | {res['elec_load_kw']:<15.2f}")
+
