@@ -1,0 +1,144 @@
+import UIKit
+
+/// Lists all active font families and their specific font names.
+/// Optimized for quick debugging and developer verification.
+func listActiveFonts() {
+    print("--- 🕊️ Active iOS Font HUD ---")
+    
+    // Sort for better readability (Kaizen efficiency)
+    let familyNames = UIFont.familyNames.sorted()
+    
+    for family in familyNames {
+        print("📂 Family: \(family)")
+        
+        let fontNames = UIFont.fontNames(forFamilyName: family).sorted()
+        for font in fontNames {
+            print("   └─ 📄 \(font)")
+        }
+    }
+    
+    print("----------------------------")
+}
+
+
+
+import SwiftUI
+
+struct FontListView: View {
+    let fontFamilies = UIFont.familyNames.sorted()
+
+    var body: some View {
+        NavigationView {
+            List {
+                ForEach(fontFamilies, id: \.self) { family in
+                    Section(header: Text(family).font(.headline)) {
+                        let fonts = UIFont.fontNames(forFamilyName: family).sorted()
+                        ForEach(fonts, id: \.self) { fontName in
+                            VStack(alignment: .leading) {
+                                Text(fontName)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Text("The quick brown fox jumps over the lazy dog.")
+                                    .font(.custom(fontName, size: 16))
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Active Fonts HUD")
+        }
+    }
+}
+
+
+
+import SwiftUI
+import UIKit
+
+// MARK: - Advanced Font Manager (Kaizen Efficiency)
+/// Centralized registry to prevent "String-typing" errors and manage font scaling.
+struct FontManager {
+    static let shared = FontManager()
+    
+    /// Returns a scaled version of a custom font that respects iOS Accessibility settings.
+    func scaledFont(name: String, size: CGFloat, relativeTo style: Font.TextStyle = .body) -> Font {
+        return Font.custom(name, size: size, relativeTo: style)
+    }
+    
+    /// Retrieves all active fonts organized by Family.
+    func fetchActiveFontMap() -> [String: [String]] {
+        var map = [String: [String]]()
+        UIFont.familyNames.sorted().forEach { family in
+            map[family] = UIFont.fontNames(forFamilyName: family).sorted()
+        }
+        return map
+    }
+}
+
+// MARK: - Font HUD View (HD Visualizer)
+struct AdvancedFontHUD: View {
+    let fontMap = FontManager.shared.fetchActiveFontMap()
+    @State private var searchText = ""
+    
+    var filteredFamilies: [String] {
+        if searchText.isEmpty { return fontMap.keys.sorted() }
+        return fontMap.keys.filter { $0.localizedCaseInsensitiveContains(searchText) }.sorted()
+    }
+
+    var body: some View {
+        NavigationView {
+            List {
+                ForEach(filteredFamilies, id: \.self) { family in
+                    Section(header: Text(family).font(.caption).bold().foregroundColor(.blue)) {
+                        ForEach(fontMap[family] ?? [], id: \.self) { fontName in
+                            FontRow(fontName: fontName)
+                        }
+                    }
+                }
+            }
+            .listStyle(InsetGroupedListStyle())
+            .navigationTitle("Active Fonts HUD")
+            .searchable(text: $searchText, prompt: "Search font families...")
+        }
+    }
+}
+
+/// Individual row demonstrating 3D-like depth and scaling
+struct FontRow: View {
+    let fontName: String
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(fontName)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Image(systemName: "info.circle")
+                    .foregroundColor(.accentColor)
+            }
+            
+            // Scaled Preview
+            Text("Sphinx of black quartz, judge my vow.")
+                .font(.custom(fontName, size: 18))
+                .padding(.vertical, 4)
+        }
+        .padding(.vertical, 8)
+    }
+}
+
+
+
+import CoreText
+
+func registerFont(at url: URL) -> Bool {
+    var error: Unmanaged<CFError>?
+    if CTFontManagerRegisterFontURLs([url] as CFArray, .process, true, &error) {
+        print("✅ Font registered successfully.")
+        return true
+    } else {
+        print("❌ Registration failed: \(String(describing: error?.takeRetainedValue()))")
+        return false
+    }
+}
