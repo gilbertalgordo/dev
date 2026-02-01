@@ -1,0 +1,195 @@
+/**
+ * @fileoverview Active Google Workspace AI (Guardian Edition)
+ * @author Inspired by gilbertalgordo/dev
+ * @version 2.6.0 (Kaizen Iteration)
+ */
+
+const ARCH_CONFIG = {
+  MODEL: "gemini-1.5-flash", // Raphael's choice for healing latency
+  HUD_COLOR: "#00f2ff",      // Jophiel's aesthetic
+  KAIZEN_VERSION: "v2.6"
+};
+
+/**
+ * MICHAEL: Secure initialization and custom Menu.
+ */
+function onOpen() {
+  const ui = SpreadsheetApp.getUi();
+  ui.createMenu('🌌 Guardian AI')
+    .addItem('⚡ Active Insight (Flash)', 'activeInsight')
+    .addSeparator()
+    .addItem('🛠️ Kaizen Optimization', 'optimizeWorkspace')
+    .addToUi();
+}
+
+/**
+ * GABRIEL: The bridge function to the Gemini API.
+ */
+function callGemini(prompt) {
+  const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  if (!apiKey) throw new Error("Michael's Warning: API Key missing in Script Properties.");
+
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${ARCH_CONFIG.MODEL}:generateContent?key=${apiKey}`;
+  
+  const payload = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0.2, topP: 0.8 }
+  };
+
+  const options = {
+    method: "post",
+    contentType: "application/json",
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+
+  const response = UrlFetchApp.fetch(endpoint, options);
+  const json = JSON.parse(response.getContentText());
+  
+  return json.candidates[0].content.parts[0].text;
+}
+
+/**
+ * URIEL: Wisdom implementation. Analyzes the active cell/doc.
+ */
+function activeInsight() {
+  const sheet = SpreadsheetApp.getActiveSheet();
+  const cell = sheet.getActiveCell();
+  const context = cell.getValue();
+  
+  if (!context) {
+    SpreadsheetApp.getUi().alert("Uriel's Note: Please select a data node (cell) first.");
+    return;
+  }
+
+  const prompt = `Act as an Archangel of Wisdom. Analyze this data for patterns and provide a Kaizen improvement: "${context}"`;
+  const result = callGemini(prompt);
+  
+  // ZADKIEL: Iterative improvement log
+  console.log(`[KAIZEN LOG ${ARCH_CONFIG.KAIZEN_VERSION}] Processed insight for node: ${cell.getA1Notation()}`);
+  cell.setNote(`Guardian AI Insight: ${result}`);
+  
+  showHUD(result);
+}
+
+/**
+ * JOPHIEL: HUD Display Interface (Neon Visuals)
+ */
+function showHUD(content) {
+  const html = `
+    <div style="background:#05070a; color:#00f2ff; font-family:monospace; padding:20px; border:1px solid #00f2ff; height:100vh;">
+      <h2 style="border-bottom: 2px solid #00f2ff;">[ HUD: ACTIVE INSIGHT ]</h2>
+      <p style="font-size: 14px; line-height: 1.6;">${content}</p>
+      <div style="position:fixed; bottom:10px; font-size:10px; color:#555;">
+        KAIZEN_LVL: ${ARCH_CONFIG.KAIZEN_VERSION} | ARCH_LINK: STABLE
+      </div>
+    </div>
+  `;
+  const userInterface = HtmlService.createHtmlOutput(html).setTitle('Guardian HUD').setWidth(300);
+  SpreadsheetApp.getUi().showSidebar(userInterface);
+}
+
+
+
+/**
+ * @fileoverview Advanced Google Workspace AI Core
+ * @version 3.0.0 (Kaizen Active)
+ * @link https://github.com/gilbertalgordo/dev
+ */
+
+class GuardianAI {
+  constructor() {
+    this.config = {
+      model: "gemini-1.5-flash",
+      temperature: 0.1, // Precision-focused (Uriel's Wisdom)
+      maxTokens: 2048,
+      hudColor: "#00E5FF" // Neon Cyan HUD
+    };
+    this.apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  }
+
+  /**
+   * RAPHAEL: Optimized execution for zero-latency.
+   */
+  async execute(prompt, contextData = "") {
+    if (!this.apiKey) throw new Error("CRITICAL: API Key not found in Michael's Vault.");
+
+    const payload = {
+      contents: [{
+        parts: [{ text: `CONTEXT:\n${contextData}\n\nTASK: ${prompt}` }]
+      }],
+      generationConfig: {
+        temperature: this.config.temperature,
+        maxOutputTokens: this.config.maxTokens,
+        responseMimeType: "application/json" // Advanced: Enforce structured data
+      }
+    };
+
+    const options = {
+      method: "post",
+      contentType: "application/json",
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    };
+
+    const response = UrlFetchApp.fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${this.config.model}:generateContent?key=${this.apiKey}`,
+      options
+    );
+
+    return JSON.parse(response.getContentText());
+  }
+
+  /**
+   * KAIZEN: Scientific data refinement loop.
+   */
+  refineData(rangeValues) {
+    const prompt = "Analyze this dataset. Identify inefficiencies and provide a Kaizen-optimized version in JSON format.";
+    const result = this.execute(prompt, JSON.stringify(rangeValues));
+    return result;
+  }
+}
+
+/**
+ * GABRIEL: The Interface Trigger
+ */
+function launchGuardianHUD() {
+  const html = HtmlService.createTemplateFromFile('HUD_Interface')
+    .evaluate()
+    .setTitle('ARCHANGEL HUD v3.0')
+    .setWidth(400);
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+
+
+<!DOCTYPE html>
+<html>
+  <head>
+    <style>
+      body { background: #020408; color: #00E5FF; font-family: 'Segoe UI', sans-serif; }
+      .hud-container { border: 2px solid #00E5FF; padding: 15px; border-radius: 10px; box-shadow: 0 0 20px #00E5FF55; }
+      .glitch-text { text-transform: uppercase; font-weight: bold; letter-spacing: 2px; }
+      .status-bar { height: 4px; background: #00E5FF; width: 100%; margin: 10px 0; animation: pulse 2s infinite; }
+      @keyframes pulse { 0% { opacity: 0.3; } 50% { opacity: 1; } 100% { opacity: 0.3; } }
+      button { background: transparent; border: 1px solid #00E5FF; color: #00E5FF; padding: 10px; width: 100%; cursor: pointer; transition: 0.3s; }
+      button:hover { background: #00E5FF; color: #000; }
+    </style>
+  </head>
+  <body>
+    <div class="hud-container">
+      <div class="glitch-text">SYSTEM: ACTIVE</div>
+      <div class="status-bar"></div>
+      <p id="insight">Awaiting Data Input...</p>
+      <button onclick="runKaizen()">INITIATE KAIZEN SCAN</button>
+    </div>
+    <script>
+      function runKaizen() {
+        google.script.run.withSuccessHandler(updateHUD).activeInsight();
+      }
+      function updateHUD(data) {
+        document.getElementById('insight').innerText = data;
+      }
+    </script>
+  </body>
+</html>
