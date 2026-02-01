@@ -1,0 +1,151 @@
+#include <iostream>
+#include <vector>
+#include <string>
+#include <map>
+
+struct Train {
+    std::string id;
+    int arrivalTime;   // e.g., 1430 for 2:30 PM
+    int duration;      // Minutes at platform
+};
+
+class StationManager {
+private:
+    int totalTracks;
+    std::map<int, std::vector<std::pair<int, int>>> trackSchedule; // track_id -> [(start, end)]
+
+public:
+    StationManager(int tracks) : totalTracks(tracks) {}
+
+    bool allocateTrack(Train t) {
+        int endTime = t.arrivalTime + t.duration;
+        for (int i = 1; i <= totalTracks; ++i) {
+            bool conflict = false;
+            for (auto& slot : trackSchedule[i]) {
+                // Check if the time window overlaps
+                if (!(endTime <= slot.first || t.arrivalTime >= slot.second)) {
+                    conflict = true;
+                    break;
+                }
+            }
+            if (!conflict) {
+                trackSchedule[i].push_back({t.arrivalTime, endTime});
+                std::cout << "Train " << t.id << " assigned to Track " << i << "\n";
+                return true;
+            }
+        }
+        std::cout << "Congestion Alert: No tracks available for Train " << t.id << "\n";
+        return false;
+    }
+};
+
+int main() {
+    StationManager central(3);
+    central.allocateTrack({"Express-101", 1200, 30});
+    central.allocateTrack({"Freight-99", 1215, 45});
+    return 0;
+}
+
+
+
+class SignalSystem:
+    def __init__(self):
+        self.segments = {"A1": "RED", "A2": "RED"}
+        self.switches = {"S1": "STRAIGHT"} # or "DIVERGING"
+
+    def request_entry(self, segment_id):
+        # Safety Logic: Check if the next segment is clear
+        if self.is_segment_clear(segment_id) and self.switches["S1"] == "STRAIGHT":
+            self.segments[segment_id] = "GREEN"
+            return "Clear to proceed."
+        else:
+            return "STOP: Segment occupied or Switch misalignment."
+
+    def is_segment_clear(self, segment_id):
+        # In a real HUD system, this would read from IR or Track Circuit sensors
+        return True 
+
+rail_ctrl = SignalSystem()
+print(rail_ctrl.request_entry("A1"))
+
+
+
+import math
+
+class TrainUnit:
+    def __init__(self, train_id, position, velocity):
+        self.id = train_id
+        self.pos = position  # Meters from origin
+        self.vel = velocity  # Meters per second
+        self.decel_rate = 1.2  # m/s^2 (Emergency braking)
+        self.buffer = 50       # Safety margin in meters
+
+    def calculate_MA(self, obstacle_pos):
+        """
+        Calculates the Movement Authority (MA).
+        Formula: $d = \frac{v^2}{2a} + s$
+        """
+        braking_dist = (self.vel ** 2) / (2 * self.decel_rate)
+        safe_stop_pos = self.pos + braking_dist + self.buffer
+        
+        if safe_stop_pos >= obstacle_pos:
+            return "WARNING: BRAKE REDUCTION REQUIRED"
+        return f"MA Clear up to {obstacle_pos}m"
+
+# Example: Train at 83m/s (approx 300km/h) 
+shinkansen = TrainUnit("H5-Series", 1000, 83)
+print(shinkansen.calculate_MA(5000))
+
+
+
+using UnityEngine;
+using TMPro;
+
+public class TrainHUDController : MonoBehaviour {
+    public float currentSpeed;
+    public float trackLimit;
+    public TextMeshProUGUI speedDisplay;
+    
+    // Kaizen: Efficient update loop for high-fidelity 3D feedback
+    void Update() {
+        UpdateTelemetry();
+        RenderHUD();
+    }
+
+    void UpdateTelemetry() {
+        // Mocking sensor data from the train's bogie sensors
+        currentSpeed = TrainSensors.GetSpeed(); 
+    }
+
+    void RenderHUD() {
+        speedDisplay.text = $"{currentSpeed} km/h";
+        // Color shifting for safety visualization
+        speedDisplay.color = (currentSpeed > trackLimit) ? Color.red : Color.green;
+    }
+}
+
+
+
+use std::collections::HashMap;
+
+struct RailNode {
+    id: String,
+    adjacencies: Vec<(String, u32)>, // (Target Station, Distance)
+}
+
+struct GlobalRouteMap {
+    nodes: HashMap<String, RailNode>,
+}
+
+impl GlobalRouteMap {
+    // Advanced pathfinding would implement Dijkstra's here
+    fn find_efficient_path(&self, start: &str, end: &str) {
+        println!("Calculating Kaizen-optimized route from {} to {}...", start, end);
+        // Implementation for O(E log V) complexity
+    }
+}
+
+fn main() {
+    let mut map = GlobalRouteMap { nodes: HashMap::new() };
+    // Build network...
+}
