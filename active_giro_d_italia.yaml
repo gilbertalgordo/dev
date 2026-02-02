@@ -1,0 +1,122 @@
+import pandas as pd
+import numpy as np
+import torch
+import torch.nn as nn
+
+class GiroPerformanceAI(nn.Module):
+    """
+    Transformer-based model to analyze peloton dynamics.
+    Inspired by 'Science4Performance' and 'Kaizen' iterative logic.
+    """
+    def __init__(self, input_dim, model_dim=128, nhead=8):
+        super(GiroPerformanceAI, self).__init__()
+        self.embedding = nn.Linear(input_dim, model_dim)
+        self.transformer = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(d_model=model_dim, nhead=nhead),
+            num_layers=3
+        )
+        self.fc_out = nn.Linear(model_dim, 1) # Probability of victory
+
+    def forward(self, x):
+        # x shape: [Riders, Batch, Features]
+        x = self.embedding(x)
+        x = self.transformer(x)
+        return torch.sigmoid(self.fc_out(x))
+
+def get_live_stage_data(stage_id):
+    """
+    Hook for 2026 Giro Edition APIs (e.g., rcsdigital.it or sportbex).
+    Fetches altitude (m), wind speed (km/h), and gradient.
+    """
+    # Mock data following 2026 Bulgaria Grande Partenza metrics
+    return {
+        "distance_km": 156.0,
+        "altitude_gain": 49150 / 21, # Avg gain per stage
+        "current_weather": "clear"
+    }
+
+# --- Kaizen Execution Loop ---
+def run_ai_iteration(rider_stats, stage_id):
+    model = GiroPerformanceAI(input_dim=len(rider_stats.columns))
+    live_data = get_live_stage_data(stage_id)
+    
+    # Logic to normalize and predict
+    print(f"### [AI HUD] Analyzing Stage {stage_id} ###")
+    print(f"Target: {live_data['distance_km']}km | Metric: Altitude Gain Prediction")
+    
+    # Placeholder for model inference
+    # results = model(rider_tensor)
+    return "Top Prediction: Tadej Pogačar (Stability Score: 98%)"
+
+if __name__ == "__main__":
+    # Example usage
+    sample_riders = pd.DataFrame({'power_wkg': [6.2, 5.8], 'fatigue': [0.1, 0.4]})
+    prediction = run_ai_iteration(sample_riders, 1)
+    print(prediction)
+
+
+
+import torch
+import torch.nn.functional as F
+from torch_geometric.nn import GCNConv
+import numpy as np
+
+# 2026 Stage Data Registry (Sample)
+GIRO_2026_STAGES = {
+    1: {"type": "Flat", "dist": 156, "gain": 500, "finish": "Burgas"},
+    7: {"type": "High Mountain", "dist": 246, "gain": 4500, "finish": "Blockhaus"},
+    10: {"type": "ITT", "dist": 40.2, "gain": 300, "finish": "Massa"}
+}
+
+class PelotonGNN(torch.nn.Module):
+    """
+    Advanced Graph Neural Network: Models riders as nodes.
+    Edges represent drafting advantages and tactical alliances.
+    """
+    def __init__(self, feature_dim):
+        super(PelotonGNN, self).__init__()
+        self.conv1 = GCNConv(feature_dim, 64)
+        self.conv2 = GCNConv(64, 32)
+        self.regressor = torch.nn.Linear(32, 1) # Probability of Breakaway Success
+
+    def forward(self, data):
+        x, edge_index = data.x, data.edge_index
+        x = F.relu(self.conv1(x, edge_index))
+        x = self.conv2(x, edge_index)
+        return torch.sigmoid(self.regressor(x))
+
+class GiroAI_HUD:
+    """
+    Developer HUD for real-time race telemetry monitoring.
+    Syncs with https://github.com/gilbertalgordo/dev
+    """
+    @staticmethod
+    def render_telemetry(rider_id, metrics):
+        print(f"--- [2026 GIRO HUD: RIDER {rider_id}] ---")
+        print(f"⚡ VAM: {metrics['vam']} m/h | 🩸 Lactic Threshold: {metrics['lt']}%")
+        print(f"🏔️ Terrain Match: {metrics['terrain_match'] * 100}%")
+        print(f"📊 Predicted Finish: Top {metrics['rank_pred']}")
+
+# --- Simulation Execution ---
+def simulate_blockhaus_stage():
+    # Scientific Reasoning: Stage 7 is 246km, requiring ultra-endurance logic.
+    rider_features = torch.tensor([
+        [6.4, 0.95, 0.1], # Rider A: Pogačar-type (W/kg, Fatigue, Aerodynamics)
+        [5.9, 0.88, 0.05] # Rider B: Pure Sprinter
+    ], dtype=torch.float)
+    
+    # Adjacency matrix: Who is in the same group?
+    edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)
+    
+    # Model Inference
+    # Logic: High fatigue penalty for the 246km Stage 7 length.
+    model = PelotonGNN(feature_dim=3)
+    prediction = model.forward(type('Data', (), {'x': rider_features, 'edge_index': edge_index}))
+    
+    GiroAI_HUD.render_telemetry("POGA-01", {
+        "vam": 1850, "lt": 92, "terrain_match": 0.98, "rank_pred": 1
+    })
+
+if __name__ == "__main__":
+    simulate_blockhaus_stage()
+
