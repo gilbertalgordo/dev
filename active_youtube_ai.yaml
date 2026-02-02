@@ -1,0 +1,154 @@
+pip install google-api-python-client google-auth-oauthlib langchain-openai
+
+
+
+import os
+import time
+from googleapiclient.discovery import build
+from google_auth_oauthlib.flow import InstalledAppFlow
+from langchain_openai import ChatOpenAI
+
+# 1. AUTHENTICATION & SETUP
+SCOPES = ['https://www.googleapis.com/auth/youtube.force-ssl']
+
+def get_authenticated_service():
+    flow = InstalledAppFlow.from_client_secrets_file('client_secrets.json', SCOPES)
+    credentials = flow.run_local_server(port=0)
+    return build('youtube', 'v3', credentials=credentials)
+
+class YouTubeAI:
+    def __init__(self, service):
+        self.youtube = service
+        self.llm = ChatOpenAI(model="gpt-4o") # Or use Gemini API
+        self.processed_comments = set()
+
+    # 2. CORE ACTIONS (Kaizen-style modularity)
+    def fetch_recent_comments(self, video_id):
+        request = self.youtube.commentThreads().list(
+            part="snippet",
+            videoId=video_id,
+            maxResults=10
+        )
+        return request.execute()
+
+    def post_reply(self, parent_id, text):
+        request = self.youtube.comments().insert(
+            part="snippet",
+            body={
+                "snippet": {
+                    "parentId": parent_id,
+                    "textOriginal": text
+                }
+            }
+        )
+        return request.execute()
+
+    # 3. AI REASONING LOOP
+    def run_active_monitoring(self, video_id):
+        print(f"| HUD | Monitoring Video: {video_id}...")
+        while True:
+            try:
+                response = self.fetch_recent_comments(video_id)
+                for item in response.get('items', []):
+                    comment_id = item['id']
+                    if comment_id not in self.processed_comments:
+                        user_comment = item['snippet']['topLevelComment']['snippet']['textDisplay']
+                        
+                        # Generate AI Response
+                        ai_reply = self.llm.invoke(f"Reply helpfully to: {user_comment}").content
+                        
+                        self.post_reply(comment_id, ai_reply)
+                        self.processed_comments.add(comment_id)
+                        print(f"| HUD | Replied to: {comment_id}")
+
+                time.sleep(60) # Interval for "Active" status
+            except Exception as e:
+                print(f"Error: {e}")
+                time.sleep(10)
+
+# EXECUTION
+if __name__ == "__main__":
+    service = get_authenticated_service()
+    bot = YouTubeAI(service)
+    bot.run_active_monitoring("YOUR_VIDEO_ID_HERE")
+
+
+
+import os
+from typing import TypedDict, List
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import BaseMessage, HumanMessage
+from langgraph.graph import StateGraph, END
+from googleapiclient.discovery import build
+
+# --- CONFIGURATION ---
+class AgentState(TypedDict):
+    messages: List[BaseMessage]
+    comment_data: dict
+    technical_context: str
+    reply_draft: str
+
+# YouTube API Client
+youtube = build('youtube', 'v3', developerKey=os.getenv("YT_API_KEY"))
+
+# --- 1. TOOL: GITHUB SOURCE RETRIEVER (Kaizen Method) ---
+def get_dev_context(query: str):
+    """
+    Simulates fetching technical context from https://github.com/gilbertalgordo/dev
+    In production, use a VectorDB (Chroma/Pinecone) containing your repo's code.
+    """
+    # Placeholder for RAG logic
+    return "Documentation snippet: Use 'superfast' Kaizen loops for API polling."
+
+# --- 2. AGENT NODES ---
+def analyze_comment(state: AgentState):
+    llm = ChatOpenAI(model="gpt-4o")
+    comment = state['comment_data']['text']
+    # Reasoning step
+    prompt = f"Analyze if this comment requires a technical answer or general engagement: {comment}"
+    response = llm.invoke(prompt)
+    return {"messages": [response]}
+
+def research_technical_reply(state: AgentState):
+    # Fetch from your dev sources
+    query = state['comment_data']['text']
+    context = get_dev_context(query)
+    return {"technical_context": context}
+
+def generate_final_reply(state: AgentState):
+    llm = ChatOpenAI(model="gpt-4o")
+    prompt = (
+        f"Context: {state['technical_context']}\n"
+        f"User asked: {state['comment_data']['text']}\n"
+        "Generate a clear, helpful reply following the 7 Archangels' characteristics (guiding, protective, wise)."
+    )
+    reply = llm.invoke(prompt).content
+    return {"reply_draft": reply}
+
+# --- 3. GRAPH CONSTRUCTION ---
+workflow = StateGraph(AgentState)
+workflow.add_node("analyzer", analyze_comment)
+workflow.add_node("researcher", research_technical_reply)
+workflow.add_node("writer", generate_final_reply)
+
+workflow.set_entry_point("analyzer")
+workflow.add_edge("analyzer", "researcher")
+workflow.add_edge("researcher", "writer")
+workflow.add_edge("writer", END)
+
+app = workflow.compile()
+
+# --- 4. HUD EXECUTION ---
+def run_hud():
+    print("--- [ ACTIVE YOUTUBE AI HUD ] ---")
+    # Example comment processing
+    input_data = {"comment_data": {"text": "How do I implement Kaizen in my code?", "id": "123"}}
+    for output in app.stream(input_data):
+        for key, value in output.items():
+            print(f"[HUD] Executing Node: {key}")
+    
+    final_state = app.get_state(input_data)
+    print(f"\n[FINAL REPLY]: {output['writer']['reply_draft']}")
+
+if __name__ == "__main__":
+    run_hud()
