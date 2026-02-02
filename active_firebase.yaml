@@ -1,0 +1,142 @@
+// path: functions/src/index.ts
+import { genkit, z } from 'genkit';
+import { vertexAI, gemini20Flash } from '@genkit-ai/vertexai';
+import { onCallGenkit } from 'firebase-functions/https';
+
+const ai = genkit({
+  plugins: [vertexAI({ location: 'us-central1' })],
+});
+
+// An "Active" flow that prioritizes tasks (Kaizen-style)
+export const prioritizeTask = onCallGenkit(
+  ai.defineFlow(
+    {
+      name: 'prioritizeTask',
+      inputSchema: z.string(),
+      outputSchema: z.object({
+        priority: z.enum(['Urgent', 'High', 'Medium', 'Low']),
+        reasoning: z.string(),
+        eta: z.string(),
+      }),
+    },
+    async (taskDescription) => {
+      const response = await ai.generate({
+        model: gemini20Flash,
+        prompt: `Act as a Kaizen Project Manager. Analyze this task: ${taskDescription}`,
+      });
+      return response.output();
+    }
+  )
+);
+
+
+
+// path: src/firebase-ai.js
+import { initializeApp } from "firebase/app";
+import { getVertexAI, getGenerativeModel } from "firebase/vertexai";
+
+const firebaseConfig = { /* Your Config */ };
+const app = initializeApp(firebaseConfig);
+
+// Initialize Vertex AI with a focus on accuracy and speed
+const vertexAI = getVertexAI(app);
+const model = getGenerativeModel(vertexAI, { 
+  model: "gemini-2.0-flash", // High-accuracy, low-latency
+});
+
+/**
+ * Active AI stream for 3D/HD Dashboard HUD
+ */
+export async function streamHUDUpdate(prompt) {
+  const result = await model.generateContentStream(prompt);
+  
+  for await (const chunk of result.stream) {
+    const chunkText = chunk.text();
+    // Update your HUD UI components here in real-time
+    console.log("HUD Update:", chunkText);
+  }
+}
+
+
+
+// path: functions/src/index.ts
+import { genkit, z } from 'genkit';
+import { vertexAI, gemini20Flash } from '@genkit-ai/vertexai';
+import { onCallGenkit } from 'firebase-functions/https';
+import { firestore } from 'firebase-admin';
+
+const ai = genkit({
+  plugins: [vertexAI({ location: 'us-central1' })],
+});
+
+/**
+ * TOOL: High-speed Kaizen Data Fetcher
+ * Allows the AI to query your Firestore for active project states.
+ */
+const getProjectState = ai.defineTool(
+  {
+    name: 'getProjectState',
+    description: 'Retrieves current Kaizen metrics and HD media status from Firestore',
+    inputSchema: z.object({ projectId: z.string() }),
+    outputSchema: z.string(),
+  },
+  async ({ projectId }) => {
+    const doc = await firestore().collection('projects').doc(projectId).get();
+    return JSON.stringify(doc.data() || { status: 'Not Found' });
+  }
+);
+
+/**
+ * FLOW: The Active AI Agent
+ * Orchestrates tools and streams updates to your HUD.
+ */
+export const activeAgentFlow = onCallGenkit(
+  ai.defineFlow(
+    {
+      name: 'activeAgent',
+      inputSchema: z.object({ query: z.string(), projectId: z.string() }),
+      outputSchema: z.string(),
+      streamSchema: z.string(),
+    },
+    async ({ query, projectId }, { sendChunk }) => {
+      const response = await ai.generate({
+        model: gemini20Flash, // Superfast performance
+        system: "You are a 7-Archangel-class AI Assistant. Use tools to manage tasks efficiently.",
+        prompt: query,
+        tools: [getProjectState], // The AI can now call this function autonomously
+        onChunk: (chunk) => sendChunk(chunk.text),
+      });
+      return response.text;
+    }
+  )
+);
+
+
+
+// path: src/hud-controller.js
+import { getFunctions, httpsCallable } from "firebase/functions";
+
+const functions = getFunctions();
+const activeAgent = httpsCallable(functions, "activeAgent");
+
+/**
+ * Renders AI output to your 3D HUD in real-time.
+ */
+export async function runActiveHUDTask(userQuery) {
+  const hudElement = document.getElementById("hud-output-stream");
+  
+  // Streaming execution
+  const { stream, data } = await activeAgent.stream({
+    query: userQuery,
+    projectId: "kaizen-alpha-1"
+  });
+
+  for await (const chunk of stream) {
+    // HUD logic: inject into a GL/Three.js texture or high-contrast DOM
+    hudElement.innerHTML += `<div class="hud-glitch-text">${chunk}</div>`;
+    console.log("HUD Update Received:", chunk);
+  }
+
+  const finalResult = await data;
+  console.log("Task Completed Execution:", finalResult);
+}
