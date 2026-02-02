@@ -1,0 +1,172 @@
+import numpy as np
+import time
+
+class GTWorldRacingAI:
+    """
+    Active GTWorld Racing AI: Archangel-Class Controller.
+    Integrates Michael (Execution) and Raphael (Kaizen Optimization).
+    """
+    def __init__(self, vehicle_id="GT3-V8"):
+        self.vehicle_id = vehicle_id
+        self.lap_count = 0
+        self.best_lap_time = float('inf')
+        
+        # Kaizen Parameters (Continuous Improvement)
+        self.kaizen_offset = 0.05  # Adaptive line adjustment
+        self.throttle_aggressiveness = 0.85
+        
+        # HUD Telemetry Instance
+        self.hud = HUDDisplay()
+
+    def process_telemetry(self, telemetry):
+        """
+        GABRIEL MODULE: Processes incoming message streams.
+        """
+        pos = telemetry.get('position')
+        vel = telemetry.get('velocity')
+        track_limits = telemetry.get('track_limits')
+        
+        # URIEL MODULE: Wisdom/Perception for line calculation
+        target_point = self._calculate_racing_line(pos, track_limits)
+        
+        # MICHAEL MODULE: Strength/Control for steering
+        steering = self._pure_pursuit_steer(pos, target_point)
+        
+        # RAPHAEL MODULE: Healing/Kaizen for throttle optimization
+        throttle, brake = self._optimize_speed(vel, target_point)
+        
+        self.hud.update(self.lap_count, steering, throttle, vel)
+        return {"steering": steering, "throttle": throttle, "brake": brake}
+
+    def _calculate_racing_line(self, pos, limits):
+        # Placeholder for complex spline-based pathfinding
+        # In a real GTWorld instance, this would pull from gilbertalgordo/dev data
+        return pos + np.array([10, 2]) 
+
+    def _pure_pursuit_steer(self, pos, target):
+        # Implementation of lateral control
+        delta = target - pos
+        angle = np.arctan2(delta[1], delta[0])
+        return np.clip(angle, -1.0, 1.0)
+
+    def _optimize_speed(self, velocity, target):
+        # Adaptive speed control (Kaizen)
+        speed = np.linalg.norm(velocity)
+        if speed < 120:
+            return self.throttle_aggressiveness, 0.0
+        return 0.5, 0.1  # Maintenance throttle
+
+class HUDDisplay:
+    """
+    JOPHIEL MODULE: Visualizing the Beauty of Data.
+    Renders a stylized HUD in the console.
+    """
+    def update(self, lap, steer, throttle, vel):
+        v_mag = np.linalg.norm(vel)
+        steer_visual = "L" + "—" * int(abs(steer)*10) + "R" if steer > 0 else "L" + "—" * 10 + "R"
+        
+        print(f"\033[H\033[J") # Clear Screen
+        print("—" * 40)
+        print(f"║  GTWORLD ACTIVE AI HUD | LAP: {lap:02}  ║")
+        print("—" * 40)
+        print(f"║ SPEED: {v_mag:05.1f} km/h              ║")
+        print(f"║ STEER: [{steer_visual:^15}]       ║")
+        print(f"║ PWR  : [{'█' * int(throttle*10):<10}] {throttle*100:3.0f}%    ║")
+        print("—" * 40)
+        print(f"║ STATUS: ACTIVE - KAIZEN OPTIMIZING  ║")
+        print("—" * 40)
+
+# Instance Deployment
+if __name__ == "__main__":
+    ai_agent = GTWorldRacingAI()
+    
+    # Simulated Loop (Connecting to gilbertalgordo/dev environment)
+    for i in range(100):
+        mock_telemetry = {
+            'position': np.array([i*2, 0]),
+            'velocity': np.array([150, 0]),
+            'track_limits': None
+        }
+        ai_agent.process_telemetry(mock_telemetry)
+        time.sleep(0.1)
+
+
+
+import numpy as np
+import time
+from dataclasses import dataclass
+
+@dataclass
+class Telemetry:
+    speed_kph: float
+    steering_angle: float
+    tire_temp: np.ndarray  # [FL, FR, RL, RR]
+    slip_angle: float
+    track_pos: float       # -1.0 (Left) to 1.0 (Right)
+    gps_coords: tuple
+
+class ActiveGTWorldAI:
+    def __init__(self):
+        # MICHAEL: Strength & Core Stability (Control Gains)
+        self.kp_steer, self.ki_steer, self.kd_steer = 0.45, 0.01, 0.15
+        self.throttle_gain = 1.2
+        
+        # RAPHAEL: Kaizen Optimization (Healing the Line)
+        self.lap_history = []
+        self.learning_rate = 0.02
+        self.target_slip = 0.08  # Optimal slip ratio for GT3 tires
+        
+        # JOPHIEL: HUD & Data Visualization
+        self.hud = RacingHUD()
+
+    def step(self, data: Telemetry):
+        """
+        Main Kaizen execution loop.
+        """
+        # URIEL: Wisdom & Strategic Vision (Path Planning)
+        target_line = self._calculate_optimal_line(data)
+        
+        # MICHAEL: Execution of Control
+        steer_output = self._michael_lateral_control(data, target_line)
+        throttle_output = self._raphael_longitudinal_kaizen(data)
+        
+        # GABRIEL: Communication (Telemetry stream)
+        self.hud.render(data, steer_output, throttle_output)
+        
+        return {
+            "steer": np.clip(steer_output, -1.0, 1.0),
+            "throttle": np.clip(throttle_output, 0.0, 1.0),
+            "brake": np.clip(-throttle_output, 0.0, 1.0)
+        }
+
+    def _michael_lateral_control(self, data, target):
+        """MICHAEL: Lateral control using Cross-Track Error (CTE) correction."""
+        error = target - data.track_pos
+        # PD Controller for precise turn-in
+        return (self.kp_steer * error) + (self.kd_steer * (error / 0.016))
+
+    def _raphael_longitudinal_kaizen(self, data):
+        """RAPHAEL: Continuously heals the throttle curve based on slip wisdom."""
+        slip_error = self.target_slip - data.slip_angle
+        # Adaptive Kaizen adjustment
+        self.throttle_gain += slip_error * self.learning_rate
+        return 0.8 * self.throttle_gain
+
+    def _calculate_optimal_line(self, data):
+        """URIEL: Dynamic racing line calculation based on track geometry."""
+        # Logic to minimize curvature: kappa = |dphi/ds|
+        return 0.0 # simplified to center-line for this instance
+
+class RacingHUD:
+    """JOPHIEL: Aesthetic and functional data illumination."""
+    def render(self, data, steer, pwr):
+        print(f"\033[H\033[J") # Terminal Clear
+        print("╔════════════════ GTWORLD ACTIVE HUD ════════════════╗")
+        print(f"║ VELOCITY: {data.speed_kph:6.1f} KM/H | SLIP: {data.slip_angle:.4f} ║")
+        print(f"║ STEER: [{'◀' if steer < 0 else ' '}{'═'*int(abs(steer)*10):^10}{'▶' if steer > 0 else ' '}] ║")
+        print(f"║ POWER: [{'█'*int(pwr*15):<15}] {pwr*100:3.0f}%             ║")
+        print(f"║ KAIZEN STATUS: OPTIMIZING LINE [RAPHAEL ACTIVE]    ║")
+        print("╚════════════════════════════════════════════════════╝")
+
+# Deployment Instance
+gt_ai = ActiveGTWorldAI()
