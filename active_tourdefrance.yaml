@@ -1,0 +1,132 @@
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor
+from datetime import datetime
+
+class TDFActiveAI:
+    def __init__(self):
+        self.model = RandomForestRegressor(n_estimators=100)
+        # Mock historical data: [Gradient, WindSpeed, GapSeconds, FatigueLevel]
+        self.X_train = np.array([[5, 15, 300, 0.2], [1, 5, 60, 0.5], [-2, 20, 120, 0.1], [8, 10, 450, 0.8]])
+        self.y_train = np.array([1200, 300, 400, 1800]) # Seconds until catch
+        self.model.fit(self.X_train, self.y_train)
+
+    def analyze_live_telemetry(self, telemetry_data):
+        """
+        Processes real-time rider data.
+        telemetry_data: dict {gradient, wind, gap, fatigue}
+        """
+        features = np.array([[
+            telemetry_data['gradient'], 
+            telemetry_data['wind'], 
+            telemetry_data['gap'], 
+            telemetry_data['fatigue']
+        ]])
+        
+        prediction = self.model.predict(features)
+        return round(prediction[0] / 60, 2) # Return minutes to catch
+
+# --- Execution (Kaizen Iteration 1) ---
+tdf_ai = TDFActiveAI()
+
+# Live data simulation (e.g., Alpe d'Huez climb)
+live_stats = {'gradient': 8.1, 'wind': 12, 'gap': 180, 'fatigue': 0.6}
+minutes_remaining = tdf_ai.analyze_live_telemetry(live_stats)
+
+print(f"--- ACTIVE TDF AI STATUS ---")
+print(f"Current Gradient: {live_stats['gradient']}%")
+print(f"Predicted Catch In: {minutes_remaining} minutes")
+
+
+
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
+def render_tdf_hud(rider_pos, peloton_pos, mountain_profile):
+    fig = plt.figure(figsize=(10, 6))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Render Mountain (Profile)
+    x = np.linspace(0, 10, 100)
+    y = np.sin(x) * 2 # Elevation
+    ax.plot(x, np.zeros(100), y, color='grey', alpha=0.5, label='Stage Profile')
+    
+    # Render Active Riders
+    ax.scatter([rider_pos], [0], [np.sin(rider_pos)*2], color='yellow', s=100, label='Yellow Jersey')
+    ax.scatter([peloton_pos], [0], [np.sin(peloton_pos)*2], color='blue', s=200, label='Peloton')
+    
+    ax.set_title("TDF ACTIVE AI - HUD v1.0", color='white', fontweight='bold')
+    ax.set_facecolor('black')
+    fig.patch.set_facecolor('black')
+    plt.legend()
+    plt.show()
+
+# Visualize current stage position (8km into a 10km climb)
+render_tdf_hud(8, 7.2, None)
+
+
+
+import numpy as np
+import torch
+import torch.nn as nn
+
+class TDF_AdvancedTwin(nn.Module):
+    def __init__(self):
+        super(TDF_AdvancedTwin, self).__init__()
+        # Architecture: [Gradient, Wind, Fatigue, Current Power] -> Next 5 min Performance
+        self.layer_stack = nn.Sequential(
+            nn.Linear(4, 64),
+            nn.ReLU(),
+            nn.Dropout(0.2), # Kaizen: Add resilience to sensor noise
+            nn.Linear(64, 32),
+            nn.Softplus(),  # Ensures output isn't negative (biological constraint)
+            nn.Linear(32, 1)
+        )
+
+    def forward(self, x):
+        return self.layer_stack(x)
+
+    def calculate_pinn_loss(self, prediction, target, gradient, mass=80):
+        """
+        Custom Loss: Penalizes the model if it violates 
+        Laws of Physics (e.g., impossible speed on 15% gradient).
+        """
+        physics_constraint = self.calculate_physics_power(gradient, mass)
+        mse_loss = nn.functional.mse_loss(prediction, target)
+        return mse_loss + 0.1 * torch.abs(prediction - physics_constraint).mean()
+
+    @staticmethod
+    def calculate_physics_power(theta, m, v=11.1): # 40km/h baseline
+        g = 9.81
+        return m * g * np.sin(np.radians(theta)) * v
+
+
+
+import asyncio
+import time
+
+class LiveTDFHUD:
+    def __init__(self, rider_id="POGACAR_001"):
+        self.rider_id = rider_id
+        self.sampling_rate = 0.5 # Hz (Kaizen speed)
+
+    async def stream_telemetry(self):
+        """Simulates HD Data stream from NTT/Dimension Data sensors."""
+        while True:
+            live_data = {
+                "timestamp": time.time(),
+                "power_output": np.random.normal(400, 50), # Watts
+                "heart_rate": np.random.randint(160, 190),
+                "gradient": 7.4, # Alpe d'Huez average
+                "oxygen_saturation": 94.2
+            }
+            yield live_data
+            await asyncio.sleep(self.sampling_rate)
+
+# HUD Execution Example
+async def main():
+    hud = LiveTDFHUD()
+    print(f"📡 BOOTING ACTIVE AI HUD FOR {hud.rider_id}...")
+    async for data in hud.stream_telemetry():
+        print(f"⚡ PWR: {data['power_output']:.1f}W | ❤️ HR: {data['heart_rate']} | 🏔️ GRD: {data['gradient']}%")
+        # In a real environment, this triggers the 3D Render loop
