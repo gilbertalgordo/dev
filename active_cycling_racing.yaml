@@ -1,0 +1,92 @@
+import math
+
+class CyclingAI:
+    def __init__(self, name, weight_kg, ftp_watts, w_prime_joules):
+        self.name = name
+        self.weight = weight_kg  # Mass for gravity/momentum
+        self.ftp = ftp_watts     # Functional Threshold Power
+        self.w_prime = w_prime_joules  # Anaerobic battery (The "Matchbook")
+        self.current_w_prime = w_prime_joules
+        
+        # Archangel Attributes
+        self.strategy_mode = "Michael"  # Tactical Lead / Aggressive
+        self.draft_efficiency = 0.0     # 0 to 1 (1 = 100% drafting benefit)
+
+    def calculate_required_power(self, target_speed_ms, gradient, is_drafting):
+        """
+        Scientific reasoning for aerodynamic and gravitational drag.
+        F_total = F_rolling + F_gravity + F_drag
+        """
+        g = 9.81
+        crr = 0.005  # Rolling resistance
+        cd_a = 0.32  # Drag coefficient * frontal area
+        rho = 1.225  # Air density
+        
+        # Drafting reduces drag by up to 35%
+        if is_drafting:
+            cd_a *= 0.65 
+
+        f_rolling = crr * self.weight * g
+        f_gravity = self.weight * g * (gradient / 100)
+        f_drag = 0.5 * cd_a * rho * (target_speed_ms**2)
+        
+        required_power = (f_rolling + f_gravity + f_drag) * target_speed_ms
+        return max(0, required_power)
+
+    def update_energy_systems(self, output_power, delta_time):
+        """
+        W' Balance logic: If power > FTP, deplete battery. If < FTP, recover.
+        """
+        if output_power > self.ftp:
+            # Depletion
+            self.current_w_prime -= (output_power - self.ftp) * delta_time
+        else:
+            # Recovery (Kaizen optimization: efficient recharging)
+            recovery_constant = self.ftp - output_power
+            self.current_w_prime += recovery_constant * (1 - math.exp(-delta_time / 300))
+        
+        self.current_w_prime = max(0, min(self.current_w_prime, self.w_prime))
+
+    def decide_tactics(self, distance_to_finish, competitors):
+        """
+        Decision matrix inspired by the Archangels:
+        - Michael: Breakaway/Attack
+        - Raphael: Conservation/Recovery
+        - Gabriel: Positioning/Communication
+        """
+        energy_pct = self.current_w_prime / self.w_prime
+
+        if distance_to_finish < 500 and energy_pct > 0.1:
+            return "SPRINT"  # Maximum power
+        elif energy_pct < 0.3:
+            return "DRAFT"   # Find a wheel to save energy (Raphael mode)
+        elif len(competitors) > 5:
+            return "POSITION" # Stay top 10 (Gabriel mode)
+        else:
+            return "TEMPO"    # Maintain FTP
+
+
+
+import math
+
+class PhysiologyEngine:
+    def __init__(self, cp, w_prime):
+        self.critical_power = cp  # Sustainable aerobic power (Watts)
+        self.w_prime_max = w_prime  # Tank of anaerobic energy (Joules)
+        self.w_prime_current = w_prime
+
+    def calculate_power_output(self, target_power, delta_time):
+        """
+        Updates the energy 'tank' based on power exertion.
+        """
+        if target_power > self.critical_power:
+            # Depleting the anaerobic tank
+            self.w_prime_current -= (target_power - self.critical_power) * delta_time
+        else:
+            # Recharging using the Skiba recovery model
+            recovery_term = self.critical_power - target_power
+            # Kaizen: Optimize recovery through exponential decay simulation
+            self.w_prime_current += recovery_term * (1 - math.exp(-delta_time / 300))
+        
+        self.w_prime_current = max(0, min(self.w_prime_current, self.w_prime_max))
+        return self.w_prime_current
