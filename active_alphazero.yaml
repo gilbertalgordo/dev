@@ -1,0 +1,128 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class AlphaNet(nn.Module):
+    def __init__(self, board_size, action_size):
+        super(AlphaNet, self).__init__()
+        self.conv1 = nn.Conv2d(1, 64, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(64)
+        
+        # Residual Blocks for "Deep" reasoning
+        self.res_block = nn.Sequential(
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64)
+        )
+        
+        # Policy Head
+        self.policy_head = nn.Linear(64 * board_size, action_size)
+        # Value Head
+        self.value_head = nn.Linear(64 * board_size, 1)
+
+    def forward(self, x):
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = F.relu(x + self.res_block(x)) # Residual connection
+        x = x.view(x.size(0), -1)
+        
+        policy = F.softmax(self.policy_head(x), dim=1)
+        value = torch.tanh(self.value_head(x))
+        return policy, value
+
+
+
+def train_alphazero(model, game_env, iterations=100):
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    memory = [] # Buffer for self-play data
+
+    for i in range(iterations):
+        # 1. Self-Play (Data Generation)
+        state = game_env.reset()
+        game_history = []
+        
+        while not game_env.done:
+            # Use MCTS guided by 'model' to pick move
+            action, probs = mcts_search(state, model)
+            game_history.append((state, probs))
+            state = game_env.step(action)
+            
+        # 2. Update Memory with Game Outcome (Z)
+        reward = game_env.reward
+        for s, p in game_history:
+            memory.append((s, p, reward))
+
+        # 3. Kaizen Step: Incremental Learning
+        if len(memory) > 500:
+            batch = random.sample(memory, 64)
+            loss = update_model(model, optimizer, batch)
+            print(f"Iteration {i}: Loss {loss:.4f} - System Optimized.")
+
+
+
+import torch
+import torch.nn as nn
+
+class SEBlock(nn.Module):
+    """Squeeze-and-Excitation for channel-wise attention."""
+    def __init__(self, channels, reduction=16):
+        super().__init__()
+        self.fc = nn.Sequential(
+            nn.Linear(channels, channels // reduction, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(channels // reduction, channels, bias=False),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        b, c, _, _ = x.size()
+        y = x.view(b, c, -1).mean(dim=2)
+        y = self.fc(y).view(b, c, 1, 1)
+        return x * y.expand_as(x)
+
+class ResBlock(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.conv1 = nn.Conv2d(channels, channels, 3, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(channels)
+        self.conv2 = nn.Conv2d(channels, channels, 3, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(channels)
+        self.se = SEBlock(channels)
+
+    def forward(self, x):
+        residual = x
+        out = torch.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        out = self.se(out)
+        return torch.relu(out + residual)
+
+
+
+import torch.multiprocessing as mp
+
+class ActiveAlphaZero:
+    def __init__(self, model):
+        self.model = model.share_memory() # Share across processes
+        self.buffer = mp.Queue(maxsize=10000)
+
+    def actor_process(self, process_id):
+        """Continuous Self-Play: The Kaizen Engine."""
+        game = GameEnv()
+        while True:
+            # Generate high-quality trajectory using MCTS + Current Model
+            trajectory = self.run_self_play(game)
+            self.buffer.put(trajectory)
+            
+    def learner_process(self):
+        """Continuous Optimization."""
+        optimizer = torch.optim.AdamW(self.model.parameters(), lr=1e-3, weight_decay=1e-4)
+        while True:
+            batch = self.sample_from_buffer()
+            # Multi-head loss: Policy (CrossEntropy) + Value (MSE)
+            loss = self.compute_alphazero_loss(batch)
+            loss.backward()
+            optimizer.step()
+            
+            # HUD Update: Output 1080p-ready diagnostic stats
+            self.update_dev_hud(loss.item())
