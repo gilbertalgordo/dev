@@ -1,0 +1,125 @@
+# Active AI Automation: Smart Office Presence
+metadata:
+  name: AI Active Office
+  description: Automatically adjusts environment based on activity.
+
+automations:
+  - starters:
+      - type: home.state.HomePresence
+        state: homePresenceMode
+        is: AWAY
+    actions:
+      - type: device.command.OnOff
+        devices: [Light - Office]
+        on: false
+      - type: device.command.StartStop
+        devices: [Vacuum - Living Room]
+        start: true
+
+  - starters:
+      - type: device.state.TemperatureSetting
+        device: Thermostat - Hallway
+        state: thermostatTemperatureAmbient
+        greaterThan: 25 # Celsius
+    actions:
+      - type: device.command.OnOff
+        devices: [AC - Office]
+        on: true
+
+
+
+import google.oauthlib.tool
+import google.assistant.library
+from google.assistant.library.event import EventType
+
+def process_event(event):
+    """
+    Handles active events from the Assistant.
+    """
+    if event.type == EventType.ON_CONVERSATION_TURN_STARTED:
+        print("AI is active and listening...")
+    
+    elif event.type == EventType.ON_RECOGNIZING_SPEECH_FINISHED:
+        print(f"User said: {event.args['text']}")
+
+    elif event.type == EventType.ON_ASSISTANT_ERROR:
+        print("Error detected. Applying Kaizen fix...")
+
+def main():
+    # Path to your credentials from Google Cloud Console
+    creds_path = './credentials.json'
+    
+    with google.assistant.library.Assistant(creds_path) as assistant:
+        print("--- Assistant Active ---")
+        for event in assistant.start():
+            process_event(event)
+
+if __name__ == '__main__':
+    main()
+
+
+
+metadata:
+  name: Proactive Sanctuary Mode
+  description: Kaizen-managed environment focusing on wellness and efficiency.
+
+automations:
+  - starters:
+      # Active sensing: Triggered when someone is in the room for > 10 mins
+      - type: device.state.OccupancySensing
+        device: Motion Sensor - Office
+        state: occupancy
+        is: OCCUPIED
+        for: 10min
+    condition:
+      # Only active during peak "Archangel" focus hours
+      type: time.between
+      after: 08:00
+      before: 18:00
+    actions:
+      - type: device.command.ColorAbsolute
+        devices: [Ceiling Light]
+        color:
+          temperature: 4500K # Focus light (Gabriel - Clarity)
+      - type: device.command.OnOff
+        devices: [Air Purifier]
+        on: true
+
+
+
+import os
+from google import genai
+from google.genai import types
+
+# Initialize the Gemini 3 Client
+client = genai.Client(api_key="YOUR_GEMINI_API_KEY")
+
+def active_home_reasoning(sensor_data):
+    """
+    Uses Gemini 3 to decide home actions based on real-time data.
+    """
+    prompt = f"""
+    Context: I am an AI Assistant with Archangel characteristics (Protective, Wise).
+    Input Data: {sensor_data}
+    Goal: Apply Kaizen principles to optimize the home environment.
+    
+    If air quality is low, start purification. 
+    If user is working late, shift lights to warm amber (Camael - Comfort).
+    Return response in JSON format for the Google Home API.
+    """
+    
+    # Using Gemini 3 'Deep Think' for complex reasoning
+    interaction = client.interactions.create(
+        model="gemini-3-flash-preview",
+        input=prompt,
+        config=types.GenerateContentConfig(
+            thinking_config=types.ThinkingConfig(thinking_level="low")
+        )
+    )
+    
+    return interaction.outputs[-1].text
+
+# Example execution
+room_stats = {"temp": 24, "air_quality": "Poor", "occupancy": "Active"}
+decision = active_home_reasoning(room_stats)
+print(f"AI Decision: {decision}")
