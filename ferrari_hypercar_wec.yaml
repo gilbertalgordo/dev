@@ -1,0 +1,111 @@
+// Ferrari 499P WEC Hypercar Initialization
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// Environment Lighting for HD 3D effect
+const light = new THREE.DirectionalLight(0xffffff, 1.5);
+light.position.set(5, 10, 7.5).normalize();
+scene.add(light);
+
+// Loading the 499P Model (Substitute path with your local/GitHub source)
+const loader = new GLTFLoader();
+loader.load('path/to/ferrari_499p.glb', (gltf) => {
+    const hypercar = gltf.scene;
+    hypercar.scale.set(1, 1, 1);
+    scene.add(hypercar);
+    
+    // Instance management for performance
+    console.log("Ferrari 499P Instance Loaded successfully.");
+});
+
+camera.position.z = 5;
+
+// HUD Data Overlay (Simplified)
+function updateHUD(speed, gear, soc) {
+    document.getElementById('hud-speed').innerText = `${speed} km/h`;
+    document.getElementById('hud-battery').innerText = `SoC: ${soc}%`;
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+    renderer.render(scene, camera);
+}
+animate();
+
+
+
+class Ferrari499PSimulator:
+    def __init__(self):
+        self.MAX_POWER_KW = 500.0  # WEC Limit
+        self.ERS_THRESHOLD_KPH = 190.0  # Ferrari 499P Activation Speed
+        self.ice_power = 0.0
+        self.ers_power = 0.0
+        
+    def calculate_deployment(self, current_speed_kph, throttle_input):
+        """
+        Calculates power split between ICE and ERS.
+        throttle_input: 0.0 to 1.0
+        """
+        if current_speed_kph >= self.ERS_THRESHOLD_KPH:
+            # Deploy 4WD (Electric Front Axle)
+            self.ers_power = 200.0 * throttle_input  # Front MGU output
+            self.ice_power = min(300.0, self.MAX_POWER_KW - self.ers_power)
+        else:
+            # ICE only on rear axle
+            self.ers_power = 0.0
+            self.ice_power = self.MAX_POWER_KW * throttle_input
+            
+        total_output = self.ice_power + self.ers_power
+        return {
+            "Total_kW": total_output,
+            "ICE_kW": self.ice_power,
+            "ERS_kW": self.ers_power,
+            "4WD_Active": current_speed_kph >= self.ERS_THRESHOLD_KPH
+        }
+
+# Instance of the 499P Logic
+ferrari_instance = Ferrari499PSimulator()
+print(ferrari_instance.calculate_deployment(210.0, 1.0))
+
+
+
+// GLSL Custom Shader for 'Rosso Corsa' Carbon Effect
+const ferrariShader = {
+    uniforms: {
+        "color": { value: new THREE.Color(0xce0000) },
+        "envMap": { value: null }
+    },
+    vertexShader: `
+        varying vec3 vNormal;
+        void main() {
+            vNormal = normalize(normalMatrix * normal);
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+    `,
+    fragmentShader: `
+        varying vec3 vNormal;
+        void main() {
+            float intensity = pow(0.7 - dot(vNormal, vec3(0, 0, 1.0)), 2.0);
+            gl_FragColor = vec4(vec3(0.8, 0.0, 0.0) + intensity, 1.0);
+        }
+    `
+};
+
+// HUD Implementation for real-time Telemetry
+function updateRaceHUD(telemetry) {
+    const hudContainer = document.getElementById('ferrari-hud');
+    hudContainer.innerHTML = `
+        <div class="hud-box">
+            <span class="label">ERS DEP</span>
+            <div class="bar" style="width: ${telemetry.ers_percent}%"></div>
+            <span class="value">${telemetry.speed} KPH</span>
+        </div>
+    `;
+}
