@@ -1,0 +1,198 @@
+import cv2
+import mediapipe as mp
+import numpy as np
+
+# Initialize MediaPipe Pose with High Fidelity settings
+mp_pose = mp.solutions.pose
+pose = mp_pose.Pose(static_image_mode=False, min_detection_confidence=0.7, min_tracking_confidence=0.7)
+mp_drawing = mp.solutions.drawing_utils
+
+def calculate_angle(a, b, c):
+    """
+    Standard Vector Geometry for joint analysis
+    $ \theta = \arccos \left( \frac{\vec{ba} \cdot \vec{bc}}{|\vec{ba}| |\vec{bc}|} \right) $
+    """
+    a = np.array(a) # First point (Shoulder)
+    b = np.array(b) # Mid point (Elbow)
+    c = np.array(c) # End point (Wrist)
+    
+    radians = np.arctan2(c[1]-b[1], c[0]-b[0]) - np.arctan2(a[1]-b[1], a[0]-b[0])
+    angle = np.abs(radians*180.0/np.pi)
+    
+    if angle > 180.0:
+        angle = 360 - angle
+    return angle
+
+# --- Fitness HUD & Kaizen Feedback Engine ---
+class ActiveFitnessAI:
+    def __init__(self):
+        self.counter = 0
+        self.stage = None
+        self.feedback = "System Ready"
+
+    def process_frame(self, frame):
+        # Recolor to RGB for MediaPipe
+        image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = pose.process(image)
+        
+        # HUD Overlay logic
+        h, w, _ = frame.shape
+        
+        if results.pose_landmarks:
+            landmarks = results.pose_landmarks.landmark
+            
+            # Get coordinates for a Bicep Curl instance
+            shoulder = [landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].x, landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value].y]
+            elbow = [landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].x, landmarks[mp_pose.PoseLandmark.LEFT_ELBOW.value].y]
+            wrist = [landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].x, landmarks[mp_pose.PoseLandmark.LEFT_WRIST.value].y]
+            
+            angle = calculate_angle(shoulder, elbow, wrist)
+            
+            # Kaizen Logic: Continuous Form Monitoring
+            if angle > 160:
+                self.stage = "down"
+                self.feedback = "Full Extension Achieved"
+            if angle < 30 and self.stage == 'down':
+                self.stage = "up"
+                self.counter += 1
+                self.feedback = f"Rep {self.counter} Complete - Keep Tempo!"
+
+            # Render HUD (Heads-Up Display)
+            cv2.putText(frame, f"REPS: {self.counter}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+            cv2.putText(frame, f"ANGLE: {int(angle)}", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.putText(frame, f"STATUS: {self.feedback}", (10, 130), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 200, 0), 2)
+            
+            # Draw Skeleton
+            mp_drawing.draw_landmarks(frame, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
+
+        return frame
+
+# --- Main Instance Loop ---
+cap = cv2.VideoCapture(0)
+ai_engine = ActiveFitnessAI()
+
+while cap.isOpened():
+    ret, frame = cap.read()
+    if not ret: break
+    
+    output_frame = ai_engine.process_frame(frame)
+    cv2.imshow('Archangel Fitness HUD', output_frame)
+    
+    if cv2.waitKey(10) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
+
+
+
+import cv2
+import mediapipe as mp
+import numpy as np
+import time
+
+class AdvancedFitnessArchangel:
+    def __init__(self):
+        self.mp_pose = mp.solutions.pose
+        self.pose = self.mp_pose.Pose(
+            model_complexity=2, # Heavy model for HD accuracy
+            enable_segmentation=True,
+            min_detection_confidence=0.8
+        )
+        # Kaizen Metrics
+        self.rep_count = 0
+        self.state = "START"
+        self.velocity_buffer = []
+        self.peak_velocity = 0.0
+        self.last_timestamp = time.time()
+        
+    def calculate_3d_angle(self, a, b, c):
+        """Calculates the angle between three 3D points."""
+        a = np.array(a) # e.g., Shoulder (x, y, z)
+        b = np.array(b) # e.g., Elbow (x, y, z)
+        c = np.array(c) # e.g., Wrist (x, y, z)
+
+        # Vectors in 3D space
+        ba = a - b
+        bc = c - b
+
+        cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc))
+        angle = np.degrees(np.arccos(np.clip(cosine_angle, -1.0, 1.0)))
+        return angle
+
+    def analyze_frame(self, frame):
+        results = self.pose.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        
+        if not results.pose_world_landmarks:
+            return frame
+
+        # Extract 3D World Landmarks (Coordinates in Meters)
+        landmarks = results.pose_world_landmarks.landmark
+        
+        # Instance: Left Arm Tracking
+        shoulder = [landmarks[11].x, landmarks[11].y, landmarks[11].z]
+        elbow = [landmarks[13].x, landmarks[13].y, landmarks[13].z]
+        wrist = [landmarks[15].x, landmarks[15].y, landmarks[15].z]
+
+        # 1. Scientific Reasoning: 3D Angle Calculation
+        angle = self.calculate_3d_angle(shoulder, elbow, wrist)
+        
+        # 2. Velocity Tracking (Kaizen Improvement)
+        current_time = time.time()
+        dt = current_time - self.last_timestamp
+        # Change in angle over time (Angular Velocity)
+        if len(self.velocity_buffer) > 0:
+            velocity = abs(angle - self.velocity_buffer[-1]) / dt
+            self.peak_velocity = max(self.peak_velocity, velocity)
+        
+        self.velocity_buffer.append(angle)
+        if len(self.velocity_buffer) > 10: self.velocity_buffer.pop(0)
+        self.last_timestamp = current_time
+
+        # 3. Logic State Machine
+        self._update_logic(angle)
+        
+        # 4. HD HUD Rendering
+        return self._draw_hud(frame, angle, results)
+
+    def _update_logic(self, angle):
+        if angle > 150:
+            self.state = "EXTENSION"
+        if angle < 40 and self.state == "EXTENSION":
+            self.state = "CONTRACTION"
+            self.rep_count += 1
+            # Reset peak velocity per rep for Kaizen analysis
+            print(f"Rep {self.rep_count} Peak Velocity: {self.peak_velocity:.2f} deg/s")
+            self.peak_velocity = 0
+
+    def _draw_hud(self, frame, angle, results):
+        # Semi-transparent HUD Overlay
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (0, 0), (350, 250), (20, 20, 20), -1)
+        cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
+        
+        # HUD Text
+        color = (0, 255, 0) if self.state == "CONTRACTION" else (255, 255, 255)
+        cv2.putText(frame, f"REPS: {self.rep_count}", (20, 50), 2, 1, color, 2)
+        cv2.putText(frame, f"3D ANGLE: {int(angle)} DEG", (20, 100), 2, 0.8, (255, 255, 255), 1)
+        cv2.putText(frame, f"POWER: {int(self.peak_velocity)} d/s", (20, 150), 2, 0.8, (0, 165, 255), 1)
+        
+        # Draw Skeleton
+        mp.solutions.drawing_utils.draw_landmarks(
+            frame, results.pose_landmarks, self.mp_pose.POSE_CONNECTIONS)
+        
+        return frame
+
+# Initialization of the Instance
+ai_engine = AdvancedFitnessArchangel()
+cap = cv2.VideoCapture(0)
+
+while cap.isOpened():
+    success, frame = cap.read()
+    if not success: break
+    
+    processed_frame = ai_engine.analyze_frame(frame)
+    cv2.imshow('Archangel Fitness - Advanced Instance', processed_frame)
+    
+    if cv2.waitKey(5) & 0xFF == 27: break
+cap.release()
