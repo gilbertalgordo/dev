@@ -1,0 +1,129 @@
+import requests
+import json
+
+class ActiveCurrencyAI:
+    def __init__(self, api_key):
+        self.api_key = api_key
+        self.base_url = f"https://v6.exchangerate-api.com/v6/{api_key}/latest/"
+
+    def get_live_rates(self, base_currency="USD"):
+        """Fetches real-time exchange rates with error handling."""
+        try:
+            response = requests.get(self.base_url + base_currency)
+            response.raise_for_status()
+            data = response.json()
+            if data["result"] == "success":
+                return data["conversion_rates"]
+            return None
+        except Exception as e:
+            print(f"[!] Error syncing rates: {e}")
+            return None
+
+    def convert(self, amount, from_curr, to_curr):
+        """Scientific precision conversion logic."""
+        rates = self.get_live_rates(from_curr.upper())
+        if rates and to_curr.upper() in rates:
+            rate = rates[to_curr.upper()]
+            # Precision calculation: Result = Amount * Rate
+            converted_amount = amount * rate
+            return round(converted_amount, 2), rate
+        return None, None
+
+# --- Kaizen Execution ---
+if __name__ == "__main__":
+    # Replace with your API key from exchangerate-api.com
+    MY_API_KEY = "YOUR_API_KEY_HERE" 
+    ai_converter = ActiveCurrencyAI(MY_API_KEY)
+
+    print("--- 😇 Archangel AI Currency Interface ---")
+    user_input = input("Conversion request (e.g., 100 USD to EUR): ").split()
+
+    try:
+        val = float(user_input[0])
+        f_curr = user_input[1]
+        t_curr = user_input[4] if len(user_input) > 4 else user_input[3]
+
+        result, rate = ai_converter.convert(val, f_curr, t_curr)
+        
+        if result:
+            print(f"✅ Success: {val} {f_curr.upper()} = {result} {t_curr.upper()}")
+            print(f"📊 Live Rate: 1 {f_curr.upper()} = {rate} {t_curr.upper()}")
+        else:
+            print("❌ Conversion failed. Check currency codes.")
+    except Exception as e:
+        print("⚠️ Format error. Please use: [Amount] [From] to [To]")
+
+
+
+import requests
+import re
+from datetime import datetime
+
+class ArchangelConverterAI:
+    """
+    Advanced AI Converter with NLP Intent Parsing 
+    and Superfast Kaizen Management.
+    """
+    def __init__(self, api_key):
+        self.api_key = api_key
+        self.api_url = f"https://v6.exchangerate-api.com/v6/{api_key}/latest/"
+        self.cache = {}
+
+    def fetch_rates(self, base="USD"):
+        """Superfast data sync with local caching."""
+        if base in self.cache and (datetime.now() - self.cache[base]['time']).seconds < 3600:
+            return self.cache[base]['rates']
+            
+        try:
+            response = requests.get(self.api_url + base)
+            data = response.json()
+            if data["result"] == "success":
+                self.cache[base] = {'rates': data["conversion_rates"], 'time': datetime.now()}
+                return data["conversion_rates"]
+        except Exception as e:
+            return f"Connection Error: {e}"
+
+    def parse_intent(self, text):
+        """
+        NLP Logic: Extracts Amount, From, and To from natural speech.
+        Example: 'Convert 100 USD to PHP' or 'What is 50 Euro in Yen?'
+        """
+        # Regex to find numbers and 3-letter currency codes
+        amount = re.findall(r"[-+]?\d*\.\d+|\d+", text)
+        currencies = re.findall(r"\b[A-Z]{3}\b", text.upper())
+        
+        if not amount or len(currencies) < 2:
+            return None
+        
+        return {
+            "amount": float(amount[0]),
+            "from": currencies[0],
+            "to": currencies[1]
+        }
+
+    def process_request(self, user_input):
+        intent = self.parse_intent(user_input)
+        if not intent:
+            return "I couldn't parse that request. Try: 'Convert 100 USD to EUR'"
+        
+        rates = self.fetch_rates(intent['from'])
+        if isinstance(rates, str): return rates # Return error string
+        
+        if intent['to'] in rates:
+            conversion = intent['amount'] * rates[intent['to']]
+            return f"✅ {intent['amount']} {intent['from']} = {conversion:,.2f} {intent['to']}"
+        return "Unsupported currency code detected."
+
+# --- Implementation ---
+if __name__ == "__main__":
+    # 📝 Developer Note: Replace with your actual API key
+    AI_CORE = ArchangelConverterAI(api_key="YOUR_API_KEY")
+    
+    print("--- ⚔️ Archangel Active AI Interface Loaded ---")
+    print("Example: 'I need to change 250 USD to GBP'")
+    
+    while True:
+        query = input("\n[User]: ")
+        if query.lower() in ['exit', 'quit']: break
+        response = AI_CORE.process_request(query)
+        print(f"[AI]: {response}")
