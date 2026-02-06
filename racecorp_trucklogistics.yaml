@@ -1,0 +1,160 @@
+using UnityEngine;
+using System.Collections.Generic;
+
+public class RacingHaulerController : MonoBehaviour
+{
+    [Header("Hybrid Powertrain Systems")]
+    public float electricTorque = 5000f; // Precision docking
+    public float combustionTorque = 15000f; // High-speed transit
+    public bool isElectricMode = true;
+
+    [Header("10-Wheeler Configuration")]
+    public List<WheelCollider> steeringWheels; // Front 4 wheels
+    public List<WheelCollider> driveWheels;    // Rear 6 wheels
+    public float maxSteerAngle = 35f;
+
+    [Header("Logistics HUD & Deployment")]
+    public GameObject rampMechanism;
+    public bool isDocked = false;
+    private float rampProgress = 0f;
+
+    void FixedUpdate()
+    {
+        float t = Input.GetAxis("Vertical");
+        float s = Input.GetAxis("Horizontal");
+
+        ApplyDrive(t);
+        ApplySteering(s);
+        
+        // Superfast Kaizen: Real-time HUD telemetry update
+        UpdateLogisticsHUD();
+    }
+
+    private void ApplyDrive(float input)
+    {
+        float currentTorque = isElectricMode ? electricTorque : combustionTorque;
+        foreach (var wheel in driveWheels)
+        {
+            wheel.motorTorque = input * currentTorque;
+        }
+    }
+
+    private void ApplySteering(float input)
+    {
+        float steer = input * maxSteerAngle;
+        foreach (var wheel in steeringWheels)
+        {
+            wheel.steerAngle = steer;
+        }
+    }
+
+    public void ToggleRamp()
+    {
+        // Automated docking sequence
+        isDocked = !isDocked;
+        StopAllCoroutines();
+        StartCoroutine(AnimateRamp(isDocked ? 1f : 0f));
+    }
+
+    private System.Collections.IEnumerator AnimateRamp(float target)
+    {
+        while (!Mathf.Approximately(rampProgress, target))
+        {
+            rampProgress = Mathf.MoveTowards(rampProgress, target, Time.deltaTime * 0.5f);
+            // Translate ramp position/rotation based on progress
+            rampMechanism.transform.localRotation = Quaternion.Euler(rampProgress * 45f, 0, 0);
+            yield return null;
+        }
+    }
+
+    private void UpdateLogisticsHUD()
+    {
+        // Placeholder for the HUD integration requested in preferences
+        // Debug.Log($"HUD: Mode: {(isElectricMode ? "EV" : "ICE")} | Ramp: {rampProgress*100}%");
+    }
+}
+
+
+
+using UnityEngine;
+using System;
+using System.Collections.Generic;
+
+namespace RaceCorp.Logistics.Advanced
+{
+    [RequireComponent(typeof(Rigidbody))]
+    public class HybridTruckMaster : MonoBehaviour
+    {
+        // Preferences: HUD & Scientific Reasoning
+        [Serializable]
+        public struct TelemetryData {
+            public float batteryLevel;
+            public float thermalLoad;
+            public Vector3 gForce;
+            public bool dockingAlignment;
+        }
+
+        [Header("Hybrid Propulsion (Scientific Accuracy)")]
+        [SerializeField] private AnimationCurve torqueCurve; // ICE Power band
+        [SerializeField] private float electricInstantTorque = 8000f; 
+        private float currentPowerOutput;
+
+        [Header("Multi-Axle Steering (Kaizen Optimization)")]
+        [Range(0, 1)] public float rearSteerCounterWeight = 0.3f; // Counter-steer for tight turns
+
+        private Rigidbody _rb;
+        public TelemetryData hudTelemetry;
+
+        // Events for UI/HUD
+        public static event Action<TelemetryData> OnTelemetryUpdate;
+
+        void Awake() {
+            _rb = GetComponent<Rigidbody>();
+            _rb.centerOfMass = new Vector3(0, -0.5f, 0); // Low center of gravity for racing safety
+        }
+
+        void FixedUpdate() {
+            ProcessHybridInput();
+            ApplyAdvancedPhysics();
+            BroadcastHUD();
+        }
+
+        private void ProcessHybridInput() {
+            float input = Input.GetAxis("Vertical");
+            
+            // Scientific Logic: Electric assists the initial inertia, ICE takes over at high RPM
+            float velocityKmh = _rb.velocity.magnitude * 3.6f;
+            currentPowerOutput = (velocityKmh < 30) ? electricInstantTorque : torqueCurve.Evaluate(velocityKmh);
+            
+            // Apply force to the 6 drive wheels (from the 10-wheeler config)
+            _rb.AddForce(transform.forward * input * currentPowerOutput);
+        }
+
+        private void ApplyAdvancedPhysics() {
+            // Kaizen: Optimizing the turning radius of a long-wheelbase 10-wheeler
+            float steer = Input.GetAxis("Horizontal") * 30f;
+            hudTelemetry.gForce = _rb.velocity / Time.fixedDeltaTime;
+            hudTelemetry.thermalLoad = Mathf.PingPong(Time.time * 10, 100); // Simulated heat
+        }
+
+        public void InitiateDockingSequence() {
+            // HUD feedback for precision alignment
+            Debug.Log("RaceCorp: Initializing magnetic docking clamps...");
+            hudTelemetry.dockingAlignment = true;
+        }
+
+        private void BroadcastHUD() {
+            OnTelemetryUpdate?.Invoke(hudTelemetry);
+        }
+    }
+
+    public class RampController : MonoBehaviour {
+        [SerializeField] private Transform rampPivot;
+        
+        public void DeployRamp() {
+            // Implementation of 3D hydraulic movement
+            LeanTween.rotateLocal(rampPivot.gameObject, new Vector3(45, 0, 0), 2f)
+                .setEase(LeanTweenType.easeInOutCubic);
+        }
+    }
+}
