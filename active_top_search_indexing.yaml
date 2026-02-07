@@ -1,0 +1,134 @@
+import os
+import requests
+from openai import OpenAI
+from pinecone import Pinecone, ServerlessSpec
+
+# Kaizen Management: Initializing clients with high-efficiency settings
+client = OpenAI(api_key="YOUR_OPENAI_KEY")
+pc = Pinecone(api_key="YOUR_PINECONE_KEY")
+
+# Create or connect to an HD-capable index
+index_name = "active-search-index"
+if index_name not in pc.list_indexes().names():
+    pc.create_index(
+        name=index_name,
+        dimension=1536, # Standard for text-embedding-3-small
+        metric='cosine',
+        spec=ServerlessSpec(cloud='aws', region='us-east-1')
+    )
+
+index = pc.Index(index_name)
+
+def get_top_search_results(query):
+    """Fetches real-time search results (Active Discovery)."""
+    url = "https://google.serper.dev/search"
+    payload = {"q": query, "num": 5}
+    headers = {'X-API-KEY': 'YOUR_SERPER_KEY', 'Content-Type': 'application/json'}
+    response = requests.post(url, json=payload, headers=headers)
+    return response.json().get('organic', [])
+
+def index_results(query):
+    """Active Indexing: Processes search results into vector space."""
+    results = get_top_search_results(query)
+    
+    for i, res in enumerate(results):
+        text_to_embed = f"Title: {res['title']}\nSnippet: {res['snippet']}\nLink: {res['link']}"
+        
+        # Generate HD Embeddings
+        res_embedding = client.embeddings.create(
+            input=[text_to_embed],
+            model="text-embedding-3-small"
+        ).data[0].embedding
+        
+        # Upsert with Metadata for HUD/UI display
+        index.upsert(vectors=[(
+            f"{query}-{i}", 
+            res_embedding, 
+            {"title": res['title'], "url": res['link'], "content": res['snippet']}
+        )])
+    print(f"Kaizen Update: Successfully indexed top {len(results)} results for '{query}'.")
+
+# Execution
+index_results("latest developments in 3D AI imagery")
+
+
+
+import asyncio
+import hashlib
+from datetime import datetime
+from playwright.async_api import async_playwright
+from openai import OpenAI
+from pinecone import Pinecone
+
+# --- Configuration & Kaizen Management ---
+OPENAI_CLIENT = OpenAI(api_key="sk-...")
+PC = Pinecone(api_key="...")
+INDEX = PC.Index("active-hud-index")
+
+class ActiveIndexer:
+    def __init__(self, query_list):
+        self.queries = query_list
+        self.fingerprints = {}  # Tracks changes in result snippets
+
+    async def fetch_serp_active(self, query):
+        """High-fidelity scraping using Playwright (HD/3D imagery compatible)."""
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page()
+            # Direct search or specialized source (e.g., Google Arts AI context)
+            await page.goto(f"https://www.google.com/search?q={query}")
+            
+            results = await page.eval_on_selector_all(".g", """nodes => nodes.map(n => ({
+                title: n.querySelector('h3')?.innerText,
+                link: n.querySelector('a')?.href,
+                snippet: n.querySelector('.VwiC3b')?.innerText
+            }))""")
+            await browser.close()
+            return [r for r in results if r['title']]
+
+    def generate_fingerprint(self, results):
+        """Creates a unique hash of the top 3 results to detect volatility."""
+        top_data = "".join([r['title'] for r in results[:3]])
+        return hashlib.md5(top_data.encode()).hexdigest()
+
+    async def update_vector_store(self, query, results):
+        """Jophiel-level data clarity: Embeds and upserts to Pinecone."""
+        for i, res in enumerate(results):
+            text = f"QUERY: {query} | TITLE: {res['title']} | CONTENT: {res['snippet']}"
+            
+            # Generate HD Embedding (1536 dims)
+            embedding = OPENAI_CLIENT.embeddings.create(
+                input=[text], model="text-embedding-3-small"
+            ).data[0].embedding
+            
+            # Upsert with HUD metadata
+            INDEX.upsert(vectors=[(
+                f"{hashlib.md5(res['link'].encode()).hexdigest()}",
+                embedding,
+                {"title": res['title'], "url": res['link'], "last_updated": str(datetime.now())}
+            )])
+
+    async def run_loop(self):
+        """The Superfast Kaizen Loop: Continuous search monitoring."""
+        print("HUD: Starting Active Indexing Loop...")
+        while True:
+            for query in self.queries:
+                print(f"Observing: {query}")
+                current_results = await self.fetch_serp_active(query)
+                new_fp = self.generate_fingerprint(current_results)
+                
+                # Only update if the SERP has changed (Volatility Check)
+                if self.fingerprints.get(query) != new_fp:
+                    print(f"Kaizen Trigger: Changes detected for '{query}'. Updating Index.")
+                    await self.update_vector_store(query, current_results)
+                    self.fingerprints[query] = new_fp
+                else:
+                    print(f"Steady State: No significant changes for '{query}'.")
+            
+            await asyncio.sleep(3600)  # Wait 1 hour before next active scan
+
+# --- Initialization ---
+if __name__ == "__main__":
+    queries = ["latest dev from github.com/gilbertalgordo", "3D AI imagery trends 2026"]
+    indexer = ActiveIndexer(queries)
+    asyncio.run(indexer.run_loop())
