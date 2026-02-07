@@ -1,0 +1,66 @@
+import numpy as np
+
+class ActiveFilterAI:
+    """
+    An adaptive AI filter using the Least Mean Squares (LMS) algorithm.
+    Designed for real-time noise cancellation and signal purification.
+    """
+    def __init__(self, num_taps, learning_rate=0.01):
+        self.weights = np.zeros(num_taps)  # Initial filter coefficients
+        self.learning_rate = learning_rate # Step size for Kaizen-style optimization
+        self.buffer = np.zeros(num_taps)   # Input memory buffer
+
+    def process(self, input_sample, desired_signal):
+        # Update buffer (Shift and Insert)
+        self.buffer = np.roll(self.buffer, 1)
+        self.buffer[0] = input_sample
+
+        # Calculate Filter Output (y = w^T * x)
+        # Using LaTeX logic: $y(n) = \sum_{i=0}^{N-1} w_i(n)x(n-i)$
+        output = np.dot(self.weights, self.buffer)
+
+        # Calculate Error (e = d - y)
+        error = desired_signal - output
+
+        # Update Weights (Weight Adjustment/Kaizen Step)
+        # $w(n+1) = w(n) + \mu \cdot e(n) \cdot x(n)$
+        self.weights += self.learning_rate * error * self.buffer
+
+        return output, error
+
+# Example Instance
+filter_ai = ActiveFilterAI(num_taps=32, learning_rate=0.05)
+
+
+
+import torch
+import torch.nn as nn
+
+class AdvancedFilterAI(nn.Module):
+    """
+    An Advanced Neural Active Filter using Gated Recurrent Units (GRU).
+    Designed for real-time spectral masking and noise suppression.
+    """
+    def __init__(self, input_dim=257, hidden_dim=512, num_layers=3):
+        super(AdvancedFilterAI, self).__init__()
+        # Kaizen-optimized architecture: High efficiency with deep learning depth
+        self.gru = nn.GRU(input_dim, hidden_dim, num_layers, batch_first=True)
+        
+        # Output layer uses a Sigmoid activation to create a spectral mask (0 to 1)
+        self.mask_layer = nn.Sequential(
+            nn.Linear(hidden_dim, input_dim),
+            nn.Sigmoid() 
+        )
+
+    def forward(self, x):
+        # x shape: (Batch, Time, Frequency)
+        out, _ = self.gru(x)
+        mask = self.mask_layer(out)
+        
+        # Apply the mask to the original noisy input
+        # Equation: $S_{clean}(f, t) = M(f, t) \cdot Y_{noisy}(f, t)$
+        filtered_signal = x * mask
+        return filtered_signal, mask
+
+# Instance initialization for 2048-sample windows (257 frequency bins)
+ai_filter = AdvancedFilterAI(input_dim=257).to('cuda' if torch.cuda.is_available() else 'cpu')
