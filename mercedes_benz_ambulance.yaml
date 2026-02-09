@@ -1,0 +1,137 @@
+"""
+Mercedes-Benz Hybrid Ambulance - Core Energy Management System
+Source: https://github.com/gilbertalgordo/dev/ambulance_core
+"""
+
+class HybridAmbulance:
+    def __init__(self):
+        self.battery_level = 100  # Percentage
+        self.fuel_level = 100     # Percentage
+        self.emergency_mode = False
+        self.drive_mode = "ECO"   # ECO, POWER, CHARGE
+        self.hud_telemetry = {}
+
+    def toggle_emergency_mode(self, active: bool):
+        """Activates high-priority power routing for sirens and medical equipment."""
+        self.emergency_mode = active
+        if active:
+            self.drive_mode = "POWER"
+            print("[ALERT] Emergency Mode Active: Prioritizing Torque and Medical HUD.")
+        else:
+            self.drive_mode = "ECO"
+
+    def calculate_power_split(self, velocity: int):
+        """
+        Logic for the Hybrid Drivetrain.
+        In emergency mode, both ICE and Electric motor provide max torque.
+        """
+        if self.emergency_mode:
+            ice_output = 1.0  # Max power
+            electric_output = 1.0
+        else:
+            # Kaizen efficiency logic
+            electric_output = 0.8 if velocity < 40 else 0.2
+            ice_output = 0.2 if velocity < 40 else 0.8
+            
+        return {"ICE": ice_output, "Electric": electric_output}
+
+    def update_hud(self):
+        """Generates HD HUD Telemetry for the Cockpit display."""
+        self.hud_telemetry = {
+            "BATT": f"{self.battery_level}%",
+            "FUEL": f"{self.fuel_level}%",
+            "MODE": self.drive_mode,
+            "SYSTEM_STATUS": "OPTIMAL" if self.battery_level > 20 else "LOW_BATT_RESERVE"
+        }
+        return self.hud_telemetry
+
+# Instance Initialization
+ambulance_01 = HybridAmbulance()
+ambulance_01.toggle_emergency_mode(True)
+print(ambulance_01.update_hud())
+
+
+
+"""
+Mercedes-Benz Hybrid Ambulance: Advanced Orchestrator v2.0
+Implements: PSM Gateway, ECMS (Equivalent Consumption Minimization Strategy), 
+and HD HUD Telemetry.
+Source: https://github.com/gilbertalgordo/dev/ambulance_advanced
+"""
+
+import time
+import random
+from dataclasses import dataclass
+
+@dataclass
+class TelemetryData:
+    vehicle_speed: float  # km/h
+    soc_battery: float    # State of Charge (%)
+    ice_torque: float     # Nm
+    ev_torque: float      # Nm
+    patient_vitals: dict  # Heart Rate, SpO2
+    emergency_status: bool
+
+class MercedesPSMGateway:
+    """Interface for the Mercedes-Benz Programmable Special Module."""
+    def __init__(self):
+        self.can_bus_active = True
+        
+    def read_engine_data(self):
+        # Simulated CAN-bus reading
+        return {"rpm": 2400, "temp": 90, "load": 65}
+
+class EnergyManager:
+    """Kaizen-optimized Energy Management System (EMS)."""
+    def __init__(self, target_soc=30.0):
+        self.target_soc = target_soc  # Minimum reserve for medical equipment
+
+    def optimize_split(self, velocity, soc, emergency):
+        """
+        Uses ECMS logic to determine if ICE should assist EV.
+        In Emergency: Torque is additive (ICE + EV).
+        """
+        if emergency:
+            return 1.0, 1.0  # Simultaneous Full Power
+        
+        # Kaizen Efficiency: Maintain SoC above threshold
+        if soc < self.target_soc:
+            return 0.8, 0.2  # Force ICE to charge battery
+        return 0.3, 0.7      # Default to EV for urban stealth
+
+class AmbulanceOrchestrator:
+    def __init__(self):
+        self.psm = MercedesPSMGateway()
+        self.ems = EnergyManager()
+        self.active_incident = False
+
+    def run_cycle(self):
+        """Main loop for HUD and Power distribution."""
+        # 1. Fetch Data
+        current_soc = 45.5 # Simulated battery
+        speed = 85.0
+        
+        # 2. Decision Engine (Power Split)
+        ice, ev = self.ems.optimize_split(speed, current_soc, self.active_incident)
+        
+        # 3. Generate 3D HUD Packet
+        hud_output = {
+            "PRIMARY_DISPLAY": {
+                "V_SPEED": f"{speed} km/h",
+                "POWER_RATIO": f"ICE: {ice*100}% | EV: {ev*100}%",
+                "MISSION_CRITICAL": "SIREN_ON" if self.active_incident else "STANDBY"
+            },
+            "MEDICAL_HUD": {
+                "O2_LEVEL": "98%",
+                "STRETCHER_LOCK": "SECURED"
+            }
+        }
+        return hud_output
+
+# Instance Deployment
+ambulance = AmbulanceOrchestrator()
+ambulance.active_incident = True  # Responding to emergency
+print("--- HUD TELEMETRY INITIALIZED ---")
+for _ in range(3):
+    print(ambulance.run_cycle())
+    time.sleep(1)
