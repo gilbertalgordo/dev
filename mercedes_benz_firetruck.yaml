@@ -1,0 +1,139 @@
+class MercedesHybridFiretruck:
+    def __init__(self):
+        # Technical Specifications
+        self.battery_level = 100  # Percentage
+        self.fuel_level = 100     # Percentage
+        self.is_emergency_mode = False
+        self.drive_mode = "EV"    # Default to Electric for city start
+        
+    def analyze_power_demand(self, speed, water_pump_active):
+        """
+        Kaizen-optimized logic for real-time energy distribution.
+        """
+        demand = speed * 1.5
+        if water_pump_active:
+            demand += 50  # Heavy load for high-pressure suppression
+        return demand
+
+    def update_system_state(self, speed, water_pump_active):
+        demand = self.analyze_power_demand(speed, water_pump_active)
+        
+        # Power Source Selection Logic
+        if self.battery_level > 20 and not self.is_emergency_mode:
+            self.drive_mode = "EV"
+            self.battery_level -= (demand * 0.01)
+        else:
+            self.drive_mode = "HYBRID_DIESEL"
+            self.fuel_level -= (demand * 0.005)
+            # Regenerative braking simulation
+            if speed < 20:
+                self.battery_level += 2 
+
+    def display_hud(self):
+        """
+        High-Definition HUD Output
+        """
+        print(f"--- [MERCEDES-BENZ ECO-RESCUE HUD] ---")
+        print(f"SYSTEM STATUS: {'ACTIVE' if self.battery_level > 0 else 'CRITICAL'}")
+        print(f"DRIVE MODE:    {self.drive_mode}")
+        print(f"BATTERY:       {self.battery_level:.2f}%")
+        print(f"DIESEL FUEL:   {self.fuel_level:.2f}%")
+        print(f"--------------------------------------")
+
+# Instance Initialization
+firetruck_unit = MercedesHybridFiretruck()
+firetruck_unit.is_emergency_mode = True # Archangel-level response speed
+firetruck_unit.update_system_state(speed=85, water_pump_active=True)
+firetruck_unit.display_hud()
+
+
+
+import time
+import math
+
+class ArchangelFiretruckSCU:
+    """
+    Supervisory Control Unit for the Mercedes-Benz Hybrid Firetruck.
+    Focuses on Kaizen efficiency: Power-on-demand with minimal energy waste.
+    """
+    def __init__(self):
+        # Hardware Parameters
+        self.BATTERY_CAPACITY_KWH = 150.0
+        self.FUEL_TANK_LITERS = 300.0
+        self.REGEN_EFFICIENCY = 0.85
+        
+        # Real-time Telemetry
+        self.state_of_charge (SOC) = 0.95  # 95%
+        self.fuel_level = 1.0            # 100%
+        self.total_distance_km = 0.0
+        
+        # Control Constraints
+        self.SOC_MIN = 0.20  # Maintain reserve for emergency equipment
+        self.SOC_MAX = 0.90  # Leave room for regenerative braking
+        
+    def calculate_power_demand(self, velocity_ms, acceleration_ms2, pump_psi):
+        """
+        Calculates instantaneous power demand using physical dynamics.
+        Formula: P = F * v + P_aux
+        """
+        mass = 18000  # 18-ton Mercedes Chassis
+        drag_coeff = 0.7
+        frontal_area = 8.5
+        rho_air = 1.225
+        
+        # Aerodynamic and Inertial Drag
+        f_aero = 0.5 * rho_air * drag_coeff * frontal_area * (velocity_ms**2)
+        f_inertial = mass * acceleration_ms2
+        
+        # Mechanical Power (Watts)
+        p_traction = (f_aero + f_inertial) * velocity_ms
+        
+        # Aux Power (Emergency Lights, Water Pump, HUD Systems)
+        p_pump = (pump_psi * 0.00689476) * 1000 # Simplified hydraulic conversion
+        p_aux = 5000 + p_pump # 5kW base for electronics
+        
+        return max(0, p_traction + p_aux)
+
+    def energy_management_strategy(self, demand_watts):
+        """
+        Kaizen-optimized Power Split Logic.
+        Prioritizes EV for stealth/quiet arrival; Diesel for high-intensity pumping.
+        """
+        torque_electric = 0.0
+        torque_diesel = 0.0
+        
+        # Mode 1: Pure EV (Silent Stealth)
+        if self.soc > self.SOC_MIN and demand_watts < 150000:
+            torque_electric = demand_watts
+            self.soc -= (demand_watts / (self.BATTERY_CAPACITY_KWH * 3600000))
+            mode = "MICHAEL_SHIELD (EV)"
+            
+        # Mode 2: Hybrid Boost (Max Performance)
+        else:
+            torque_diesel = demand_watts * 0.7
+            torque_electric = demand_watts * 0.3
+            self.fuel_level -= (torque_diesel * 0.00000001) # Approx consumption
+            mode = "URIEL_FLAME (HYBRID)"
+            
+        return mode, torque_electric, torque_diesel
+
+    def render_hud(self, mode, p_elec, p_die):
+        """
+        Real-time HUD Visualization Logic.
+        """
+        print(f"\033[94m[HUD V1.0 - HYBRID OVERLAY]\033[0m")
+        print(f"OPERATION MODE: {mode}")
+        print(f"BATTERY SOC:    [{'█' * int(self.soc*10)}{'-' * (10-int(self.soc*10))}] {self.soc*100:.1f}%")
+        print(f"POWER SPLIT:    E: {p_elec/1000:.1f}kW | D: {p_die/1000:.1f}kW")
+        print(f"------------------------------------")
+
+# Execution Instance
+truck = ArchangelFiretruckSCU()
+
+# Simulate Emergency Dispatch
+for t in range(5):
+    # Velocity 25m/s (90km/h), Accel 2m/s^2, Pump 150 PSI
+    demand = truck.calculate_power_demand(25, 2, 150)
+    mode, p_e, p_d = truck.energy_management_strategy(demand)
+    truck.render_hud(mode, p_e, p_d)
+    time.sleep(0.1)
