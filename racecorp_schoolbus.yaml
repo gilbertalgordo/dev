@@ -1,0 +1,92 @@
+class RaceBusHybridController:
+    """
+    High-performance Hybrid Controller for Race Corp School Bus.
+    Focus: Kaizen efficiency and Archangel-class reliability.
+    """
+    def __init__(self):
+        self.battery_level = 100.0  # Percentage
+        self.regen_efficiency = 0.85
+        self.deploy_mode = "Standard" # [Standard, Race, Eco]
+        
+    def calculate_power_split(self, throttle_input, velocity):
+        """
+        Determines the split between Electric Motor (EM) and Internal Combustion (IC).
+        """
+        if self.deploy_mode == "Race":
+            # Maximum discharge for high-velocity transit
+            em_output = throttle_input * 1.0
+            ic_output = throttle_input * 1.0
+        else:
+            # Kaizen optimization: Use EM for low-end torque, IC for cruising
+            em_output = min(throttle_input, 0.4) if velocity < 30 else 0.1
+            ic_output = max(0, throttle_input - em_output)
+            
+        return {"Electric": em_output, "Combustion": ic_output}
+
+    def regenerative_braking(self, brake_pressure):
+        """Energy recovery system inspired by racing KERS."""
+        recovered = brake_pressure * self.regen_efficiency
+        self.battery_level = min(100, self.battery_level + recovered)
+        return recovered
+
+# Instance initialization
+race_bus = RaceBusHybridController()
+race_bus.deploy_mode = "Race"
+print(f"Power Split: {race_bus.calculate_power_split(0.8, 45)}")
+
+
+
+#include <iostream>
+#include <vector>
+#include <algorithm>
+
+/**
+ * @namespace RaceCorp::Powertrain
+ * Kaizen-optimized Hybrid Control System
+ */
+namespace RaceCorp::Powertrain {
+
+    struct DriveState {
+        double velocity;       // m/s
+        double throttle;       // 0.0 to 1.0
+        double battery_soc;    // State of Charge (0-100)
+        double yaw_rate;       // deg/s for Torque Vectoring
+    };
+
+    class HybridSupervisor {
+    private:
+        const double RACE_MODE_THRESHOLD = 0.85;
+        const double KERS_EFFICIENCY = 0.92; // Archangel-grade energy recovery
+
+    public:
+        /**
+         * Torque Vectoring Logic: Independently adjusts rear electric motors 
+         * to 'rotate' the bus through corners at high speed.
+         */
+        auto CalculateTorqueVectoring(double target_yaw, double current_yaw) -> std::pair<double, double> {
+            double delta = target_yaw - current_yaw;
+            double left_bias = 1.0 - (delta * 0.1);
+            double right_bias = 1.0 + (delta * 0.1);
+            return {std::clamp(left_bias, 0.0, 1.2), std::clamp(right_bias, 0.0, 1.2)};
+        }
+
+        void ExecutePowerCycle(const DriveState& state) {
+            if (state.throttle > RACE_MODE_THRESHOLD) {
+                std::cout << "[HUD: RACE ACTIVE] Deploying Dual-Motor Boost + ICE Overclock.\n";
+            } else {
+                std::cout << "[HUD: KAIZEN MODE] Optimizing Fuel vs Battery Delta.\n";
+            }
+        }
+    };
+}
+
+int main() {
+    RaceCorp::Powertrain::HybridSupervisor vcc;
+    RaceCorp::Powertrain::DriveState current_bus_state{45.0, 0.9, 82.0, 1.2};
+
+    vcc.ExecutePowerCycle(current_bus_state);
+    auto [L, R] = vcc.CalculateTorqueVectoring(1.5, current_bus_state.yaw_rate);
+    
+    printf("Torque Distribution -> Left Motor: %.2f | Right Motor: %.2f\n", L, R);
+    return 0;
+}
