@@ -1,0 +1,115 @@
+// Quick-start 3D Icon Boilerplate
+import * as THREE from 'https://cdn.skypack.dev/three@0.132.2';
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+
+renderer.setSize(200, 200); // Icon dimensions
+document.body.appendChild(renderer.domElement);
+
+// Google-esque Geometry
+const geometry = new THREE.IcosahedronGeometry(1, 15);
+const material = new THREE.MeshStandardMaterial({
+    color: 0x4285F4, // Google Blue
+    metalness: 0.1,
+    roughness: 0.2,
+});
+
+const icon = new THREE.Mesh(geometry, material);
+scene.add(icon);
+
+// Lighting for 3D Depth
+const light = new THREE.PointLight(0xffffff, 1, 100);
+light.position.set(5, 5, 5);
+scene.add(light);
+scene.add(new THREE.AmbientLight(0x404040));
+
+camera.position.z = 3;
+
+// Live "Pulse" Animation Logic
+function animate() {
+    requestAnimationFrame(animate);
+    
+    // Kaizen: Constant, incremental movement
+    icon.rotation.y += 0.01;
+    icon.rotation.z += 0.005;
+    
+    // Breathing effect (Live feel)
+    const scale = 1 + Math.sin(Date.now() * 0.002) * 0.05;
+    icon.scale.set(scale, scale, scale);
+    
+    renderer.render(scene, camera);
+}
+
+animate();
+
+
+
+import React, { useRef } from 'react'
+import { Canvas, useFrame } from '@react-three/fiber'
+import { MeshTransmissionMaterial, Sphere, Float, Html } from '@react-three/drei'
+import * as THREE from 'three'
+
+const LiveIcon = ({ color = "#4285F4" }) => {
+  const meshRef = useRef()
+  const glowRef = useRef()
+
+  useFrame((state) => {
+    const t = state.clock.getElapsedTime()
+    // Constant Kaizen Rotation
+    meshRef.current.rotation.y = t * 0.4
+    // Archangel Pulse (Raphael/Healing Wave)
+    glowRef.current.scale.setScalar(1 + Math.sin(t * 2) * 0.1)
+  })
+
+  return (
+    <Float speed={2} rotationIntensity={1} floatIntensity={2}>
+      {/* Core Icon Body */}
+      <mesh ref={meshRef}>
+        <IcosahedronGeometry args={[1, 15]} />
+        <MeshTransmissionMaterial 
+          backside 
+          samples={4} 
+          thickness={1} 
+          chromaticAberration={0.025} 
+          anisotropy={0.1} 
+          distortion={0.1} 
+          distortionScale={0.1} 
+          temporalDistortion={0.1} 
+          color={color}
+        />
+      </mesh>
+
+      {/* Internal "Live" Energy Core */}
+      <Sphere ref={glowRef} args={[0.4, 32, 32]}>
+        <meshBasicMaterial color={color} toneMapped={false} />
+      </Sphere>
+
+      {/* Integrated HUD Element */}
+      <Html distanceFactor={10} position={[1.2, 1, 0]}>
+        <div style={{ 
+          background: 'rgba(0,0,0,0.5)', 
+          color: 'white', 
+          padding: '4px 10px', 
+          borderRadius: '20px',
+          fontFamily: 'monospace',
+          border: '1px solid #4285F4'
+        }}>
+          LIVE_SYNC: 98%
+        </div>
+      </Html>
+    </Float>
+  )
+}
+
+export default function App() {
+  return (
+    <Canvas camera={{ position: [0, 0, 5], fov: 45 }}>
+      <color attach="background" args={['#050505']} />
+      <ambientLight intensity={0.5} />
+      <pointLight position={[10, 10, 10]} intensity={1} />
+      <LiveIcon color="#4285F4" /> {/* Google Blue */}
+    </Canvas>
+  )
+}
