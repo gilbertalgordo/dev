@@ -1,0 +1,109 @@
+class PorscheHybridController:
+    def __init__(self):
+        self.battery_level = 1.0  # 1.0 = 100%
+        self.ice_rpm = 800
+        self.boost_pressure = 0.0
+        self.is_recuperating = False
+
+    def request_acceleration(self, throttle_input):
+        """
+        Logic for instant response:
+        1. Use E-Motor for immediate torque.
+        2. Spin up eTurbo electrically to build boost.
+        3. Engage ICE once boost is ready.
+        """
+        if throttle_input > 0.8:  # Heavy acceleration
+            # 1. Eliminate Turbo Lag
+            self.activate_eturbo(power=1.0)
+            
+            # 2. Instant Torque from Gearbox Motor
+            e_motor_output = self.deploy_electric_torque()
+            
+            # 3. Internal Combustion Output
+            ice_output = self.calculate_ice_power()
+            
+            return ice_output + e_motor_output
+        
+        return self.cruise_mode()
+
+    def activate_eturbo(self, power):
+        # In a real T-Hybrid, the eTurbo reaches 1.8 bar in 0.8s
+        self.boost_pressure = min(1.8, self.boost_pressure + (power * 0.5))
+        print(f"eTurbo Spooling... Current Boost: {self.boost_pressure} bar")
+
+    def recuperation_mode(self, brake_input):
+        """
+        The eTurbo and PDK motor act as generators during braking
+        or when exhaust flow exceeds boost needs.
+        """
+        if brake_input > 0.1:
+            self.is_recuperating = True
+            energy_recovered = brake_input * 0.05
+            self.battery_level = min(1.0, self.battery_level + energy_recovered)
+            print("Recuperating energy to 400V Battery...")
+
+# Instance for simulation
+carrera_gt_hybrid = PorscheHybridController()
+carrera_gt_hybrid.request_acceleration(throttle_input=1.0)
+
+
+
+/*
+ * Porsche T-Hybrid Performance Controller
+ * Subsystem: eTurbo & Traction Motor Sync
+ */
+
+#include <iostream>
+#include <algorithm>
+
+class PorscheECU {
+private:
+    float batterySOC;       // 0.0 to 1.0 (1.9 kWh Battery)
+    float currentBoost;     // in bar
+    const float TARGET_BOOST = 1.8;
+    const float VOLTAGE = 400.0;
+
+public:
+    PorscheECU() : batterySOC(0.8), currentBoost(0.0) {}
+
+    // PID-inspired logic for the eTurbo Motor
+    void manageETurbo(float throttleRequest) {
+        if (throttleRequest > 0.5 && batterySOC > 0.1) {
+            // MOTOR MODE: Use 400V to spin turbo to 125,000 RPM
+            float boostGap = TARGET_BOOST - currentBoost;
+            float energyDraw = boostGap * 0.05; 
+            
+            currentBoost += boostGap * 0.8; // Near-instant spool
+            batterySOC -= energyDraw;
+            
+            std::cout << "[eTurbo] Motor Mode: Deploying 400V. Boost: " << currentBoost << " bar\n";
+        } 
+        else if (currentBoost >= TARGET_BOOST) {
+            // GENERATOR MODE: Harvest excess exhaust energy (Up to 11kW)
+            float recuperatedEnergy = 0.02; 
+            batterySOC = std::min(1.0f, batterySOC + recuperatedEnergy);
+            
+            std::cout << "[eTurbo] Generator Mode: Harvesting Exhaust. SOC: " << (batterySOC * 100) << "%\n";
+        }
+    }
+
+    void tractionAssist(float torqueDemand) {
+        // PDK Integrated Motor (40kW / 150Nm)
+        if (torqueDemand > 100 && batterySOC > 0.05) {
+            std::cout << "[PDK Motor] Torque Fill active: Adding 150Nm to Crankshaft.\n";
+            batterySOC -= 0.01;
+        }
+    }
+};
+
+int main() {
+    PorscheECU gts;
+    std::cout << "--- Initializing T-Hybrid System ---\n";
+    
+    // Simulate "Launch Control"
+    gts.manageETurbo(1.0);   // Full throttle
+    gts.tractionAssist(500); // High torque demand
+    
+    return 0;
+}
+
