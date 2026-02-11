@@ -1,0 +1,168 @@
+{
+  "name": "markitdown-github-app",
+  "version": "0.1.0",
+  "description": "GitHub App for mcp/microsoft/markitdown — Probot starter",
+  "main": "index.js",
+  "scripts": {
+    "start": "node ./index.js",
+    "dev": "DEBUG=probot:* nodemon --watch . --exec node ./index.js",
+    "lint": "eslint . --ext .js",
+    "test": "echo \"No tests yet\" && exit 0"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "dependencies": {
+    "probot": "^13.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.0",
+    "eslint": "^8.0.0"
+  },
+  "license": "MIT"
+}
+
+
+/**
+ * markitdown-github-app — Probot entrypoint
+ *
+ * This app:
+ * - Comments + labels new issues
+ * - Comments a checklist on new PRs
+ */
+const { Probot } = require("probot");
+
+const app = new Probot({
+  // Probot will read APP_ID, PRIVATE_KEY, WEBHOOK_SECRET from env automatically
+});
+
+app.load(({ on, log, octokit }) => {
+  // Welcome + label new issues
+  app.on("issues.opened", async (context) => {
+    const issueComment = context.issue({
+      body:
+        "Thanks for opening this issue! A maintainer will triage it soon. Meanwhile, please make sure the issue includes a clear description, steps to reproduce, and expected behaviour."
+    });
+
+    try {
+      await context.octokit.issues.createComment(issueComment);
+      await context.octokit.issues.addLabels(
+        context.issue({ labels: ["triage"] })
+      );
+      log.info("Added welcome comment and triage label to issue");
+    } catch (err) {
+      log.error(err, "Failed to comment or label issue");
+    }
+  });
+
+  // PR checklist
+  app.on("pull_request.opened", async (context) => {
+    const prComment = context.issue({
+      body:
+        "Thanks for the PR! Please ensure:\n\n- [ ] PR description explains the intent\n- [ ] Tests added or existing tests updated\n- [ ] CI is passing\n\nA maintainer will review soon."
+    });
+
+    try {
+      await context.octokit.issues.createComment(prComment);
+      log.info("Posted PR checklist");
+    } catch (err) {
+      log.error(err, "Failed to post PR checklist");
+    }
+  });
+});
+
+// If invoked directly (not via Probot CLI), start the server
+if (require.main === module) {
+  app.start().catch((err) => {
+    console.error("Failed to start app:", err);
+    process.exit(1);
+  });
+}
+
+module.exports = app;
+
+
+# Copy to .env and fill in values for local development
+APP_ID=12345
+PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
+...
+-----END RSA PRIVATE KEY-----"
+WEBHOOK_SECRET=your_webhook_secret
+NODE_ENV=development
+PORT=3000
+
+
+name: Markitdown Bot
+description: Automation for issues and PRs in the markitdown repository
+url: https://example.com
+hook_attributes:
+  webhook_url: https://example.com/api/webhooks
+  # Optional: webhook_active: true
+permissions:
+  issues: write
+  pull_requests: write
+  contents: read
+  metadata: read
+events:
+  - issues
+  - pull_request
+redirect_url: https://example.com/settings
+
+
+# Markitdown GitHub App (Probot)
+
+This repository contains a minimal Probot-based GitHub App that automates basic issue and PR handling for the `mcp/microsoft/markitdown` repository.
+
+Features
+- Comment + apply `triage` label when an issue is opened
+- Post a PR checklist when a PR is opened
+
+Quickstart (local)
+1. Create a GitHub App using the `app-manifest.yml`:
+   - Go to GitHub > Settings > Developer settings > GitHub Apps > Create a new GitHub App
+   - Click "Create an app from a manifest" and paste `app-manifest.yml` contents
+   - After creating, download the private key and note the App ID and Webhook Secret.
+
+2. Run locally:
+   - Copy `.env.example` to `.env` and fill `APP_ID`, `PRIVATE_KEY` (use multiline string), and `WEBHOOK_SECRET`
+   - Install deps: `npm install`
+   - Start: `npm start`
+   - Use a tunneling tool (ngrok) to expose your local server to GitHub and set the webhook url to the tunnel URL (e.g. `https://<id>.ngrok.io/api/webhooks`).
+
+Deploy
+- You can deploy this app to any host that supports Node.js (Cloud Run, Heroku, Railway, Fly, etc.)
+- Ensure environment variables are set in production: `APP_ID`, `PRIVATE_KEY`, `WEBHOOK_SECRET`, `NODE_ENV=production`
+
+Installing into `mcp/microsoft/markitdown`
+- Install the app from the GitHub App page you created and grant access to the `mcp/microsoft/markitdown` repository (or to the whole organization if desired).
+
+Extending the app
+- Add additional event handlers in `index.js` (or split into modules in `./lib`)
+- Adjust app permissions in the GitHub App settings if you need extra capabilities (checks, statuses, commit statuses, etc.)
+
+If you want I can:
+- Convert this to a manifest that auto-creates custom labels
+- Add more automations (stale PR closing, PR size checks, label-based routing)
+- Create containerization + a GitHub Actions deployment workflow for the app
+
+
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Install deps
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Test
+        run: npm test
+        
