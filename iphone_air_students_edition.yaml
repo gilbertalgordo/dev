@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iPhone Air - Student Edition</title>
+    <style>
+        :root {
+            --primary-blue: #4a90e2;
+            --glass-bg: rgba(255, 255, 255, 0.1);
+            --hud-color: #00f0ff;
+            --text-color: #ffffff;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: radial-gradient(circle at center, #1a2a3a 0%, #0d1216 100%);
+            font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+            overflow: hidden;
+        }
+
+        /* 3D Scene Container */
+        .scene {
+            width: 300px;
+            height: 600px;
+            perspective: 1000px;
+        }
+
+        /* The Phone Object */
+        .phone {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            transform-style: preserve-3d;
+            transition: transform 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            cursor: pointer;
+        }
+
+        .scene:hover .phone {
+            transform: rotateY(180deg);
+        }
+
+        /* Common Face Styles */
+        .face {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 40px;
+            backface-visibility: hidden;
+            box-shadow: 
+                0 0 20px rgba(74, 144, 226, 0.3),
+                inset 0 0 10px rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* --- FRONT FACE (Screen & HUD) --- */
+        .front {
+            background: #000;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border: 8px solid #2c3e50; /* Bezel */
+        }
+
+        /* The Notch (Dynamic Island style) */
+        .notch {
+            width: 100px;
+            height: 25px;
+            background: #000;
+            margin: 10px auto;
+            border-radius: 20px;
+            z-index: 10;
+        }
+
+        /* Student HUD Interface */
+        .hud-screen {
+            flex: 1;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(74,144,226,0.1) 100%);
+            color: var(--text-color);
+        }
+
+        .hud-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+
+        .widget-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .widget {
+            background: var(--glass-bg);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .widget h3 {
+            margin: 0 0 5px 0;
+            font-size: 0.8rem;
+            color: var(--hud-color);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .widget p {
+            margin: 0;
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+
+        .focus-circle {
+            width: 150px;
+            height: 150px;
+            border-radius: 50%;
+            border: 2px solid var(--hud-color);
+            align-self: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            box-shadow: 0 0 15px var(--hud-color);
+            animation: pulse 3s infinite;
+        }
+
+        .dock {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 30px;
+            height: 70px;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .app-icon {
+            width: 45px;
+            height: 45px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #ddd, #fff);
+        }
+
+        /* --- BACK FACE --- */
+        .back {
+            background: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%); /* Air Blue */
+            transform: rotateY(180deg);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .camera-bump {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            width: 100px;
+            height: 100px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 25px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        .lens {
+            width: 35px;
+            height: 35px;
+            background: #111;
+            border-radius: 50%;
+            position: absolute;
+            border: 2px solid #333;
+        }
+        .lens:nth-child(1) { top: 10px; left: 10px; } /* Main */
+        .lens:nth-child(2) { bottom: 10px; left: 10px; } /* Ultra Wide */
+        .lidar { top: 35px; right: 15px; width: 15px; height: 15px; background: #222; border-radius: 50%; position: absolute;}
+
+        .logo {
+            font-size: 3rem;
+            color: rgba(255, 255, 255, 0.8);
+            opacity: 0.9;
+        }
+        
+        .air-branding {
+            position: absolute;
+            bottom: 50px;
+            font-family: 'Helvetica Neue', sans-serif;
+            font-weight: 300;
+            font-size: 1.2rem;
+            color: #555;
+            letter-spacing: 2px;
+        }
+
+        /* Animations */
+        @keyframes pulse {
+            0% { box-shadow: 0 0 5px var(--hud-color); }
+            50% { box-shadow: 0 0 20px var(--hud-color), inset 0 0 10px var(--hud-color); }
+            100% { box-shadow: 0 0 5px var(--hud-color); }
+        }
+
+        /* Floating effect */
+        .scene {
+            animation: float 6s ease-in-out infinite;
+        }
+        @keyframes float {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-20px); }
+            100% { transform: translateY(0px); }
+        }
+        
+        .controls {
+            position: absolute;
+            bottom: 30px;
+            color: white;
+            font-family: monospace;
+            text-align: center;
+            opacity: 0.6;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="scene">
+        <div class="phone">
+            <div class="face front">
+                <div class="notch"></div>
+                <div class="hud-screen">
+                    <div class="hud-header">
+                        <span>9:41 AM</span>
+                        <span>5G // AIR</span>
+                    </div>
+
+                    <div class="focus-circle">
+                        <span style="font-size: 0.8rem; color: #fff;">MODE</span>
+                        <span style="font-size: 1.2rem; font-weight: bold; color: #fff;">STUDY</span>
+                    </div>
+
+                    <div class="widget-grid">
+                        <div class="widget">
+                            <h3>Next Class</h3>
+                            <p>Physics 101</p>
+                            <span style="font-size:0.7rem; color:#aaa;">Room 304 • 10:00 AM</span>
+                        </div>
+                        <div class="widget">
+                            <h3>Deadline</h3>
+                            <p>History Essay</p>
+                            <span style="font-size:0.7rem; color:#ff4d4d;">Due in 2h</span>
+                        </div>
+                        <div class="widget" style="grid-column: span 2;">
+                            <h3>AI Assistant</h3>
+                            <p>"Summarize Lecture?"</p>
+                        </div>
+                    </div>
+
+                    <div class="dock">
+                        <div class="app-icon" style="background: #34c759;"></div> <div class="app-icon" style="background: #007aff;"></div> <div class="app-icon" style="background: #ff9500;"></div> <div class="app-icon" style="background: #af52de;"></div> </div>
+                </div>
+            </div>
+
+            <div class="face back">
+                <div class="camera-bump">
+                    <div class="lens"></div>
+                    <div class="lens"></div>
+                    <div class="lidar"></div>
+                </div>
+                <svg class="logo" viewBox="0 0 512 512" width="60" height="60">
+                    <path fill="currentColor" d="M255.9 120.9c0-16.2 14.1-29.6 28.9-29.6 0 .3 0 .6-.1 1-.3 15.6-13.6 28.5-28.8 28.6zm57 29.8c-15.1-1.3-30.8 4.2-43.1 4.2-12.8 0-26.6-4.6-41.2-4.2-22.1.4-44.5 13.8-56.1 35.8-23.7 44.5 14.8 116.3 38 116.3 9.4 0 17.5-6.6 32.7-6.6 15.6 0 21.6 6.8 32.7 6.8 19.8 0 27.6-18.7 36.9-33.8 11.1-17.7 15.8-35 16-35.8-.4-.2-31-12.7-30.7-49.8.3-31.1 26.2-46.1 27.2-46.7-16-24.3-41-26.2-52.4-26.2z"/>
+                </svg>
+                <div class="air-branding">iPhone Air</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="controls">
+        Hover to Flip Device<br>
+        <span style="color: #00f0ff;">Student HUD v1.0 Active</span>
+    </div>
+
+</body>
+</html>
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iPhone Air - Student OS</title>
+    <style>
+        :root {
+            --depth: 18px; /* Thickness of iPhone Air */
+            --bg-color: #050505;
+            --frame-color: #a8c0ff; /* Aluminum Blue */
+            --screen-bg: #000;
+            --accent: #00f2ff;
+        }
+
+        body {
+            background: var(--bg-color);
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: 'SF Pro Display', -apple-system, sans-serif;
+            overflow: hidden;
+            color: white;
+        }
+
+        /* 3D Scene Wrapper */
+        .scene {
+            perspective: 1500px;
+            width: 320px;
+            height: 650px;
+            position: relative;
+        }
+
+        /* The Phone Container */
+        .phone {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            transform-style: preserve-3d;
+            transform: rotateX(0deg) rotateY(0deg);
+            transition: transform 0.1s ease-out; /* Smooth follow */
+        }
+
+        /* --- 3D SIDES (The Frame) --- */
+        .side {
+            position: absolute;
+            background: linear-gradient(135deg, #dceaff, #a8c0ff);
+            border: 1px solid rgba(255,255,255,0.4);
+        }
+
+        .side.front, .side.back {
+            width: 320px;
+            height: 650px;
+            border-radius: 45px;
+        }
+
+        .side.front {
+            transform: translateZ(calc(var(--depth) / 2));
+            background: var(--screen-bg);
+            overflow: hidden;
+            border: 4px solid var(--frame-color);
+            box-shadow: inset 0 0 20px rgba(255,255,255,0.1);
+        }
+
+        .side.back {
+            transform: translateZ(calc(var(--depth) / -2)) rotateY(180deg);
+            background: linear-gradient(120deg, #a1c4fd 0%, #c2e9fb 100%);
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+        }
+
+        /* Thickness Sides */
+        .side.left  { width: var(--depth); height: 580px; left: calc(var(--depth)/-2); top: 35px; transform: rotateY(-90deg); }
+        .side.right { width: var(--depth); height: 580px; right: calc(var(--depth)/-2); top: 35px; transform: rotateY(90deg); }
+        .side.top   { width: 250px; height: var(--depth); top: calc(var(--depth)/-2); left: 35px; transform: rotateX(90deg); }
+        .side.bottom{ width: 250px; height: var(--depth); bottom: calc(var(--depth)/-2); left: 35px; transform: rotateX(-90deg); }
+
+        /* Corner patches for smoothness (simplified) */
+        .corner { position: absolute; background: var(--frame-color); width: var(--depth); height: 100%; }
+
+        /* --- SCREEN CONTENT (OS) --- */
+        .screen-content {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            box-sizing: border-box;
+            background: url('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop') center/cover;
+            position: relative;
+        }
+
+        /* Dynamic Island */
+        .dynamic-island {
+            width: 120px;
+            height: 35px;
+            background: #000;
+            margin: 10px auto 20px;
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-around;
+            padding: 0 10px;
+            transition: width 0.3s ease;
+            z-index: 100;
+        }
+        
+        .dynamic-island:hover { width: 200px; }
+        .cam-dot { width: 8px; height: 8px; background: #1a1a1a; border-radius: 50%; }
+
+        /* HUD Sections */
+        .hud-grid {
+            flex: 1;
+            display: grid;
+            grid-template-rows: 1fr 1fr;
+            gap: 15px;
+        }
+
+        .widget-card {
+            background: rgba(20, 20, 30, 0.6);
+            backdrop-filter: blur(25px);
+            border-radius: 25px;
+            padding: 20px;
+            border: 1px solid rgba(255,255,255,0.1);
+            transition: transform 0.2s;
+        }
+        
+        .widget-card:hover { transform: scale(1.02); background: rgba(30, 30, 45, 0.7); }
+
+        .time-display { font-size: 3.5rem; font-weight: 200; text-align: center; margin-bottom: 10px; }
+        .date-display { font-size: 1rem; text-align: center; color: #ccc; text-transform: uppercase; letter-spacing: 2px; }
+
+        /* App Dock */
+        .dock-container {
+            margin-top: 20px;
+            background: rgba(255,255,255,0.15);
+            backdrop-filter: blur(20px);
+            border-radius: 35px;
+            padding: 15px;
+            display: flex;
+            justify-content: space-around;
+        }
+
+        .app-btn {
+            width: 50px;
+            height: 50px;
+            border-radius: 14px;
+            border: none;
+            cursor: pointer;
+            transition: transform 0.2s;
+            font-size: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .app-btn:hover { transform: translateY(-5px); }
+        .btn-focus { background: linear-gradient(135deg, #ff9a9e, #fecfef); }
+        .btn-ar { background: linear-gradient(135deg, #a18cd1, #fbc2eb); }
+        .btn-sched { background: linear-gradient(135deg, #84fab0, #8fd3f4); }
+
+        /* Active Tab Content */
+        .tab-content { display: none; height: 100%; flex-direction: column; }
+        .tab-content.active { display: flex; }
+
+        /* BACK CAMERA */
+        .camera-island {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            width: 110px;
+            height: 110px;
+            background: rgba(255,255,255,0.25);
+            backdrop-filter: blur(10px);
+            border-radius: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        
+        .lens {
+            width: 40px; height: 40px;
+            background: #000;
+            border-radius: 50%;
+            border: 3px solid #333;
+            position: absolute;
+            box-shadow: inset 0 0 10px #555;
+        }
+        .lens:nth-child(1) { top: 10px; left: 10px; }
+        .lens:nth-child(2) { bottom: 10px; left: 10px; }
+        .flash { top: 15px; right: 15px; width: 15px; height: 15px; background: white; border-radius: 50%; position: absolute; opacity: 0.8;}
+
+    </style>
+</head>
+<body>
+
+<div class="scene">
+    <div class="phone" id="phone">
+        
+        <div class="side left"></div>
+        <div class="side right"></div>
+        <div class="side top"></div>
+        <div class="side bottom"></div>
+
+        <div class="side front">
+            <div class="screen-content">
+                
+                <div class="dynamic-island">
+                    <div class="cam-dot"></div>
+                    <span style="font-size: 10px; color: #555;">FaceID</span>
+                </div>
+
+                <div id="tab-dashboard" class="tab-content active">
+                    <div class="time-display" id="clock">12:00</div>
+                    <div class="date-display" id="date">Wednesday, Oct 24</div>
+                    
+                    <div class="hud-grid" style="margin-top: 30px;">
+                        <div class="widget-card">
+                            <h3 style="margin:0; color:var(--accent);">Next Class</h3>
+                            <p style="font-size:1.4rem;">Molecular Biology</p>
+                            <small>Room 402 • 15 mins left</small>
+                            <div style="height:4px; width:100%; background:#333; margin-top:10px; border-radius:2px;">
+                                <div style="height:100%; width:75%; background:var(--accent); border-radius:2px;"></div>
+                            </div>
+                        </div>
+                        <div class="widget-card">
+                            <h3 style="margin:0; color:#ff4757;">Assignments</h3>
+                            <ul style="padding-left: 20px; font-size: 0.9rem;">
+                                <li>Physics Lab Report</li>
+                                <li>History Essay</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="tab-focus" class="tab-content">
+                    <div class="widget-card" style="height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;">
+                        <div style="width: 120px; height: 120px; border: 4px solid #ff9a9e; border-radius: 50%; display: flex; align-items: center; justify-content: center; animation: pulse 2s infinite;">
+                            <h1>25:00</h1>
+                        </div>
+                        <h2>Deep Work</h2>
+                        <p>Notifications Silenced</p>
+                        <button style="padding: 10px 30px; border-radius: 20px; border:none; background: #ff9a9e; color:white; margin-top:20px; cursor:pointer;">Stop</button>
+                    </div>
+                </div>
+
+                <div id="tab-ar" class="tab-content">
+                    <div class="widget-card" style="height: 100%; background: rgba(0,0,0,0.5);">
+                        <div style="border: 2px dashed var(--accent); height: 80%; width: 100%; border-radius: 15px; display: flex; align-items: center; justify-content: center;">
+                            <p style="color: var(--accent);">Scanning Notes...</p>
+                        </div>
+                        <p style="text-align: center; margin-top: 15px;">Point at whiteboard</p>
+                    </div>
+                </div>
+
+                <div class="dock-container">
+                    <button class="app-btn btn-focus" onclick="switchTab('tab-focus')">🧠</button>
+                    <button class="app-btn btn-sched" onclick="switchTab('tab-dashboard')">🏠</button>
+                    <button class="app-btn btn-ar" onclick="switchTab('tab-ar')">📷</button>
+                </div>
+
+            </div>
+        </div>
+
+        <div class="side back">
+            <div class="camera-island">
+                <div class="lens"></div>
+                <div class="lens"></div>
+                <div class="flash"></div>
+            </div>
+            <div style="position: absolute; bottom: 80px; width: 100%; text-align: center; opacity: 0.7;">
+                <svg viewBox="0 0 512 512" width="50" height="50" fill="white">
+                     <path d="M255.9 120.9c0-16.2 14.1-29.6 28.9-29.6 0 .3 0 .6-.1 1-.3 15.6-13.6 28.5-28.8 28.6zm57 29.8c-15.1-1.3-30.8 4.2-43.1 4.2-12.8 0-26.6-4.6-41.2-4.2-22.1.4-44.5 13.8-56.1 35.8-23.7 44.5 14.8 116.3 38 116.3 9.4 0 17.5-6.6 32.7-6.6 15.6 0 21.6 6.8 32.7 6.8 19.8 0 27.6-18.7 36.9-33.8 11.1-17.7 15.8-35 16-35.8-.4-.2-31-12.7-30.7-49.8.3-31.1 26.2-46.1 27.2-46.7-16-24.3-41-26.2-52.4-26.2z"/>
+                </svg>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script>
+    // 1. Live Clock
+    function updateClock() {
+        const now = new Date();
+        document.getElementById('clock').innerText = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        document.getElementById('date').innerText = now.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // 2. Tab Switcher
+    function switchTab(tabId) {
+        // Hide all tabs
+        document.querySelectorAll('.tab-content').forEach(tab => {
+            tab.classList.remove('active');
+        });
+        // Show selected tab
+        document.getElementById(tabId).classList.add('active');
+    }
+
+    // 3. 3D Mouse Parallax Effect
+    const scene = document.querySelector('.scene');
+    const phone = document.getElementById('phone');
+
+    document.addEventListener('mousemove', (e) => {
+        const xAxis = (window.innerWidth / 2 - e.pageX) / 20; // Rotate Y
+        const yAxis = (window.innerHeight / 2 - e.pageY) / 20; // Rotate X
+        
+        // Apply rotation based on mouse position
+        phone.style.transform = `rotateY(${xAxis}deg) rotateX(${yAxis}deg)`;
+    });
+
+    // Reset when mouse leaves
+    document.addEventListener('mouseleave', () => {
+        phone.style.transform = `rotateY(0deg) rotateX(0deg)`;
+    });
+</script>
+
+</body>
+</html>
