@@ -1,0 +1,147 @@
+from vpython import *
+
+# --- Scene Setup ---
+scene = canvas(title='Bianchi Aquila SF1 Ferrari - Training Instance', 
+               width=800, height=600, background=color.white)
+scene.camera.pos = vector(2, 1, 3)
+
+# --- Ferrari Rosso Corsa & Bianchi Aesthetics ---
+ferrari_red = vector(0.8, 0, 0)
+carbon_fiber = vector(0.1, 0.1, 0.1)
+
+# --- HUD (Heads-Up Display) ---
+hud_label = label(pos=vector(0, 1.5, 0), text='WATTS: 0 | RPM: 0', 
+                  height=20, box=False, color=color.black)
+
+# --- Bike Geometry (Simplified 3D Instance) ---
+# Main Frame (Aero Diamond)
+frame_top = cylinder(pos=vector(-0.5, 0.8, 0), axis=vector(1, 0, 0), radius=0.05, color=ferrari_red)
+frame_down = cylinder(pos=vector(-0.5, 0.8, 0), axis=vector(0.4, -0.7, 0), radius=0.07, color=ferrari_red)
+seat_tube = cylinder(pos=vector(-0.1, 0.1, 0), axis=vector(0, 0.9, 0), radius=0.05, color=carbon_fiber)
+
+# Ferrari Logo Placeholder
+logo = sphere(pos=vector(-0.25, 0.5, 0.06), radius=0.03, color=color.yellow)
+
+# --- Wheels & Trainer ---
+# Rear Disc Wheel (Connected to Trainer)
+rear_wheel = cylinder(pos=vector(-0.6, 0.1, -0.02), axis=vector(0, 0, 0.04), radius=0.4, color=carbon_fiber)
+trainer_base = box(pos=vector(-0.6, -0.3, 0), size=vector(0.5, 0.1, 0.6), color=vector(0.3, 0.3, 0.3))
+
+# Front Wheel
+front_wheel = ring(pos=vector(0.8, 0.1, 0), axis=vector(0, 0, 1), radius=0.4, thickness=0.03, color=carbon_fiber)
+
+# --- Animation Logic (Simulation) ---
+speed = 0
+while True:
+    rate(60)
+    # Simulate pedaling/trainer resistance
+    speed += 0.1
+    watts = 250 + 50 * sin(speed * 0.5)
+    cadence = 90 + 5 * cos(speed * 0.3)
+    
+    # Update HUD
+    hud_label.text = f'BIANCHI SF1 | {int(watts)} WATTS | {int(cadence)} RPM'
+    
+    # Rotate rear disc to simulate movement
+    rear_wheel.rotate(angle=0.1, axis=vector(0,0,1))
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Bianchi Aquila SF1 Ferrari Edition - Kaizen Sim</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #050505; font-family: 'Orbitron', sans-serif; }
+        #hud {
+            position: absolute; top: 20px; left: 20px; color: #ff0000;
+            background: rgba(0, 0, 0, 0.7); padding: 15px; border-left: 4px solid #ff0000;
+            text-transform: uppercase; letter-spacing: 2px;
+        }
+        .metric { font-size: 24px; font-weight: bold; color: #fff; }
+    </style>
+</head>
+<body>
+    <div id="hud">
+        <div>Model: <span style="color: #ff0000;">Bianchi Aquila SF1 Ferrari</span></div>
+        <hr style="border: 0; border-top: 1px solid #333;">
+        <div>Power: <span id="watts" class="metric">0</span> W</div>
+        <div>Cadence: <span id="rpm" class="metric">0</span> RPM</div>
+        <div>Speed: <span id="speed" class="metric">0.0</span> KM/H</div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
+
+        // --- Scientific Constants & Kaizen Configuration ---
+        const AIR_DENSITY = 1.225; // kg/m^3
+        const CdA = 0.22;         // Ultra-aero coefficient for Aquila SF1
+        const LOSS_FACTOR = 0.97; // 3% drivetrain loss
+
+        // --- Scene & Camera Setup ---
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // --- Lighting (Studio Setup) ---
+        const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+        sun.position.set(5, 10, 7);
+        scene.add(sun, new THREE.AmbientLight(0x404040, 0.5));
+
+        // --- 3D Geometry: The Bianchi Aquila SF1 ---
+        const frameMat = new THREE.MeshPhysicalMaterial({ color: 0xcc0000, metalness: 0.6, roughness: 0.1 }); // Ferrari Red
+        const carbonMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8 });
+
+        // Aero Frame (Extruded Geometry)
+        const frameGeo = new THREE.BoxGeometry(1.2, 0.15, 0.05);
+        const frame = new THREE.Mesh(frameGeo, frameMat);
+        frame.position.y = 0.8;
+        scene.add(frame);
+
+        // Rear Disc Wheel (Locked to Trainer)
+        const discGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.05, 64);
+        const rearWheel = new THREE.Mesh(discGeo, carbonMat);
+        rearWheel.rotation.z = Math.PI / 2;
+        rearWheel.position.set(-0.6, 0.4, 0);
+        scene.add(rearWheel);
+
+        // Smart Trainer Base
+        const trainer = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.2, 0.6), new THREE.MeshStandardMaterial({color: 0x333333}));
+        trainer.position.set(-0.6, 0.1, 0);
+        scene.add(trainer);
+
+        camera.position.set(1.5, 1.2, 2);
+        camera.lookAt(0, 0.5, 0);
+
+        // --- Animation Loop with Physics Engine ---
+        let time = 0;
+        function animate() {
+            requestAnimationFrame(animate);
+            time += 0.01;
+
+            // Simulated Input (Interpreted from "Trainer Resistance")
+            let power = 250 + Math.sin(time) * 50; 
+            let cadence = 85 + Math.cos(time * 0.5) * 5;
+
+            // Scientific Reasoning: v = (Power / (0.5 * rho * CdA))^(1/3)
+            let speedMS = Math.pow((power * LOSS_FACTOR) / (0.5 * AIR_DENSITY * CdA), 1/3);
+            let speedKMH = speedMS * 3.6;
+
+            // Visual Logic: Rotate wheel based on speed
+            rear_wheel_rotation: 
+            rearWheel.rotation.y += speedMS * 0.05;
+
+            // Update HUD Elements
+            document.getElementById('watts').innerText = Math.round(power);
+            document.getElementById('rpm').innerText = Math.round(cadence);
+            document.getElementById('speed').innerText = speedKMH.toFixed(1);
+
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
