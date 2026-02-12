@@ -1,0 +1,161 @@
+pip install torch diffusers transformers accelerate opencv-python
+
+
+
+import torch
+from diffusers import StableVideoDiffusionPipeline, AutoPipelineForTextToImage
+from diffusers.utils import load_image, export_to_video
+from PIL import Image
+import os
+
+# --- Configuration ---
+OUTPUT_DIR = "generated_videos"
+height = 576
+width = 1024
+fps = 7
+num_frames = 25
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+def generate_video_pipeline(prompt, seed=None):
+    print(f"--- Starting Generation for: '{prompt}' ---")
+    
+    # 1. Text-to-Image Generation (SDXL Turbo for speed & quality)
+    # Note: This aligns with your preference for HD 3D imagery.
+    print("Step 1: Generating Base Image...")
+    
+    # Check if we can use fp16 for VRAM savings
+    dtype = torch.float16 if device == "cuda" else torch.float32
+    
+    t2i_pipeline = AutoPipelineForTextToImage.from_pretrained(
+        "stabilityai/sdxl-turbo", 
+        torch_dtype=dtype, 
+        variant="fp16" if device == "cuda" else None
+    )
+    t2i_pipeline.to(device)
+    
+    # Generate the initial frame
+    image = t2i_pipeline(prompt=prompt, num_inference_steps=4, guidance_scale=0.0).images[0]
+    
+    # Resize to SVD standard resolution to avoid artifacts
+    image = image.resize((width, height), Image.LANCZOS)
+    image_path = os.path.join(OUTPUT_DIR, "base_frame.png")
+    image.save(image_path)
+    print(f"Base image saved to: {image_path}")
+    
+    # Clean up memory to free VRAM for the video model
+    del t2i_pipeline
+    torch.cuda.empty_cache()
+
+    # 2. Image-to-Video Generation (Stable Video Diffusion XT)
+    print("Step 2: Animating Video (SVD-XT)...")
+    
+    svd_pipeline = StableVideoDiffusionPipeline.from_pretrained(
+        "stabilityai/stable-video-diffusion-img2vid-xt", 
+        torch_dtype=dtype, 
+        variant="fp16" if device == "cuda" else None
+    )
+    svd_pipeline.enable_model_cpu_offload() # Crucial for saving VRAM
+    
+    # Optional: Seed for reproducibility
+    generator = torch.manual_seed(seed) if seed else None
+
+    # Generate frames
+    frames = svd_pipeline(
+        image, 
+        decode_chunk_size=8,
+        generator=generator,
+        num_frames=num_frames,
+        motion_bucket_id=127, # Controls amount of motion (1-255)
+        fps=fps
+    ).frames[0]
+
+    # 3. Export
+    video_path = os.path.join(OUTPUT_DIR, "final_output.mp4")
+    export_to_video(frames, video_path, fps=fps)
+    print(f"--- Success! Video saved to: {video_path} ---")
+
+if __name__ == "__main__":
+    # Example Prompt - tailored to your preference for 3D/Archangel themes
+    user_prompt = "Cinematic 3D render of a futuristic hud interface with glowing golden geometric shapes, hyper-realistic, 8k, archangel aesthetics"
+    
+    generate_video_pipeline(user_prompt, seed=42)
+
+
+
+import torch
+import cv2
+import numpy as np
+from diffusers import LTXVideoPipeline
+from diffusers.utils import export_to_video
+from datetime import datetime
+
+# --- SYSTEM CONFIG (Kaizen Optimization) ---
+MODEL_ID = "Lightricks/LTX-2" # Open-source SOTA for 2026
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
+
+class AdvancedVideoGenerator:
+    def __init__(self):
+        print(f"Initializing {MODEL_ID} on {DEVICE}...")
+        self.pipe = LTXVideoPipeline.from_pretrained(
+            MODEL_ID, torch_dtype=DTYPE
+        ).to(DEVICE)
+        
+        # Performance boost
+        if DEVICE == "cuda":
+            self.pipe.enable_xformers_memory_efficient_attention()
+
+    def add_hud_overlay(self, frames):
+        """Applies a 3D-style HUD layer to each frame."""
+        processed_frames = []
+        for i, frame in enumerate(frames):
+            # Convert PIL to CV2 (numpy)
+            img = cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2BGR)
+            h, w, _ = img.shape
+
+            # Draw HUD elements (e.g., Scan lines, corner brackets)
+            color = (0, 255, 255) # Cyan HUD
+            thickness = 2
+            
+            # Corner Brackets
+            cv2.line(img, (50, 50), (100, 50), color, thickness)
+            cv2.line(img, (50, 50), (50, 100), color, thickness)
+            
+            # Dynamic Telemetry Data
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            cv2.putText(img, f"SYNC: ACTIVE", (w-200, 50), font, 0.7, color, 1)
+            cv2.putText(img, f"FRAME: {i}/{len(frames)}", (w-200, 80), font, 0.7, color, 1)
+            cv2.putText(img, f"TIMESTAMP: {datetime.now().strftime('%H:%M:%S')}", (50, h-50), font, 0.5, color, 1)
+
+            # Convert back to RGB for video export
+            processed_frames.append(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        return processed_frames
+
+    def generate(self, prompt, num_frames=24):
+        print(f"Generating HD Video for: {prompt}")
+        output = self.pipe(
+            prompt=prompt,
+            num_frames=num_frames,
+            width=768, 
+            height=512,
+            num_inference_steps=30
+        ).frames[0]
+        
+        # Post-process with HUD
+        final_video = self.add_hud_overlay(output)
+        
+        filename = f"gen_video_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+        export_to_video(final_video, filename, fps=8)
+        print(f"Saved: {filename}")
+
+if __name__ == "__main__":
+    # Prompt optimized for your '7 Archangels' & 3D aesthetic
+    ARCHANGEL_PROMPT = (
+        "Cinematic 3D render of Archangel Michael standing in a digital sanctum, "
+        "surrounded by floating geometric HUD interfaces, holy fire, hyper-realistic, 8k."
+    )
+    
+    gen = AdvancedVideoGenerator()
+    gen.generate(ARCHANGEL_PROMPT)
