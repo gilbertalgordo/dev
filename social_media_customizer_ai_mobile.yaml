@@ -1,0 +1,149 @@
+// core/ai_customizer.js
+import { GoogleGenerativeAI } from "@google/generative-ai";
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+export async function generatePageLayout(userPrompt, currentData) {
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+  const prompt = `
+    Context: Social Media Mobile App.
+    User Intent: ${userPrompt}
+    Current Profile: ${JSON.stringify(currentData)}
+    
+    Task: Return a JSON object for a HUD-inspired 3D profile layout.
+    Include: primaryColor (hex), borderRadius, glassmorphismIntensity (0-1), 
+    and widgetOrder (array: ['stats', 'bio', 'posts']).
+  `;
+
+  const result = await model.generateContent(prompt);
+  return JSON.parse(result.response.text());
+}
+
+
+
+// components/ProfileHUD.tsx
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { Canvas } from '@react-three/fiber/native'; // For 3D HUD Elements
+
+const ProfileHUD = ({ aiConfig, userData }) => {
+  return (
+    <View style={[styles.container, { backgroundColor: aiConfig.primaryColor + '22' }]}>
+      {/* 3D Background Element */}
+      <View style={styles.canvasContainer}>
+        <Canvas>
+          <ambientLight intensity={0.5} />
+          <mesh rotation={[1, 1, 0]}>
+             <boxGeometry args={[2, 2, 2]} />
+             <meshStandardMaterial color={aiConfig.primaryColor} wireframe />
+          </mesh>
+        </Canvas>
+      </View>
+
+      {/* Dynamic HUD Content */}
+      <View style={[styles.glassCard, { borderRadius: aiConfig.borderRadius }]}>
+        <Text style={styles.hudText}>ID: {userData.username}</Text>
+        <Text style={styles.bio}>{userData.bio}</Text>
+        
+        <View style={styles.statsRow}>
+          {aiConfig.widgetOrder.map((widget) => (
+            <View key={widget} style={styles.statNode}>
+               <Text style={styles.nodeLabel}>{widget.toUpperCase()}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: { flex: 1, padding: 20 },
+  canvasContainer: { height: 200, marginBottom: 20 },
+  glassCard: {
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  hudText: { color: '#00ffff', fontFamily: 'monospace', fontSize: 18 },
+  // Additional styles here...
+});
+
+
+
+import { GoogleGenerativeAI } from "@google/generative-ai";
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+export async function getAdvancedLayout(userRequest) {
+  const model = genAI.getGenerativeModel({ 
+    model: "gemini-1.5-flash",
+    generationConfig: { responseMimeType: "application/json" }
+  });
+
+  const prompt = `
+    Generate a HUD-style social media layout configuration.
+    User Request: "${userRequest}"
+    Return JSON: {
+      "theme": { "primary": "hex", "accent": "hex", "glassIntensity": 0-100 },
+      "hud3D": { "rotationSpeed": float, "geometry": "torus|sphere|cube" },
+      "components": [
+        { "id": "profile_card", "position": { "x": 0, "y": 1 }, "blur": 20 },
+        { "id": "feed_module", "type": "scroll", "elevation": 5 }
+      ]
+    }`;
+
+  const result = await model.generateContent(prompt);
+  return JSON.parse(result.response.text());
+}
+
+
+
+import React, { useRef } from 'react';
+import { Canvas, useFrame } from '@react-three/fiber/native';
+import { BlurView } from 'expo-blur';
+import { View, StyleSheet } from 'react-native';
+
+// 3D HUD Background Element
+function HUDGeometry({ type, color, speed }) {
+  const mesh = useRef();
+  useFrame((state, delta) => {
+    mesh.current.rotation.x += delta * speed;
+    mesh.current.rotation.y += delta * speed;
+  });
+
+  return (
+    <mesh ref={mesh}>
+      {type === 'torus' ? <torusGeometry args={[1, 0.4, 16, 100]} /> : <boxGeometry />}
+      <meshStandardMaterial color={color} wireframe />
+    </mesh>
+  );
+}
+
+export default function AIProfilePage({ config }) {
+  return (
+    <View style={styles.container}>
+      {/* Layer 1: 3D HUD Canvas */}
+      <Canvas style={StyleSheet.absoluteFill}>
+        <ambientLight intensity={0.5} />
+        <HUDGeometry 
+          type={config.hud3D.geometry} 
+          color={config.theme.primary} 
+          speed={config.hud3D.rotationSpeed} 
+        />
+      </Canvas>
+
+      {/* Layer 2: Glassmorphic Content */}
+      <BlurView intensity={config.theme.glassIntensity} style={styles.glassLayer}>
+        {/* Render AI-positioned components here */}
+      </BlurView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#000' },
+  glassLayer: { margin: 20, borderRadius: 30, padding: 20, flex: 1 }
+});
