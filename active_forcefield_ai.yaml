@@ -50,52 +50,78 @@ for p in positions:
 
 
 
+import torch
+import torch.nn as nn
+import torch.optim as optim
 import numpy as np
-from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C
 
-class ActiveForceFieldAI:
-    def __init__(self, kaizen_threshold=0.15):
-        # 1. AI Core: RBF Kernel simulates the "Guardian" field characteristics
-        kernel = C(1.0) * RBF(length_scale=1.5)
-        self.ai_model = GaussianProcessRegressor(kernel=kernel, alpha=1e-2)
+class ActiveGuardianNet(nn.Module):
+    """
+    Superfast Kaizen AI: Equivariant-inspired Force Field 
+    with Monte Carlo Dropout for Uncertainty Detection.
+    """
+    def __init__(self, input_dim=3, hidden_dim=64):
+        super().__init__()
+        self.network = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.SiLU(), # Smooth activation for physical gradients
+            nn.Dropout(p=0.2), # MC Dropout Layer
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.SiLU(),
+            nn.Linear(hidden_dim, 1) # Energy Output (Scalar)
+        )
+
+    def forward(self, x):
+        return self.network(x)
+
+class ForceFieldAgent:
+    def __init__(self, learning_threshold=0.05):
+        self.model = ActiveGuardianNet()
+        self.optimizer = optim.Adam(self.model.parameters(), lr=1e-3)
+        self.threshold = learning_threshold
+        self.loss_fn = nn.MSELoss()
+
+    def get_force_and_uncertainty(self, pos, n_samples=10):
+        """HUD-Ready: Returns predicted force and AI confidence."""
+        pos = torch.tensor(pos, dtype=torch.float32, requires_grad=True)
         
-        # 2. Kaizen Parameters
-        self.threshold = kaizen_threshold  # Trigger for active improvement
-        self.X_observed = np.array([[0.0]]) # Initial known state
-        self.y_observed = np.array([0.0])   # Initial known force
-        self.ai_model.fit(self.X_observed, self.y_observed)
-
-    def oracle_ground_truth(self, x):
-        """Simulates high-fidelity physics (e.g., Quantum Mechanics or DFT)"""
-        return -np.sin(x) * (1 / (1 + 0.1 * x))
-
-    def predict_and_evolve(self, x_query):
-        """Predicts force and triggers active learning if uncertainty is high."""
-        x_query = np.array([[x_query]])
-        force_pred, sigma = self.ai_model.predict(x_query, return_std=True)
+        # Monte Carlo Sampling (Active Learning Trigger)
+        self.model.train() # Keep dropout active for sampling
+        energies = [self.model(pos) for _ in range(n_samples)]
         
-        # HUD / Kaizen Trigger: If AI is 'confused' (High Sigma), Learn.
-        if sigma[0] > self.threshold:
-            true_force = self.oracle_ground_truth(x_query[0, 0])
-            self._retrain(x_query[0, 0], true_force)
-            return true_force, 0.0, "KAIZEN_UPDATE"
+        # Calculate Forces via Auto-Diff: F = -dE/dr
+        forces = []
+        for e in energies:
+            grad = torch.autograd.grad(e, pos, create_graph=True)[0]
+            forces.append(-grad.detach().numpy())
+            
+        forces = np.array(forces)
+        mean_force = np.mean(forces, axis=0)
+        uncertainty = np.std(forces, axis=0).mean() # Epistemic uncertainty
         
-        return force_pred[0], sigma[0], "STABLE"
+        return mean_force, uncertainty
 
-    def _retrain(self, x, y):
-        """Internal update to refine the AI's internal model."""
-        self.X_observed = np.vstack([self.X_observed, [[x]]])
-        self.y_observed = np.append(self.y_observed, y)
-        self.ai_model.fit(self.X_observed, self.y_observed)
+    def kaizen_update(self, pos, true_force):
+        """On-the-fly model refinement (The Active Learning step)."""
+        self.model.train()
+        pos_tensor = torch.tensor(pos, dtype=torch.float32, requires_grad=True)
+        energy_pred = self.model(pos_tensor)
+        force_pred = -torch.autograd.grad(energy_pred, pos_tensor, create_graph=True)[0]
+        
+        loss = self.loss_fn(force_pred, torch.tensor(true_force, dtype=torch.float32))
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        return loss.item()
 
-# --- HUD Simulation Output ---
-ai_field = ActiveForceFieldAI()
-simulation_steps = np.linspace(0, 10, 25)
+# --- HUD Simulation ---
+agent = ForceFieldAgent()
+test_pos = [1.2, 0.5, -0.8]
+force, sigma = agent.get_force_and_uncertainty(test_pos)
 
-print(f"{'STEP':<6} | {'POS':<6} | {'PRED_FORCE':<12} | {'SIGMA':<10} | {'HUD_STATUS'}")
-print("-" * 60)
+print(f"HUD STATUS:")
+print(f"Vector: {force} | Uncertainty (Σ): {sigma:.4f}")
+if sigma > 0.05:
+    print(">>> TRIGGERING KAIZEN: AI is updating internal force constants...")
+    agent.kaizen_update(test_pos, [0.1, -0.1, 0.5]) # Simulated Oracle Corrective
 
-for i, pos in enumerate(simulation_steps):
-    f, s, status = ai_field.predict_and_evolve(pos)
-    print(f"{i:<6} | {pos:<6.2f} | {f:<12.4f} | {s:<10.4f} | {status}")
