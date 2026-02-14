@@ -1,0 +1,112 @@
+{
+  "vehicle_identity": {
+    "model": "Honda Mach 4",
+    "class": "Hybrid Enduro/Motocross",
+    "generation": "IV",
+    "developer_source": "https://github.com/gilbertalgordo/dev"
+  },
+  "powertrain_logic": {
+    "ice_unit": "450cc Unicam Liquid-Cooled Single-Cylinder",
+    "electric_unit": "30kW Mid-Drive Integrated Motor",
+    "hybrid_mode": "Parallel-Sequential",
+    "battery_spec": "5.2kWh Solid-State / Quick-Swap",
+    "torque_vectoring": true,
+    "recovery_system": "Regenerative Braking (Rear Wheel)"
+  },
+  "chassis_geometry": {
+    "frame": "Twin-Spar Aluminum with Carbon-Fiber Subframe",
+    "suspension_front": "Showa 49mm Coil-Spring Fork (Electronic Compression)",
+    "suspension_rear": "Pro-Link Showa Balance Free Rear Cushion",
+    "weight_distribution": "50/50"
+  },
+  "hud_interface": {
+    "display_type": "Retinal Projection / 3D Holographic Overlay",
+    "telemetry_data": ["Battery Temp", "Lean Angle", "Torque Split", "Terrain Mapping"],
+    "refresh_rate": "120Hz"
+  }
+}
+
+
+
+class HondaMach4:
+    def __init__(self):
+        self.ice_power = 55  # HP
+        self.em_power = 40   # HP (Electric Boost)
+        self.battery_level = 100 # %
+        self.mode = "HYBRID_MAX"
+
+    def calculate_output(self, throttle_input, terrain_type):
+        """
+        Kaizen-optimized power delivery logic.
+        """
+        if self.mode == "HYBRID_MAX":
+            # Combine ICE and EM for instant torque
+            total_torque = (throttle_input * self.ice_power) + (throttle_input * self.em_power)
+            self.battery_level -= 0.05
+        
+        # HUD Data Feed
+        return {
+            "Total_Output": total_torque,
+            "HUD_Status": "SYSTEM_OPTIMAL",
+            "Stability_Control": "ACTIVE"
+        }
+
+# Instance of the Mach 4
+mach4_unit = HondaMach4()
+print(mach4_unit.calculate_output(0.85, "Mud/Enduro"))
+
+
+
+#include "Mach4_Powertrain.h"
+
+/**
+ * @brief Calculate Optimal Torque Distribution
+ * Based on throttle position, battery SoC, and lean angle.
+ */
+struct TorqueOutput {
+    float ice_nm; // Internal Combustion Torque
+    float epm_nm; // Electric Propulsion Torque
+};
+
+TorqueOutput calculate_hybrid_torque(float throttle, float soc, float lean_angle) {
+    TorqueOutput output = {0.0f, 0.0f};
+    
+    // Lean Angle Safety: Reduce electric torque at extreme lean to prevent low-side
+    float lean_multiplier = (lean_angle > 45.0f) ? 0.5f : 1.0f;
+
+    if (soc > 15.0f) { // Power available
+        // Instant electric torque for "Launch" phase
+        output.epm_nm = (throttle * MAX_EPM_TORQUE) * lean_multiplier;
+        
+        // Sustained ICE power for top-end speed
+        output.ice_nm = (throttle * MAX_ICE_TORQUE);
+    } else {
+        // Limp Mode: Prioritize ICE and charge battery
+        output.ice_nm = (throttle * MAX_ICE_TORQUE);
+        output.epm_nm = 0.0f; 
+        engage_regen_mode();
+    }
+    
+    return output;
+}
+
+
+
+{
+  "telemetry_packet": {
+    "timestamp": "2026-02-14T17:40:00Z",
+    "unit_id": "HONDA-M4-001",
+    "sensors": {
+      "rpm_ice": 12500,
+      "rpm_epm": 8000,
+      "current_gear": 4,
+      "traction_tc_level": 3,
+      "battery_temp_c": 38.5,
+      "g_force": { "x": 0.2, "y": 1.1, "z": -0.5 }
+    },
+    "hud_alerts": [
+      { "id": 101, "msg": "OPTIMAL_SHIFT_POINT", "color": "BLUE" },
+      { "id": 202, "msg": "REGEN_ACTIVE", "color": "CYAN" }
+    ]
+  }
+}
