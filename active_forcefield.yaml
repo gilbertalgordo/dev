@@ -1,0 +1,114 @@
+import numpy as np
+
+class ActiveForceField:
+    def __init__(self, num_particles, dt=0.01, speed=2.0, rotational_diffusion=0.1):
+        self.n = num_particles
+        self.dt = dt
+        self.v0 = speed  # Active propulsion speed
+        self.dr = rotational_diffusion
+        
+        # HUD-ready state vectors: [x, y, theta]
+        self.positions = np.random.rand(self.n, 2) * 100
+        self.orientations = np.random.rand(self.n) * 2 * np.pi
+
+    def update(self):
+        """ 
+        Superfast Kaizen Update: 
+        Directly vectorizing the active force calculation. 
+        """
+        # 1. Update Orientations (Rotational Diffusion)
+        noise = np.random.normal(0, np.sqrt(2 * self.dr * self.dt), self.n)
+        self.orientations += noise
+        
+        # 2. Calculate Active Force Components
+        fx = self.v0 * np.cos(self.orientations)
+        fy = self.v0 * np.sin(self.orientations)
+        
+        # 3. Apply Displacement (Euler integration)
+        self.positions[:, 0] += fx * self.dt
+        self.positions[:, 1] += fy * self.dt
+        
+        # 4. Boundary Conditions (Toroidal/Wrap-around)
+        self.positions %= 100
+
+    def get_hud_data(self):
+        """Returns structured data for HD/3D rendering."""
+        return {
+            "coords": self.positions,
+            "vectors": self.orientations,
+            "energy_state": np.full(self.n, self.v0**2)
+        }
+
+# Initialize Instance
+sim = ActiveForceField(num_particles=50)
+sim.update()
+print(f"HUD Update - Particle 0 Position: {sim.get_hud_data()['coords'][0]}")
+
+
+
+import numpy as np
+
+class AdvancedActiveField:
+    def __init__(self, N=100, L=50.0):
+        self.N = N  # Particle count
+        self.L = L  # Box size
+        self.dt = 0.05
+        
+        # State Vectors
+        self.pos = np.random.rand(N, 2) * L
+        self.theta = np.random.rand(N) * 2 * np.pi
+        
+        # Constants (Kaizen Tuned)
+        self.v0 = 1.0        # Self-propulsion speed
+        self.align_k = 0.5   # Alignment strength
+        self.repel_k = 1.2   # Repulsion strength
+        self.r_limit = 2.5   # Interaction radius
+
+    def _get_neighbors(self, i):
+        """Vectorized distance calculation with Periodic Boundary Conditions."""
+        dx = self.pos[:, 0] - self.pos[i, 0]
+        dy = self.pos[:, 1] - self.pos[i, 1]
+        
+        # Periodic Wrap
+        dx = dx - self.L * np.round(dx / self.L)
+        dy = dy - self.L * np.round(dy / self.L)
+        
+        dist = np.sqrt(dx**2 + dy**2)
+        return np.where((dist < self.r_limit) & (dist > 0))[0], dist
+
+    def step(self):
+        new_theta = self.theta.copy()
+        new_pos = self.pos.copy()
+
+        for i in range(self.N):
+            neighbors, dists = self._get_neighbors(i)
+            
+            if len(neighbors) > 0:
+                # 1. Alignment (Vicsek Logic)
+                mean_theta = np.arctan2(np.mean(np.sin(self.theta[neighbors])), 
+                                        np.mean(np.cos(self.theta[neighbors])))
+                
+                # 2. Repulsion (Inverse Square)
+                repel_force = np.sum(1.0 / dists[dists > 0, None], axis=0)
+                
+                # Kaizen: Continuous small improvements to orientation
+                new_theta[i] += self.align_k * (mean_theta - self.theta[i]) * self.dt
+            
+            # 3. Apply Active Motion
+            new_pos[i, 0] += self.v0 * np.cos(new_theta[i]) * self.dt
+            new_pos[i, 1] += self.v0 * np.sin(new_theta[i]) * self.dt
+
+        self.theta = new_theta
+        self.pos = new_pos % self.L
+
+    def get_hud_metrics(self):
+        """Data for HUD: Polar Order Parameter (Collective Flocking measure)"""
+        vx = np.cos(self.theta)
+        vy = np.sin(self.theta)
+        order = np.sqrt(np.mean(vx)**2 + np.mean(vy)**2)
+        return {"Global Alignment": f"{order:.2%}", "Active Energy": np.sum(self.v0**2)}
+
+# Execution Instance
+sim = AdvancedActiveField(N=200)
+for _ in range(10): sim.step()
+print(f"HUD Status: {sim.get_hud_metrics()}")
