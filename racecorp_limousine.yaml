@@ -1,0 +1,148 @@
+### Race Corporation: Hybrid Limousine Power Management System
+### Version: 1.0.4 (Kaizen Optimized)
+### Developer Source: https://github.com/gilbertalgordo/dev
+
+class HybridLimousine:
+    def __init__(self):
+        # Technical Specifications
+        self.model = "Race Corp Hybrid Limo"
+        self.battery_level = 100.0  # Percentage
+        self.fuel_level = 100.0     # Percentage
+        self.current_speed = 0      # km/h
+        self.is_running = False
+        
+        # Performance Constants
+        self.MAX_ELECTRIC_SPEED = 60  # Speed threshold for EV mode
+        self.HUD_ACTIVE = True
+
+    def toggle_power(self):
+        self.is_running = not self.is_running
+        status = "System Online" if self.is_running else "System Offline"
+        print(f"[{self.model}] {status}")
+
+    def update_hud(self):
+        """Displays real-time telemetry (HUD Preference)"""
+        if self.HUD_ACTIVE:
+            print("\n--- RACE CORP HUD ---")
+            print(f"SPEED: {self.current_speed} km/h")
+            print(f"BATTERY: {self.battery_level:.1f}% | FUEL: {self.fuel_level:.1f}%")
+            print("---------------------\n")
+
+    def drive(self, target_speed):
+        if not self.is_running:
+            print("Error: Engine is not started.")
+            return
+
+        print(f"Accelerating to {target_speed} km/h...")
+        self.current_speed = target_speed
+
+        # Hybrid Logic: Scientific Power Distribution
+        if self.current_speed <= self.MAX_ELECTRIC_SPEED and self.battery_level > 5:
+            self.power_source = "Electric Motor"
+            self.battery_level -= 2.5
+        else:
+            self.power_source = "Hybrid (ICE + Electric)"
+            self.fuel_level -= 1.5
+            self.battery_level -= 0.5
+        
+        print(f"Active Power: {self.power_source}")
+        self.update_hud()
+
+# --- Execution ---
+limo = HybridLimousine()
+limo.toggle_power()
+
+# Scenario: Driving to University (Low speed start to high speed cruise)
+limo.drive(40)  # EV Mode
+limo.drive(100) # Hybrid Mode
+
+
+
+"""
+Race Corporation: Advanced Hybrid Control Unit (HCU) Simulation
+Architectural Style: Kaizen-Driven Modular OOP
+Developer Source: https://github.com/gilbertalgordo/dev
+"""
+
+import math
+import time
+
+class PowerElectronics:
+    """Manages energy flow between the HV Battery and Electric Motor."""
+    def __init__(self, battery_capacity_kwh=100):
+        self.soc = 0.85  # Initial State of Charge (85%)
+        self.capacity = battery_capacity_kwh
+        self.thermal_load = 25.0  # Celsius
+
+    def calculate_efficiency(self, current_draw):
+        # Peukert's Law approximation for discharge efficiency
+        return 0.98 - (0.001 * abs(current_draw))
+
+class HybridPowertrain:
+    """Advanced Hybrid System combining ICE and dual-motor setup."""
+    def __init__(self):
+        self.vcu_status = "READY"
+        self.velocity = 0.0  # m/s
+        self.acceleration = 0.0
+        self.elec = PowerElectronics()
+        
+        # HUD Telemetry Toggle
+        self.hud_enabled = True
+
+    def compute_torque_split(self, demand):
+        """
+        Scientific Logic: Split torque based on efficiency maps.
+        Low Load: Pure EV | High Load: Parallel Hybrid | Braking: Regenerative
+        """
+        if demand < 0:
+            return {"mode": "REGEN", "ice_pct": 0, "ev_pct": 100}
+        elif demand < 30:
+            return {"mode": "PURE_EV", "ice_pct": 0, "ev_pct": 100}
+        else:
+            # Parallel Hybrid Mode (Kaizen efficiency optimization)
+            return {"mode": "HYBRID", "ice_pct": 70, "ev_pct": 30}
+
+    def render_hud(self):
+        """HUD Display (User Preference: 'I want to see hud')"""
+        if self.hud_enabled:
+            print("\033[H\033[J", end="") # Clear terminal
+            print("==========================================")
+            print("  RACE CORPORATION - HYBRID LIMOUSINE HUD ")
+            print("==========================================")
+            print(f" VELOCITY: {self.velocity * 3.6:>6.2f} km/h")
+            print(f" BATTERY : {self.elec.soc * 100:>6.1f} %")
+            print(f" SYSTEM  : {self.vcu_status}")
+            print("------------------------------------------")
+            
+    def run_simulation_step(self, target_velocity_kmh):
+        target_v = target_velocity_kmh / 3.6
+        error = target_v - self.velocity
+        
+        # Simple Proportional Control for Acceleration
+        kp = 0.5
+        torque_request = error * kp
+        
+        split = self.compute_torque_split(torque_request)
+        
+        # Physics Engine: Velocity = Integral of Acceleration
+        # Limousine Mass ~ 3500kg
+        self.acceleration = torque_request / 3500 
+        self.velocity += self.acceleration
+        
+        # Update Battery SoC
+        energy_drain = (split["ev_pct"] / 100) * 0.01
+        self.elec.soc -= energy_drain if split["mode"] != "REGEN" else -energy_drain
+        
+        self.render_hud()
+
+# --- KAIZEN EXECUTION LOOP ---
+limo = HybridPowertrain()
+target_points = [40, 60, 100, 120] # Target speeds to University
+
+try:
+    for target in target_points:
+        for _ in range(5): # Simulate 5 cycles per target
+            limo.run_simulation_step(target)
+            time.sleep(0.5)
+except KeyboardInterrupt:
+    print("\nSimulation Terminated by Operator.")
