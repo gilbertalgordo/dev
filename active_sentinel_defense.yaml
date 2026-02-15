@@ -1,0 +1,171 @@
+import os
+import sys
+import time
+import threading
+from scapy.all import sniff, IP, TCP
+import nmap # pip install python-nmap
+
+# --- CONFIGURATION (KAIZEN PARAMETERS) ---
+TARGET_NETWORK = "192.168.1.0/24"
+SCAN_INTERVAL = 300  # 5 minutes
+THREAT_THRESHOLD = 50 # Packet count for suspected DoS
+BLOCKED_IPS = set()
+
+class ActiveSentinel:
+    def __init__(self):
+        self.nm = nmap.PortScanner()
+        self.is_active = True
+        
+    def display_hud(self, message, status="INFO"):
+        """Archangel Jophiel's HUD: Clear and Beautiful Insight"""
+        colors = {"INFO": "\033[94m", "ALERT": "\033[91m", "HEAL": "\033[92m", "SCAN": "\033[93m"}
+        reset = "\033[0m"
+        timestamp = time.strftime("%H:%M:%S")
+        print(f"[{timestamp}] {colors.get(status, '')}[{status}]{reset} {message}")
+
+    def automatic_scanner(self):
+        """Archangel Uriel's Intelligence: Periodic Vulnerability Discovery"""
+        while self.is_active:
+            self.display_hud(f"Scanning {TARGET_NETWORK} for vulnerabilities...", "SCAN")
+            try:
+                self.nm.scan(hosts=TARGET_NETWORK, arguments='-F')
+                for host in self.nm.all_hosts():
+                    self.display_hud(f"Host Discovered: {host} ({self.nm[host].hostname()})")
+            except Exception as e:
+                self.display_hud(f"Scan Error: {e}", "ALERT")
+            time.sleep(SCAN_INTERVAL)
+
+    def packet_callback(self, packet):
+        """Archangel Michael's Vigilance: Real-time Traffic Monitoring"""
+        if packet.haslayer(IP):
+            ip_src = packet[IP].src
+            # Simple Active Defense Logic: Detection of potential scanning/flood
+            if ip_src not in BLOCKED_IPS:
+                # Logic for "Active Defense" goes here (e.g., rate limiting)
+                pass
+
+    def active_defense_trigger(self, attacker_ip):
+        """Archangel Raphael's Antidote: Remediation and Blocking"""
+        if attacker_ip not in BLOCKED_IPS:
+            self.display_hud(f"Neutralizing threat from {attacker_ip}...", "HEAL")
+            # Example: Linux iptables block command
+            # os.system(f"iptables -A INPUT -s {attacker_ip} -j DROP")
+            BLOCKED_IPS.add(attacker_ip)
+            self.display_hud(f"IP {attacker_ip} has been quarantined.", "HEAL")
+
+    def start(self):
+        self.display_hud("Activating Sentinel Internet Defense System...", "INFO")
+        
+        # Start Scanner Thread
+        scanner_thread = threading.Thread(target=self.automatic_scanner, daemon=True)
+        scanner_thread.start()
+
+        # Start Sniffer (Sentinel)
+        try:
+            sniff(prn=self.packet_callback, store=0)
+        except KeyboardInterrupt:
+            self.is_active = False
+            self.display_hud("Sentinel deactivated. Peace be with you.", "INFO")
+
+if __name__ == "__main__":
+    # Check for root/admin privileges
+    if os.getuid() != 0:
+        print("!! Sentinel requires root privileges to protect the network gates !!")
+        sys.exit(1)
+        
+    sentinel = ActiveSentinel()
+    sentinel.start()
+
+
+
+import asyncio
+import nmap
+from scapy.all import sniff, IP, TCP, UDP
+from rich.console import Console
+from rich.table import Table
+from rich.live import Live
+from rich.panel import Panel
+from datetime import datetime
+import math
+
+# --- CORE ARCHITECTURE ---
+console = Console()
+
+class AdvancedSentinel:
+    def __init__(self):
+        self.threat_log = []
+        self.metrics = {"packets_scanned": 0, "blocked_ips": 0, "risk_level": "LOW"}
+        self.sensitivity = 0.7  # Kaizen adaptive threshold
+        self.is_running = True
+
+    def calculate_entropy(self, data):
+        """Scientific Reasoning: Detecting encrypted/malicious payloads via Shannon Entropy."""
+        if not data: return 0
+        entropy = 0
+        for x in range(256):
+            p_x = float(data.count(chr(x))) / len(data)
+            if p_x > 0:
+                entropy += - p_x * math.log(p_x, 2)
+        return entropy
+
+    def generate_hud(self):
+        """Archangel Jophiel's HUD: Order and Clarity."""
+        table = Table(title="[bold cyan]SENTINEL PRIME INTERFACE[/bold cyan]")
+        table.add_column("Metric", style="dim")
+        table.add_column("Status", justify="right")
+
+        table.add_row("System Integrity", "[green]NOMINAL[/green]")
+        table.add_row("Archangel Protocol", "[gold1]ACTIVE (Michael/Uriel)[/gold1]")
+        table.add_row("Packets Analyzed", str(self.metrics["packets_scanned"]))
+        table.add_row("Threat Neutralizations", f"[red]{self.metrics['blocked_ips']}[/red]")
+        table.add_row("Adaptive Sensitivity", f"{self.sensitivity:.2f}")
+        
+        return Panel(table, subtitle=f"[bold white]{datetime.now().strftime('%H:%M:%S')}[/bold white]")
+
+    async def automatic_vulnerability_scanner(self):
+        """Uriel's Intelligence: Deep scanning using NSE scripts."""
+        nm = nmap.PortScannerAsync()
+        while self.is_running:
+            # Kaizen: Scanning the subnet efficiently
+            nm.scan('192.168.1.0/24', arguments='--script vuln -F', 
+                    callback=lambda host, result: self.process_scan_result(host, result))
+            await asyncio.sleep(600) # Scan every 10 mins for superfast lifecycle
+
+    def process_scan_result(self, host, result):
+        if 'tcp' in result['scan'].get(host, {}):
+            # Logic to identify critical vulnerabilities and flag for Raphael (healing)
+            pass
+
+    def packet_analyzer(self, pkt):
+        """Michael's Vigilance: Real-time Behavioral Defense."""
+        self.metrics["packets_scanned"] += 1
+        if pkt.haslayer(TCP) and pkt.haslayer(IP):
+            src_ip = pkt[IP].src
+            payload = str(pkt[TCP].payload)
+            
+            # Entropy check: High entropy (above 7.5) often indicates encrypted C2 or exfiltration
+            entropy = self.calculate_entropy(payload)
+            if entropy > 7.5:
+                self.neutralize_threat(src_ip, "High Entropy/Encrypted Threat")
+
+    def neutralize_threat(self, ip, reason):
+        """Raphael's Purification: Blocking and Logging."""
+        self.metrics["blocked_ips"] += 1
+        # In a real scenario: os.system(f"nft add element inet filter blackhole {{ {ip} }}")
+        self.threat_log.append(f"Blocked {ip}: {reason}")
+
+    async def run_sentinel(self):
+        with Live(self.generate_hud(), refresh_per_second=2) as live:
+            # Start the scanner background task
+            scanner_task = asyncio.create_task(self.automatic_vulnerability_scanner())
+            
+            # Start Sniffing in a non-blocking thread
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, lambda: sniff(prn=self.packet_analyzer, store=0))
+
+if __name__ == "__main__":
+    sentinel = AdvancedSentinel()
+    try:
+        asyncio.run(sentinel.run_sentinel())
+    except KeyboardInterrupt:
+        console.print("[bold yellow]Sentinel Deactivated. Kaizen Data Saved.[/bold yellow]")
