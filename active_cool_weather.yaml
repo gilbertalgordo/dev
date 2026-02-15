@@ -1,0 +1,145 @@
+import requests
+import time
+from datetime import datetime
+
+# --- CONFIGURATION ---
+API_KEY = "YOUR_OPENWEATHER_API_KEY"  # Get one at openweathermap.org
+CITY = "London"
+COOL_THRESHOLD = 18  # Celsius (Adjust based on your Kaizen standards)
+UNITS = "metric"
+
+class WeatherHUD:
+    """Provides a clear, scannable HUD for active weather monitoring."""
+    
+    @staticmethod
+    def display(data, status_msg):
+        print("\n" + "="*40)
+        print(f" SYSTEM HUD | {datetime.now().strftime('%H:%M:%S')} ")
+        print("="*40)
+        print(f" LOCATION:  {data['name']}")
+        print(f" TEMP:      {data['main']['temp']}°C")
+        print(f" FEELS LIKE: {data['main']['feels_like']}°C")
+        print(f" HUMIDITY:  {data['main']['humidity']}%")
+        print(f" STATUS:    {data['weather'][0]['description'].upper()}")
+        print("-" * 40)
+        print(f" AI LOGIC:  {status_msg}")
+        print("="*40 + "\n")
+
+def check_weather_logic(temp):
+    """Scientific reasoning for active cool weather management."""
+    if temp <= 0:
+        return "⚠️ CRITICAL COLD: Risk of frostbite/hypothermia. High energy consumption."
+    elif 0 < temp <= 10:
+        return "❄️ COLD: Layering required. Increase indoor thermal efficiency."
+    elif 10 < temp <= COOL_THRESHOLD:
+        return "🍃 ACTIVE COOL: Optimal for cognitive focus. No cooling systems required."
+    else:
+        return "☀️ ABOVE COOL: Monitor for rising humidity and heat stress."
+
+def run_weather_ai():
+    url = f"http://api.openweathermap.org/data/2.5/weather?q={CITY}&appid={API_KEY}&units={UNITS}"
+    
+    try:
+        response = requests.get(url)
+        data = response.json()
+        
+        if data.get("cod") != 200:
+            print(f"Error: {data.get('message', 'Unknown error')}")
+            return
+
+        current_temp = data['main']['temp']
+        logic_output = check_weather_logic(current_temp)
+        
+        # Display the HUD
+        WeatherHUD.display(data, logic_output)
+
+    except Exception as e:
+        print(f"System Error: {e}")
+
+if __name__ == "__main__":
+    # Kaizen loop: Monitor and iterate every 10 minutes
+    while True:
+        run_weather_ai()
+        time.sleep(600) 
+
+
+
+import requests
+import math
+import time
+from datetime import datetime
+
+# --- CONFIGURATION & CONSTANTS ---
+API_KEY = "YOUR_API_KEY"  # Securely stored
+CITY = "Reykjavik"        # Example: A cool-climate city
+REFRESH_RATE = 600        # 10 Minutes (Kaizen Interval)
+
+class ScienceLogic:
+    """Accurate scientific reasoning for thermal management."""
+    
+    @staticmethod
+    def calculate_dew_point(T, Rh):
+        """Calculates Dew Point using the Magnus-Tetens approximation."""
+        b = 17.625
+        c = 243.04
+        gamma = (b * T / (c + T)) + math.log(Rh / 100.0)
+        return round((c * gamma) / (b - gamma), 2)
+
+    @staticmethod
+    def get_thermal_guidance(temp, humidity, feels_like):
+        """Logic based on Archangel characteristics: Protection & Balance."""
+        if feels_like < 5:
+            return "🛡️ ARCH-MICHAEL PROTECT: Severe cold. Seal thermal leaks immediately."
+        elif 5 <= feels_like < 15:
+            return "⚖️ ARCH-RAPHAEL BALANCE: Ideal cool. Optimize air circulation."
+        elif 15 <= feels_like < 22:
+            return "🍃 OPTIMAL ZONE: Kaizen efficiency peak. Energy usage: 10%."
+        else:
+            return "⚠️ ALERT: Temperature exceeding 'Cool Weather' constraints."
+
+class HUD:
+    """High-Definition Console HUD."""
+    
+    @staticmethod
+    def render(data, science):
+        ts = datetime.now().strftime("%Y-%m-%d | %H:%M:%S")
+        print(f"\n{'='*50}")
+        print(f"  [ ACTIVE COOL WEATHER AI ]  V2.0  |  {ts}")
+        print(f"{'='*50}")
+        print(f"  LOCATION: {data['name']} [{data['sys']['country']}]")
+        print(f"  ACTUAL TEMP: {data['main']['temp']}°C")
+        print(f"  FEELS LIKE:  {data['main']['feels_like']}°C")
+        print(f"  HUMIDITY:    {data['main']['humidity']}%")
+        print(f"  DEW POINT:   {science['dew_point']}°C")
+        print(f"{'-'*50}")
+        print(f"  SYSTEM LOGIC: {science['guidance']}")
+        print(f"{'='*50}\n")
+
+def main():
+    while True:
+        try:
+            url = f"http://api.openweathermap.org/data/2.5/weather?q={CITY}&appid={API_KEY}&units=metric"
+            response = requests.get(url).json()
+            
+            if response.get("cod") == 200:
+                # Scientific processing
+                t = response['main']['temp']
+                rh = response['main']['humidity']
+                fl = response['main']['feels_like']
+                
+                science_stats = {
+                    "dew_point": ScienceLogic.calculate_dew_point(t, rh),
+                    "guidance": ScienceLogic.get_thermal_guidance(t, rh, fl)
+                }
+                
+                HUD.render(response, science_stats)
+            else:
+                print(f"⚠️ API Error: {response.get('message')}")
+                
+        except Exception as e:
+            print(f"⚠️ System Failure: {e}")
+            
+        time.sleep(REFRESH_RATE)
+
+if __name__ == "__main__":
+    main()
