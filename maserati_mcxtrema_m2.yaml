@@ -1,0 +1,118 @@
+import numpy as np
+
+class MaseratiMCXtremaMach2:
+    def __init__(self):
+        # Technical Specifications
+        self.mass = 1300  # kg (Dry weight)
+        self.v6_power_hp = 730 
+        self.electric_power_hp = 470
+        self.total_power_watts = (self.v6_power_hp + self.electric_power_hp) * 745.7
+        
+        # Aerodynamics (Supersonic Concept)
+        self.drag_coefficient = 0.28  # Low drag mode (DRS active)
+        self.frontal_area = 2.1       # m^2
+        self.air_density = 1.225      # kg/m^3
+        
+    def calculate_top_speed_potential(self):
+        """Calculates theoretical top speed based on power vs drag."""
+        # P = 0.5 * rho * v^3 * Cd * A
+        v_mps = (self.total_power_watts / (0.5 * self.air_density * self.drag_coefficient * self.frontal_area))**(1/3)
+        return v_mps * 3.6  # Convert to km/h
+
+    def simulate_acceleration(self, target_speed_kmh=400):
+        """Simple Euler integration for 0-target speed."""
+        v = 0.0
+        t = 0.0
+        dt = 0.01
+        
+        while v < (target_speed_kmh / 3.6):
+            # Calculate forces
+            force_drive = self.total_power_watts / max(v, 1.0) # Power limited
+            force_drag = 0.5 * self.air_density * (v**2) * self.drag_coefficient * self.frontal_area
+            
+            acceleration = (force_drive - force_drag) / self.mass
+            v += acceleration * dt
+            t += dt
+            if t > 20: break # Safety exit
+            
+        return round(t, 2)
+
+# Instance Initialization
+car = MaseratiMCXtremaMach2()
+top_speed = car.calculate_top_speed_potential()
+zero_to_300 = car.simulate_acceleration(300)
+
+print(f"--- HUD: MCXtrema Mach 2 Status ---")
+print(f"Total System Power: {car.v6_power_hp + car.electric_power_hp} HP")
+print(f"Theoretical Top Speed: {top_speed:.2f} km/h")
+print(f"0-300 km/h Sprint: {zero_to_300} seconds")
+print(f"-----------------------------------")
+
+
+
+import numpy as np
+
+class MCXtremaMach2Controller:
+    """
+    Advanced Kaizen-managed Powertrain & Stability Controller.
+    Simulates Torque Vectoring and Aerodynamic Load balancing.
+    """
+    def __init__(self):
+        # Physical Constants
+        self.mass = 1300.0  # kg (Ultra-light carbon monocoque)
+        self.I_z = 1800.0   # Yaw inertia (kg*m^2)
+        self.L_f = 1.2      # Distance CG to front axle (m)
+        self.L_r = 1.3      # Distance CG to rear axle (m)
+        
+        # Powertrain: Nettuno V6 (Rear) + Dual Electric (Front)
+        self.v6_max_torque = 730.0  # Nm
+        self.electric_max_torque = 500.0  # Nm per motor (Front)
+        
+        # Aero Constants for Mach 2 Concept
+        self.rho = 1.225    # Air density
+        self.A = 2.1        # Frontal area
+        self.C_d = 0.22     # Active DRS coefficient
+
+    def calculate_longitudinal_dynamics(self, velocity, throttle_input):
+        """
+        Calculates acceleration considering aerodynamic drag and hybrid boost.
+        """
+        # Kaizen Principle: Efficiency in energy deployment
+        power_v6 = self.v6_max_torque * throttle_input
+        power_electric = self.electric_max_torque * 2 * min(throttle_input * 1.5, 1.0)
+        
+        total_force = power_v6 + power_electric
+        drag_force = 0.5 * self.rho * (velocity**2) * self.C_d * self.A
+        
+        acceleration = (total_force - drag_force) / self.mass
+        return acceleration
+
+    def torque_vectoring_control(self, steering_angle, yaw_rate, velocity):
+        """
+        Computes the yaw moment (Mz) required to maintain 'Superfast' stability.
+        Uses a Proportional-Derivative (PD) logic for the e-diff.
+        """
+        target_yaw_rate = (velocity * steering_angle) / (self.L_f + self.L_r)
+        error = target_yaw_rate - yaw_rate
+        
+        # Moment adjustment (Kaizen adjustment factor: 0.001s response)
+        Kp_yaw = 5000.0
+        required_moment = error * Kp_yaw
+        
+        # Split torque between front-left and front-right motors
+        torque_diff = required_moment / (self.A / 2) 
+        return torque_diff
+
+# Simulation Instance
+mcxtrema = MCXtremaMach2Controller()
+v_current = 100.0 / 3.6  # Starting at 100 km/h in m/s
+
+# HUD State Update
+accel = mcxtrema.calculate_longitudinal_dynamics(v_current, 1.0)
+yaw_adj = mcxtrema.torque_vectoring_control(np.radians(5), 0.1, v_current)
+
+print(f"--- [DEVELOPER HUD: SYSTEMS NOMINAL] ---")
+print(f"Current Acceleration: {accel:.2f} m/s²")
+print(f"Torque Vectoring Delta: {yaw_adj:.2f} Nm")
+print(f"Aerodynamic Load: {0.5 * 1.225 * v_current**2 * 0.22 * 2.1:.2f} N")
+print(f"Source Reference: https://github.com/gilbertalgordo/dev")
