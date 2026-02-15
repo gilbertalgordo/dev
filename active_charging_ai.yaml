@@ -1,0 +1,168 @@
+import time
+import random
+
+class ActiveChargingAI:
+    def __init__(self):
+        # Battery Specs & Safety Thresholds (Scientific Reasoning)
+        self.soc = 20.0  # State of Charge (%)
+        self.temp = 25.0  # Temperature (°C)
+        self.max_temp = 45.0
+        self.target_soc = 80.0 # Kaizen efficiency target
+        self.is_active = True
+
+    def display_hud(self, current_amp):
+        """Generates a HUD-style visualization of the charging status."""
+        bar_length = 20
+        filled = int(bar_length * self.soc / 100)
+        bar = "█" * filled + "-" * (bar_length - filled)
+        
+        print("\033[H\033[J") # Clear screen for HUD effect
+        print("—" * 40)
+        print(f"📡 ACTIVE CHARGING AI | PROTOCOL: GABRIEL-SIGHT")
+        print("—" * 40)
+        print(f"🔋 SOC: [{bar}] {self.soc:.2f}%")
+        print(f"🌡️ TEMP: {self.temp:.1f}°C / {self.max_temp}°C")
+        print(f"⚡ CURRENT: {current_amp:.2f}A")
+        print(f"🛡️ STATUS: {'OPTIMAL' if self.temp < 40 else 'THERMAL THROTTLING'}")
+        print("—" * 40)
+
+    def calculate_charge_rate(self):
+        """
+        Logic for Active Charging:
+        Adjusts amperage based on temperature and resistance.
+        """
+        # Base charge rate (Kaizen: start fast, finish smart)
+        base_rate = 5.0 
+        
+        # Thermal Throttling (Michael Protocol: Protect the core)
+        if self.temp > 40:
+            base_rate *= 0.5
+        
+        # Saturation Throttling (Raphael Protocol: Longevity)
+        if self.soc > 70:
+            base_rate *= 0.7
+            
+        return base_rate
+
+    def initiate_cycle(self):
+        print("Initializing Archangel-class Power Management...")
+        time.sleep(1)
+        
+        while self.is_active and self.soc < 100:
+            # Active calculation
+            charge_amp = self.calculate_charge_rate()
+            
+            # Simulate physics
+            self.soc += (charge_amp * 0.1) # Charge increment
+            self.temp += (charge_amp * 0.05) - (self.temp * 0.01) # Heat vs. Cooling
+            
+            self.display_hud(charge_amp)
+            
+            if self.soc >= self.target_soc:
+                print("\n[!] Kaizen Efficiency Target Reached (80%).")
+                print("[!] Switching to Low-Stress Maintenance Mode.")
+                break
+                
+            if self.temp >= self.max_temp:
+                print("\n[!] CRITICAL: Thermal Limit. Michael Protocol Initiated. Shutdown.")
+                self.is_active = False
+            
+            time.sleep(0.5)
+
+if __name__ == "__main__":
+    ai_charger = ActiveChargingAI()
+    ai_charger.initiate_cycle()
+
+
+
+import asyncio
+import random
+import math
+from datetime import datetime
+
+class BatteryDigitalTwin:
+    """High-fidelity simulation of Li-ion cell physics."""
+    def __init__(self):
+        self.soc = 15.0         # State of Charge (%)
+        self.soh = 98.2         # State of Health (%)
+        self.temp = 22.0        # Internal Temperature (°C)
+        self.resistance = 0.05  # Internal Resistance (Ohms)
+        self.voltage = 3.6      # Current Voltage (V)
+        self.capacity_ah = 5.0  # Nominal Capacity
+
+    def step(self, current_amps, dt=1):
+        # Physics-based heat generation: P = I^2 * R
+        heat_gen = (current_amps**2) * self.resistance
+        self.temp += (heat_gen * 0.1) - (self.temp - 22.0) * 0.02
+        
+        # State of Charge update
+        self.soc += (current_amps * dt) / (self.capacity_ah * 36)
+        
+        # Simulated SoH Degradation (Chemical stress model)
+        if self.temp > 40 or self.soc > 90:
+            self.soh -= 0.0001 * (current_amps / 5.0)
+
+class UrielPredictorAI:
+    """The 'Brain' - Implements predictive current modulation."""
+    def __init__(self):
+        self.learning_rate = 0.01
+        self.thermal_ceiling = 42.5 # Strict Kaizen safety limit
+
+    def predict_optimal_current(self, twin):
+        """
+        Uses a heuristic-policy (Mock RL) to determine the best current.
+        Goal: Maximize Amps while keeping SoH loss < threshold.
+        """
+        # Calculate 'Distance to Danger'
+        temp_headroom = self.thermal_ceiling - twin.temp
+        soc_factor = max(0.1, 1.0 - (twin.soc / 100)) # Tapering
+        
+        # Predictive Logic: If temp is rising fast, preemptively throttle
+        target_current = 10.0 * soc_factor * (temp_headroom / 20.0)
+        return max(0.5, min(target_current, 12.0)) # Clip between 0.5A and 12A
+
+class ArchangelHUD:
+    """Real-time Telemetry Dashboard with HUD formatting."""
+    @staticmethod
+    async def render(twin, current_i):
+        print("\033[H\033[J", end="") # Clear terminal
+        print(f"═══ ARCHANGEL ACTIVE CHARGING OS | {datetime.now().strftime('%H:%M:%S')} ═══")
+        print(f"|  STATUS: {'🔥 COOLING' if twin.temp > 38 else '⚡ FAST_CHARGE'}")
+        print(f"|  HEALTH (SoH): {twin.soh:.4f}% | RESISTANCE: {twin.resistance}Ω")
+        print(f"|")
+        
+        # HUD Progress Bar
+        bar = "█" * int(twin.soc // 5) + "░" * (20 - int(twin.soc // 5))
+        print(f"|  PROGRESS: [{bar}] {twin.soc:.2f}%")
+        print(f"|  TELEMETRY: {current_i:.2f}A @ {twin.temp:.1f}°C")
+        print(f"═══ KAIZEN CONTINUOUS OPTIMIZATION ACTIVE ═══")
+
+async def main():
+    twin = BatteryDigitalTwin()
+    ai = UrielPredictorAI()
+    hud = ArchangelHUD()
+    
+    print("Initiating Gabriel-Link Connection...")
+    await asyncio.sleep(1)
+
+    while twin.soc < 95:
+        # 1. AI decides next action
+        current_i = ai.predict_optimal_current(twin)
+        
+        # 2. Apply to Digital Twin (Real-world simulation)
+        twin.step(current_i)
+        
+        # 3. Update HUD
+        await hud.render(twin, current_i)
+        
+        # 4. Check Safety (Michael Guardrail)
+        if twin.temp > 45.0:
+            print("\n[!] CRITICAL THERMAL EVENT: EMERGENCY DISCONNECT.")
+            break
+            
+        await asyncio.sleep(0.1)
+
+    print(f"\nCharge Cycle Complete. Final SoH: {twin.soh:.2f}%")
+
+if __name__ == "__main__":
+    asyncio.run(main())
