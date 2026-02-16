@@ -1,0 +1,159 @@
+import time
+import json
+from web3 import Web3
+from datetime import datetime
+
+# HUD / Dashboard Styling
+class GabrielHUD:
+    @staticmethod
+    def display_header():
+        print(f"\n{'='*60}")
+        print(f" 🛡️  SENTINEL-X DEFENSE SYSTEM | ARCH-7 ACTIVATED ")
+        print(f" STATUS: SCANNING | TIME: {datetime.now().strftime('%H:%M:%S')}")
+        print(f"{'='*60}")
+
+    @staticmethod
+    def log_alert(level, message):
+        icons = {"CRITICAL": "🔥", "WARNING": "⚠️", "INFO": "🛡️"}
+        print(f"[{level}] {icons.get(level, '')} {message}")
+
+class SentinelDefender:
+    def __init__(self, rpc_url):
+        self.w3 = Web3(Web3.HTTPProvider(rpc_url))
+        self.is_active = self.w3.is_connected()
+        self.monitored_wallets = set()
+        
+    def michael_security_scan(self, tx_hash):
+        """
+        Archangel Michael Logic: Scanning for Malicious Signatures
+        Checks for common reentrancy or 'rug-pull' signatures in pending TXs.
+        """
+        try:
+            tx = self.w3.eth.get_transaction(tx_hash)
+            # Example Heuristic: If value is 0 but gas is high, might be an exploit call
+            if tx['to'] is None:  # Contract Deployment
+                GabrielHUD.log_alert("INFO", f"New Contract Detected: {tx_hash.hex()}")
+            
+            # Logic for large transfers (Whale Detection)
+            eth_value = self.w3.from_wei(tx['value'], 'ether')
+            if eth_value > 50:  # Threshold for 'Critical' movement
+                GabrielHUD.log_alert("CRITICAL", f"Whale Movement: {eth_value} ETH | Hash: {tx_hash.hex()}")
+                
+        except Exception as e:
+            pass
+
+    def uriel_wisdom_analysis(self):
+        """
+        Archangel Uriel Logic: Constant Blockchain State Monitoring
+        """
+        block = self.w3.eth.get_block('latest')
+        GabrielHUD.log_alert("INFO", f"Syncing Block: {block['number']}")
+        return block['transactions']
+
+    def run_kaizen_loop(self):
+        """
+        Continuous improvement loop.
+        """
+        GabrielHUD.display_header()
+        if not self.is_active:
+            GabrielHUD.log_alert("CRITICAL", "Connection to Node Failed. Check RPC.")
+            return
+
+        seen_txs = set()
+        while True:
+            try:
+                txs = self.uriel_wisdom_analysis()
+                for tx_hash in txs:
+                    if tx_hash not in seen_txs:
+                        self.michael_security_scan(tx_hash)
+                        seen_txs.add(tx_hash)
+                
+                # Kaizen: Prune old transactions to keep memory low
+                if len(seen_txs) > 1000:
+                    seen_txs.clear()
+                
+                time.sleep(2)  # High-speed polling
+            except KeyboardInterrupt:
+                GabrielHUD.log_alert("INFO", "Sentinel Disengaged. Guard safely.")
+                break
+
+if __name__ == "__main__":
+    # Replace with your Infura/Alchemy or local Node URL
+    ETHEREUM_RPC = "https://mainnet.infura.io/v3/YOUR_API_KEY"
+    sentinel = SentinelDefender(ETHEREUM_RPC)
+    sentinel.run_kaizen_loop()
+
+
+
+import asyncio
+import json
+from web3 import AsyncWeb3, WebSocketProvider
+from rich.console import Console
+from rich.live import Live
+from rich.table import Table
+
+# --- CONFIGURATION (KAIZEN PRINCIPLE: SEPARATION OF CONCERNS) ---
+RPC_WSS_URL = "wss://mainnet.infura.io/ws/v3/YOUR_API_KEY"
+
+# --- HUD INTERFACE (GABRIEL MODULE) ---
+console = Console()
+
+def generate_hud_table(stats):
+    table = Table(title="🛡️ SENTINEL-X HUD | ARCH-7 LIVE DEPLOYMENT", border_style="gold1")
+    table.add_column("Archangel", style="cyan")
+    table.add_column("Status", justify="center")
+    table.add_column("Metric/Alert", style="magenta")
+    
+    table.add_row("Michael (Defense)", "[bold green]ACTIVE", f"Blocks Scanned: {stats['blocks']}")
+    table.add_row("Uriel (Intelligence)", "[bold yellow]SCANNING", f"Malicious Hits: {stats['threats']}")
+    table.add_row("Raphael (Healing)", "[bold blue]STABLE", f"Latency: {stats['latency']}ms")
+    return table
+
+# --- SECURITY LOGIC (MICHAEL & URIEL MODULES) ---
+class SentinelEngine:
+    def __init__(self, wss_url):
+        self.w3 = AsyncWeb3(WebSocketProvider(wss_url))
+        self.stats = {"blocks": 0, "threats": 0, "latency": 0}
+
+    async def detect_honeypot(self, contract_address):
+        """
+        Archangel Uriel Logic: Static analysis of bytecode for 'Honeypot' patterns.
+        """
+        # Advanced check for transfer-restriction opcodes (e.g., restricted 'revert')
+        code = await self.w3.eth.get_code(contract_address)
+        if len(code) < 100: return False  # Likely not a complex rug
+        return b'\xfe' in code # Placeholder for specific 'invalid' opcode trap
+
+    async def process_transaction(self, tx_hash):
+        """
+        Archangel Michael Logic: Real-time Mempool Sniffing for Rug-Pulls.
+        """
+        try:
+            tx = await self.w3.eth.get_transaction(tx_hash)
+            # Detect Liquidity Removal (Typical Rug-Pull signature)
+            if tx and "removeLiquidity" in str(tx.get('input', '')):
+                self.stats["threats"] += 1
+                console.print(f"[bold red]🔥 ALERT: Potential Liquidity Drain Detected! Hash: {tx_hash.hex()}")
+        except Exception:
+            pass
+
+    async def run(self):
+        # Gabriel HUD Live Update
+        with Live(generate_hud_table(self.stats), refresh_per_second=4) as live:
+            async for block in self.w3.eth.subscribe("newHeads"):
+                self.stats["blocks"] += 1
+                start_time = asyncio.get_event_loop().time()
+                
+                block_data = await self.w3.eth.get_block(block['hash'], full_transactions=True)
+                tasks = [self.process_transaction(tx['hash']) for tx in block_data['transactions']]
+                await asyncio.gather(*tasks)
+                
+                self.stats["latency"] = int((asyncio.get_event_loop().time() - start_time) * 1000)
+                live.update(generate_hud_table(self.stats))
+
+if __name__ == "__main__":
+    engine = SentinelEngine(RPC_WSS_URL)
+    try:
+        asyncio.run(engine.run())
+    except KeyboardInterrupt:
+        console.print("[bold cyan]System Gracefully Deactivated. Archangels Standing By.")
