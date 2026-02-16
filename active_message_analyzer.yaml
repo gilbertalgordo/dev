@@ -1,0 +1,180 @@
+import time
+from transformers import pipeline
+import pandas as pd
+
+class ActiveMessageAnalyzer:
+    def __init__(self):
+        # Initializing the 'Gabriel' module (Communication/Analysis)
+        print("[SYSTEM] Initializing Neural Networks...")
+        self.analyzer = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
+        self.history = []
+
+    def ingest_message(self, user, message):
+        """
+        Processes an incoming message and returns a HUD-style analysis.
+        """
+        start_time = time.time()
+        
+        # Scientific Reasoning: Using DistilBERT for high-speed inference
+        result = self.analyzer(message)[0]
+        processing_time = time.time() - start_time
+        
+        analysis_report = {
+            "timestamp": time.strftime("%H:%M:%S"),
+            "user": user,
+            "message": message,
+            "sentiment": result['label'],
+            "confidence": f"{result['score']:.2%}",
+            "latency": f"{processing_time:.4f}s"
+        }
+        
+        self.history.append(analysis_report)
+        return analysis_report
+
+    def display_hud(self, report):
+        """
+        Renders the analysis in a structured, scannable format.
+        """
+        print(f"\n--- 🖥️ MESSAGE ANALYZER HUD ---")
+        print(f"| USER      : {report['user']}")
+        print(f"| CONTENT   : {report['message']}")
+        print(f"| SENTIMENT : {report['sentiment']}")
+        print(f"| PRECISION : {report['confidence']}")
+        print(f"| SPEED     : {report['latency']}")
+        print(f"-------------------------------")
+
+# --- KAIZEN EXECUTION LOOP ---
+if __name__ == "__main__":
+    ai_observer = ActiveMessageAnalyzer()
+    
+    # Mock stream of active messages
+    stream = [
+        ("User_Alpha", "The integration is failing, we need a fix immediately."),
+        ("User_Beta", "The new UI looks incredible, great job team!"),
+        ("User_Gamma", "I am uncertain about the project timeline.")
+    ]
+
+    for user, msg in stream:
+        report = ai_observer.ingest_message(user, msg)
+        ai_observer.display_hud(report)
+        time.sleep(1) # Simulating active stream interval
+
+
+
+import asyncio
+import time
+from datetime import datetime
+from rich.console import Console
+from rich.table import Table
+from rich.live import Live
+from rich.panel import Panel
+from transformers import pipeline
+
+# --- SYSTEM CONFIGURATION ---
+console = Console()
+
+class KaizenMetrics:
+    """Tracks system performance for continuous improvement."""
+    def __init__(self):
+        self.total_processed = 0
+        self.total_latency = 0.0
+        self.confidence_threshold = 0.85
+        self.low_confidence_alerts = 0
+
+    def update(self, latency, confidence):
+        self.total_processed += 1
+        self.total_latency += latency
+        if confidence < self.confidence_threshold:
+            self.low_confidence_alerts += 1
+
+    @property
+    def avg_speed(self):
+        return self.total_latency / max(1, self.total_processed)
+
+class ActiveAnalyzerAI:
+    def __init__(self):
+        # Initializing heavy models asynchronously would be ideal; here we load SOTA models
+        # Raphael's Sphere: Integrity Check
+        console.print("[bold blue]Initializing Archangel Gabriel (Message Pipeline)...[/bold blue]")
+        self.sentiment_pipe = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
+        # Michael's Sphere: Security/Toxic Detection
+        self.toxicity_pipe = pipeline("text-classification", model="unitary/toxic-bert")
+        self.kaizen = KaizenMetrics()
+
+    async def process_message(self, user: str, text: str):
+        """High-speed asynchronous analysis of message intent and sentiment."""
+        start_time = time.perf_counter()
+        
+        # Parallel Execution of NLP Tasks
+        loop = asyncio.get_event_loop()
+        sentiment_task = loop.run_in_executor(None, self.sentiment_pipe, text)
+        toxicity_task = loop.run_in_executor(None, self.toxicity_pipe, text)
+        
+        sentiment, toxicity = await asyncio.gather(sentiment_task, toxicity_task)
+        
+        latency = time.perf_counter() - start_time
+        self.kaizen.update(latency, sentiment[0]['score'])
+        
+        return {
+            "user": user,
+            "text": text,
+            "sentiment": sentiment[0]['label'],
+            "score": sentiment[0]['score'],
+            "toxic": toxicity[0]['label'] if toxicity[0]['score'] > 0.7 else "CLEAN",
+            "latency": f"{latency:.4f}s"
+        }
+
+# --- HUD RENDERING ENGINE ---
+def generate_hud_table(results_history, metrics):
+    table = Table(title="🛡️ ACTIVE MESSAGE ANALYZER HUD", border_style="cyan")
+    table.add_column("Timestamp", style="dim")
+    table.add_column("User", style="bold yellow")
+    table.add_column("Message Content", width=40)
+    table.add_column("Sentiment", justify="center")
+    table.add_column("Security", justify="center")
+    table.add_column("Latency", justify="right")
+
+    for r in results_history[-5:]: # Show last 5
+        color = "green" if r['sentiment'] == "POSITIVE" else "red"
+        sec_color = "white" if r['toxic'] == "CLEAN" else "bold red"
+        table.add_row(
+            datetime.now().strftime("%H:%M:%S"),
+            r['user'],
+            r['text'],
+            f"[{color}]{r['sentiment']} ({r['score']:.2%})[/{color}]",
+            f"[{sec_color}]{r['toxic']}[/{sec_color}]",
+            r['latency']
+        )
+    
+    metrics_panel = Panel(
+        f"Avg Latency: {metrics.avg_speed:.4f}s | Processed: {metrics.total_processed} | Kaizen Alerts: {metrics.low_confidence_alerts}",
+        title="[bold green]Kaizen Telemetry[/bold green]",
+        border_style="green"
+    )
+    return table, metrics_panel
+
+async def main():
+    ai = ActiveAnalyzerAI()
+    history = []
+    
+    # Mock data stream representing active users
+    stream = [
+        ("Uriel_01", "We must optimize the neural weights for better clarity."),
+        ("Michael_X", "Warning: Unauthorized access attempt detected in the perimeter."),
+        ("Gabriel_Msg", "The project update is ready for 3D rendering."),
+        ("Raphael_Dev", "Error in data stream fixed. Integrity is back to 100%.")
+    ]
+
+    console.print("[bold green]System Online. Commencing Active Analysis...[/bold green]")
+    
+    with Live(console=console, refresh_per_second=4) as live:
+        for user, msg in stream:
+            result = await ai.process_message(user, msg)
+            history.append(result)
+            
+            table, metrics = generate_hud_table(history, ai.kaizen)
+            live.update(Panel.fit(table, subtitle="Kaizen Management v2.6"))
+            await asyncio.sleep(1.5) # Simulate real-time delay
+
+if __name__ == "__main__":
+    asyncio.run(main())
