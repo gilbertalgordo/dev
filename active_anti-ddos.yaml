@@ -1,0 +1,259 @@
+import time
+import random
+import pandas as pd
+import numpy as np
+from datetime import datetime
+from sklearn.ensemble import IsolationForest
+from rich.console import Console
+from rich.table import Table
+from rich.live import Live
+from rich.panel import Panel
+from rich.layout import Layout
+from rich.progress import BarColumn, Progress, TextColumn
+
+# --- Configuration & Archangel Parameters ---
+VIGILANCE_THRESHOLD = -0.6  # Sensitivity: Lower is more aggressive
+WINDOW_SIZE = 100           # Packets to analyze per batch
+PURGE_INTERVAL = 30         # Seconds to hold a ban
+CELESTIAL_MODE = True       # HUD Aesthetics
+
+console = Console()
+
+class ActiveSentinelAI:
+    def __init__(self):
+        # The Brain: Isolation Forest detects outliers in high-dimensional traffic data
+        self.brain = IsolationForest(contamination=0.1, random_state=42)
+        self.registry = pd.DataFrame(columns=['timestamp', 'source_ip', 'packet_size', 'entropy'])
+        self.blacklist = {} # IP: Expiry Timestamp
+        self.stats = {"shielded": 0, "intercepted": 0, "status": "VIGILANT"}
+
+    def simulate_traffic(self):
+        """Generates synthetic telemetry for demonstration."""
+        is_attack = random.random() < 0.1
+        if is_attack:
+            return {
+                'source_ip': f"192.168.1.{random.randint(100, 255)}",
+                'packet_size': random.randint(1000, 1500), # Large volumetric flood
+                'entropy': random.uniform(0.1, 0.3)        # Low entropy/repetitive
+            }
+        return {
+            'source_ip': f"10.0.0.{random.randint(1, 50)}",
+            'packet_size': random.randint(40, 500),
+            'entropy': random.uniform(0.7, 1.0)
+        }
+
+    def analyze_and_act(self):
+        """The core Kaizen loop: Monitor -> Detect -> Mitigate."""
+        # 1. Ingest Data
+        new_data = [self.simulate_traffic() for _ in range(10)]
+        batch_df = pd.DataFrame(new_data)
+        batch_df['timestamp'] = datetime.now()
+        
+        # 2. Update Registry
+        self.registry = pd.concat([self.registry, batch_df]).tail(WINDOW_SIZE)
+
+        # 3. AI Inference (The Sentinel's Vision)
+        if len(self.registry) >= WINDOW_SIZE:
+            features = self.registry[['packet_size', 'entropy']]
+            self.brain.fit(features)
+            scores = self.brain.decision_function(features)
+            
+            # Identify anomalies
+            anomalies = self.registry[scores < VIGILANCE_THRESHOLD]
+            for ip in anomalies['source_ip'].unique():
+                if ip not in self.blacklist:
+                    self.blacklist[ip] = time.time() + PURGE_INTERVAL
+                    self.stats["intercepted"] += 1
+        
+        self.stats["shielded"] += len(new_data)
+        self.cleanup_blacklist()
+
+    def cleanup_blacklist(self):
+        now = time.time()
+        self.blacklist = {ip: expiry for ip, expiry in self.blacklist.items() if expiry > now}
+
+# --- HUD Interface (Archangel Gabriel Style) ---
+def make_layout() -> Layout:
+    layout = Layout()
+    layout.split_column(
+        Layout(name="header", size=3),
+        Layout(name="main", size=15),
+        Layout(name="footer", size=3)
+    )
+    layout["main"].split_row(
+        Layout(name="monitors"),
+        Layout(name="blacklist", size=40)
+    )
+    return layout
+
+def generate_hud_content(sentinel: ActiveSentinelAI):
+    # Monitor Table
+    monitor_table = Table(title="[bold cyan]Celestial Traffic Monitor[/bold cyan]", expand=True)
+    monitor_table.add_column("Source IP")
+    monitor_table.add_column("Load", justify="right")
+    monitor_table.add_column("Threat Level")
+
+    for _, row in sentinel.registry.tail(8).iterrows():
+        threat = "CLEAN" if row['entropy'] > 0.5 else "SUSPICIOUS"
+        color = "green" if threat == "CLEAN" else "yellow"
+        monitor_table.add_row(row['source_ip'], f"{row['packet_size']}B", f"[{color}]{threat}[/{color}]")
+
+    # Blacklist Table
+    ban_table = Table(title="[bold red]Active Interceptions (Shielded)[/bold red]", expand=True)
+    ban_table.add_column("Malicious Entity")
+    ban_table.add_column("Remaining")
+    for ip, expiry in sentinel.blacklist.items():
+        rem = max(0, int(expiry - time.time()))
+        ban_table.add_row(ip, f"{rem}s")
+
+    return monitor_table, ban_table
+
+# --- Main Execution ---
+sentinel = ActiveSentinelAI()
+layout = make_layout()
+
+with Live(layout, refresh_per_second=4, screen=True) as live:
+    while True:
+        sentinel.analyze_and_act()
+        monitors, bans = generate_hud_content(sentinel)
+        
+        layout["header"].update(Panel(f"[bold white]ACTIVE SENTINEL AI[/bold white] | Status: [bold green]SACRED VIGILANCE[/bold green] | Packets Scanned: {sentinel.stats['shielded']}"))
+        layout["monitors"].update(monitors)
+        layout["blacklist"].update(bans)
+        layout["footer"].update(Panel(f"Archangel Protocol: [cyan]Michael's Shield Active[/cyan] | Detected Threats: [red]{sentinel.stats['intercepted']}[/red]"))
+        
+        time.sleep(0.5)
+
+
+
+import asyncio
+import numpy as np
+import pandas as pd
+from datetime import datetime
+from collections import Counter
+from sklearn.ensemble import IsolationForest
+from rich.console import Console
+from rich.live import Live
+from rich.panel import Panel
+from rich.layout import Layout
+from rich.table import Table
+
+# --- Scientific Core: Shannon Entropy ---
+def calculate_entropy(data_str: str) -> float:
+    """
+    Calculates Shannon Entropy to detect bot-generated randomized headers.
+    Formula: $H(X) = -\sum_{i=1}^{n} P(x_i) \log_2 P(x_i)$
+    """
+    if not data_str: return 0
+    probs = [n_x / len(data_str) for n_x in Counter(data_str).values()]
+    return -sum(p * np.log2(p) for p in probs)
+
+# --- Sentinel Instance: Raphael-Class (The Healer/Self-Optimizer) ---
+class SentinelInstance:
+    def __init__(self, instance_id: int):
+        self.instance_id = instance_id
+        self.brain = IsolationForest(contamination=0.05, n_estimators=50)
+        self.telemetry = []
+        self.is_trained = False
+        self.threat_log = []
+
+    async def ingest_packet(self, packet: dict):
+        # Feature Engineering: Entropy of Payload + Request Frequency
+        entropy = calculate_entropy(packet.get('payload', ''))
+        features = [packet['size'], packet['rate'], entropy]
+        self.telemetry.append(features)
+        
+        # Kaizen: Iterative retraining every 50 packets
+        if len(self.telemetry) >= 50:
+            await self.retrain()
+
+    async def retrain(self):
+        """Self-optimization loop (Superfast Kaizen)."""
+        data = np.array(self.telemetry[-200:]) # Windowed memory
+        self.brain.fit(data)
+        self.is_trained = True
+
+    def predict(self, packet_features) -> bool:
+        """Returns True if Malicious (Anomaly)."""
+        if not self.is_trained: return False
+        score = self.brain.predict([packet_features])
+        return score[0] == -1
+
+# --- Orchestrator: Michael-Class (The Commander) ---
+class MichaelOrchestrator:
+    def __init__(self, instance_count=4):
+        self.instances = [SentinelInstance(i) for i in range(instance_count)]
+        self.global_blacklist = set()
+        self.packet_count = 0
+        self.start_time = datetime.now()
+
+    async def process_traffic_stream(self):
+        """High-concurrency stream handling."""
+        while True:
+            # Simulate high-speed ingress
+            tasks = []
+            for _ in range(20):
+                packet = {
+                    'ip': f"192.168.{np.random.randint(1,255)}.{np.random.randint(1,255)}",
+                    'size': np.random.normal(500, 100),
+                    'rate': np.random.randint(1, 1000),
+                    'payload': "GET /index.php HTTP/1.1" + ("X" * np.random.randint(0, 50))
+                }
+                tasks.append(self.route_to_instance(packet))
+            
+            await asyncio.gather(*tasks)
+            await asyncio.sleep(0.1)
+
+    async def route_to_instance(self, packet):
+        # Round-robin distribution to Instances
+        idx = self.packet_count % len(self.instances)
+        instance = self.instances[idx]
+        
+        entropy = calculate_entropy(packet['payload'])
+        features = [packet['size'], packet['rate'], entropy]
+        
+        if instance.predict(features):
+            self.global_blacklist.add(packet['ip'])
+            instance.threat_log.append(f"Blocked: {packet['ip']} | Ent: {entropy:.2f}")
+        
+        await instance.ingest_packet(packet)
+        self.packet_count += 1
+
+# --- HUD: Jophiel-Class (The Visualizer) ---
+def build_hud(orchestrator: MichaelOrchestrator):
+    layout = Layout()
+    layout.split_column(
+        Layout(name="top", size=3),
+        Layout(name="mid"),
+        Layout(name="bottom", size=10)
+    )
+    
+    # Instance Status Table
+    table = Table(title="[bold blue]Active Sentinel Fabric (Legions)[/bold blue]")
+    table.add_column("ID", style="cyan")
+    table.add_column("Status", style="green")
+    table.add_column("Training Data", justify="right")
+    table.add_column("Latest Threat", style="red")
+
+    for inst in orchestrator.instances:
+        latest = inst.threat_log[-1] if inst.threat_log else "CLEAR"
+        status = "VIGILANT" if inst.is_trained else "INITIALIZING"
+        table.add_row(f"Inst-{inst.instance_id}", status, str(len(inst.telemetry)), latest)
+
+    layout["top"].update(Panel(f"GLOBAL SHIELD ACTIVE | Packets: {orchestrator.packet_count} | Uptime: {datetime.now() - orchestrator.start_time}"))
+    layout["mid"].update(table)
+    layout["bottom"].update(Panel(f"Active Blacklist: {list(orchestrator.global_blacklist)[:5]}... (+{len(orchestrator.global_blacklist)})"))
+    
+    return layout
+
+async def main():
+    m Michael = MichaelOrchestrator(instance_count=6)
+    asyncio.create_task(Michael.process_traffic_stream())
+    
+    with Live(refresh_per_second=4, screen=True) as live:
+        while True:
+            live.update(build_hud(Michael))
+            await asyncio.sleep(0.25)
+
+if __name__ == "__main__":
+    asyncio.run(main())
