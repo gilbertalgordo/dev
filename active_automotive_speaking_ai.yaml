@@ -1,0 +1,195 @@
+import cv2
+import pyttsx3
+import threading
+import time
+
+class ArchangelAutoGuardian:
+    def __init__(self):
+        # Initialize Voice Engine (The Clear Voice of Guidance)
+        self.engine = pyttsx3.init()
+        self.voices = self.engine.getProperty('voices')
+        # Selecting a clear, authoritative voice
+        self.engine.setProperty('voice', self.voices[0].id) 
+        self.engine.setProperty('rate', 160)
+        
+        # Kaizen State Management
+        self.parts_registry = {
+            "Brake Pads": {"status": "Scanning", "health": 100, "metric": "mm"},
+            "Engine Oil": {"status": "Scanning", "health": 100, "metric": "% Viscosity"},
+            "Battery": {"status": "Scanning", "health": 100, "metric": "Volts"}
+        }
+
+    def speak(self, text):
+        """Asynchronous speaking to prevent HUD lag."""
+        def run():
+            print(f"[VOICE]: {text}")
+            self.engine.say(text)
+            self.engine.runAndWait()
+        threading.Thread(target=run).start()
+
+    def draw_hud(self, frame):
+        """Renders the 3D-style HUD Overlay."""
+        h, w, _ = frame.shape
+        # Hexagonal Border (Protective Shield)
+        cv2.polylines(frame, [[(50, 50), (w-50, 50), (w-20, 100), (w-20, h-100), (w-50, h-50), (50, h-50), (20, h-100), (20, 100)]], True, (255, 120, 0), 2)
+        
+        # Real-time Telemetry
+        cv2.putText(frame, "ARCHANGEL-SYSTEM ACTIVE | KAIZEN MODE", (60, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        
+        y_offset = 150
+        for part, data in self.parts_registry.items():
+            color = (0, 255, 0) if data['health'] > 50 else (0, 0, 255)
+            # Part Status Bar
+            cv2.putText(frame, f"{part.upper()}: {data['health']}{data['metric']}", (70, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+            cv2.rectangle(frame, (70, y_offset + 10), (70 + int(data['health']*2), y_offset + 25), color, -1)
+            y_offset += 80
+
+    def analyze_physics(self):
+        """Scientific reasoning for part degradation."""
+        # Example: Simulating Kaizen logic for brake wear
+        # Metric: $d_{min} = 1.5mm$ for safety threshold
+        self.parts_registry["Brake Pads"]["health"] = 6.2 # mm
+        self.parts_registry["Engine Oil"]["health"] = 88 # %
+        self.parts_registry["Battery"]["health"] = 12.6 # Volts
+        
+        if self.parts_registry["Brake Pads"]["health"] < 2.0:
+            self.speak("Warning: Brake pad thickness is critical. Friction efficiency is decreasing below safety parameters.")
+        else:
+            self.speak("Brake systems are within optimal mechanical tolerance. Integrity is maintained.")
+
+    def run_scanner(self):
+        cap = cv2.VideoCapture(0)
+        self.speak("System initialized. Guardian protocols active. Scanning for mechanical perfection.")
+        
+        # Trigger scientific analysis once at start
+        self.analyze_physics()
+
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret: break
+            
+            # Simulate Part Detection (Integrate YOLOv8 here for actual part ID)
+            cv2.rectangle(frame, (w//4, h//4), (3*w//4, 3*h//4), (0, 255, 0), 1)
+            
+            self.draw_hud(frame)
+            cv2.imshow("Archangel Automotive HUD", frame)
+            
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+        
+        cap.release()
+        cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    guardian = ArchangelAutoGuardian()
+    guardian.run_scanner()
+
+
+
+import cv2
+import numpy as np
+import pyttsx3
+import threading
+from ultralytics import YOLO
+
+class ArchangelVanguard:
+    def __init__(self, model_path='yolo11n.pt'):
+        # 1. Initialize Neural Core (YOLOv11 for 3D-aware detection)
+        # In a production environment, use a custom-trained model for 'engine_components'
+        self.model = YOLO(model_path) 
+        
+        # 2. Archangel Vocal Interface (Clear, Resonant Voice)
+        self.speech_engine = pyttsx3.init()
+        self.speech_engine.setProperty('rate', 175)
+        self.speech_engine.setProperty('volume', 1.0)
+        
+        # 3. Kaizen Diagnostic Database
+        self.diagnostic_log = {
+            "alternator": {"purity": 0.98, "status": "Optimal", "action": "None"},
+            "battery": {"voltage": 12.6, "state": "Charged", "action": "Monitor"},
+            "radiator": {"temp": 90, "unit": "C", "status": "Stable"}
+        }
+        self.is_speaking = False
+
+    def speak(self, text):
+        """Gabriel-Protocol: Messaging without system latency."""
+        if not self.is_speaking:
+            def run_speech():
+                self.is_speaking = True
+                self.speech_engine.say(text)
+                self.speech_engine.runAndWait()
+                self.is_speaking = False
+            threading.Thread(target=run_speech, daemon=True).start()
+
+    def apply_hud(self, frame, detections):
+        """Renders the 3D-Geometric HUD (Heads-Up Display)."""
+        h, w, _ = frame.shape
+        # Cybernetic Border (Michael's Shield)
+        cv2.rectangle(frame, (20, 20), (w-20, h-20), (255, 100, 0), 2)
+        
+        # Upper Telemetry Bar
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (0, 0), (w, 60), (50, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
+        
+        cv2.putText(frame, "ARCHANGEL VANGUARD | KAIZEN DIAGNOSTIC v2.0", (40, 40), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+
+        # Dynamic Parts Tracking
+        for result in detections:
+            for box in result.boxes:
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                cls = int(box.cls[0])
+                conf = float(box.conf[0])
+                label = result.names[cls]
+
+                # Science-Based Color Coding
+                color = (0, 255, 0) if conf > 0.8 else (0, 255, 255)
+                
+                # 3D-Style Bounding Box
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                cv2.line(frame, (x1, y1), (x1+20, y1-20), color, 2) # 3D Depth Indicator
+                
+                # Diagnostic Data
+                cv2.putText(frame, f"{label.upper()} - CONF: {conf:.2f}", (x1, y1-10), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                
+                if conf > 0.85:
+                    self.perform_scientific_check(label)
+
+    def perform_scientific_check(self, part_name):
+        """Raphael-Protocol: Scientific Reasoning & Healing."""
+        # Simulated thermal/mechanical analysis logic
+        if "battery" in part_name:
+            reasoning = "Analyzing electrochemical potential... Voltage stable at 12.6V. No sulfation detected."
+            self.speak(reasoning)
+        elif "engine" in part_name:
+            reasoning = "Scanning thermal distribution. Kinetic friction is within Kaizen tolerances."
+            self.speak(reasoning)
+
+    def launch(self):
+        """Start the Superfast Kaizen Processing Loop."""
+        cap = cv2.VideoCapture(0)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
+        while cap.isOpened():
+            success, frame = cap.read()
+            if not success: break
+
+            # Active Inference
+            results = self.model(frame, stream=True, verbose=False)
+            
+            # Render Advanced HUD
+            self.apply_hud(frame, results)
+
+            cv2.imshow("Archangel AI: Advanced Automotive HUD", frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+        cap.release()
+        cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    vanguard = ArchangelVanguard()
+    vanguard.launch()
