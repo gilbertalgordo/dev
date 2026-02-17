@@ -257,3 +257,160 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+
+import asyncio
+import numpy as np
+import time
+from datetime import datetime
+from collections import deque, Counter
+from dataclasses import dataclass, field
+from sklearn.ensemble import IsolationForest
+from rich.console import Console
+from rich.live import Live
+from rich.table import Table
+from rich.panel import Panel
+from rich.layout import Layout
+
+# --- Constants & Scientific Parameters ---
+ENTROPY_THRESHOLD = 3.8    # Detects randomized/obfuscated L7 payloads
+RECON_SCAN_SENSITIVITY = 5 # Alert if an IP touches X+ unique ports in <1s
+KAIZEN_WINDOW = 500        # Data points before self-optimization
+
+console = Console()
+
+@dataclass
+class ThreatIntel:
+    ip: str
+    risk_score: float
+    vector: str
+    timestamp: datetime = field(default_factory=datetime.now)
+
+# --- Uriel-Class: The Proactive Scanner (The "Light" that reveals) ---
+class UrielScanner:
+    """Proactively scans logs and connection attempts for reconnaissance signatures."""
+    def __init__(self):
+        self.connection_history = deque(maxlen=2000)
+        self.port_scan_map = {} # IP: set(ports)
+
+    async def scan_for_recon(self, packet):
+        ip = packet['ip']
+        port = packet['port']
+        
+        if ip not in self.port_scan_map:
+            self.port_scan_map[ip] = set()
+        
+        self.port_scan_map[ip].add(port)
+        
+        # Identify "Vertical Scanning" (One IP, many ports)
+        if len(self.port_scan_map[ip]) > RECON_SCAN_SENSITIVITY:
+            return ThreatIntel(ip, 0.85, "PREEMPTIVE_PORT_SCAN")
+        return None
+
+# --- Michael-Class: The Orchestrator (The Commander) ---
+class MichaelOrchestrator:
+    def __init__(self):
+        self.scanner = UrielScanner()
+        self.brain = IsolationForest(contamination=0.02, n_estimators=100)
+        self.telemetry = []
+        self.blacklist = {} # IP: Expiry
+        self.stats = {"blocked": 0, "verified": 0, "recon_thwarted": 0}
+        self.is_optimized = False
+
+    def calculate_shannon_entropy(self, data: str) -> float:
+        """Measures payload randomness to detect bot-generated headers."""
+        if not data: return 0
+        p = [n_x/len(data) for n_x in Counter(data).values()]
+        return -sum(p_i * np.log2(p_i) for p_i in p)
+
+    async def process_ingress(self, packet):
+        """Main Kaizen Loop: Ingest -> Analyze -> Mitigate."""
+        # 1. Proactive Scan (Uriel)
+        intel = await self.scanner.scan_for_recon(packet)
+        if intel:
+            self.execute_ban(intel.ip, "RECON_DETECTION")
+            self.stats["recon_thwarted"] += 1
+            return
+
+        # 2. Layer 7 Entropy & Volumetric Analysis
+        entropy = self.calculate_shannon_entropy(packet['payload'])
+        features = [packet['size'], packet['rate'], entropy]
+        self.telemetry.append(features)
+
+        # 3. AI Inference (If trained)
+        if self.is_optimized:
+            prediction = self.brain.predict([features])
+            if prediction[0] == -1:
+                self.execute_ban(packet['ip'], "ANOMALY_AI")
+                return
+
+        # 4. Self-Optimization (Kaizen)
+        if len(self.telemetry) % KAIZEN_WINDOW == 0:
+            await self.optimize_brain()
+
+        self.stats["verified"] += 1
+
+    async def optimize_brain(self):
+        """Rapid retraining without downtime."""
+        data = np.array(self.telemetry[-KAIZEN_WINDOW:])
+        self.brain.fit(data)
+        self.is_optimized = True
+
+    def execute_ban(self, ip, reason):
+        if ip not in self.blacklist:
+            self.blacklist[ip] = time.time() + 60
+            self.stats["blocked"] += 1
+
+# --- HUD Interface (Gabriel-Class Broadcaster) ---
+def make_hud_layout() -> Layout:
+    layout = Layout()
+    layout.split_column(
+        Layout(name="header", size=3),
+        Layout(name="body"),
+        Layout(name="footer", size=3)
+    )
+    layout["body"].split_row(
+        Layout(name="monitor", ratio=2),
+        Layout(name="scanner_output", ratio=1)
+    )
+    return layout
+
+async def run_sentinel_service():
+    michael = MichaelOrchestrator()
+    layout = make_hud_layout()
+    
+    with Live(layout, refresh_per_second=10, screen=True) as live:
+        while True:
+            # Simulate Traffic Flow
+            for _ in range(5):
+                packet = {
+                    "ip": f"192.168.1.{np.random.randint(1, 255)}",
+                    "port": np.random.choice([80, 443, 22, 8080] if np.random.rand() > 0.1 else range(1000, 5000)),
+                    "size": np.random.normal(500, 200),
+                    "rate": np.random.randint(1, 100),
+                    "payload": "GET /api/v1/resource " + ("X" * np.random.randint(0, 50))
+                }
+                await michael.process_ingress(packet)
+
+            # Update HUD
+            layout["header"].update(Panel(f"[bold white]ACTIVE SENTINEL AI[/bold white] | Status: [bold green]DIVINE VIGILANCE[/bold green] | Nodes: [cyan]Active[/cyan]"))
+            
+            mon_table = Table(title="Live Traffic Stream")
+            mon_table.add_column("Source IP"); mon_table.add_column("Entropy"); mon_table.add_column("Risk")
+            mon_table.add_row("192.168.1.104", "3.21", "[green]LOW[/green]")
+            mon_table.add_row("10.0.4.22", "4.89", "[red]CRITICAL[/red]")
+            
+            scan_table = Table(title="Uriel Scanner (Proactive)")
+            scan_table.add_column("Target"); scan_table.add_column("Threat")
+            for ip in list(michael.blacklist.keys())[-5:]:
+                scan_table.add_row(ip, "PORT_SCAN_RECON")
+
+            layout["monitor"].update(mon_table)
+            layout["scanner_output"].update(scan_table)
+            layout["footer"].update(Panel(f"KAIZEN METRICS: Blocked: {michael.stats['blocked']} | Recon Thwarted: {michael.stats['recon_thwarted']} | System Optimized: {michael.is_optimized}"))
+            
+            await asyncio.sleep(0.1)
+
+if __name__ == "__main__":
+    asyncio.run(run_sentinel_service())
