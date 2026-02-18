@@ -1,0 +1,119 @@
+class Mach7Hybrid:
+    def __init__(self):
+        # Engine Specs: Triple-Rotor + Dual Electric Motors
+        self.rotary_hp = 450
+        self.electric_hp = 350
+        self.max_rpm = 9500
+        self.is_boost_active = False
+
+    def calculate_total_torque(self, current_rpm, throttle_input):
+        """
+        Simulates the Mach 7's power curve.
+        Electric torque fills the low-end gap of the rotary engine.
+        """
+        # Instant electric torque
+        e_torque = self.electric_hp * throttle_input 
+        
+        # Linear rotary power buildup
+        r_torque = (self.rotary_hp * (current_rpm / self.max_rpm)) * throttle_input
+        
+        total_output = e_torque + r_torque
+        
+        if self.is_boost_active:
+            total_output *= 1.25 # 25% KERS Overboost
+            
+        return total_output
+
+# Instance of the Mach 7
+rx7_mach7 = Mach7Hybrid()
+print(f"Total Output at 5000 RPM: {rx7_mach7.calculate_total_torque(5000, 1.0)} HP")
+
+
+
+// Mach 7 HUD Component
+void AMach7HUD::DrawTelemetry() {
+    float CurrentSpeed = Vehicle->GetVelocity();
+    float BatteryLevel = Vehicle->GetHybridBatteryCharge();
+    int CurrentRPM = Vehicle->GetEngineRPM();
+
+    // Render Speedometer (Digital Center)
+    DrawText("SPEED: " + String(CurrentSpeed) + " KM/H", ScreenCenter, Color::Cyan);
+
+    // Hybrid Power Split Bar
+    DrawProgressBar(ScreenLeft, BatteryLevel, Color::Blue); // Electric Flow
+    DrawProgressBar(ScreenRight, (float)CurrentRPM / 9500.0f, Color::Red); // Rotary Flow
+
+    // Mach 7 System Status
+    if (BatteryLevel > 0.8f) {
+        DrawIcon("BOOST READY", ScreenTop, Color::Green);
+    }
+}
+
+
+
+import math
+
+class Mach7AdvancedECU:
+    def __init__(self):
+        # Constants for the Mach 7 Configuration
+        self.MAX_ROTARY_TORQUE = 550  # Nm (13B-REW Hybrid Config)
+        self.MAX_ELECTRIC_TORQUE = 400 # Nm (Instantaneous)
+        self.REDLINE = 9500
+        self.BATTERY_SOC = 1.0        # 100% State of Charge
+        
+    def get_rotary_efficiency(self, rpm):
+        """Calculates thermal efficiency based on Wankel eccentric shaft speed."""
+        return 0.25 + (0.15 * math.sin(math.pi * rpm / self.REDLINE))
+
+    def compute_power_split(self, throttle, rpm):
+        """
+        Kaizen-Optimized Torque Distribution.
+        Logic: Prioritize Electric at low RPM, blend into Rotary at 4k+ RPM.
+        """
+        # 1. Calculate Electric Assist (Torque Fill)
+        # Torque fill is highest when RPM is low and throttle is pinned.
+        fill_factor = max(0, 1 - (rpm / 5000)) 
+        e_torque = self.MAX_ELECTRIC_TORQUE * throttle * fill_factor * self.BATTERY_SOC
+        
+        # 2. Calculate Rotary Output
+        # Simulated turbo lag curve: Torque builds exponentially with RPM
+        r_torque = self.MAX_ROTARY_TORQUE * (throttle ** 2) * (rpm / self.REDLINE)
+        
+        total_torque = e_torque + r_torque
+        total_hp = (total_torque * rpm) / 7127  # Standard HP conversion
+        
+        return {
+            "Total_Torque_Nm": round(total_torque, 2),
+            "HP_Output": round(total_hp, 2),
+            "E_Contribution": f"{int((e_torque/total_torque)*100)}%" if total_torque > 0 else "0%"
+        }
+
+# Execution
+ecu = Mach7AdvancedECU()
+telemetry = ecu.compute_power_split(throttle=1.0, rpm=3500)
+print(f"Mach 7 Telemetry: {telemetry}")
+
+
+
+// Mach 7 HUD Visual Controller
+struct HUDData {
+    float Speed;
+    float RotaryRPM;
+    float ElectricLoad;
+    bool BoostReady;
+};
+
+void RenderMach7HUD(HUDData data) {
+    // 1. Arc-style Tachometer (0 to 9500)
+    float rpmNormalized = data.RotaryRPM / 9500.0f;
+    DrawGlowArc(Vector2(0.5, 0.5), rpmNormalized, Color::ElectricBlue);
+
+    // 2. Hybrid System Status (HUD HUD Display)
+    if (data.ElectricLoad > 0.7f) {
+        DisplayWarning("HYBRID TORQUE FILL ACTIVE", Color::Cyan);
+    }
+
+    // 3. Kaizen Performance Monitor
+    // Real-time micro-adjustments for thermal management
+    UpdateHeatMap(data.RotaryRPM, "Active Cooling Engaged");
+}
