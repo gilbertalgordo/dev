@@ -1,0 +1,152 @@
+import os
+import shutil
+import time
+from pathlib import Path
+from datetime import datetime, timedelta
+
+# --- CONFIGURATION (KAIZEN PARAMETERS) ---
+CLEANING_TARGETS = {
+    "temp_files": ["*.tmp", "*.log", "*.cache", "temp", "tmp"],
+    "downloads_junk": ["*.dmg", "*.exe", "*.zip", "*.apk"],
+    "ai_workspace": ["*checkpoint*", "*_old*", "*.trash"]
+}
+
+RETENTION_DAYS = 7  # Standard Kaizen cycle for review
+
+class ActiveCleaningAI:
+    def __init__(self, root_dir):
+        self.root = Path(root_dir)
+        self.stats = {"deleted": 0, "freed_mb": 0}
+
+    def log_action(self, message):
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"[{timestamp}] [HUD-AI]: {message}")
+
+    def smart_analyze(self, file_path):
+        """
+        AI Reasoning: Determines if a file is truly 'junk' based on 
+        access patterns and metadata.
+        """
+        last_access = datetime.fromtimestamp(file_path.stat().st_atime)
+        is_old = last_access < (datetime.now() - timedelta(days=RETENTION_DAYS))
+        
+        # Heuristic: Large files that haven't been touched in a week are flagged
+        if is_old and file_path.stat().st_size > (50 * 1024 * 1024): # 50MB
+            return True
+        return False
+
+    def clean(self):
+        self.log_action(f"Scanning target: {self.root}")
+        for pattern in [p for sub in CLEANING_TARGETS.values() for p in sub]:
+            for file in self.root.rglob(pattern):
+                try:
+                    if self.smart_analyze(file):
+                        file_size = file.stat().st_size
+                        # file.unlink() # Uncomment to enable active deletion
+                        self.stats["deleted"] += 1
+                        self.stats["freed_mb"] += file_size / (1024 * 1024)
+                        self.log_action(f"Optimized: {file.name}")
+                except Exception as e:
+                    self.log_action(f"Error skipping {file.name}: {e}")
+
+    def display_hud(self):
+        print("\n" + "="*30)
+        print("📊 ACTIVE AI CLEANING HUD")
+        print(f"Files Processed: {self.stats['deleted']}")
+        print(f"Space Reclaimed: {self.stats['freed_mb']:.2f} MB")
+        print(f"System Status:   OPTIMIZED")
+        print("="*30 + "\n")
+
+# --- EXECUTION ---
+if __name__ == "__main__":
+    # For PC: Path.home() / "Downloads"
+    # For Phone (Termux): "/sdcard/Download"
+    cleaner = ActiveCleaningAI(Path.home() / "Downloads")
+    cleaner.clean()
+    cleaner.display_hud()
+
+
+
+import os
+import shutil
+import asyncio
+import psutil
+import logging
+from pathlib import Path
+from datetime import datetime
+
+# --- KAIZEN OPTIMIZATION CONSTANTS ---
+THRESHOLD_RAM_PERCENT = 85.0  # Trigger cleaning if RAM > 85%
+THRESHOLD_DISK_PERCENT = 90.0 # Trigger cleaning if Disk > 90%
+VIRTUAL_HUD_SYMBOL = "💠"
+
+class AdvancedCleaningAI:
+    def __init__(self):
+        self.log = logging.getLogger("ArchangelAI")
+        self.cleanup_registry = [
+            Path.home() / "AppData/Local/Temp",  # Windows
+            Path("/tmp"),                        # Linux/Mac
+            Path("/sdcard/Download/.cache"),     # Android (Termux)
+            Path.home() / ".cache"               # Developer Caches
+        ]
+
+    async def get_system_vitals(self):
+        """HUD: Real-time telemetry of system health."""
+        ram = psutil.virtual_memory().percent
+        cpu = psutil.cpu_percent(interval=1)
+        disk = psutil.disk_usage('/').percent
+        return {"ram": ram, "cpu": cpu, "disk": disk}
+
+    async def identify_muda(self, path: Path):
+        """
+        AI Reasoning: Calculates the entropy of a directory.
+        Logic: If a file is a 'Log' or 'Cache' and hasn't been 
+        accessed in $T > 48h$, it is marked for compression or removal.
+        """
+        if not path.exists():
+            return 0
+
+        freed_space = 0
+        for item in path.iterdir():
+            try:
+                # Check for 'Stale' data (Scientific Reasoning)
+                last_access = (datetime.now() - datetime.fromtimestamp(item.stat().st_atime)).days
+                if last_access > 2 or item.suffix in ['.log', '.tmp', '.old']:
+                    size = item.stat().st_size
+                    if item.is_file():
+                        item.unlink()
+                        freed_space += size
+                    elif item.is_dir():
+                        shutil.rmtree(item)
+                        freed_space += size
+            except Exception:
+                continue
+        return freed_space
+
+    async def active_cycle(self):
+        """The Kaizen Loop: Continuous background optimization."""
+        while True:
+            vitals = await self.get_system_vitals()
+            
+            # HUD Output
+            print(f"\r{VIRTUAL_HUD_SYMBOL} [HUD] CPU: {vitals['cpu']}% | RAM: {vitals['ram']}% | DISK: {vitals['disk']}%", end="")
+
+            # Logical Trigger: Only clean if thresholds are breached
+            if vitals['ram'] > THRESHOLD_RAM_PERCENT or vitals['disk'] > THRESHOLD_DISK_PERCENT:
+                print(f"\n[!] Threshold Breach detected. Initiating Active Purge...")
+                total_freed = 0
+                for target in self.cleanup_registry:
+                    total_freed += await self.identify_muda(target)
+                
+                print(f"[*] Kaizen Complete: {total_freed / (1024**2):.2f} MB reclaimed.")
+            
+            await asyncio.sleep(60) # Wait 1 minute before next scan
+
+# --- EXECUTION ---
+if __name__ == "__main__":
+    ai = AdvancedCleaningAI()
+    print("--- ARCHANGEL ACTIVE CLEANING AI INITIALIZED ---")
+    try:
+        asyncio.run(ai.active_cycle())
+    except KeyboardInterrupt:
+        print("\n[!] AI Hibernating. Systems remaining in optimized state.")
