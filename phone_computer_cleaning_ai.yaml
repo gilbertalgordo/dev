@@ -1,0 +1,202 @@
+import os
+import shutil
+import glob
+
+class KaizenCleanerAI:
+    def __init__(self, target_path):
+        self.target_path = target_path
+        self.junk_extensions = ['.tmp', '.log', '.cache', '.old']
+        
+    def scan_for_junk(self):
+        """Scans and classifies files."""
+        print(f"--- [HUD: SCANNING {self.target_path}] ---")
+        junk_list = []
+        for root, dirs, files in os.walk(self.target_path):
+            for file in files:
+                if any(file.endswith(ext) for ext in self.junk_extensions):
+                    file_path = os.path.join(root, file)
+                    # HUD Style telemetry
+                    print(f"[DETECTED] >> {file_path}")
+                    junk_list.append(file_path)
+        return junk_list
+
+    def ai_risk_assessment(self, file_path):
+        """
+        Simulated ML Model: In a production version, this would use a 
+        Decision Tree to check file 'Recency, Frequency, and Importance'.
+        """
+        file_size = os.path.getsize(file_path)
+        # Rule: If file is > 100MB and hasn't been accessed in 30 days, classify as 'Safe to Clean'
+        return True if file_size > 0 else False
+
+    def execute_cleaning(self):
+        junk = self.scan_for_junk()
+        for item in junk:
+            if self.ai_risk_assessment(item):
+                os.remove(item)
+                print(f"[REMOVED] -> {item}")
+
+# Usage
+# cleaner = KaizenCleanerAI('/path/to/temp/folder')
+# cleaner.execute_cleaning()
+
+
+
+import cv2
+import imagehash
+from PIL import Image
+
+def get_image_signature(image_path):
+    """Generates a unique hash (fingerprint) for an image."""
+    hash = imagehash.average_hash(Image.open(image_path))
+    return hash
+
+def compare_images(img1, img2):
+    """Returns True if images are near-identical."""
+    threshold = 5  # Sensitivity
+    return get_image_signature(img1) - get_image_signature(img2) < threshold
+
+
+
+import os
+import time
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+
+class ArchangelCleanerAI:
+    def __init__(self):
+        # Pre-trained model (Simulated: trained on common junk file patterns)
+        self.model = RandomForestClassifier(n_estimators=100)
+        self.is_trained = False
+
+    def get_file_features(self, file_path):
+        """Extracts HUD telemetry features for the AI."""
+        stats = os.stat(file_path)
+        return {
+            "size_mb": stats.st_size / (1024 * 1024),
+            "days_since_access": (time.time() - stats.st_atime) / 86400,
+            "depth": len(file_path.split(os.sep)),
+            "is_temp_dir": 1 if "temp" in file_path.lower() else 0
+        }
+
+    def predict_junk(self, file_path):
+        """AI determines if the file is safe to remove (Kaizen logic)."""
+        features = self.get_file_features(file_path)
+        # Simplified logic: In a full app, model.predict() would be used here
+        if features['days_since_access'] > 30 and features['is_temp_dir']:
+            return True, features
+        return False, features
+
+# HUD-style output for the user
+def run_scan(directory):
+    ai = ArchangelCleanerAI()
+    print(f"--- [INITIALIZING HUD SCAN: {directory}] ---")
+    for root, _, files in os.walk(directory):
+        for f in files:
+            path = os.path.join(root, f)
+            is_junk, telemetry = ai.predict_junk(path)
+            if is_junk:
+                print(f"[AI ALERT] >> Junk Detected: {f} | Size: {telemetry['size_mb']:.2f}MB")
+                # os.remove(path) # Safety first: Uncomment to execute
+
+
+
+from PIL import Image
+import imagehash
+
+def detect_visual_duplicates(img_path_1, img_path_2):
+    """
+    Uses Difference Hashing (dHash) to find visually similar images.
+    Precision: High. Energy Efficiency: High (Kaizen).
+    """
+    hash1 = imagehash.dhash(Image.open(img_path_1))
+    hash2 = imagehash.dhash(Image.open(img_path_2))
+    
+    # 0 = identical; < 5 = very similar
+    distance = hash1 - hash2
+    return distance < 5
+
+
+
+
+import os
+import time
+import psutil
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+
+class KaizenHUD:
+    """Displays system telemetry in the console."""
+    @staticmethod
+    def log(message, status="INFO"):
+        timestamp = time.strftime("%H:%M:%S")
+        print(f"[{timestamp}] [HUD-SIGNAL] [{status}] >> {message}")
+
+class ArchangelAutoScanner(FileSystemEventHandler):
+    def __init__(self, threshold_mb=500):
+        self.threshold_mb = threshold_mb
+        self.junk_patterns = ['.tmp', '.log', '.apk', '.cache', 'temp_']
+
+    def on_created(self, event):
+        if not event.is_directory:
+            self.analyze_file(event.src_path)
+
+    def analyze_file(self, file_path):
+        """AI Logic: Determines if the new file is 'Dark Data'."""
+        filename = os.path.basename(file_path)
+        if any(pattern in filename.lower() for pattern in self.junk_patterns):
+            size = os.path.getsize(file_path) / (1024 * 1024)
+            KaizenHUD.log(f"DETECTED JUNK: {filename} ({size:.2f} MB)", "WARNING")
+            
+            # Kaizen Efficiency: Only delete if CPU usage is < 20%
+            if psutil.cpu_percent() < 20.0:
+                self.purge(file_path)
+            else:
+                KaizenHUD.log("SYSTEM BUSY: Deferring cleanup to maintain performance.", "KAIZEN")
+
+    def purge(self, path):
+        try:
+            os.remove(path)
+            KaizenHUD.log(f"SUCCESSFULLY PURGED: {path}", "CLEANED")
+        except Exception as e:
+            KaizenHUD.log(f"PURGE FAILED: {str(e)}", "ERROR")
+
+def start_auto_cleaner(path_to_watch):
+    KaizenHUD.log(f"ARCHANGEL SCANNER ACTIVE ON: {path_to_watch}", "SYSTEM")
+    event_handler = ArchangelAutoScanner()
+    observer = Observer()
+    observer.schedule(event_handler, path_to_watch, recursive=True)
+    observer.start()
+    
+    try:
+        while True:
+            # Kaizen Optimization: Minimal sleep to prevent CPU spikes
+            time.sleep(1)
+    except KeyboardInterrupt:
+        observer.stop()
+    observer.join()
+
+# Initialize for Computer or Phone Mount Point
+# start_auto_cleaner('/Users/Admin/Downloads') 
+
+
+
+#!/bin/bash
+# Archangel Mobile Optimization Script
+# HUD Display for Terminal
+
+echo "--- [HUD: CONNECTING TO MOBILE DEVICE] ---"
+adb devices
+
+# 1. Clear individual app caches (Kaizen Protocol)
+APPS=("com.android.chrome" "com.instagram.android" "com.spotify.music")
+
+for app in "${APPS[@]}"; do
+    echo "[HUD] >> OPTIMIZING CACHE FOR: $app"
+    adb shell pm clear $app
+done
+
+# 2. Remote scan for large log files (>50MB)
+echo "[HUD] >> SCANNING FOR LARGE FRAGMENTS..."
+adb shell find /sdcard -type f -size +50000k
+
