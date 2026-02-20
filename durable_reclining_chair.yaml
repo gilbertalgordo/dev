@@ -1,0 +1,118 @@
+import React, { useRef } from 'react';
+import { Canvas } from '@react-three/fiber';
+import { OrbitControls, PerspectiveCamera, Html } from '@react-three/drei';
+
+const CarbonFiberChair = () => {
+  return (
+    <group>
+      {/* Frame: Lightweight CFRP Instance */}
+      <mesh castShadow position={[0, 1, 0]}>
+        <cylinderGeometry args={[0.03, 0.03, 2, 32]} />
+        <meshStandardMaterial color="#1a1a1a" roughness={0.2} metalness={0.8} />
+      </mesh>
+
+      {/* Rubberized Cushion */}
+      <mesh position={[0, 1.2, 0.1]} rotation={[Math.PI / 4, 0, 0]}>
+        <boxGeometry args={[0.6, 1.2, 0.08]} />
+        <meshStandardMaterial color="#333" roughness={0.9} />
+      </mesh>
+
+      {/* Attachable Carbon Plate for Laptop */}
+      <mesh position={[0.5, 1.5, 0.3]}>
+        <boxGeometry args={[0.4, 0.01, 0.3]} />
+        <meshStandardMaterial color="#000" metalness={1} />
+        {/* HUD Overlay for Tech Specs */}
+        <Html distanceFactor={1.5} position={[0, 0.1, 0]}>
+          <div style={{ color: 'cyan', fontFamily: 'monospace', background: 'rgba(0,0,0,0.5)', padding: '5px' }}>
+            [SYSTEM_OK]: ATTACHED_PLATE <br/>
+            LOAD: 2.5kg | ANGLE: 15°
+          </div>
+        </Html>
+      </mesh>
+    </group>
+  );
+};
+
+export default function App() {
+  return (
+    <Canvas shadows style={{ height: '500px', background: '#050505' }}>
+      <PerspectiveCamera makeDefault position={[3, 3, 3]} />
+      <ambientLight intensity={0.5} />
+      <pointLight position={[10, 10, 10]} castShadow />
+      <CarbonFiberChair />
+      <OrbitControls />
+    </Canvas>
+  );
+}
+
+
+
+// ADVANCED PARAMETRIC CARBON CHAIR v2.0
+// Materials: CFRP Tubing, Titanium Pivots, TPE Rubber
+
+// --- CONSTANTS ---
+recline_angle = 135; // Variable: 90 to 180
+tube_d = 32;         // 32mm Carbon Fiber Tube
+wall_t = 2.5;        // Wall thickness for stress distribution
+plate_dim = [350, 250, 4]; // Laptop Plate Dimensions (mm)
+
+module frame_instance() {
+    color([0.1, 0.1, 0.1]) 
+    render() {
+        // Main Rail Structural Loop
+        difference() {
+            cylinder(h = 1100, d = tube_d, $fn = 64);
+            cylinder(h = 1101, d = tube_d - wall_t, $fn = 64);
+        }
+    }
+}
+
+module rubber_cushion() {
+    color([0.2, 0.2, 0.2])
+    translate([0, 10, 0])
+    // Ergonomic ribbing for airflow and grip
+    for (i = [0 : 100 : 900]) {
+        translate([0, 0, i])
+        rotate([0, 90, 0])
+        cylinder(h = 500, d = 45, $fn = 32);
+    }
+}
+
+module tech_plate() {
+    color([0, 0, 0])
+    translate([550, 0, 600])
+    rotate([0, -15, 0])
+    cube(plate_dim, center = true);
+}
+
+// --- ASSEMBLY ---
+union() {
+    frame_instance(); // Left Rail
+    translate([500, 0, 0]) frame_instance(); // Right Rail
+    rotate([recline_angle - 180, 0, 0]) translate([0, 0, 400]) {
+        rubber_cushion();
+        tech_plate(); // Integrated Laptop/Phone Mount
+    }
+}
+
+
+
+// HUD Scanline and Grid Overlay Shader
+precision highp float;
+varying vec2 vUv;
+uniform float time;
+
+void main() {
+    // Base Carbon Fiber Twill Pattern Simulation
+    float pattern = step(0.5, fract(vUv.x * 20.0 + vUv.y * 20.0));
+    vec3 baseColor = mix(vec3(0.05), vec3(0.12), pattern);
+
+    // HUD Grid Overlay
+    float grid = sin(vUv.x * 100.0) * sin(vUv.y * 100.0);
+    float line = smoothstep(0.9, 1.0, grid);
+    
+    // Pulsing "Active" Cyan HUD Color
+    vec3 hudColor = vec3(0.0, 1.0, 1.0) * line * (0.5 + 0.5 * sin(time * 2.0));
+    
+    gl_FragColor = vec4(baseColor + hudColor, 1.0);
+}
