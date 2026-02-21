@@ -1,0 +1,93 @@
+// --- Parameters ---
+table_height = 75;
+table_width = 120;
+table_depth = 60;
+bench_height = 45;
+bench_width = 110;
+bench_depth = 30;
+slat_thickness = 2;
+frame_thickness = 3; // Carbon fiber profile
+
+// --- Modules ---
+
+module carbon_frame_x_legs(h, w, d) {
+    color([0.2, 0.2, 0.2]) { // Matte Carbon Fiber Dark Grey
+        // Leg 1
+        translate([0, 0, 0]) rotate([0, -20, 0]) 
+            cube([frame_thickness, d, h * 1.1]);
+        // Leg 2 (Crossing)
+        translate([w/4, 0, 0]) rotate([0, 20, 0]) 
+            cube([frame_thickness, d, h * 1.1]);
+    }
+}
+
+module wood_slats(w, d) {
+    color([0.6, 0.4, 0.2]) { // Natural Wood Tone
+        for (i = [0 : 10 : d-5]) {
+            translate([0, i, 0])
+                cube([w, 8, slat_thickness]);
+        }
+    }
+}
+
+// --- Assembly ---
+
+// Main Table
+translate([0, 0, 0]) {
+    carbon_frame_x_legs(table_height, table_width, table_depth);
+    translate([-table_width/8, 0, table_height]) 
+        wood_slats(table_width, table_depth);
+}
+
+// Bench 1
+translate([0, -80, 0]) {
+    carbon_frame_x_legs(bench_height, bench_width, bench_depth);
+    translate([-bench_width/8, 0, bench_height]) 
+        wood_slats(bench_width, bench_depth);
+}
+
+// Bench 2
+translate([0, 110, 0]) {
+    carbon_frame_x_legs(bench_height, bench_width, bench_depth);
+    translate([-bench_width/8, 0, bench_height]) 
+        wood_slats(bench_width, bench_depth);
+}
+
+
+
+import cadquery as cq
+
+# --- HUD & Engineering Parameters ---
+CF_TUBE_OD = 25.0       # Carbon Fiber Tube Outer Diameter (mm)
+CF_WALL_THICKNESS = 2.5 # High-tensile wall thickness
+WOOD_SLAT_W = 60.0      # Slat width
+SLAT_GAP = 5.0          # Thermal expansion gap
+TABLE_L = 1200.0        # Total length
+BENCH_L = 1100.0        # Total bench length
+
+def generate_hybrid_surface(length, width, thickness=15):
+    """Generates the wood board assembly with CF structural inserts"""
+    num_slats = int(width / (WOOD_SLAT_W + SLAT_GAP))
+    surface = cq.Workplane("XY")
+    
+    for i in range(num_slats):
+        offset = i * (WOOD_SLAT_W + SLAT_GAP)
+        surface = surface.center(0, offset).box(length, WOOD_SLAT_W, thickness).center(0, -offset)
+        
+    # Subtracting holes for the Carbon Fiber support spine
+    spine_cut = cq.Workplane("YZ").circle(CF_TUBE_OD/2).extrude(length)
+    return surface.cut(spine_cut)
+
+def generate_x_frame(height, spread):
+    """Generates the foldable X-leg mechanism"""
+    leg = cq.Workplane("XY").rect(CF_TUBE_OD, CF_TUBE_OD).extrude(height)
+    leg1 = leg.rotate((0,0,0), (0,1,0), 25)
+    leg2 = leg.rotate((0,0,0), (0,1,0), -25).translate((spread, 0, 0))
+    return leg1.union(leg2)
+
+# Assembly Instance
+table_top = generate_hybrid_surface(TABLE_L, 600)
+table_legs = generate_x_frame(750, 400).translate([-TABLE_L/4, 300, 0])
+
+# Export for 3D Printing or CNC
+# cq.exporters.export(table_top, 'table_top.stl')
