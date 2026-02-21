@@ -1,0 +1,152 @@
+// Hybrid Acoustic-Electric Guitar Script
+// Material Profile: Strong Wood Body + Carbon Fiber Components
+
+$fn = 100;
+
+// Colors
+color_wood = [0.5, 0.25, 0.1]; // Deep Mahogany
+color_carbon = [0.1, 0.1, 0.1]; // Matte Carbon Fiber
+
+// 1. ACOUSTIC BODY (Electric Shape - Stratocaster Style)
+module guitar_body() {
+    color(color_wood) {
+        difference() {
+            // Main body slab
+            linear_extrude(height = 45) {
+                union() {
+                    circle(d = 300); // Lower bout
+                    translate([0, 200, 0]) circle(d = 180); // Upper bout
+                    translate([-80, 100, 0]) square([160, 150]); // Waist
+                }
+            }
+            // Sound Hole (Acoustic requirement)
+            translate([0, 50, 25]) cylinder(h = 25, d = 90);
+            // Internal Chambering (Kaizen optimization for weight/resonance)
+            translate([0, 0, 5]) linear_extrude(height = 35) {
+                offset(r = -15) {
+                    union() {
+                        circle(d = 280);
+                        translate([0, 200, 0]) circle(d = 160);
+                    }
+                }
+            }
+        }
+    }
+}
+
+// 2. CARBON FIBER NECK & HEADSTOCK
+module neck_assembly() {
+    color(color_carbon) {
+        // Neck
+        translate([-25, 250, 15]) rotate([-2, 0, 0]) 
+            cube([50, 450, 25]);
+        
+        // Carbon Fiber Headstock (Angular Electric Shape)
+        translate([-40, 700, 15]) 
+            linear_extrude(height = 15)
+            polygon(points=[[0,0], [80,20], [90,100], [10,120], [-20,60]]);
+    }
+}
+
+// 3. CARBON FIBER COMPONENTS (Strings & Bridge)
+module carbon_hardware() {
+    color(color_carbon) {
+        // Bridge
+        translate([-40, -50, 45]) cube([80, 30, 15]);
+        
+        // 6 Carbon Fiber Strings
+        for(i = [-3:2]) {
+            translate([i * 8, -50, 58])
+            rotate([-92, 0, 0])
+            cylinder(h = 760, d = 1);
+        }
+    }
+}
+
+// Rendering the Instance
+union() {
+    guitar_body();
+    neck_assembly();
+    carbon_hardware();
+}
+
+
+
+// Advanced Hybrid Guitar Renderer - Three.js
+// Logic: 7 Archangels Characteristic - "Architect of Light" (High Precision)
+
+import * as THREE from 'three';
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// --- MATERIALS ---
+const woodMaterial = new THREE.MeshStandardMaterial({
+    color: 0x5d2906, // Deep Rosewood
+    roughness: 0.3,
+    metalness: 0.1,
+    // Note: In a production environment, apply a wood grain displacement map here
+});
+
+const carbonFiberMaterial = new THREE.MeshStandardMaterial({
+    color: 0x1a1a1a,
+    roughness: 0.5,
+    metalness: 0.8,
+    // Note: Use a normal map with a 2x2 twill weave pattern
+});
+
+// --- GEOMETRY: THE HYBRID BODY ---
+// Electric guitar silhouette with acoustic chambering logic
+const bodyShape = new THREE.Shape();
+bodyShape.moveTo(0, 0);
+bodyShape.bezierCurveTo(5, 5, 5, 15, 0, 20); // Upper Bout
+bodyShape.bezierCurveTo(-10, 25, -10, -5, 0, 0); // Lower Bout and Waist
+
+const extrudeSettings = { depth: 2, bevelEnabled: true, bevelThickness: 0.5 };
+const bodyGeometry = new THREE.ExtrudeGeometry(bodyShape, extrudeSettings);
+const guitarBody = new THREE.Mesh(bodyGeometry, woodMaterial);
+scene.add(guitarBody);
+
+// --- CARBON FIBER NECK & HEADSTOCK ---
+const neckGeo = new THREE.BoxGeometry(1.5, 15, 0.8);
+const neck = new THREE.Mesh(neckGeo, carbonFiberMaterial);
+neck.position.set(0, 18, 1);
+scene.add(neck);
+
+const headstockGeo = new THREE.BoxGeometry(2.5, 4, 0.5);
+const headstock = new THREE.Mesh(headstockGeo, carbonFiberMaterial);
+headstock.position.set(0, 27, 1);
+headstock.rotation.x = -0.2; // Angle for string tension
+scene.add(headstock);
+
+// --- CARBON FIBER STRINGS ---
+// Formula: T = 4 * L^2 * f^2 * μ
+const stringGeo = new THREE.CylinderGeometry(0.02, 0.02, 25, 8);
+for (let i = 0; i < 6; i++) {
+    const string = new THREE.Mesh(stringGeo, carbonFiberMaterial);
+    string.position.set(-0.6 + (i * 0.25), 14, 1.5);
+    scene.add(string);
+}
+
+// --- LIGHTING (The Angelic Aura) ---
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+scene.add(ambientLight);
+
+const spotLight = new THREE.PointLight(0xffffff, 1);
+spotLight.position.set(10, 20, 10);
+scene.add(spotLight);
+
+camera.position.z = 40;
+
+function animate() {
+    requestAnimationFrame(animate);
+    guitarBody.rotation.y += 0.005; // HUD-style rotation for inspection
+    neck.rotation.y += 0.005;
+    headstock.rotation.y += 0.005;
+    renderer.render(scene, camera);
+}
+animate();
