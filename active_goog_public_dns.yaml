@@ -1,0 +1,109 @@
+import requests
+import json
+
+class GoogleDNS_AI:
+    def __init__(self):
+        self.doh_url = "https://dns.google/resolve"
+        self.headers = {"Accept": "application/dns-json"}
+
+    def resolve(self, domain, record_type="A"):
+        """
+        Active DNS Resolution via Google Public DoH
+        """
+        params = {
+            "name": domain,
+            "type": record_type,
+            "do": "true",  # DNSSEC validation
+        }
+        
+        try:
+            response = requests.get(self.doh_url, params=params, headers=self.headers)
+            data = response.json()
+            
+            # --- HUD Display ---
+            print(f" [DNS_HUD] QUERY: {domain} | TYPE: {record_type}")
+            print(f" [DNS_HUD] STATUS: {data.get('Status')} (0 = Success)")
+            
+            if "Answer" in data:
+                for answer in data["Answer"]:
+                    print(f" [DNS_HUD] DATA: {answer['data']} | TTL: {answer['TTL']}")
+                return data["Answer"]
+            else:
+                print(" [DNS_HUD] WARNING: No records found.")
+                return None
+                
+        except Exception as e:
+            print(f" [DNS_HUD] ERROR: {str(e)}")
+            return None
+
+# Initialization
+dns_agent = GoogleDNS_AI()
+results = dns_agent.resolve("google.com")
+
+
+
+import asyncio
+import aiohttp
+import time
+from aiocache import cached, Cache
+from aiocache.serializers import JsonSerializer
+
+class KaizenDNSAgent:
+    """
+    Advanced Active Google DNS AI Agent
+    Features: Asynchronous I/O, TTL Caching, HUD Logging
+    """
+    def __init__(self):
+        self.endpoint = "https://dns.google/resolve"
+        self.session = None
+
+    async def start(self):
+        """Initialize the async session"""
+        self.session = aiohttp.ClientSession(headers={"Accept": "application/dns-json"})
+
+    async def stop(self):
+        """Close the session"""
+        if self.session:
+            await self.session.close()
+
+    @cached(ttl=300, cache=Cache.MEMORY, serializer=JsonSerializer())
+    async def resolve(self, domain: str, record_type: str = "A"):
+        """
+        Perform an optimized DNS-over-HTTPS lookup with caching.
+        """
+        params = {
+            "name": domain,
+            "type": record_type,
+            "do": "true" # Enable DNSSEC validation
+        }
+        
+        start_time = time.perf_counter()
+        async with self.session.get(self.endpoint, params=params) as response:
+            data = await response.json()
+            latency = (time.perf_counter() - start_time) * 1000
+            
+            # --- HUD: REAL-TIME TELEMETRY ---
+            status = "SUCCESS" if data.get("Status") == 0 else "FAILED"
+            print(f"[{time.strftime('%H:%M:%S')}] ❯❯ DNS_HUD | Domain: {domain:15} | Latency: {latency:6.2f}ms | Status: {status}")
+            
+            return data.get("Answer", [])
+
+async def main():
+    agent = KaizenDNSAgent()
+    await agent.start()
+    
+    # Concurrent batch processing (Kaizen speed)
+    domains = ["google.com", "github.com", "openai.com", "anthropic.com"]
+    tasks = [agent.resolve(domain) for domain in domains]
+    
+    results = await asyncio.gather(*tasks)
+    
+    # Example Output Processing
+    for domain, res in zip(domains, results):
+        ips = [r['data'] for r in res] if res else ["No Record"]
+        print(f"RESULT: {domain} -> {ips}")
+
+    await agent.stop()
+
+if __name__ == "__main__":
+    asyncio.run(main())
