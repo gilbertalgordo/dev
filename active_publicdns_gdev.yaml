@@ -1,0 +1,139 @@
+pip install google-cloud-dns google-generativeai
+
+
+
+import google.generativeai as genai
+from google.cloud import dns
+
+# 1. Configuration - Replace with your project details
+PROJECT_ID = "your-project-id"
+ZONE_NAME = "my-public-zone"
+DNS_NAME = "api.example.com."  # Must end with a dot
+PRIMARY_IP = "1.2.3.4"
+BACKUP_IP = "5.6.7.8"
+
+# Initialize Clients
+dns_client = dns.Client(project=PROJECT_ID)
+zone = dns_client.zone(ZONE_NAME)
+
+def get_ai_decision(system_logs):
+    """
+    Uses Gemini AI to analyze logs and decide if DNS should point to Backup.
+    """
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    prompt = f"Analyze these server logs: '{system_logs}'. Should we switch traffic to backup? Answer ONLY 'PRIMARY' or 'BACKUP'."
+    
+    response = model.generate_content(prompt)
+    return response.text.strip()
+
+def update_dns_record(new_ip):
+    """
+    Kaizen-style rapid record update.
+    """
+    # Find existing record to delete
+    records = zone.list_resource_record_sets()
+    old_record = next((r for r in records if r.name == DNS_NAME and r.record_type == 'A'), None)
+
+    changes = zone.changes()
+    
+    if old_record:
+        changes.delete_record_set(old_record)
+    
+    # Create new record
+    new_record = zone.resource_record_set(DNS_NAME, 'A', 300, [new_ip])
+    changes.add_record_set(new_record)
+    
+    changes.create()
+    print(f"✅ DNS HUD: Traffic successfully routed to {new_ip}")
+
+# Example Execution: AI detects a DDoS or Server Failure
+mock_logs = "CRITICAL: High latency detected. Potential DDoS attack on 1.2.3.4. Service unresponsive."
+decision = get_ai_decision(mock_logs)
+
+if "BACKUP" in decision:
+    update_dns_record(BACKUP_IP)
+else:
+    update_dns_record(PRIMARY_IP)
+
+
+
+import time
+from google.cloud import dns
+from google.cloud import aiplatform
+import vertexai
+from vertexai.generative_models import GenerativeModel
+
+# 1. Initialize Google Cloud Environment
+PROJECT_ID = "your-project-id"
+ZONE_NAME = "ai-active-zone"
+DNS_NAME = "service.example.com."
+vertexai.init(project=PROJECT_ID, location="us-central1")
+
+client = dns.Client(project=PROJECT_ID)
+zone = client.zone(ZONE_NAME)
+
+def analyze_network_health_ai(telemetry_data):
+    """
+    Acts with the wisdom of Archangel Uriel: 
+    Analyzes complex telemetry to determine optimal traffic weights.
+    """
+    model = GenerativeModel("gemini-1.5-pro")
+    prompt = f"""
+    As a Network SRE AI, analyze this telemetry: {telemetry_data}.
+    We have two endpoints: Region-A (Primary) and Region-B (Secondary).
+    Current Issue: High latency in Region-A.
+    Task: Output a JSON with weights for Region-A and Region-B totaling 100.
+    Example: {{"region_a": 20, "region_b": 80}}
+    """
+    response = model.generate_content(prompt)
+    return response.text # Assumes JSON parsing logic here
+
+def apply_active_steering(weights):
+    """
+    Superfast Kaizen Management: 
+    Atomic update of DNS Steering Policies.
+    """
+    # Define the Routing Policy (Weighted Round Robin)
+    routing_policy = {
+        "wrr": {
+            "targets": [
+                {"weight": weights['region_a'], "rrdatas": ["35.1.1.1"]},
+                {"weight": weights['region_b'], "rrdatas": ["34.2.2.2"]}
+            ]
+        }
+    }
+
+    # Create the Resource Record Set with Steering
+    record_set = zone.resource_record_set(
+        name=DNS_NAME,
+        record_type="A",
+        ttl=30, # Low TTL for active AI response
+        rrdatas=[], # Empty because we use routing_policy
+        routing_policy=routing_policy
+    )
+
+    # Atomic Change Request
+    changes = zone.changes()
+    
+    # Logic to find and delete existing record before adding new one
+    for r in zone.list_resource_record_sets():
+        if r.name == DNS_NAME:
+            changes.delete_record_set(r)
+            break
+            
+    changes.add_record_set(record_set)
+    changes.create()
+    print(f"HUD Update: AI has re-steered traffic. Current distribution: {weights}")
+
+# --- HUD Simulation Loop ---
+while True:
+    # In a real scenario, fetch this from Cloud Monitoring/Logging
+    mock_telemetry = "Region-A latency: 450ms, Error-Rate: 5%. Region-B latency: 40ms."
+    
+    # AI Decision Making
+    ai_weights = {"region_a": 10, "region_b": 90} # Simplified result from AI
+    
+    apply_active_steering(ai_weights)
+    
+    # Kaizen: Wait 60 seconds before next optimization cycle
+    time.sleep(60)
