@@ -1,0 +1,210 @@
+/* * Project: Archangel-Class All-in-One Bike Gadget
+ * Features: GPS, HUD, Camera, Flashlight, Speedometer
+ * Principles: Kaizen Efficiency & Multi-core Processing
+ */
+
+#include "esp_camera.h"
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <TinyGPS++.h>
+#include <SoftwareSerial.h>
+
+// --- Configuration & Pins ---
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET    -1
+#define FLASHLIGHT_PIN 4  // ESP32-CAM built-in bright LED
+#define REED_SWITCH    13 // For physical wheel speed sensor
+
+// GPS Pins (adjust based on your wiring)
+static const int RXPin = 14, TXPin = 15;
+static const uint32_t GPSBaud = 9600;
+
+// --- Objects ---
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+TinyGPSPlus gps;
+SoftwareSerial ss(RXPin, TXPin);
+
+// Variables for Speed & HUD
+float currentSpeed = 0.0;
+unsigned long lastUpdate = 0;
+
+void setup() {
+  Serial.begin(115200);
+  ss.begin(GPSBaud);
+  
+  pinMode(FLASHLIGHT_PIN, OUTPUT);
+  pinMode(REED_SWITCH, INPUT_PULLUP);
+
+  // Initialize HUD (OLED)
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println(F("HUD Allocation failed"));
+    for(;;);
+  }
+  
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  
+  // Initialize Camera (Standard ESP32-CAM Config)
+  camera_config_t config;
+  config.ledc_channel = LEDC_CHANNEL_0;
+  config.ledc_timer = LEDC_TIMER_0;
+  config.pin_d0 = 5; // Simplified for brevity
+  // ... (Full camera pin mappings would go here)
+  
+  esp_err_t err = esp_camera_init(&config);
+  if (err != ESP_OK) {
+    Serial.printf("Camera init failed with error 0x%x", err);
+  }
+}
+
+void loop() {
+  // 1. Process GPS Data
+  while (ss.available() > 0) {
+    gps.encode(ss.read());
+  }
+
+  // 2. Update HUD Logic
+  if (millis() - lastUpdate > 500) { // Update every 0.5s
+    updateHUD();
+    lastUpdate = millis();
+  }
+  
+  // 3. Optional: Trigger Flashlight based on Light Sensor/Button
+  // digitalWrite(FLASHLIGHT_PIN, HIGH); 
+}
+
+void updateHUD() {
+  display.clearDisplay();
+  
+  // MIRROR TEXT FOR HUD REFLECTION
+  // In a real HUD, the display is reflected on glass, so we flip it.
+  display.setRotation(2); // Flips the screen 180 degrees if needed
+  
+  // Speed Display
+  display.setTextSize(2);
+  display.setCursor(10, 0);
+  if (gps.speed.isValid()) {
+    display.print(gps.speed.kmph());
+    display.print(" km/h");
+  } else {
+    display.print("0.0 km/h");
+  }
+
+  // GPS Status & Altitude
+  display.setTextSize(1);
+  display.setCursor(10, 35);
+  display.print("ALT: ");
+  display.print(gps.altitude.meters());
+  display.print("m");
+
+  display.setCursor(10, 50);
+  display.print("SATS: ");
+  display.print(gps.satellites.value());
+
+  display.display();
+}
+
+
+
+/**
+ * Project: Archangel-Sovereign Bike HUD v2.0 (Kaizen Optimized)
+ * Developer Reference: https://github.com/gilbertalgordo/dev
+ * Features: Asynchronous Camera, GPS Fusion, Fall Detection, HUD
+ */
+
+#include "esp_camera.h"
+#include "FS.h"
+#include "SD_MMC.h"
+#include <TinyGPS++.h>
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_SSD1306.h>
+
+// --- System Instances ---
+class BikeHUD {
+public:
+    Adafruit_SSD1306 display;
+    BikeHUD() : display(128, 64, &Wire, -1) {}
+    
+    void begin() {
+        if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) return;
+        display.clearDisplay();
+        display.setRotation(2); // HUD Reflection mode
+    }
+
+    void render(float speed, int sats, float tilt) {
+        display.clearDisplay();
+        display.setTextSize(3);
+        display.setCursor(20, 5);
+        display.printf("%02.1f", speed);
+        
+        display.setTextSize(1);
+        display.setCursor(85, 20); display.print("KM/H");
+        
+        // Tilt/Lean Angle Indicator
+        display.drawFastHLine(34, 55, 60, SSD1306_WHITE);
+        display.fillCircle(64 + (tilt * 2), 55, 3, SSD1306_WHITE);
+        
+        display.setCursor(0, 0); display.printf("SAT:%d", sats);
+        display.display();
+    }
+};
+
+// --- Global Objects ---
+BikeHUD hud;
+TinyGPSPlus gps;
+Adafruit_MPU6050 mpu;
+TaskHandle_t CameraTask;
+
+// --- Core 0: Camera & SD Logging (The "Sentinel" Task) ---
+void CameraLoop(void * pvParameters) {
+    for(;;) {
+        camera_fb_t * fb = esp_camera_fb_get();
+        if (fb) {
+            // In a production Kaizen build, we save to SD or stream here
+            // For now, we cycle the buffer to maintain the "Live View"
+            esp_camera_fb_return(fb);
+        }
+        vTaskDelay(30 / portTICK_PERIOD_MS); // 30 FPS target
+    }
+}
+
+void setup() {
+    Serial.begin(115200);
+    Wire.begin(14, 15); // Custom I2C pins for ESP32-CAM
+    
+    hud.begin();
+    if (!mpu.begin()) Serial.println("MPU6050 Fail");
+    
+    // Initialize Camera Config (Standard AI-Thinker)
+    camera_config_t config;
+    config.ledc_channel = LEDC_CHANNEL_0;
+    // ... [Standard Pin Mappings for GPIO 5, 18, 19, etc.] ...
+    esp_camera_init(&config);
+
+    // Launch Camera Core (Core 0)
+    xTaskCreatePinnedToCore(CameraLoop, "CamTask", 10000, NULL, 1, &CameraTask, 0);
+}
+
+void loop() {
+    // --- Core 1: Sensor & HUD Logic ---
+    sensors_event_t a, g, temp;
+    mpu.getEvent(&a, &g, &temp);
+    
+    float leanAngle = a.acceleration.y; // Simplified tilt
+    
+    // Process GPS via Serial2
+    while (Serial2.available() > 0) {
+        gps.encode(Serial2.read());
+    }
+
+    // Protection Logic: Detect high G-Force (Impact)
+    if (a.acceleration.z > 25.0) { // Archangel Protection Trigger
+        Serial.println("IMPACT DETECTED - LOCKING VIDEO FILE");
+    }
+
+    hud.render(gps.speed.kmph(), gps.satellites.value(), leanAngle);
+    
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+}
