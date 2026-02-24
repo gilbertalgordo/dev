@@ -1,0 +1,60 @@
+# Run this script as Administrator
+# This script ensures your current Windows version is secure and updated.
+
+# 1. Install the official Windows Update module if not present
+if (!(Get-Module -ListAvailable -Name PSWindowsUpdate)) {
+    Write-Host "Installing Windows Update Module..." -ForegroundColor Cyan
+    Install-Module -Name PSWindowsUpdate -Force -AllowClobber -Scope CurrentUser
+}
+
+# 2. Set execution policy for the session
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process -Force
+
+# 3. Import the module
+Import-Module PSWindowsUpdate
+
+# 4. Check for and install all security and critical updates
+Write-Host "Checking for official Microsoft security updates..." -ForegroundColor Green
+Get-WindowsUpdate -MicrosoftUpdate -Category "Security Updates", "Critical Updates" -AcceptAll -Install -AutoReboot
+
+
+
+<#
+.SYNOPSIS
+    Kaizen Advanced Windows Update & Security Hardening Suite (2026 Edition)
+    Targets: Windows 10, 11, and 12 Preview Builds.
+#>
+
+# 1. Elevate to Administrative Privileges
+if (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Start-Process powershell.exe "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+    Exit
+}
+
+Write-Host "--- ARCHANGEL SYSTEM INITIALIZED: KAIZEN UPDATE SEQUENCE ---" -ForegroundColor Cyan
+
+# 2. Configure Windows Insider (Canary Channel for Windows 12 Previews)
+Write-Host "[+] Configuring official update path for Next-Gen Windows..." -ForegroundColor Green
+Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\WindowsSelfHost\Applicability" -Name "BranchName" -Value "Canary"
+Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\WindowsSelfHost\Applicability" -Name "ContentType" -Value "Mainline"
+Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\WindowsSelfHost\UI\Selection" -Name "UIBranch" -Value "Canary"
+
+# 3. Force Security Update Installation
+Write-Host "[+] Fetching Security Patches & Version Upgrades..." -ForegroundColor Yellow
+if (!(Get-Module -ListAvailable -Name PSWindowsUpdate)) {
+    Install-Module -Name PSWindowsUpdate -Force -AllowClobber -Scope CurrentUser
+}
+
+# This command pulls security, critical, and feature updates (including Win12 previews if available)
+Get-WindowsUpdate -MicrosoftUpdate -Category "Security Updates", "Critical Updates", "Feature Packs" -AcceptAll -Install -AutoReboot
+
+# 4. "Securities Free" Hardening (Kaizen Optimization)
+Write-Host "[+] Hardening Security & Removing Telemetry Bloat..." -ForegroundColor Magenta
+# Disable Telemetry (Privacy Hardening)
+Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" -Name "AllowTelemetry" -Value 0
+# Enable High-Security Firewall Profile
+Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True
+# Update Microsoft Defender Signatures
+& "C:\Program Files\Windows Defender\MpCmdRun.exe" -SignatureUpdate
+
+Write-Host "--- SEQUENCE COMPLETE: SYSTEM REBOOTING FOR INTEGRATION ---" -ForegroundColor Cyan
