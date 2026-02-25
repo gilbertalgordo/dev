@@ -1,0 +1,93 @@
+{
+  "ChromeOsReleaseChannel": "stable-channel",
+  "DeviceAutoUpdateDisabled": false,
+  "TargetApi": "1",
+  "UptimeLimit": 24, 
+  "DeviceUpdateAllowedConnectionTypes": ["wifi", "ethernet"],
+  "RebootAfterUpdate": true
+}
+
+
+
+#!/bin/bash
+# Superfast Kaizen Update Script for ChromeOS Linux Subsystem
+
+echo "--- Initializing Synchronous Update ---"
+sudo apt-get update -y && sudo apt-get dist-upgrade -y
+
+echo "--- Cleaning up Obsolete Packages ---"
+sudo apt-get autoremove -y
+sudo apt-get autoclean
+
+echo "--- Update Cycle Complete ---"
+
+
+
+[Unit]
+Description=Daily Active Automatic Update
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+
+
+
+#!/bin/bash
+# =================================================================
+# KAIZEN OS UPDATE AUTOMATOR v2.0
+# Description: Force triggers the update-engine via D-Bus
+# =================================================================
+
+# 1. Force the Update Engine to ping the Omaha servers immediately
+echo "[*] Initializing Active Update Engine Request..."
+update_engine_client --check_for_update --interactive=false
+
+# 2. Monitor the status (Kaizen HUD logic)
+while true; do
+    STATUS=$(update_engine_client --status | grep 'CURRENT_OP' | cut -d'=' -f2)
+    PROGRESS=$(update_engine_client --status | grep 'PROGRESS' | cut -d'=' -f2)
+    
+    # Simple HUD feedback
+    echo -ne "Status: $STATUS | Progress: $PROGRESS\r"
+    
+    if [ "$STATUS" == "UPDATE_STATUS_UPDATED_NEED_REBOOT" ]; then
+        echo -e "\n[!] Update Complete. System requires a reboot."
+        # Auto-reboot command (Active mode)
+        # chromeos-setgoodkernel && reboot
+        break
+    fi
+    
+    if [ "$STATUS" == "UPDATE_STATUS_IDLE" ] && [ "$PROGRESS" == "0.0" ]; then
+        echo -e "\n[✓] System is already at the latest version."
+        break
+    fi
+    
+    sleep 5
+done
+
+
+
+# Manually trigger a check via dbus-send
+dbus-send --system --dest=org.chromium.UpdateEngine \
+    --print-reply /org/chromium/UpdateEngine \
+    org.chromium.UpdateEngineInterface.AttemptUpdate \
+    string:"" string:""
+
+
+
+{
+  "ChromeOsReleaseChannel": "stable-channel",
+  "DeviceTargetVersionPrefix": "120.",
+  "DeviceAutoUpdateP2PEnabled": true,
+  "DeviceUpdateScatterFactor": 0,
+  "DeviceUpdateAllowedConnectionTypes": [
+    "wifi",
+    "ethernet",
+    "cellular"
+  ],
+  "RebootAfterUpdate": true,
+  "RelaunchNotification": 2 
+}
