@@ -1,0 +1,77 @@
+# Requires -RunAsAdministrator
+
+## 1. Install/Import the Update Module
+if (!(Get-Module -ListAvailable -Name PSWindowsUpdate)) {
+    Write-Host "Initializing Kaizen Protocol: Installing Update Module..." -ForegroundColor Cyan
+    Install-Module -Name PSWindowsUpdate -Force -Confirm:$false -Scope CurrentUser
+}
+
+Import-Module PSWindowsUpdate
+
+## 2. Configure Automatic Update Settings
+# Sets the system to automatically download and install, then reboot if needed.
+Write-Host "Applying HUD Configuration: Auto-Update Active." -ForegroundColor Green
+
+$UpdateSettings = @{
+    AcceptAll = $true
+    AutoReboot = $true
+    Schedule = (Get-Date).AddHours(2) # Sets a sliding window for deployment
+}
+
+## 3. Execute Update Sequence
+# Forces a check and installation of all pending security and critical updates.
+Get-WindowsUpdate -Install -AcceptAll -AutoReboot -Verbose
+
+
+
+<#
+.SYNOPSIS
+    Advanced Windows 12 Kaizen Update Orchestrator.
+    Optimized for GitHub-integrated dev environments.
+#>
+
+# 1. Elevate & Initialize HUD Logging
+$LogPath = "C:\Logs\UpdateHUD_$(Get-Date -Format 'yyyyMMdd').log"
+Start-Transcript -Path $LogPath -Append
+
+Write-Host ">>> INITIALIZING WINDOWS 12 ORCHESTRATION PLATFORM (UOP) <<<" -ForegroundColor Cyan
+
+# 2. Dependency Check: PSWindowsUpdate Module
+if (!(Get-Module -ListAvailable -Name PSWindowsUpdate)) {
+    Write-Host "[!] Module Missing. Fetching from Microsoft Gallery..." -ForegroundColor Yellow
+    Install-Module -Name PSWindowsUpdate -Force -AllowClobber -Scope CurrentUser
+}
+Import-Module PSWindowsUpdate
+
+# 3. Registry-Level Kaizen Optimization (Active Updates)
+$RegKey = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU"
+if (!(Test-Path $RegKey)) { New-Item -Path $RegKey -Force }
+
+Set-ItemProperty -Path $RegKey -Name "AUOptions" -Value 4            # Auto download & Schedule
+Set-ItemProperty -Path $RegKey -Name "ScheduledInstallDay" -Value 0  # Daily
+Set-ItemProperty -Path $RegKey -Name "NoAutoRebootWithLoggedOnUsers" -Value 0 # Enforce security
+
+# 4. The Orchestration Logic
+function Invoke-SystemKaizen {
+    Write-Host "[i] Scanning for Critical & Security Patches..." -ForegroundColor Green
+    
+    # Utilizing UOP-style filters to prioritize stability
+    $Updates = Get-WindowsUpdate -MicrosoftUpdate -Category "Security Updates", "Critical Updates" -AcceptAll
+    
+    if ($Updates) {
+        Write-Host "[+] Found $($Updates.Count) updates. Executing Deployment..." -ForegroundColor Magenta
+        Install-WindowsUpdate -MicrosoftUpdate -AcceptAll -AutoReboot -Verbose
+    } else {
+        Write-Host "[*] System is at Peak Efficiency. No updates required." -ForegroundColor Gray
+    }
+}
+
+# 5. Execution
+Invoke-SystemKaizen
+Stop-Transcript
+
+
+
+$Action = New-ScheduledTaskAction -Execute 'PowerShell.exe' -Argument '-ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Scripts\UpdateKaizen.ps1"'
+$Trigger = New-ScheduledTaskTrigger -Daily -At 3am
+Register-ScheduledTask -Action $Action -Trigger $Trigger -TaskName "Win12_ActiveUpdate_Orchestrator" -User "SYSTEM" -RunLevel Highest
