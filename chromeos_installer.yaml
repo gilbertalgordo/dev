@@ -1,0 +1,73 @@
+# Clone the depot_tools repository
+git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+
+# Add to your PATH
+export PATH="$PATH:$(pwd)/depot_tools"
+
+
+
+mkdir chromiumos && cd chromiumos
+repo init -u https://chromium.googlesource.com/chromiumos/manifest.git
+repo sync -j$(nproc)
+
+
+
+# Enter the SDK (the chroot)
+cros_sdk <<EOF
+
+# 1. Setup the board
+setup_board --board=amd64-generic
+
+# 2. Build the packages for the board
+build_packages --board=amd64-generic
+
+# 3. Build the actual disk image
+build_image --board=amd64-generic dev
+
+EOF
+
+
+
+# Outside the chroot
+cros flash usb:// /dev/sdX  amd64-generic/latest
+
+
+
+
+#!/bin/bash
+# Advanced Kaizen Build Script for ChromeOS Installer
+BOARD="amd64-generic"
+PACKAGES=( "chromeos-base/chromeos-installer" "sys-kernel/chromeos-kernel-6_1" )
+
+# Enter SDK environment
+cros_sdk <<EOF
+
+# 1. Initialize Board with Custom Overlays
+setup_board --board=${BOARD} --force
+
+# 2. Workon specific packages for surgical modifications
+for pkg in "${PACKAGES[@]}"; do
+    cros_workon --board=${BOARD} start \$pkg
+done
+
+# 3. Apply Kernel Hardening (Scientific Reasoning)
+# We enable KVM_GUEST and VIRTIO for high-speed VM performance
+./scripts/update_kernel_config --board=${BOARD} --enable KVM_GUEST VIRTIO_PCI
+
+# 4. Build with parallel optimization
+build_packages --board=${BOARD} --jobs=$(nproc)
+
+# 5. Generate Image without RootFS verification (Advanced Dev Mode)
+build_image --board=${BOARD} --noenable_rootfs_verification dev
+
+# 6. Create the Official Installer Shim
+./build_library/create_legacy_bootloader_templates.sh
+./image_to_vm.sh --board=${BOARD}
+
+EOF
+
+
+
+# Flash the image to your target device via USB
+# --clobber ensures a clean slate, removing old GPT structures
+cros flash --clobber usb:// "${BOARD}/latest"
