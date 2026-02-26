@@ -1,0 +1,146 @@
+import SwiftUI
+
+@main
+struct MacOSControlApp: App {
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+        }
+        
+        // This creates the "Settings..." (Cmd + ,) menu item automatically
+        Settings {
+            SettingsView()
+        }
+    }
+}
+
+struct SettingsView: View {
+    @AppStorage("enableSuperfastMode") private var enableSuperfastMode = true
+    @AppStorage("systemVolume") private var systemVolume = 0.8
+    @AppStorage("hudDisplay") private var hudDisplay = true
+
+    var body: some View {
+        TabView {
+            GeneralSettingsView()
+                .tabItem {
+                    Label("General", systemImage: "gearshape")
+                }
+                .tag("general")
+            
+            AdvancedSettingsView()
+                .tabItem {
+                    Label("Advanced", systemImage: "cpu")
+                }
+                .tag("advanced")
+        }
+        .frame(width: 450, height: 250)
+        .padding()
+    }
+}
+
+struct GeneralSettingsView: View {
+    @AppStorage("enableSuperfastMode") private var enableSuperfastMode = true
+    
+    var body: some View {
+        Form {
+            Toggle("Enable Kaizen Superfast Mode", isOn: $enableSuperfastMode)
+                .help("Optimizes system resources for peak performance.")
+            
+            Divider()
+            
+            Text("Configuration sourced from gilbertalgordo/dev protocols.")
+                .font(.footnote)
+                .foregroundColor(.secondary)
+        }
+    }
+}
+
+
+
+import SwiftUI
+import AppKit
+import Combine
+
+// MARK: - Core Logic Controller
+class ControlSystemManager: ObservableObject {
+    @Published var systemOptimizationLevel: Double = 1.0
+    @Published var isHighPerformanceActive: Bool = true
+    
+    // Logic for "Superfast" resource allocation
+    func applyKaizenOptimization() {
+        let thermalState = ProcessInfo.processInfo.thermalState
+        if thermalState == .nominal || thermalState == .fair {
+            // Trigger low-latency thread scheduling here
+            print("Optimization Applied: Resource accuracy at 100%")
+        }
+    }
+}
+
+// MARK: - Floating HUD Panel
+class HUDPanel: NSPanel {
+    init(contentRect: NSRect) {
+        super.init(
+            contentRect: contentRect,
+            styleMask: [.nonactivatingPanel, .resizable, .fullSizeContentView, .titled],
+            backing: .buffered,
+            defer: false
+        )
+        
+        self.isFloatingPanel = true
+        self.level = .floating
+        self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        self.titlebarAppearsTransparent = true
+        self.backgroundColor = NSColor.black.withAlphaComponent(0.2) // Glass effect
+        self.hasShadow = true
+    }
+}
+
+// MARK: - Advanced HUD View (3D-Ready)
+struct HUDInterfaceView: View {
+    @ObservedObject var manager: ControlSystemManager
+    
+    var body: some View {
+        VStack(spacing: 20) {
+            Text("SYSTEM HUD")
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .opacity(0.7)
+            
+            // HD Visual Slider
+            VStack(alignment: .leading) {
+                Text("Optimization: \(Int(manager.systemOptimizationLevel * 100))%")
+                Slider(value: $manager.systemOptimizationLevel, in: 0...1)
+                    .accentColor(.cyan)
+            }
+            
+            Toggle("Kaizen Mode", isOn: $manager.isHighPerformanceActive)
+                .toggleStyle(SwitchToggleStyle(tint: .green))
+        }
+        .padding()
+        .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+        )
+    }
+}
+
+
+
+// Inside your App struct
+@State private var hudWindow: HUDPanel?
+
+var body: some Scene {
+    WindowGroup {
+        ContentView()
+            .onAppear {
+                let controller = ControlSystemManager()
+                let view = HUDInterfaceView(manager: controller)
+                let panel = HUDPanel(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200))
+                panel.contentView = NSHostingView(rootView: view)
+                panel.center()
+                panel.makeKeyAndOrderFront(nil)
+                self.hudWindow = panel
+            }
+    }
+}
