@@ -1,0 +1,145 @@
+import AppKit
+
+class LiveIconManager {
+    
+    /// Updates the Dock tile with a custom view
+    func updateDockIcon(progress: CGFloat) {
+        let dockTile = NSApplication.shared.dockTile
+        
+        // Create a custom view for the icon
+        let iconView = NSView(frame: NSRect(x: 0, y: 0, width: 128, height: 128))
+        
+        // Example: Adding a circular progress HUD style element
+        let shapeLayer = CAShapeLayer()
+        let center = CGPoint(x: 64, y: 64)
+        let path = NSBezierPath()
+        path.appendArc(withCenter: center, radius: 50, startAngle: 0, endAngle: 360 * progress, clockwise: false)
+        
+        shapeLayer.path = path.cgPath // Note: May need a simple extension for NSBezierPath to CGPath
+        shapeLayer.strokeColor = NSColor.systemBlue.cgColor
+        shapeLayer.lineWidth = 8
+        shapeLayer.fillColor = .none
+        
+        iconView.layer?.addSublayer(shapeLayer)
+        
+        // Set the content and refresh
+        dockTile.contentView = iconView
+        dockTile.display()
+    }
+}
+
+
+
+import SwiftUI
+
+@main
+struct LiveStatusApp: App {
+    @State private var currentStatus = "Active"
+
+    var body: some Scene {
+        MenuBarExtra(currentStatus, systemImage: "bolt.circle.fill") {
+            Button("Refresh System") {
+                // Kaizen: Continuous improvement logic here
+                print("Optimizing processes...")
+            }
+            Divider()
+            Button("Quit") {
+                NSApplication.shared.terminate(nil)
+            }
+        }
+    }
+}
+
+
+
+import AppKit
+import SwiftUI
+import Combine
+
+class AdvancedDockManager: ObservableObject {
+    static let shared = AdvancedDockManager()
+    
+    // Using a Timer with a specific RunLoop mode for "Superfast" updates
+    private var timer: AnyCancellable?
+    @Published var cpuUsage: Double = 0.0
+
+    func startLiveUpdates() {
+        timer = Timer.publish(every: 0.5, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.cpuUsage = Double.random(in: 0.1...0.9) // Mock telemetry
+                self?.refreshDockTile()
+            }
+    }
+
+    private func refreshDockTile() {
+        let dockTile = NSApplication.shared.dockTile
+        
+        // Advanced: Bridging SwiftUI to the Dock
+        let hudView = NSHostingView(rootView: DockHUDView(value: cpuUsage))
+        hudView.frame = NSRect(x: 0, y: 0, width: 128, height: 128)
+        
+        dockTile.contentView = hudView
+        dockTile.display() // Forces the Dock to re-render the layer
+    }
+}
+
+/// A HUD-style SwiftUI View for the Dock Icon
+struct DockHUDView: View {
+    var value: Double
+    
+    var body: some View {
+        ZStack {
+            // Background Glow (HUD Aesthetic)
+            RoundedRectangle(cornerRadius: 24)
+                .fill(Color.black)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24)
+                        .stroke(Color.cyan.opacity(0.5), lineWidth: 4)
+                        .blur(radius: 2)
+                )
+            
+            // Circular Progress "HUD"
+            Circle()
+                .trim(from: 0, to: value)
+                .stroke(
+                    AngularGradient(gradient: Gradient(colors: [.cyan, .blue]), center: .center),
+                    style: StrokeStyle(lineWidth: 10, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+                .padding(20)
+            
+            Text("\(Int(value * 100))%")
+                .font(.system(size: 24, weight: .bold, design: .monospaced))
+                .foregroundColor(.cyan)
+        }
+    }
+}
+
+
+
+extension NSDockTile {
+    func overlayHUD(progress: CGFloat) {
+        let size = self.size
+        let canvas = NSImage(size: size)
+        
+        canvas.lockFocus()
+        // 1. Draw the Original App Icon
+        NSApp.applicationIconImage?.draw(in: NSRect(origin: .zero, size: size))
+        
+        // 2. Draw HUD Overlay (Semi-transparent progress bar at bottom)
+        let hudRect = NSRect(x: 10, y: 10, width: size.width - 20, height: 15)
+        NSColor.black.withAlphaComponent(0.7).set()
+        hudRect.fill()
+        
+        let progressRect = NSRect(x: 10, y: 10, width: (size.width - 20) * progress, height: 15)
+        NSColor.systemCyan.set()
+        progressRect.fill()
+        canvas.unlockFocus()
+        
+        // 3. Update the Tile
+        let imageView = NSImageView(image: canvas)
+        self.contentView = imageView
+        self.display()
+    }
+}
