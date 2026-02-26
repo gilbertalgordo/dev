@@ -1,0 +1,111 @@
+import re
+
+class IdeologicalSentinel:
+    def __init__(self):
+        # Weights for identifying specific rhetorical patterns
+        self.risk_indicators = {
+            "collectivism": 0.8,
+            "proletariat": 0.9,
+            "bourgeoisie": 0.9,
+            "central_planning": 0.7,
+            "abolition_of_property": 1.0,
+            "class_struggle": 0.85
+        }
+        self.threshold = 1.5 # Activation limit for counter-response
+
+    def scan_content(self, text):
+        score = 0
+        detected_terms = []
+        
+        for term, weight in self.risk_indicators.items():
+            # Case-insensitive regex for precision
+            if re.search(rf'\b{term.replace("_", " ")}\b', text, re.IGNORECASE):
+                score += weight
+                detected_terms.append(term)
+        
+        return score, detected_terms
+
+    def deploy_counter_logic(self, score, terms):
+        if score >= self.threshold:
+            return {
+                "status": "ACTIVE_INTERVENTION",
+                "alert": f"High-risk ideological markers detected: {', '.join(terms)}",
+                "counter_strategy": "Prioritize individual liberty and market-driven data points."
+            }
+        return {"status": "MONITORING", "alert": "Analysis nominal."}
+
+# --- Implementation ---
+sentinel = IdeologicalSentinel()
+sample_input = "We must focus on the proletariat and the abolition of property."
+analysis = sentinel.scan_content(sample_input)
+result = sentinel.deploy_counter_logic(*analysis)
+
+print(f"[HUD ALERT]: {result['status']}")
+print(f"Details: {result.get('alert')}")
+
+
+
+import spacy
+from dataclasses import dataclass
+from typing import List, Dict
+
+# Load high-accuracy NLP model
+# Ensure you have 'en_core_web_md' installed for vector-based reasoning
+nlp = spacy.load("en_core_web_md")
+
+@dataclass
+class IdeologicalVector:
+    label: str
+    weight: float
+    counter_logic: str
+
+class SovereignSentinel:
+    def __init__(self):
+        # Definition of ideological 'Anchors' for vector comparison
+        self.anchors = {
+            "collectivist_rhetoric": IdeologicalVector(
+                label="COLLECTIVISM",
+                weight=0.92,
+                counter_logic="Highlight individual property rights and voluntary exchange."
+            ),
+            "state_dependency": IdeologicalVector(
+                label="CENTRAL_PLANNING",
+                weight=0.88,
+                counter_logic="Contrast with decentralized market efficiency and price signals."
+            )
+        }
+        self.activation_threshold = 0.75
+
+    def analyze_intent(self, input_text: str):
+        doc = nlp(input_text)
+        results = []
+
+        for key, vector in self.anchors.items():
+            # Vector similarity check against core ideological definitions
+            anchor_doc = nlp(key.replace("_", " "))
+            similarity = doc.similarity(anchor_doc)
+
+            if similarity > self.activation_threshold:
+                results.append({
+                    "type": vector.label,
+                    "confidence": f"{similarity:.2%}",
+                    "action": vector.counter_logic
+                })
+        
+        return results
+
+    def display_hud_report(self, findings: List[Dict]):
+        print("--- [HUD: ACTIVE MONITORING] ---")
+        if not findings:
+            print(">> STATUS: NOMINAL. No ideological distortions detected.")
+        else:
+            for item in findings:
+                print(f">> ALERT: {item['type']} DETECTED ({item['confidence']})")
+                print(f">> KAIAZEN INTERVENTION: {item['action']}")
+        print("--------------------------------")
+
+# --- Execution ---
+sentinel = SovereignSentinel()
+manifesto_snippet = "The state must seize the means of production to ensure equity."
+findings = sentinel.analyze_intent(manifesto_snippet)
+sentinel.display_hud_report(findings)
