@@ -1,0 +1,291 @@
+import SwiftUI
+import WebKit
+
+struct NativeBrowserView: NSViewRepresentable {
+    let url: URL
+    
+    func makeNSView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        // Enable Kaizen-style performance: inline media and optimized rendering
+        config.allowsAirPlayForMediaPlayback = true
+        let webView = WKWebView(frame: .zero, configuration: config)
+        return webView
+    }
+    
+    func updateNSView(_ nsView: WKWebView, context: Context) {
+        let request = URLRequest(url: url)
+        nsView.load(request)
+    }
+}
+
+
+
+struct AIAssistantSidebar: View {
+    @State private var chatInput: String = ""
+    @State private var messages: [String] = ["How can I assist your workflow today?"]
+
+    var body: some View {
+        VStack {
+            Text("Archangel AI")
+                .font(.headline)
+                .padding()
+
+            ScrollView {
+                ForEach(messages, id: \.self) { msg in
+                    Text(msg)
+                        .padding(8)
+                        .background(Color.gray.opacity(0.2))
+                        .cornerRadius(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+
+            Divider()
+
+            HStack {
+                TextField("Ask AI...", text: $chatInput)
+                    .textFieldStyle(.roundedBorder)
+                Button("Send") {
+                    sendMessage()
+                }
+                .keyboardShortcut(.return, modifiers: [])
+            }
+            .padding()
+        }
+        .frame(minWidth: 250)
+        .background(VisualEffectView(material: .sidebar, blendingMode: .behindWindow))
+    }
+
+    func sendMessage() {
+        guard !chatInput.isEmpty else { return }
+        messages.append("You: \(chatInput)")
+        // Placeholder for AI Logic: Link to your preferred model here
+        messages.append("AI: Analyzing your request with precision...")
+        chatInput = ""
+    }
+}
+
+
+
+struct MainBrowserAppView: View {
+    @State private var currentURL = URL(string: "https://github.com/gilbertalgordo")!
+    @State private var showAISidebar = true
+
+    var body: some View {
+        NavigationSplitView {
+            // Sidebar for Navigation or History
+            List {
+                NavigationLink("GitHub Profile", destination: Text("Profile Settings"))
+                NavigationLink("Developer Tools", destination: Text("Dev Sources"))
+            }
+            .listStyle(.sidebar)
+        } content: {
+            // Main Browser HUD
+            VStack(spacing: 0) {
+                HStack {
+                    TextField("Enter URL", value: $currentURL, formatter: URLFormatter())
+                        .textFieldStyle(.roundedBorder)
+                    Button(action: { showAISidebar.toggle() }) {
+                        Image(systemName: "sparkles")
+                    }
+                    .help("Toggle AI Assistant")
+                }
+                .padding(8)
+
+                NativeBrowserView(url: currentURL)
+            }
+        } detail: {
+            if showAISidebar {
+                AIAssistantSidebar()
+            } else {
+                Text("Select an item to view details")
+            }
+        }
+        .navigationTitle("AI Browser HUD")
+    }
+}
+
+// Utility for HUD background effect
+struct VisualEffectView: NSViewRepresentable {
+    var material: NSVisualEffectView.Material
+    var blendingMode: NSVisualEffectView.BlendingMode
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = material
+        view.blendingMode = blendingMode
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+}
+
+
+
+import SwiftUI
+import WebKit
+import Combine
+
+class BrowserViewModel: ObservableObject {
+    @Published var urlString: String = "https://github.com/gilbertalgordo/dev"
+    @Published var isLoading: Bool = false
+    @Published var canGoBack: Bool = false
+    @Published var canGoForward: Bool = false
+    @Published var progress: Double = 0
+    
+    let webView: WKWebView
+    
+    init() {
+        let config = WKWebViewConfiguration()
+        // Kaizen Optimization: Prefetch and optimize rendering
+        config.allowsAirPlayForMediaPlayback = false
+        self.webView = WKWebView(frame: .zero, configuration: config)
+    }
+    
+    func load() {
+        guard let url = URL(string: urlString) else { return }
+        webView.load(URLRequest(url: url))
+    }
+}
+
+struct AdvancedWebView: NSViewRepresentable {
+    @ObservedObject var viewModel: BrowserViewModel
+
+    func makeNSView(context: Context) -> WKWebView {
+        viewModel.webView.navigationDelegate = context.coordinator
+        // HUD Script Injection: Customize the look of loaded sites
+        let script = "document.body.style.backgroundColor = 'transparent';"
+        let userScript = WKUserScript(source: script, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
+        viewModel.webView.configuration.userContentController.addUserScript(userScript)
+        
+        return viewModel.webView
+    }
+
+    func updateNSView(_ nsView: WKWebView, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(viewModel)
+    }
+
+    class Coordinator: NSObject, WKNavigationDelegate {
+        var parent: BrowserViewModel
+        var cancellables = Set<AnyCancellable>()
+
+        init(_ parent: BrowserViewModel) {
+            self.parent = parent
+            super.init()
+            
+            // KVO for Progress and Navigation State
+            parent.webView.publisher(for: \.estimatedProgress)
+                .assign(to: \.progress, on: parent)
+                .store(in: &cancellables)
+                
+            parent.webView.publisher(for: \.isLoading)
+                .assign(to: \.isLoading, on: parent)
+                .store(in: &cancellables)
+        }
+    }
+}
+
+
+
+@MainActor
+class ArchangelAI: ObservableObject {
+    @Published var history: [ChatMessage] = []
+    @Published var isThinking: Bool = false
+
+    struct ChatMessage: Identifiable {
+        let id = UUID()
+        let role: String
+        let content: String
+    }
+
+    func processCommand(_ input: String, context: String) async {
+        isThinking = true
+        history.append(ChatMessage(role: "User", content: input))
+        
+        // Advanced: Context-aware prompt injection
+        let prompt = "System: Analyze context [\(context)]. Task: \(input)"
+        
+        // Simulate high-speed AI inference
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        
+        let response = "Kaizen Analysis Complete: Optimization path identified for \(context.prefix(20))..."
+        history.append(ChatMessage(role: "Archangel", content: response))
+        isThinking = false
+    }
+}
+
+
+
+struct MainHUDView: View {
+    @StateObject private var browser = BrowserViewModel()
+    @StateObject private var ai = ArchangelAI()
+    @State private var showAIOverlay = false
+
+    var body: some View {
+        ZStack {
+            // Background Browser Layer
+            AdvancedWebView(viewModel: browser)
+                .ignoresSafeArea()
+
+            // HUD Overlays
+            VStack {
+                // Top Search Bar (Floating)
+                HStack {
+                    TextField("Secure Navigation...", text: $browser.urlString, onCommit: browser.load)
+                        .textFieldStyle(.plain)
+                        .padding(10)
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(12)
+                        .shadow(radius: 5)
+                    
+                    Button(action: { showAIOverlay.toggle() }) {
+                        Image(systemName: "bolt.shield.fill") // Archangel Symbol
+                            .foregroundColor(.blue)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: 40, height: 40)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Circle())
+                }
+                .padding()
+
+                Spacer()
+
+                // AI Archangel Overlay (Bottom Sheet HUD)
+                if showAIOverlay {
+                    VStack {
+                        Capsule().frame(width: 40, height: 4).opacity(0.3).padding(8)
+                        
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 12) {
+                                ForEach(ai.history) { msg in
+                                    Text(msg.content)
+                                        .padding(10)
+                                        .background(msg.role == "User" ? Color.blue.opacity(0.3) : Color.white.opacity(0.1))
+                                        .cornerRadius(10)
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 300)
+
+                        HStack {
+                            TextField("Ask Archangel...", text: .constant(""))
+                                .textFieldStyle(.roundedBorder)
+                            if ai.isThinking { ProgressView().controlSize(.small) }
+                        }
+                    }
+                    .padding()
+                    .background(.ultraThinMaterial)
+                    .cornerRadius(20)
+                    .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.white.opacity(0.2)))
+                    .padding()
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+        }
+        .onAppear { browser.load() }
+    }
+}
