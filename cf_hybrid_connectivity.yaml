@@ -1,0 +1,125 @@
+# Configure the Cloudflare Provider
+terraform {
+  required_providers {
+    cloudflare = {
+      source  = "cloudflare/cloudflare"
+      version = "~> 4.0"
+    }
+  }
+}
+
+variable "cloudflare_account_id" {
+  type    = string
+  default = "your-account-id"
+}
+
+# 1. Create a secret for the Tunnel
+resource "random_id" "tunnel_secret" {
+  byte_length = 32
+}
+
+# 2. Define the Cloudflare Tunnel (The Hybrid Bridge)
+resource "cloudflare_zero_trust_tunnel_cloudflared" "hybrid_tunnel" {
+  account_id = var.cloudflare_account_id
+  name       = "hybrid-link-to-onprem"
+  secret     = random_id.tunnel_secret.b64_std
+}
+
+# 3. Define the Private Network Route
+# This tells Cloudflare to route traffic for your internal subnet through this tunnel
+resource "cloudflare_zero_trust_tunnel_cloudflared_config" "hybrid_config" {
+  account_id = var.cloudflare_account_id
+  tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.hybrid_tunnel.id
+
+  config {
+    warp_routing {
+      enabled = true
+    }
+    # Ingress rules for specific internal services
+    ingress {
+      hostname = "app.yourdomain.com"
+      service  = "http://10.0.1.50:8080" # Your internal server IP
+    }
+    ingress {
+      service  = "http_status:404"
+    }
+  }
+}
+
+# 4. Create the Cloudflare Private Network Route
+resource "cloudflare_zero_trust_tunnel_route" "internal_network" {
+  account_id = var.cloudflare_account_id
+  tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.hybrid_tunnel.id
+  network    = "10.0.1.0/24" # Your local data center subnet
+  comment    = "Route to On-Prem Data Center"
+}
+
+
+
+docker run -d --name cloudflared-connector \
+  cloudflare/cloudflared:latest \
+  tunnel --no-autoupdate run \
+  --token <YOUR_TUNNEL_TOKEN>
+
+
+
+# Advanced Cloudflare Hybrid Connectivity (IPsec + BGP)
+terraform {
+  required_providers {
+    cloudflare = {
+      source  = "cloudflare/cloudflare"
+      version = "~> 5.0" # Using latest 2026 Provider features
+    }
+  }
+}
+
+variable "account_id" { default = "your_account_id" }
+
+# 1. Define the IPsec Tunnel (On-Ramp 01)
+resource "cloudflare_magic_wan_ipsec_tunnel" "primary_tunnel" {
+  account_id         = var.account_id
+  name               = "hybrid-ipsec-pri-01"
+  customer_endpoint  = "203.0.113.10" # Your On-Prem Public IP
+  cloudflare_endpoint = "162.159.x.x"  # Cloudflare Anycast IP
+  interface_address  = "10.200.1.1/31" # Tunnel Internal IP
+  
+  # 2026 Post-Quantum Security
+  allow_null_cipher  = false
+  psk                = "your-secure-pre-shared-key"
+}
+
+# 2. Configure BGP Session for Dynamic Route Exchange
+resource "cloudflare_magic_wan_bgp_session" "onprem_bgp" {
+  account_id           = var.account_id
+  tunnel_id            = cloudflare_magic_wan_ipsec_tunnel.primary_tunnel.id
+  name                 = "bgp-hybrid-primary"
+  peer_asn             = 65001      # Your Local ASN
+  cloudflare_asn       = 64512      # Cloudflare ASN
+  peer_address         = "10.200.1.0"
+  cloudflare_address   = "10.200.1.1"
+  
+  # Enable Multi-hop if routing through intermediate firewalls
+  multihop_ttl         = 1
+}
+
+# 3. Network-Layer Firewall (HUD Visibility)
+# Ensures only authorized local traffic reaches Cloudflare
+resource "cloudflare_magic_wan_network_acl" "allow_internal" {
+  account_id = var.account_id
+  name       = "allow-internal-subnets"
+  action     = "allow"
+  protocol   = "tcp"
+  src        = "192.168.10.0/24" # On-prem subnet
+  dst        = "0.0.0.0/0"
+  description = "HUD: Monitoring local branch traffic"
+}
+
+
+
+.
+├── main.tf           # Provider and Account Config
+├── modules/
+│   └── hybrid_mesh/  # Logic for IPsec + BGP sessions
+│       ├── main.tf
+│       └── variables.tf
+└── terraform.tfvars  # Site-specific values (ASN, Public IPs)
