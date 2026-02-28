@@ -1,0 +1,138 @@
+-- 1. Enable the Google ML and Vector extensions
+CREATE EXTENSION IF NOT EXISTS google_ml_integration CASCADE;
+CREATE EXTENSION IF NOT EXISTS vector CASCADE;
+
+-- 2. Create a hybrid table for 'Research Papers'
+CREATE TABLE research_archive (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    -- Vector embedding for semantic search
+    embedding vector(768), 
+    -- GIN index for fast full-text keyword search
+    content_tokens tsvector GENERATED ALWAYS AS (to_tsvector('english', content)) STORED
+);
+
+-- 3. Create a Hybrid Index (ScaNN + GIN)
+CREATE INDEX idx_research_embedding ON research_archive USING scann (embedding);
+CREATE INDEX idx_research_text ON research_archive USING GIN (content_tokens);
+
+-- 4. Execute a Hybrid Query: Keyword + Semantic
+-- This finds papers about "Quantum Computing" using both exact words and meaning.
+WITH semantic_search AS (
+    SELECT id, title, (embedding <=> '[0.12, -0.05, ...]') as distance
+    FROM research_archive
+    ORDER BY distance LIMIT 10
+),
+keyword_search AS (
+    SELECT id, title, ts_rank(content_tokens, to_tsquery('Quantum & Computing')) as rank
+    FROM research_archive
+    WHERE content_tokens @@ to_tsquery('Quantum & Computing')
+    ORDER BY rank DESC LIMIT 10
+)
+SELECT s.title, s.distance, k.rank
+FROM semantic_search s
+JOIN keyword_search k ON s.id = k.id;
+
+
+
+# Configure the Google Cloud Provider
+provider "google" {
+  project = "your-project-id"
+  region  = "us-central1"
+}
+
+# Deploy an AlloyDB Cluster for Hybrid Workloads
+module "alloy-db" {
+  source  = "GoogleCloudPlatform/alloy-db/google"
+  version = "~> 3.0"
+
+  cluster_id     = "hybrid-kaizen-cluster"
+  location       = "us-central1"
+  network_self_link = "projects/your-project/global/networks/hybrid-vpc"
+
+  primary_instance = {
+    instance_id = "primary-node"
+    instance_type = "PRIMARY"
+    machine_cpu_count = 4
+  }
+}
+
+# Define the Hybrid Connectivity (Private Service Connect)
+resource "google_compute_service_attachment" "hybrid_attachment" {
+  name        = "db-hybrid-connector"
+  region      = "us-central1"
+  target_service = module.alloy-db.primary_instance_id
+  connection_preference = "ACCEPT_AUTOMATIC"
+  nat_subnets = ["projects/your-project/regions/us-central1/subnetworks/nat-subnet"]
+}
+
+
+
+# Pull the 2026 production-grade AlloyDB Omni image
+docker pull gcr.io/alloydb-omni/pg-service:latest
+
+# Start the instance with optimized shared memory for Kaizen-level speed
+docker run -d \
+  --name alloydb-hybrid-core \
+  -e POSTGRES_PASSWORD=YourSecurePassword \
+  -v /var/lib/alloydb-omni/data:/var/lib/postgresql/data \
+  -p 5432:5432 \
+  --shm-size=2g \
+  --restart unless-stopped
+
+
+
+
+-- Step 1: Initialize the AI and Vector Tooling
+CREATE EXTENSION IF NOT EXISTS google_ml_integration CASCADE;
+CREATE EXTENSION IF NOT EXISTS vector CASCADE;
+
+-- Step 2: Create a high-performance Hybrid Table
+CREATE TABLE intelligence_archive (
+    doc_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    content TEXT NOT NULL,
+    -- Vector embedding (768 dims for Vertex AI models)
+    semantic_fingerprint vector(768),
+    -- Columnar engine optimization for 100x faster analytics
+    metadata JSONB
+);
+
+-- Step 3: Create 'ScaNN' Index (Google's proprietary ultra-fast vector index)
+-- This is significantly faster than standard HNSW for large datasets.
+CREATE INDEX idx_semantic_search ON intelligence_archive 
+USING scann (semantic_fingerprint) 
+WITH (num_leaves = 1000);
+
+-- Step 4: Hybrid Query (Keyword + Semantic Fusion)
+-- Uses Reciprocal Rank Fusion logic to find "Quantum Computing" papers
+WITH semantic_hits AS (
+  SELECT doc_id, content, 1 - (semantic_fingerprint <=> embedding_vector) AS score
+  FROM intelligence_archive, 
+       -- Call Vertex AI remotely from your hybrid local DB
+       CAST(google_ml.embedding('text-embedding-005', 'Quantum Computing advances') AS vector) AS embedding_vector
+  ORDER BY score DESC LIMIT 20
+),
+keyword_hits AS (
+  SELECT doc_id, content, ts_rank(to_tsvector('english', content), to_tsquery('Quantum & Computing')) AS score
+  FROM intelligence_archive
+  WHERE to_tsvector('english', content) @@ to_tsquery('Quantum & Computing')
+  ORDER BY score DESC LIMIT 20
+)
+-- Fuse results for ultimate accuracy
+SELECT s.doc_id, s.content, (s.score + k.score) / 2 AS hybrid_relevance
+FROM semantic_hits s
+FULL OUTER JOIN keyword_hits k ON s.doc_id = k.doc_id
+ORDER BY hybrid_relevance DESC;
+
+
+
+-- Enable the columnar engine for real-time hybrid analytics
+ALTER SYSTEM SET google_columnar_engine.enabled = 'on';
+SELECT pg_reload_conf();
+
+-- Flag specific tables for columnar acceleration
+SELECT google_columnar_engine.add_table('intelligence_archive');
+
+-- Scientific Verification: Check memory efficiency
+SELECT * FROM google_columnar_engine.columnar_stat();
