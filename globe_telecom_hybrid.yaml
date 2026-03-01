@@ -1,0 +1,123 @@
+# Example for a High Availability VPN Gateway as a backup to Direct Connect
+resource "google_compute_ha_vpn_gateway" "ha_gateway" {
+  name    = "globe-hybrid-ha-vpn"
+  network = google_compute_network.main_vpc.id
+  region  = "asia-southeast1" # Singapore region for lowest latency to PH
+}
+
+resource "google_compute_router" "router" {
+  name    = "globe-bgp-router"
+  network = google_compute_network.main_vpc.name
+  bgp {
+    asn = 65001 # Your Autonomous System Number
+  }
+}
+
+
+
+
+import requests
+import time
+
+# Configuration for Globe Network API (Nokia NEP Integration)
+GLOBE_API_ENDPOINT = "https://api.globe.com.ph/network/v1/status"
+API_KEY = "your_kaizen_api_key"
+
+def check_connectivity():
+    """
+    Checks the status of the Hybrid Link 24/7.
+    Returns True if Primary Link is healthy.
+    """
+    try:
+        response = requests.get(GLOBE_API_ENDPOINT, headers={"Authorization": f"Bearer {API_KEY}"})
+        status = response.json()
+        
+        # High Availability Logic: Check for 'Healthy' status and latency < 50ms
+        if status['link_primary'] == 'UP' and status['latency_ms'] < 50:
+            return True
+        return False
+    except Exception as e:
+        print(f"Alert: Monitoring System Error - {e}")
+        return False
+
+def main_loop():
+    while True:
+        if not check_connectivity():
+            print("CRITICAL: Primary Globe Link degraded. Initiating SD-WAN failover...")
+            # Insert logic to trigger BGP route weighting change here
+        else:
+            print("Status: 24/7 Connectivity Optimal.")
+        time.sleep(10) # Kaizen: Frequent polling for high-availability
+
+if __name__ == "__main__":
+    main_loop()
+
+
+
+
+import requests
+import json
+import time
+
+# Globe Nokia NEP API Configuration
+API_BASE_URL = "https://api.globe.com.ph/v1/network-exposure"
+NEP_TOKEN = "your_kaizen_auth_token"
+
+def get_link_telemetry(link_id):
+    """
+    Fetches real-time QoS data from Globe's NEP platform.
+    """
+    headers = {"Authorization": f"Bearer {NEP_TOKEN}", "Content-Type": "application/json"}
+    response = requests.get(f"{API_BASE_URL}/telemetry/{link_id}", headers=headers)
+    return response.json() if response.status_code == 200 else None
+
+def trigger_bgp_update(router_ip, priority="BACKUP"):
+    """
+    Sends a command to the SD-WAN controller to adjust BGP path prepending.
+    """
+    print(f"[HUD ALERT] Rerouting traffic to {priority} instance...")
+    # Logic to interface with Globe SD-WAN Connect+ Controller
+    pass
+
+def monitor_24_7():
+    primary_link = "GLOBE-DC-PH-001"
+    while True:
+        data = get_link_telemetry(primary_link)
+        if data:
+            latency = data.get("latency_ms", 0)
+            packet_loss = data.get("packet_loss", 0)
+            
+            # Kaizen logic: Pre-emptive failover if performance degrades
+            if latency > 40 or packet_loss > 0.05:
+                trigger_bgp_update("10.0.0.1", priority="STARLINK_5G_FAILOVER")
+            else:
+                print(f"[STATUS] Connectivity Optimal: {latency}ms")
+        
+        time.sleep(5) # High-frequency polling for 24/7 availability
+
+if __name__ == "__main__":
+    monitor_24_7()
+
+
+
+# Resource for a 99.99% Availability HA VPN Gateway
+resource "google_compute_ha_vpn_gateway" "globe_ha_vpn" {
+  name    = "globe-hybrid-ha-gateway"
+  network = var.vpc_id
+  region  = "asia-southeast1" # Proximity to Globe's Manila hub
+}
+
+# BGP Configuration for Sub-Second Failover (BFD)
+resource "google_compute_router_peer" "globe_peer_1" {
+  name                      = "globe-peer-1"
+  router                    = google_compute_router.router.name
+  peer_ip_address           = "169.254.1.1"
+  peer_asn                  = 65000 # Globe Private ASN
+  advertised_route_priority = 100
+  
+  bfd {
+    min_transmit_interval = 1000 # 1 second detection
+    min_receive_interval  = 1000
+    multiplier            = 3
+  }
+}
