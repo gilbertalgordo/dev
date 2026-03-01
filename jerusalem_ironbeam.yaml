@@ -1,0 +1,154 @@
+import time
+import math
+
+class IronBeamSystem:
+    def __init__(self):
+        self.status = "INITIALIZING_HEAVENLY_SHIELD"
+        self.power_level = 100.0  # kW (Conceptual)
+        self.thermal_load = 0.0
+        self.active_targets = []
+        self.is_firing = False
+
+    def hud_display(self):
+        """Simulates the HUD interface for the operator."""
+        print("-" * 40)
+        print(f"HUD | STATUS: {self.status}")
+        print(f"HUD | POWER: {self.power_level}kW | HEAT: {self.thermal_load}%")
+        print(f"HUD | ACTIVE THREATS: {len(self.active_targets)}")
+        print("-" * 40)
+
+    def acquire_target(self, distance, velocity, signature):
+        """Uriel's Light: Identifying the shadow before it falls."""
+        target = {
+            "id": f"THREAT_{int(time.time())}",
+            "dist": distance, # meters
+            "vel": velocity,  # m/s
+            "sig": signature, # RCS
+            "lock_attained": False
+        }
+        self.active_targets.append(target)
+        self.status = "LOCKING_TARGET"
+
+    def calculate_interception(self, target):
+        """Scientific reasoning for beam focal point adjustment."""
+        # Simplified focal adjustment based on atmospheric diffraction
+        dwell_required = (target['dist'] / 1000) * (1 / (self.power_level / 50))
+        return round(dwell_required, 2)
+
+    def engage(self):
+        """Michael's Sword: The activation of the Directed Energy Weapon."""
+        if not self.active_targets:
+            self.status = "SEARCHING_FOR_SHADOWS"
+            return
+
+        target = self.active_targets[0]
+        dwell_time = self.calculate_interception(target)
+        
+        self.is_firing = True
+        self.status = "BEAM_ACTIVE_INTERCEPTING"
+        self.hud_display()
+
+        # Simulate the burn process (Kaizen: continuous efficiency)
+        for second in range(int(dwell_time * 10)):
+            self.thermal_load += 1.5
+            time.sleep(0.1)
+            if self.thermal_load > 85:
+                self.status = "THERMAL_LIMIT_REACHED"
+                break
+        
+        print(f"[!] INTERCEPT_SUCCESS: {target['id']} neutralized.")
+        self.active_targets.pop(0)
+        self.is_firing = False
+        self.cool_down()
+
+    def cool_down(self):
+        """Rapid Kaizen reset for next engagement."""
+        self.status = "COOLING_RECHARGING"
+        while self.thermal_load > 0:
+            self.thermal_load -= 5.0
+            time.sleep(0.1)
+        self.status = "STANDBY_READY"
+
+# --- Deployment ---
+iron_beam = IronBeamSystem()
+iron_beam.acquire_target(distance=2500, velocity=300, signature="MORTAR_INCOMING")
+iron_beam.hud_display()
+iron_beam.engage()
+iron_beam.hud_display()
+
+
+
+import numpy as np
+import time
+from dataclasses import dataclass
+
+@dataclass
+class ThreatInstance:
+    id: str
+    position: np.array  # [x, y, z] in meters
+    velocity: np.array  # [vx, vy, vz] in m/s
+    material_density: float  # For thermal calculation
+    priority: int
+
+class IronBeamAdvanced:
+    def __init__(self):
+        self.power_output = 150000  # 150 kW
+        self.wavelength = 1.064e-6  # 1064nm (Fiber Laser)
+        self.aperture_diameter = 0.5 # 50cm
+        self.thermal_state = 0.0
+        self.instances = []
+        self.hud_active = True
+
+    def calculate_irradiance(self, range_m):
+        """
+        Scientific Reasoning: Calculates the power density on target.
+        Accounts for Diffraction Limit and Atmospheric Extinction.
+        """
+        # Beam waist at target (simplified diffraction limit)
+        w_0 = (self.wavelength * range_m) / (np.pi * (self.aperture_diameter / 2))
+        
+        # Atmospheric extinction (clear sky approx: 0.1 dB/km)
+        extinction = np.exp(-0.0001 * range_m)
+        
+        # Irradiance I = P / (pi * w^2)
+        irradiance = (self.power_output * extinction) / (np.pi * w_0**2)
+        return irradiance
+
+    def apply_kaizen_tracking(self, target: ThreatInstance):
+        """Predictive target tracking using linear extrapolation."""
+        dt = 0.01  # 10ms update cycle
+        prediction = target.position + (target.velocity * dt)
+        return prediction
+
+    def render_hud(self, target: ThreatInstance, irradiance: float):
+        """Generates the High-Definition Tactical HUD."""
+        print("\n" + "="*50)
+        print(f"║ [ARCHANGEL_SYSTEM] - JERUSALEM_BEAM_ACTIVE       ║")
+        print(f"║ TARGET_ID: {target.id:<15} PRIORITY: {target.priority}      ║")
+        print(f"║ DISTANCE: {np.linalg.norm(target.position):.2f}m | VEL: {np.linalg.norm(target.velocity):.2f}m/s ║")
+        print(f"║ POWER_DENSITY: {irradiance/1e6:.2f} MW/m² | HEAT: {self.thermal_state:.1f}%   ║")
+        print("="*50)
+
+    def engage_swarm(self):
+        """High-speed engagement cycle for multiple instances."""
+        for target in sorted(self.instances, key=lambda x: x.priority, reverse=True):
+            range_to_target = np.linalg.norm(target.position)
+            irr = self.calculate_irradiance(range_to_target)
+            
+            # Engagement threshold: 10 MW/m² to melt aluminum/steel
+            if irr > 10000000:
+                self.render_hud(target, irr)
+                self.thermal_state += 2.5
+                print(f"[!] BEAM_LOCKED: Neutralizing {target.id}...")
+                time.sleep(0.5) # Dwell time
+                print(f"[✓] THREAT_ELIMINATED: {target.id}")
+            else:
+                print(f"[?] TARGET_OUT_OF_EFFECTIVE_RANGE: {target.id}")
+
+# --- Deployment Instance ---
+system = IronBeamAdvanced()
+system.instances = [
+    ThreatInstance("MORTAR_01", np.array([1200, 500, 800]), np.array([-50, 0, -20]), 2700, 1),
+    ThreatInstance("UAV_SWARM_A", np.array([2500, 100, 200]), np.array([-10, 5, 0]), 1200, 2)
+]
+system.engage_swarm()
