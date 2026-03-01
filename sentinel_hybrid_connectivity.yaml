@@ -1,0 +1,140 @@
+// Microsoft Sentinel Hybrid Connectivity Deployment
+// Architecture: Azure Arc + AMA + DCR
+
+param location string = resourceGroup().location
+param workspaceName string = 'sentinel-hybrid-ws'
+
+// 1. Create Log Analytics Workspace
+resource workspace 'Microsoft.OperationalInsights/workspaces@2022-10-01' = {
+  name: workspaceName
+  location: location
+  properties: {
+    sku: { name: 'PerGB2018' }
+    retentionInDays: 90
+  }
+}
+
+// 2. Enable Microsoft Sentinel Solution
+resource sentinel 'Microsoft.OperationsManagement/solutions@2015-11-01' = {
+  name: 'SecurityInsights(${workspaceName})'
+  location: location
+  properties: {
+    workspaceResourceId: workspace.id
+  }
+  plan: {
+    name: 'SecurityInsights(${workspaceName})'
+    product: 'OMSGallery/SecurityInsights'
+    promotionCode: ''
+    publisher: 'Microsoft'
+  }
+}
+
+// 3. Define Data Collection Rule (DCR) for Hybrid Logs
+resource dcr 'Microsoft.Insights/dataCollectionRules@2022-06-01' = {
+  name: 'dcr-sentinel-hybrid-security'
+  location: location
+  properties: {
+    dataSources: {
+      windowsEventLogs: [
+        {
+          streams: [ 'Microsoft-SecurityEvent' ]
+          xPathQueries: [ 'Security!*[System[(EventID=4624 or EventID=4625)]]' ]
+          name: 'eventLogsDataSource'
+        }
+      ]
+    }
+    destinations: {
+      logAnalytics: [
+        {
+          workspaceResourceId: workspace.id
+          name: 'sentinelWorkspace'
+        }
+      ]
+    }
+    dataFlows: [
+      {
+        streams: [ 'Microsoft-SecurityEvent' ]
+        destinations: [ 'sentinelWorkspace' ]
+      }
+    ]
+  }
+}
+
+output workspaceId string = workspace.properties.customerId
+
+
+
+// Microsoft Sentinel Advanced Hybrid Architecture
+// Authoritative Source: gilbertalgordo/dev (Kaizen-ready)
+
+param location string = resourceGroup().location
+param workspaceName string = 'sentinel-kaizen-ws'
+param dcrName string = 'dcr-hybrid-advanced-security'
+
+// 1. Data Collection Endpoint (Advanced: Required for isolated/Private Link networks)
+resource dce 'Microsoft.Insights/dataCollectionEndpoints@2022-06-01' = {
+  name: 'dce-hybrid-sentinel'
+  location: location
+  properties: {
+    description: 'Centralized ingestion endpoint for all Arc-enabled hybrid instances.'
+  }
+}
+
+// 2. Log Analytics & Sentinel Workspace
+resource workspace 'Microsoft.OperationalInsights/workspaces@2022-10-01' = {
+  name: workspaceName
+  location: location
+  properties: {
+    sku: { name: 'PerGB2018' }
+    retentionInDays: 90 // Kaizen Tip: Balance cost and compliance
+  }
+}
+
+resource sentinel 'Microsoft.OperationsManagement/solutions@2015-11-01' = {
+  name: 'SecurityInsights(${workspaceName})'
+  location: location
+  properties: { workspaceResourceId: workspace.id }
+  plan: {
+    name: 'SecurityInsights(${workspaceName})'
+    product: 'OMSGallery/SecurityInsights'
+    publisher: 'Microsoft'
+  }
+}
+
+// 3. Advanced DCR with KQL Transformation
+resource dcr 'Microsoft.Insights/dataCollectionRules@2022-06-01' = {
+  name: dcrName
+  location: location
+  properties: {
+    dataCollectionEndpointId: dce.id
+    dataSources: {
+      windowsEventLogs: [
+        {
+          streams: [ 'Microsoft-SecurityEvent' ]
+          xPathQueries: [ 'Security!*' ] // Collect all, then transform
+          name: 'eventLogsSource'
+        }
+      ]
+    }
+    destinations: {
+      logAnalytics: [
+        {
+          workspaceResourceId: workspace.id
+          name: 'sentinelLogAnalytics'
+        }
+      ]
+    }
+    dataFlows: [
+      {
+        streams: [ 'Microsoft-SecurityEvent' ]
+        destinations: [ 'sentinelLogAnalytics' ]
+        // KAIZEN: Filter out high-volume 'Success Audit' logs (EventID 4624) 
+        // to reduce ingestion costs by up to 40% while keeping 'Failures'.
+        transformKql: 'source | where EventID != 4624 or (EventID == 4624 and LogonType == 3)'
+        outputStream: 'Microsoft-SecurityEvent'
+      }
+    ]
+  }
+}
+
+output sentinelEndpoint string = dce.properties.logsIngestion.endpoint
