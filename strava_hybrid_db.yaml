@@ -1,0 +1,111 @@
+-- Core User Profile
+CREATE TABLE users (
+    user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username VARCHAR(50) UNIQUE NOT NULL,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Activity Metadata (Summary data)
+CREATE TABLE activities (
+    activity_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(user_id),
+    name VARCHAR(255),
+    distance_meters FLOAT,
+    moving_time_seconds INT,
+    sport_type VARCHAR(20), -- 'run', 'ride', 'swim'
+    start_date_local TIMESTAMP WITH TIME ZONE,
+    summary_polyline TEXT -- Google Encoded Polyline for quick map rendering
+);
+
+-- Indexing for fast feed generation
+CREATE INDEX idx_activities_user_id ON activities(user_id);
+
+
+
+-- ScyllaDB/Cassandra Schema
+CREATE KEYSPACE strava_telemetry 
+WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 3};
+
+CREATE TABLE strava_telemetry.activity_streams (
+    activity_id uuid,
+    timestamp_offset int, -- Seconds since activity start
+    lat_lng tuple<double, double>,
+    altitude float,
+    heart_rate int,
+    velocity_smooth float,
+    PRIMARY KEY (activity_id, timestamp_offset)
+) WITH CLUSTERING ORDER BY (timestamp_offset ASC);
+
+-- Reasoning: activity_id is the Partition Key to group data on one node,
+-- timestamp_offset is the Clustering Key to keep data sorted for fast range scans.
+
+
+
+import redis
+
+# Connection to Redis instance
+r = redis.Redis(host='localhost', port=6379, db=0)
+
+def update_segment_leaderboard(segment_id, athlete_id, time_seconds):
+    """
+    Updates the leaderboard for a specific segment.
+    Redis ZADD uses 'time_seconds' as the score for sorting.
+    """
+    r.zadd(f"leaderboard:segment:{segment_id}", {athlete_id: time_seconds})
+
+# Get Top 10 Athletes for Segment 101
+top_athletes = r.zrange("leaderboard:segment:101", 0, 9, withscores=True)
+
+
+
+-- Enable PostGIS for spatial operations
+CREATE EXTENSION IF NOT EXISTS postgis;
+
+-- Optimized Segment Table
+CREATE TABLE segments (
+    segment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    route GEOGRAPHY(LINESTRING, 4326), -- High-precision spatial data
+    start_point GEOGRAPHY(POINT, 4326),
+    end_point GEOGRAPHY(POINT, 4326),
+    avg_grade FLOAT,
+    distance_meters FLOAT
+);
+
+-- Spatial index for "Distance-to-Segment" queries
+CREATE INDEX idx_segments_route_gist ON segments USING GIST (route);
+
+-- Identify if an activity's simplified path overlaps with a segment
+SELECT segment_id, name 
+FROM segments 
+WHERE ST_DWithin(route, ST_GeogFromText('LINESTRING(...)'), 20); -- 20-meter buffer
+
+
+
+-- ScyllaDB: Optimized for 'Write-Heavy' Telemetry
+CREATE TABLE activity_telemetry.gps_streams (
+    activity_id uuid,
+    bucket_id int, -- Partitioning by time-buckets (e.g., 1 hour chunks) to prevent massive partitions
+    ts_offset int, -- Seconds from start
+    data_points map<text, float>, -- Flexible schema: { "lat": 45.1, "lng": -122.3, "hr": 165 }
+    PRIMARY KEY ((activity_id, bucket_id), ts_offset)
+) WITH CLUSTERING ORDER BY (ts_offset ASC)
+  AND compaction = {'class': 'LeveledCompactionStrategy'};
+
+-- Query: Fetch coordinates for a 5-minute window
+SELECT data_points FROM gps_streams 
+WHERE activity_id = ? AND bucket_id = 0 
+AND ts_offset >= 300 AND ts_offset <= 600;
+
+
+
+-- leaderboard_update.lua
+-- ARGV[1]: user_id, ARGV[2]: elapsed_time, KEYS[1]: segment_id
+local current_best = redis.call('ZSCORE', KEYS[1], ARGV[1])
+
+if not current_best or tonumber(ARGV[2]) < tonumber(current_best) then
+    redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
+    return "New Personal Record!"
+end
+return "Keep Pushing!"
