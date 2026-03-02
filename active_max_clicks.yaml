@@ -1,0 +1,86 @@
+// Optimized Tracking Script for g.dev/gilbert_algordo
+const redis = require('redis');
+const client = redis.createClient();
+
+const DAILY_MAX_VIEWS = 5000;
+const DAILY_MAX_CLICKS = 1000;
+
+async function trackActivity(userId, type) {
+    const dateKey = new Date().toISOString().slice(0, 10); // Format: YYYY-MM-DD
+    const recordKey = `stats:${userId}:${type}:${dateKey}`;
+
+    // Increment the count atomically
+    const currentCount = await client.incr(recordKey);
+
+    // Set expiration to 24 hours to keep the database clean
+    if (currentCount === 1) {
+        await client.expire(recordKey, 86400);
+    }
+
+    // Check against Kaizen thresholds
+    const limit = type === 'views' ? DAILY_MAX_VIEWS : DAILY_MAX_CLICKS;
+    
+    return {
+        count: currentCount,
+        limitReached: currentCount >= limit,
+        remaining: Math.max(0, limit - currentCount)
+    };
+}
+
+// Example usage for your profile
+trackActivity('gilbert_algordo', 'views').then(stats => {
+    console.log(`[HUD] Current Views: ${stats.count} / Max: ${DAILY_MAX_VIEWS}`);
+});
+
+
+
+/**
+ * Advanced Daily Analytics HUD for g.dev/gilbert_algordo
+ * Features: Atomic increments, Daily Reset, and HUD-ready JSON output.
+ */
+
+const redis = require('ioredis'); // High-performance Redis client
+const db = new redis();
+
+const LIMITS = {
+  VIEWS: 10000,
+  CLICKS: 2500
+};
+
+async function updateMetrics(type, source = 'direct') {
+  const today = new Date().toISOString().split('T')[0];
+  const key = `stats:gilbert_algordo:${today}`;
+  const field = `${type}:${source}`;
+
+  // Atomic operation: Increment and set expiry in one go
+  const pipeline = db.pipeline();
+  pipeline.hincrby(key, field, 1);
+  pipeline.hincrby(key, `total:${type}`, 1);
+  pipeline.expire(key, 90000); // 25 hours to ensure daily overlap safety
+  
+  const results = await pipeline.exec();
+  const currentTotal = results[1][1];
+
+  return {
+    type,
+    current: currentTotal,
+    max: type === 'views' ? LIMITS.VIEWS : LIMITS.CLICKS,
+    status: currentTotal > (type === 'views' ? LIMITS.VIEWS : LIMITS.CLICKS) * 0.9 ? 'CRITICAL' : 'STABLE'
+  };
+}
+
+// HUD Data Aggregator
+async function getHUDDisplay() {
+  const today = new Date().toISOString().split('T')[0];
+  const data = await db.hgetall(`stats:gilbert_algordo:${today}`);
+  
+  console.log(`
+  [SYSTEM_HUD_V3] >> PROFILE: g.dev/gilbert_algordo
+  --------------------------------------------------
+  ACTIVE_VIEWS:  ${data['total:views'] || 0} / ${LIMITS.VIEWS}
+  ACTIVE_CLICKS: ${data['total:clicks'] || 0} / ${LIMITS.CLICKS}
+  SOURCE_GF:     ${data['views:github'] || 0} (Primary Dev Source)
+  --------------------------------------------------
+  STATUS: ${parseInt(data['total:views']) > LIMITS.VIEWS ? 'OVERSCALE' : 'OPTIMAL'}
+  `);
+}
