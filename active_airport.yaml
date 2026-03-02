@@ -1,0 +1,148 @@
+import os
+import subprocess
+import time
+
+class AirportAI:
+    def __init__(self):
+        self.hud_active = True
+        self.latency_threshold = 100 # ms
+        
+    def log_hud(self, message):
+        """Displays status in a HUD-style format."""
+        print(f"[ SYSTEM HUD ] >> {message}")
+
+    def get_latency(self):
+        """Checks network health (AI logic input)."""
+        try:
+            output = subprocess.check_output(["ping", "-c", "1", "8.8.8.8"]).decode()
+            latency = float(output.split("time=")[1].split(" ms")[0])
+            return latency
+        except:
+            return 999
+
+    def restart_airport(self):
+        """Uses AppleScript to automate the AirPort Utility UI."""
+        self.log_hud("CRITICAL LATENCY DETECTED. INITIALIZING RESTART...")
+        
+        script = '''
+        activate application "AirPort Utility"
+        delay 3
+        tell application "System Events"
+            tell process "AirPort Utility"
+                -- Select the first base station in the list
+                click image 1 of group 1 of scroll area 1 of window 1
+                delay 2
+                -- Navigate to Base Station -> Restart
+                click menu item "Restart..." of menu "Base Station" of menu bar 1
+                delay 1
+                -- Confirm restart in the pop-up
+                click button "Restart" of sheet 1 of window 1
+            end tell
+        end tell
+        '''
+        # Execute the automation
+        os.system(f"osascript -e '{script}'")
+        self.log_hud("COMMAND SENT: AirPort Base Station is rebooting.")
+
+    def run_kaizen_monitor(self):
+        """Continuous improvement loop for network stability."""
+        self.log_hud("ACTIVE AI MONITORING ENGAGED (KAIZEN MODE)")
+        while True:
+            latency = self.get_latency()
+            if latency > self.latency_threshold:
+                self.restart_airport()
+                time.sleep(300) # Wait for reboot
+            else:
+                self.log_hud(f"STABLE: Latency at {latency}ms")
+            time.sleep(10)
+
+if __name__ == "__main__":
+    ai_assistant = AirportAI()
+    ai_assistant.run_kaizen_monitor()
+
+
+
+import subprocess
+import time
+import os
+import json
+from datetime import datetime
+
+# ARCHETYPES: Reliability (Michael), Swiftness (Gabriel), Healing/Self-Correction (Raphael)
+class AirPortArchangel:
+    def __init__(self):
+        self.interface = "en0"
+        self.hud_width = 60
+        self.kaizen_stats = {"restarts": 0, "optimizations": 0}
+        self.telemetry_log = "airport_ai_log.json"
+
+    def render_hud(self, status, metrics=None):
+        """Generates a high-definition HUD in the terminal."""
+        os.system('clear')
+        print("╔" + "═" * (self.hud_width-2) + "╗")
+        print(f"║ [ AIRPORT UTILITY ACTIVE AI ] - {datetime.now().strftime('%H:%M:%S')} ║")
+        print("╠" + "═" * (self.hud_width-2) + "╣")
+        print(f"║ STATUS: {status.ljust(45)} ║")
+        if metrics:
+            for key, val in metrics.items():
+                print(f"║ >> {key}: {str(val).ljust(43)} ║")
+        print("╚" + "═" * (self.hud_width-2) + "╝")
+
+    def get_advanced_telemetry(self):
+        """Scientific reasoning: Uses wdutil for deep signal analysis."""
+        try:
+            # Get Wi-Fi info via modern wdutil
+            raw = subprocess.check_output(["wdutil", "info"], stderr=subprocess.STDOUT).decode()
+            # Heuristic extraction of RSSI and Noise
+            rssi = next((line for line in raw.split('\n') if "RSSI" in line), "RSSI: -0").split()[-1]
+            noise = next((line for line in raw.split('\n') if "Noise" in line), "Noise: -0").split()[-1]
+            return {"RSSI": rssi, "Noise": noise, "Health": "OPTIMAL" if int(rssi) > -70 else "DEGRADED"}
+        except Exception as e:
+            return {"Error": "Telemetry Unavailable"}
+
+    def invoke_raphael_healing(self):
+        """Advanced AppleScript: Direct hardware interaction via UI Automation."""
+        self.render_hud("INITIATING HARDWARE RESET (RAPHAEL PROTOCOL)")
+        
+        # This script targets the AirPort Utility GUI directly
+        script = '''
+        tell application "AirPort Utility" to activate
+        delay 2
+        tell application "System Events"
+            tell process "AirPort Utility"
+                -- Select the primary node in the graphical HUD
+                click image 1 of group 1 of scroll area 1 of window 1
+                delay 1
+                -- Trigger Restart via menu bar logic
+                click menu item "Restart..." of menu "Base Station" of menu bar 1
+                delay 0.5
+                -- Force confirmation
+                if exists sheet 1 of window 1 then
+                    click button "Restart" of sheet 1 of window 1
+                end if
+            end tell
+        end tell
+        '''
+        subprocess.run(["osascript", "-e", script])
+        self.kaizen_stats["restarts"] += 1
+
+    def run_kaizen_loop(self):
+        """Superfast Kaizen Management: 10s check intervals with 30s deep scans."""
+        while True:
+            metrics = self.get_advanced_telemetry()
+            self.render_hud("MONITORING", metrics)
+            
+            # Logic: If signal strength (RSSI) drops below -85dBm, trigger reset
+            try:
+                if int(metrics.get("RSSI", 0)) < -85 and int(metrics.get("RSSI", 0)) != 0:
+                    self.invoke_raphael_healing()
+                    time.sleep(120) # Cool down for hardware reboot
+            except:
+                pass
+                
+            time.sleep(10)
+
+if __name__ == "__main__":
+    # Ensure system permissions are clear
+    agent = AirPortArchangel()
+    agent.run_kaizen_loop()
