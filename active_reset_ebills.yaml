@@ -1,0 +1,142 @@
+import datetime
+import time
+import random
+
+class ElectricBillAI:
+    def __init__(self, unit_price=0.15):
+        self.unit_price = unit_price  # Price per kWh
+        self.daily_kwh_consumed = 0.0
+        self.monthly_total_kwh = 0.0
+        self.last_meter_reading = 0.0
+        self.start_date = datetime.date.today()
+        
+    def reset_daily_counter(self):
+        """Kaizen Reset: Clears daily metrics at midnight."""
+        print(f"\n[SYSTEM] Daily Reset Initialized: {datetime.date.today()}")
+        self.daily_kwh_consumed = 0.0
+
+    def process_meter_reading(self, total_accumulated_kwh):
+        """Calculates consumption since last pulse and updates HUD."""
+        if self.last_meter_reading == 0:
+            self.last_meter_reading = total_accumulated_kwh
+            return
+
+        # Calculate delta
+        delta = total_accumulated_kwh - self.last_meter_reading
+        self.daily_kwh_consumed += delta
+        self.monthly_total_kwh += delta
+        self.last_meter_reading = total_accumulated_kwh
+        
+        self.display_hud()
+
+    def predict_bill(self):
+        """AI Reasoning: Predicts month-end total based on current daily average."""
+        days_passed = (datetime.date.today() - self.start_date).days + 1
+        avg_daily = self.monthly_total_kwh / days_passed
+        projected_total = avg_daily * 30
+        return projected_total * self.unit_price
+
+    def display_hud(self):
+        """Structured HUD Output."""
+        projection = self.predict_bill()
+        print("-" * 40)
+        print(f"📊 ELECTRICITY AI HUD | {datetime.datetime.now().strftime('%H:%M:%S')}")
+        print("-" * 40)
+        print(f"▶ DAILY USAGE:    {self.daily_kwh_consumed:.2f} kWh")
+        print(f"▶ ACCUMULATED:    {self.monthly_total_kwh:.2f} kWh")
+        print(f"▶ CURRENT COST:   ${(self.monthly_total_kwh * self.unit_price):.2f}")
+        print(f"🔮 AI PROJECTION: ${projection:.2f} (End of Month)")
+        print("-" * 40)
+
+# --- SIMULATION ---
+ai_billing = ElectricBillAI(unit_price=0.12)
+
+# Simulating smart meter pulses every 2 seconds
+fake_meter = 1500.0  # Initial meter reading
+try:
+    for _ in range(5):
+        usage_jump = random.uniform(0.5, 2.5)
+        fake_meter += usage_jump
+        ai_billing.process_meter_reading(fake_meter)
+        time.sleep(2)
+except KeyboardInterrupt:
+    print("\n[STOP] AI Monitoring Terminated.")
+
+
+
+import numpy as np
+import datetime
+
+class AdvancedElectricAI:
+    def __init__(self, rate_per_kwh=0.15):
+        self.rate = rate_per_kwh
+        # Kalman Filter Variables
+        self.estimated_velocity = 0.0  # Estimated kWh per hour
+        self.error_est = 1.0
+        self.error_meas = 0.05  # Sensor noise margin
+        self.last_update_time = datetime.datetime.now()
+        
+        # HUD Tracking
+        self.daily_kwh = 0.0
+        self.cumulative_kwh = 0.0
+
+    def active_reset(self):
+        """Kaizen Zero-Point: Resets daily counters while retaining AI 'memory'."""
+        print(f"\n[SYSTEM] ACTIVE RESET COMPLETED | RE-ZEROING DAILY HUD\n")
+        self.daily_kwh = 0.0
+
+    def update_ai_state(self, current_meter_reading, previous_meter_reading):
+        """
+        AI Reasoning: Applies Kalman Filter to predict consumption velocity.
+        Formula: $KG = E_{est} / (E_{est} + E_{meas})$
+        """
+        now = datetime.datetime.now()
+        time_delta_hours = (now - self.last_update_time).total_seconds() / 3600
+        
+        if time_delta_hours <= 0: return
+
+        # Calculate raw consumption speed
+        actual_velocity = (current_meter_reading - previous_meter_reading) / time_delta_hours
+        
+        # Kalman Gain Calculation
+        kalman_gain = self.error_est / (self.error_est + self.error_meas)
+        
+        # Update estimate with new measurement
+        self.estimated_velocity = self.estimated_velocity + kalman_gain * (actual_velocity - self.estimated_velocity)
+        
+        # Update error covariance
+        self.error_est = (1 - kalman_gain) * self.error_est
+        
+        # Update HUD Metrics
+        consumption = current_meter_reading - previous_meter_reading
+        self.daily_kwh += consumption
+        self.cumulative_kwh += consumption
+        self.last_update_time = now
+
+    def get_hud_data(self):
+        """Generates HD HUD data for 3D visualization layers."""
+        projected_monthly_kwh = self.estimated_velocity * 24 * 30
+        projected_bill = projected_monthly_kwh * self.rate
+        
+        return {
+            "Daily_Total": round(self.daily_kwh, 3),
+            "Current_Load": round(self.estimated_velocity, 2), # kWh/h
+            "Projected_Bill": round(projected_bill, 2),
+            "Efficiency_Status": "OPTIMAL" if self.estimated_velocity < 2.0 else "HIGH LOAD"
+        }
+
+# --- HUD DISPLAY RENDERER ---
+def render_3d_hud(data):
+    print("┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
+    print(f"┃ AI LOAD MONITOR [v2.0]         STATUS: {data['Efficiency_Status']} ┃")
+    print("┠─────────────────────────────────────────────────────┨")
+    print(f"┃  DAILY USAGE:   {data['Daily_Total']} kWh                      ┃")
+    print(f"┃  ACTIVE LOAD:   {data['Current_Load']} kWh/h                   ┃")
+    print(f"┃  EST. BILL:     ${data['Projected_Bill']} / mo                ┃")
+    print("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
+
+# Usage Example
+ai_core = AdvancedElectricAI(rate_per_kwh=0.12)
+# Simulating a meter reading update
+ai_core.update_ai_state(1500.5, 1500.0) 
+render_3d_hud(ai_core.get_hud_data())
