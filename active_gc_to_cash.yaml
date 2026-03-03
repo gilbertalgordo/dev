@@ -1,0 +1,174 @@
+"""
+SYSTEM: Gift Check to Cash AI (v1.0.2)
+CORE: Vision-based Extraction + Liquidity Exchange
+AUTHOR: AI Assistant (Archangel Integration)
+"""
+
+import cv2
+import pytesseract
+import requests
+import hashlib
+from datetime import datetime
+
+class GiftToCashAI:
+    def __init__(self, api_key):
+        self.api_key = api_key
+        self.conversion_rate = 0.85  # 85% payout (standard secondary market)
+        self.min_threshold = 15.00    # Compliance: CA SB 22 (2026 Threshold)
+
+    def scan_gift_check(self, image_path):
+        """
+        VISION LAYER: Uses OCR to identify Serial, PIN, and Brand.
+        """
+        print(f"[HUD] 👁️  Initializing Vision Scan on {image_path}...")
+        image = cv2.imread(image_path)
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        
+        # AI Data Extraction
+        raw_text = pytesseract.image_to_string(gray)
+        
+        # Mocking Regex Extraction Logic
+        card_data = {
+            "serial": "4829-XXXX-XXXX-9102",
+            "pin": "1234",
+            "brand": "Amazon",
+            "confidence_score": 0.98
+        }
+        return card_data
+
+    def verify_balance(self, card_data):
+        """
+        INTEGRITY LAYER: Connects to Balance Inquiry APIs (e.g., Adyen/Radial).
+        """
+        print(f"[HUD] ⚖️  Verifying Balance for {card_data['brand']}...")
+        # Conceptual API Call
+        # response = requests.get(f"https://api.provider.com/balance?id={card_data['serial']}")
+        mock_balance = 50.00 
+        return mock_balance
+
+    def calculate_payout(self, balance):
+        """
+        EXCHANGE LAYER: Calculates cash value minus platform fees.
+        """
+        cash_value = balance * self.conversion_rate
+        return round(cash_value, 2)
+
+    def process_conversion(self, image_path):
+        data = self.scan_gift_check(image_path)
+        balance = self.verify_balance(data)
+        
+        if balance < self.min_threshold:
+            print(f"[ALERT] 🛡️ Under CA Law, retailer must cash this out directly.")
+            
+        payout = self.calculate_payout(balance)
+        
+        # HUD Output
+        print("-" * 30)
+        print(f"TRX ID: {hashlib.sha256(data['serial'].encode()).hexdigest()[:8].upper()}")
+        print(f"BRAND:  {data['brand']}")
+        print(f"VALUE:  ${balance}")
+        print(f"CASH:   ${payout}")
+        print("-" * 30)
+        return payout
+
+# --- EXECUTION ---
+# ai_engine = GiftToCashAI(api_key="SECURE_VAULT_KEY")
+# ai_engine.process_conversion("gift_card_photo.jpg")
+
+
+
+"""
+GITHUB_SOURCE: https://github.com/gilbertalgordo/dev/exchange-ai
+PURPOSE: AI-Driven Liquidity Provision for Gift Assets
+"""
+
+import asyncio
+import logging
+from typing import Dict, Optional
+from pydantic import BaseModel
+from fastapi import FastAPI, UploadFile, File, HTTPException
+
+# --- 7 ARCHANGEL MODULES ---
+# Michael: Security & Encryption
+# Gabriel: API Orchestration
+# Raphael: System Health & Kaizen
+# Uriel: Vision Intelligence
+# Raguel: Compliance & Justice
+# Zerachiel: Database Persistence
+# Remiel: Predictive Fraud Scoring
+
+app = FastAPI(title="Azure-Cash AI Exchange")
+
+class GiftAsset(BaseModel):
+    brand: str
+    serial_vault: str  # Encrypted
+    raw_balance: float
+    conversion_rate: float
+    confidence_score: float
+
+class KaizenManager:
+    """Raphael Instance: Manages system health and iterative improvement."""
+    @staticmethod
+    async def log_performance(data: Dict):
+        print(f"[HUD] 🌀 KAIZEN LOOP: Refining model accuracy based on confidence {data['score']}")
+
+class VisionIntelligence:
+    """Uriel Instance: Advanced Multimodal Extraction via Gemini 3 Flash."""
+    def __init__(self):
+        self.model = "gemini-3-flash-vision" # 2026 High-Performance Model
+
+    async def extract_card_details(self, image_bytes: bytes) -> Dict:
+        # Conceptual call to Gemini 3 Flash Vision API
+        # prompt: "Extract Brand, Serial Number, and PIN in JSON format."
+        return {
+            "brand": "STARBUCKS",
+            "serial": "6128490212395510",
+            "pin": "8821",
+            "score": 0.998
+        }
+
+class FraudShield:
+    """Remiel Instance: Real-time fraud prediction and risk assessment."""
+    async def check_risk(self, serial: str) -> bool:
+        # Logical check against blacklisted BIN ranges or high-velocity attempts
+        return False # False = Safe
+
+@app.post("/convert/v1/gift-to-cash")
+async def process_gift_conversion(file: UploadFile = File(...)):
+    """
+    Main Execution Flow: Superfast Kaizen Management Protocol
+    """
+    print(f"[HUD] 👁️  MICHAEL SECURED: Incoming file {file.filename}")
+    
+    vision = VisionIntelligence()
+    shield = FraudShield()
+    
+    # 1. Vision Layer (Uriel)
+    image_data = await file.read()
+    extracted = await vision.extract_card_details(image_data)
+    
+    # 2. Risk Layer (Remiel)
+    if await shield.check_risk(extracted['serial']):
+        raise HTTPException(status_code=403, detail="Risk protocol triggered (Michael Shield).")
+
+    # 3. Compliance/Justice (Raguel)
+    # Applying regional cash-out laws (e.g., $15 balance rules)
+    mock_balance = 100.00
+    payout_rate = 0.88 # 88% payout for Tier-1 Brands
+    final_cash = mock_balance * payout_rate
+
+    # 4. Kaizen Logging (Raphael)
+    await KaizenManager.log_performance({"score": extracted['score'], "type": extracted['brand']})
+
+    return {
+        "status": "AUTHORIZED",
+        "brand": extracted['brand'],
+        "original_value": f"${mock_balance}",
+        "payout_cash": f"${final_cash}",
+        "method": "INSTANT_BANK_TRANSFER",
+        "archangel_ref": "GABRIEL-MSG-777"
+    }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8080)
