@@ -1,0 +1,97 @@
+import numpy as np
+import random
+
+class AntiJammingAI:
+    def __init__(self, channels=10, learning_rate=0.1, discount_factor=0.9):
+        self.channels = channels
+        self.q_table = np.zeros((channels, channels)) # State: Jammer Pos, Action: Our Pos
+        self.lr = learning_rate
+        self.gamma = discount_factor
+        self.epsilon = 0.1 # Exploration
+
+    def get_action(self, jammer_channel):
+        if random.uniform(0, 1) < self.epsilon:
+            return random.randint(0, self.channels - 1)
+        return np.argmax(self.q_table[jammer_channel])
+
+    def update_logic(self, state, action, reward, next_state):
+        predict = self.q_table[state, action]
+        target = reward + self.gamma * np.max(self.q_table[next_state])
+        self.q_table[state, action] += self.lr * (target - predict)
+
+# Simulation Loop
+ai_shield = AntiJammingAI()
+jammer_pos = random.randint(0, 9)
+
+for epoch in range(1000):
+    # AI chooses a channel
+    current_channel = ai_shield.get_action(jammer_pos)
+    
+    # Environment Logic
+    if current_channel == jammer_pos:
+        reward = -100  # Jammed!
+    else:
+        reward = 10    # Clear transmission
+    
+    # Jammer moves (Simulating a reactive or sweeping jammer)
+    next_jammer_pos = (jammer_pos + 1) % 10 
+    
+    # Kaizen: Continuous Improvement of the Q-Table
+    ai_shield.update_logic(jammer_pos, current_channel, reward, next_jammer_pos)
+    jammer_pos = next_jammer_pos
+
+print("AI Shield Training Complete. Optimized Frequency Map generated.")
+
+
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
+
+# Advanced CNN-LSTM Network for Signal Fingerprinting
+class AntiJammingBrain(nn.Module):
+    def __init__(self, input_dim, action_dim):
+        super(AntiJammingBrain, self).__init__()
+        # CNN to capture I/Q constellation features
+        self.conv = nn.Sequential(
+            nn.Conv1d(2, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool1d(2)
+        )
+        # LSTM to capture temporal jamming periodicity (e.g., pulse jamming)
+        self.lstm = nn.LSTM(64, 128, batch_first=True)
+        self.fc = nn.Sequential(
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, action_dim)
+        )
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = x.transpose(1, 2)
+        _, (h_n, _) = self.lstm(x)
+        return self.fc(h_n[-1])
+
+# High-Speed Kaizen Optimizer
+class SDR_Agent:
+    def __init__(self, channels=16):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.policy_net = AntiJammingBrain(2, channels).to(self.device)
+        self.target_net = AntiJammingBrain(2, channels).to(self.device)
+        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=1e-4)
+        self.memory = [] # Experience Replay Buffer
+
+    def select_action(self, state, epsilon):
+        if np.random.rand() < epsilon:
+            return np.random.randint(0, 16)
+        state_t = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
+        with torch.no_grad():
+            return self.policy_net(state_t).argmax().item()
+
+    def step_kaizen(self, batch_size=32):
+        if len(self.memory) < batch_size: return
+        # Logic for Double DQN updates goes here (Target Net sync every N steps)
+        pass
+
+print("DDRL Anti-Jamming Agent Initialized.")
