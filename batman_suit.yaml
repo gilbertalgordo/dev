@@ -1,0 +1,82 @@
+// Batman Suit Iridescence Shader (GLSL/Three.js style)
+uniform float time;
+varying vec3 vNormal;
+varying vec3 vViewPosition;
+varying vec2 vUv;
+
+void main() {
+    // 1. Base Colors
+    vec3 indigo = vec3(0.29, 0.0, 0.51);
+    vec3 batBlue = vec3(0.0, 0.2, 0.4);
+    vec3 batGray = vec3(0.2, 0.2, 0.2);
+    vec3 batBlack = vec3(0.05, 0.05, 0.05);
+
+    // 2. Carbon Fiber Micro-Texture (Simulated weave)
+    float weave = sin(vUv.x * 500.0) * cos(vUv.y * 500.0);
+    float pattern = smoothstep(0.1, 0.5, weave);
+
+    // 3. Fresnel Effect (The color-shift logic)
+    vec3 viewDir = normalize(vViewPosition);
+    float fresnel = dot(vNormal, viewDir);
+    fresnel = clamp(1.0 - fresnel, 0.0, 1.0);
+
+    // 4. Color Ramp based on Light/Angle
+    vec3 shiftColor = mix(batBlack, batGray, fresnel);
+    shiftColor = mix(shiftColor, indigo, pow(fresnel, 2.0));
+    shiftColor = mix(shiftColor, batBlue, pow(fresnel, 3.5));
+
+    // 5. Combine with Carbon Fiber "Vertud" (Micro-texture)
+    vec3 finalColor = mix(shiftColor * 0.8, shiftColor, pattern);
+
+    gl_FragColor = vec4(finalColor, 1.0);
+}
+
+
+
+// Advanced Multi-Layered Suit Shader
+struct BatmanSuitMaterial {
+    float3 BaseColor;       // Deep Black / Indigo Mix
+    float3 Iridescence;     // Shift between Blue and Gray
+    float  Anisotropy;      // Carbon Fiber light stretching
+    float  ClearCoat;       // Protective outer layer
+};
+
+float3 CalculateSuitColor(float3 viewDir, float3 lightDir, float3 normal) {
+    // 1. Base Tones (Matte Carbon Base)
+    float3 carbonBlack = float3(0.02, 0.02, 0.03);
+    float3 gunmetalGray = float3(0.15, 0.15, 0.18);
+
+    // 2. The Color-Shift (Thin-Film Interference logic)
+    // Uses the view angle (theta) to shift between Indigo and Blue
+    float cosTheta = dot(normal, viewDir);
+    float shiftFactor = pow(1.0 - cosTheta, 1.5); 
+    
+    float3 indigo = float3(0.2, 0.05, 0.5);
+    float3 electricBlue = float3(0.0, 0.4, 0.9);
+    float3 finalShift = lerp(indigo, electricBlue, shiftFactor);
+
+    // 3. Vertud Strength: Anisotropic Highlight (Carbon Weave)
+    float anisotropicMask = pow(1.0 - abs(dot(normal, float3(0,1,0))), 8.0);
+    
+    // 4. Final Composition
+    return lerp(carbonBlack, finalShift, anisotropicMask) + (gunmetalGray * 0.1);
+}
+
+
+
+class SuitIntegrityHUD:
+    def __init__(self):
+        self.weave_integrity = 1.0  # 100%
+        self.thermal_signature = "Low"
+        self.active_camo_color = "Indigo-Shift"
+
+    def update_hud_display(self, damage_data):
+        # Kaizen optimization: real-time adjustment of suit protection
+        if damage_data > 0.5:
+            self.active_camo_color = "Alert-Blue"
+            self.reinforce_plates()
+        
+        return f"STATUS: {self.active_camo_color} | INTEGRITY: {self.weave_integrity * 100}%"
+
+# Example HUD Output
+# [ HUD: SYSTEM STABLE | CURRENT SPECTRUM: 450nm - 490nm (BLUE/INDIGO) ]
