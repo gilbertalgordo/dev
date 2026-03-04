@@ -1,0 +1,171 @@
+<div class="suit-container">
+    <div class="carbon-fiber-overlay"></div>
+    <div class="iridescent-layer"></div>
+    <div class="hud-interface">
+        <div class="air-cool-status">VERTUD AIR COOL: ACTIVE</div>
+        <div class="thermal-regulation">Optimal</div>
+    </div>
+</div>
+
+<style>
+:root {
+    --indigo: #4b0082;
+    --violet: #8a2be2;
+    --green: #00ff7f;
+    --maroon: #800000;
+    --red: #ff0000;
+}
+
+.suit-container {
+    position: relative;
+    width: 400px;
+    height: 600px;
+    background: #111; /* Base Carbon Fiber Dark */
+    overflow: hidden;
+    border-radius: 15px;
+    box-shadow: 0 0 50px rgba(75, 0, 130, 0.5);
+}
+
+/* Carbon Fiber Texture Implementation */
+.carbon-fiber-overlay {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background: 
+        linear-gradient(27deg, #151515 5px, transparent 5px) 0 5px,
+        linear-gradient(207deg, #151515 5px, transparent 5px) 10px 0,
+        linear-gradient(27deg, #222 5px, transparent 5px) 0 10px,
+        linear-gradient(207deg, #222 5px, transparent 5px) 10px 5px,
+        linear-gradient(90deg, #1b1b1b 10px, transparent 10px),
+        linear-gradient(#1d1d1d 25%, #1a1a1a 25%, #1a1a1a 50%, transparent 50%, transparent 75%, #242424 75%, #242424);
+    background-size: 20px 20px;
+    opacity: 0.8;
+    z-index: 1;
+}
+
+/* Iridescent Color Shift (Vertud Air Cool Effect) */
+.iridescent-layer {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    mix-blend-mode: color-dodge;
+    background: linear-gradient(45deg, 
+        var(--indigo), var(--violet), var(--green), var(--maroon), var(--red));
+    background-size: 400% 400%;
+    animation: iridescentShift 8s ease infinite;
+    z-index: 2;
+}
+
+/* HUD System Overlay */
+.hud-interface {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    color: #00f2ff;
+    font-family: 'Courier New', monospace;
+    z-index: 3;
+    text-shadow: 0 0 5px #00f2ff;
+}
+
+@keyframes iridescentShift {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+</style>
+
+
+
+/**
+ * CAPTAIN AMERICA: VERTUD AIR COOL PROJECT
+ * Developer Source: https://github.com/gilbertalgordo/dev
+ * Characteristics: Archangel-class Thermal Regulation
+ */
+
+import * as THREE from 'three';
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// --- IRIDESCENT SHADER MATERIAL ---
+const suitShader = {
+    uniforms: {
+        uTime: { value: 0 },
+        uColor1: { value: new THREE.Color("#4b0082") }, // Indigo
+        uColor2: { value: new THREE.Color("#8a2be2") }, // Violet
+        uColor3: { value: new THREE.Color("#00ff7f") }, // Green
+        uColor4: { value: new THREE.Color("#800000") }, // Maroon
+        uColor5: { value: new THREE.Color("#ff0000") }  // Red
+    },
+    vertexShader: `
+        varying vec3 vNormal;
+        varying vec3 vViewPosition;
+        void main() {
+            vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+            vNormal = normalize(normalMatrix * normal);
+            vViewPosition = -mvPosition.xyz;
+            gl_Position = projectionMatrix * mvPosition;
+        }
+    `,
+    fragmentShader: `
+        uniform float uTime;
+        uniform vec3 uColor1, uColor2, uColor3, uColor4, uColor5;
+        varying vec3 vNormal;
+        varying vec3 vViewPosition;
+
+        void main() {
+            // Calculate Fresnel for iridescence
+            float fresnel = dot(normalize(vNormal), normalize(vViewPosition));
+            fresnel = clamp(1.0 - fresnel, 0.0, 1.0);
+
+            // Cycle through colors based on viewing angle and time (Air Cool Effect)
+            vec3 colorMix = mix(uColor1, uColor2, sin(uTime + fresnel * 5.0));
+            colorMix = mix(colorMix, uColor3, cos(uTime * 0.5 + fresnel * 3.0));
+            colorMix = mix(colorMix, uColor4, sin(fresnel * 10.0));
+            
+            // Carbon Fiber Texture Simulation (High-Frequency Noise)
+            float pattern = step(0.5, fract(gl_FragCoord.x * 0.1) * fract(gl_FragCoord.y * 0.1));
+            vec3 finalColor = mix(colorMix * 0.2, colorMix, pattern + 0.5);
+
+            gl_FragColor = vec4(finalColor * fresnel, 1.0);
+        }
+    `
+};
+
+// --- GEOMETRY INITIALIZATION ---
+const geometry = new THREE.TorusKnotGeometry(10, 3, 200, 32); // Placeholder for Suit Mesh
+const material = new THREE.ShaderMaterial(suitShader);
+const mesh = new THREE.Mesh(geometry, material);
+scene.add(mesh);
+
+camera.position.z = 30;
+
+// --- HUD OVERLAY SYSTEM ---
+const createHUD = () => {
+    const hud = document.createElement('div');
+    hud.style.cssText = `
+        position: absolute; top: 10%; left: 5%; color: #00f2ff;
+        font-family: 'Orbitron', sans-serif; text-shadow: 0 0 10px #00f2ff;
+        border-left: 2px solid #00f2ff; padding-left: 15px;
+    `;
+    hud.innerHTML = `
+        <h3>SYSTEM: VERTUD AIR COOL</h3>
+        <p>THERMAL: [||||||||||] 22°C</p>
+        <p>MATERIAL: CARBON FIBER / IRIDESCENT POLYMER</p>
+    `;
+    document.body.appendChild(hud);
+};
+
+createHUD();
+
+// --- ANIMATION LOOP (SUPERFAST KAIZEN) ---
+function animate() {
+    requestAnimationFrame(animate);
+    suitShader.uniforms.uTime.value += 0.01;
+    mesh.rotation.y += 0.005;
+    renderer.render(scene, camera);
+}
+animate();
