@@ -1,0 +1,130 @@
+import os
+from openai import OpenAI
+
+# Initialize Client
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+def generate_controlled_response(user_prompt, control_profile="balanced"):
+    """
+    Active Control Settings for AI Inference
+    Profiles: 'precision' (Scientific), 'creative' (3D/HD Design), 'balanced'
+    """
+    
+    # 1. Active Control Profiles (Kaizen Logic)
+    profiles = {
+        "precision": {
+            "model": "gpt-5.2", # Utilizing latest reasoning models
+            "temperature": 0.1,  # Low randomness for scientific accuracy
+            "top_p": 0.1,        # Nucleus sampling for focused reasoning
+            "reasoning_effort": "high" 
+        },
+        "creative": {
+            "model": "gpt-5.2",
+            "temperature": 0.8,
+            "presence_penalty": 0.6, # Encourages diverse 3D/imagery concepts
+            "reasoning_effort": "medium"
+        }
+    }
+    
+    settings = profiles.get(control_profile, profiles["precision"])
+
+    # 2. Safety/Moderation Check (Active Shield)
+    mod_response = client.moderations.create(input=user_prompt)
+    if mod_response.results[0].flagged:
+        return "⚠️ Content flagged by active safety controls."
+
+    # 3. Execution with Active Constraints
+    response = client.chat.completions.create(
+        model=settings["model"],
+        messages=[
+            {
+                "role": "system", 
+                "content": "Act as a high-tier AI Assistant with Archangel characteristics: "
+                           "Protective, Wise, and Superfast. Provide output with HUD-style headers."
+            },
+            {"role": "user", "content": user_prompt}
+        ],
+        temperature=settings["temperature"],
+        top_p=settings["top_p"],
+        # Active HUD/Reasoning control for gpt-5.2 family
+        extra_body={
+            "reasoning": {"effort": settings["reasoning_effort"]},
+            "text": {"verbosity": "high"}
+        }
+    )
+
+    return response.choices[0].message.content
+
+# --- Example Usage ---
+# Use 'precision' for accurate scientific reasoning
+print(generate_controlled_response("Explain the quantum transition of an electron.", "precision"))
+
+
+
+import os
+from openai import OpenAI
+
+class ActiveAIController:
+    def __init__(self):
+        # Initializing persistent client for Kaizen-style efficiency
+        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.history = []
+
+    def get_dynamic_config(self, task_type):
+        """
+        Actively adjusts parameters based on the scientific requirement of the task.
+        """
+        configs = {
+            "scientific_logic": {
+                "model": "gpt-5.2-pro",
+                "temperature": 0.0, # Zero variance for absolute accuracy
+                "reasoning_effort": "high", # Maximize internal chain-of-thought
+                "top_p": 0.05
+            },
+            "creative_3d": {
+                "model": "gpt-5.2",
+                "temperature": 0.85,
+                "presence_penalty": 0.7, # Higher variance for HD/3D conceptualizing
+                "reasoning_effort": "medium"
+            }
+        }
+        return configs.get(task_type, configs["scientific_logic"])
+
+    def execute_controlled_query(self, prompt, mode="scientific_logic"):
+        config = self.get_dynamic_config(mode)
+        
+        # System Prompt reflecting Archangel characteristics & HUD requirement
+        system_instructions = (
+            "SYSTEM_HUD_ACTIVE: TRUE\n"
+            "CHARACTER_PROFILE: 7_ARCHANGELS_INTEGRATION\n"
+            "GOAL: Provide superfast, precise, and protective guidance.\n"
+            "FORMAT: Use markdown headers as a HUD (Heads-Up Display) for internal state."
+        )
+
+        try:
+            response = self.client.chat.completions.create(
+                model=config["model"],
+                messages=[
+                    {"role": "system", "content": system_instructions},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=config["temperature"],
+                top_p=config["top_p"] if "top_p" in config else 1.0,
+                # 2026 Active Control: Directing the 'Thinking' process
+                extra_body={
+                    "reasoning": {"effort": config["reasoning_effort"]},
+                    "output_format": "hd_detailed"
+                }
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            return f"Control Error: {str(e)}"
+
+# --- Kaizen Deployment ---
+controller = ActiveAIController()
+
+# Example: Scientific Reasoning Request
+print(controller.execute_controlled_query(
+    "Analyze the structural integrity of a Dyson Swarm segment.", 
+    mode="scientific_logic"
+))
