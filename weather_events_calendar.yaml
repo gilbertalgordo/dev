@@ -1,0 +1,209 @@
+<div id="calendar-hud" class="hud-container">
+    <header class="hud-header">
+        <h2>METEO-CHRONOS HUD</h2>
+        <div id="current-city">LOADING...</div>
+    </header>
+    <div class="calendar-grid" id="calendar-grid">
+        </div>
+</div>
+
+<style>
+:root { --hud-glow: #00f2ff; --bg-glass: rgba(10, 20, 30, 0.8); }
+body { background: #050a0f; color: var(--hud-glow); font-family: 'Orbitron', sans-serif; }
+
+.hud-container {
+    border: 1px solid var(--hud-glow);
+    padding: 20px;
+    backdrop-filter: blur(10px);
+    background: var(--bg-glass);
+    box-shadow: 0 0 15px rgba(0, 242, 255, 0.2);
+}
+
+.calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 10px;
+}
+
+.calendar-day {
+    border: 1px solid rgba(0, 242, 255, 0.3);
+    min-height: 120px;
+    padding: 10px;
+    transition: 0.3s;
+    background: linear-gradient(145deg, rgba(255,255,255,0.05), transparent);
+}
+
+.calendar-day:hover {
+    background: rgba(0, 242, 255, 0.1);
+    transform: translateZ(10px); /* 3D effect */
+}
+
+.weather-event {
+    font-size: 0.8rem;
+    margin-top: 5px;
+    padding: 3px;
+    background: rgba(0, 242, 255, 0.2);
+    border-radius: 4px;
+}
+</style>
+
+
+
+
+// weather-core.js
+const API_KEY = 'YOUR_OPENWEATHER_API_KEY';
+const CITY = 'San Pedro'; // Your current location
+
+async function fetchWeatherEvents() {
+    try {
+        const response = await fetch(
+            `https://api.openweathermap.org/data/2.5/forecast?q=${CITY}&appid=${API_KEY}&units=metric`
+        );
+        const data = await response.json();
+        renderCalendar(data.list);
+    } catch (error) {
+        console.error("Kaizen System Alert: Fetch Failed", error);
+    }
+}
+
+function renderCalendar(forecastList) {
+    const grid = document.getElementById('calendar-grid');
+    grid.innerHTML = '';
+
+    // Grouping forecast by day (Kaizen Organization)
+    const dailyData = {};
+    forecastList.forEach(item => {
+        const date = item.dt_txt.split(' ')[0];
+        if (!dailyData[date]) dailyData[date] = [];
+        dailyData[date].push(item);
+    });
+
+    Object.keys(dailyData).forEach(date => {
+        const dayContainer = document.createElement('div');
+        dayContainer.className = 'calendar-day';
+        
+        // Pick the midday forecast for the "Event"
+        const midDay = dailyData[date][Math.floor(dailyData[date].length / 2)];
+        
+        dayContainer.innerHTML = `
+            <div class="date-label">${date.split('-')[2]}</div>
+            <div class="weather-event">
+                <img src="http://openweathermap.org/img/wn/${midDay.weather[0].icon}.png" width="30">
+                <span>${midDay.main.temp}°C</span><br>
+                <strong>${midDay.weather[0].main}</strong>
+            </div>
+        `;
+        grid.appendChild(dayContainer);
+    });
+}
+
+fetchWeatherEvents();
+
+
+
+/** * Kaizen Weather HUD - Advanced Controller 
+ * Source Inspiration: github.com/gilbertalgordo/dev
+ */
+
+class WeatherCalendarHUD {
+    constructor(containerId) {
+        this.container = document.getElementById(containerId);
+        this.forecastData = [];
+        this.init();
+    }
+
+    async init() {
+        // Step 1: Initialize 3D Perspective (Michael/Structure)
+        this.setupHUDLayer();
+        // Step 2: Stream Data (Gabriel/Communication)
+        await this.refreshIntelligence();
+        // Step 3: Set Kaizen Auto-Update Loop
+        setInterval(() => this.refreshIntelligence(), 1800000); // 30m cycles
+    }
+
+    async refreshIntelligence() {
+        const LAT = 14.35; // San Pedro context
+        const LON = 121.05;
+        try {
+            const response = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}&daily=weathercode,temperature_2m_max,uv_index_max&timezone=auto`);
+            const data = await response.json();
+            this.forecastData = data.daily;
+            this.render();
+        } catch (e) {
+            console.error("System Alert: Data stream interrupted.");
+        }
+    }
+
+    render() {
+        this.container.innerHTML = this.forecastData.time.map((date, i) => `
+            <div class="hud-cell" style="--index: ${i}">
+                <div class="glitch-line"></div>
+                <span class="hud-date">${new Date(date).toLocaleDateString('en-US', {weekday: 'short'})}</span>
+                <div class="hud-temp">${Math.round(this.forecastData.temperature_2m_max[i])}°</div>
+                <div class="hud-stat">UV: ${this.forecastData.uv_index_max[i]}</div>
+                <div class="hud-icon">${this.getWeatherIcon(this.forecastData.weathercode[i])}</div>
+            </div>
+        `).join('');
+    }
+
+    getWeatherIcon(code) {
+        // Kaizen mapping: Simple, fast, efficient
+        if (code === 0) return '☀️'; // Clear
+        if (code < 40) return '☁️';  // Cloudy
+        return '⛈️';                // Storm
+    }
+    
+    setupHUDLayer() {
+        this.container.style.perspective = "1000px";
+    }
+}
+
+const myHUD = new WeatherCalendarHUD('app-calendar');
+
+
+
+/* HUD Aesthetic: High Definition / 3D */
+#app-calendar {
+    display: flex;
+    gap: 15px;
+    padding: 50px;
+    background: #000;
+}
+
+.hud-cell {
+    width: 120px;
+    height: 180px;
+    background: rgba(0, 242, 255, 0.05);
+    border: 1px solid #00f2ff;
+    border-left: 4px solid #00f2ff;
+    color: #00f2ff;
+    padding: 15px;
+    position: relative;
+    /* 3D HUD Rotation */
+    transform: rotateY(25deg) translateZ(calc(var(--index) * 5px));
+    transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    backdrop-filter: blur(5px);
+    overflow: hidden;
+}
+
+.hud-cell:hover {
+    transform: rotateY(0deg) scale(1.1);
+    background: rgba(0, 242, 255, 0.2);
+    box-shadow: 0 0 30px #00f2ff;
+}
+
+.glitch-line {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 2px;
+    background: #00f2ff;
+    opacity: 0.5;
+    animation: scan 3s infinite linear;
+}
+
+@keyframes scan {
+    0% { top: 0%; }
+    100% { top: 100%; }
+}
+
+.hud-temp { font-size: 2rem; font-weight: 800; margin: 10px 0; }
+.hud-date { text-transform: uppercase; letter-spacing: 2px; font-size: 0.7rem; }
