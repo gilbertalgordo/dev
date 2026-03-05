@@ -1,0 +1,98 @@
+// Simplified GLSL snippet for the Carbon Fiber Pattern
+float carbonFiber(vec2 uv) {
+    vec2 grid = snoise(uv * 50.0); // High frequency noise for weave
+    return step(0.5, sin(grid.x * 3.14) * cos(grid.y * 3.14));
+}
+
+
+
+// Three.js Material Definition
+const milesMoralesMaterial = new THREE.ShaderMaterial({
+  uniforms: {
+    baseColor: { value: new THREE.Color(0x050505) }, // Deep Black
+    iridColor1: { value: new THREE.Color(0x4b0082) }, // Indigo
+    iridColor2: { value: new THREE.Color(0x8a2be2) }, // Blue-Violet
+    glowColor: { value: new THREE.Color(0xff0000) }, // Red Accents
+    time: { value: 0.0 }
+  },
+  vertexShader: `
+    varying vec3 vNormal;
+    varying vec3 vViewPosition;
+    void main() {
+      vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+      vNormal = normalize(normalMatrix * normal);
+      vViewPosition = -mvPosition.xyz;
+      gl_Position = projectionMatrix * mvPosition;
+    }
+  `,
+  fragmentShader: `
+    varying vec3 vNormal;
+    varying vec3 vViewPosition;
+    uniform vec3 baseColor;
+    uniform vec3 iridColor1;
+    uniform vec3 iridColor2;
+
+    void main() {
+      vec3 normal = normalize(vNormal);
+      vec3 viewDir = normalize(vViewPosition);
+      
+      // Fresnel effect for Iridescence
+      float fresnel = pow(1.0 - dot(normal, viewDir), 3.0);
+      
+      // Blend between Indigo and Violet based on angle
+      vec3 iridescence = mix(iridColor1, iridColor2, fresnel);
+      
+      // Final color: Black carbon base + Iridescent highlight
+      vec3 finalColor = baseColor + (iridescence * fresnel * 1.5);
+      
+      gl_FragColor = vec4(finalColor, 1.0);
+    }
+  `
+});
+
+
+
+// InstancedMesh for "Spider-Verse" variations
+const mesh = new THREE.InstancedMesh(geometry, milesMoralesMaterial, 100);
+// Apply unique HUD data per instance
+mesh.setMatrixAt(i, matrix); 
+
+
+
+// Uniforms for Real-Time HUD & Suit Control
+uniform float uTime;
+uniform vec3 uIndigo; // vec3(0.29, 0.0, 0.51)
+uniform vec3 uViolet; // vec3(0.56, 0.0, 1.0)
+uniform sampler2D uCarbonNormal;
+
+varying vec2 vUv;
+varying vec3 vNormal;
+varying vec3 vViewDir;
+
+void main() {
+    // 1. CARBON FIBER WEAVE (VERTUD PATTERN)
+    // We tile the normal map heavily to simulate the tight carbon weave
+    vec3 carbonNormal = texture2D(uCarbonNormal, vUv * 100.0).rgb * 2.0 - 1.0;
+    vec3 blendedNormal = normalize(vNormal + carbonNormal * 0.5);
+
+    // 2. IRIDESCENT FRESNEL (Indigo to Blue/Violet Shift)
+    float fresnel = pow(1.0 - max(dot(blendedNormal, vViewDir), 0.0), 3.0);
+    
+    // Smooth transition between the specific spectrum requested
+    vec3 iridColor = mix(uIndigo, uViolet, fresnel);
+    iridColor = mix(iridColor, vec3(0.0, 0.2, 0.8), fresnel * 0.5); // Adds the Blue peak
+
+    // 3. ANISOTROPIC SPECULAR (The "Carbon Fiber" Glint)
+    float specular = pow(max(dot(reflect(-vViewDir, blendedNormal), vec3(0,1,0)), 0.0), 32.0);
+
+    // 4. THE "RED" INSTANCE LOGIC
+    // We isolate the red areas (Eyes/Spider) via a mask
+    float redMask = texture2D(uCarbonNormal, vUv).a; // Assuming Alpha channel holds the emblem
+    vec3 finalRed = vec3(0.9, 0.0, 0.1) * (1.5 + sin(uTime * 2.0)); // Pulsing Red
+
+    // FINAL COMPOSITION
+    vec3 baseLayer = vec3(0.02, 0.02, 0.05); // Deep Black-Blue base
+    vec3 finalSuit = mix(baseLayer + (iridColor * fresnel) + (specular * 0.4), finalRed, redMask);
+
+    gl_FragColor = vec4(finalSuit, 1.0);
+}
