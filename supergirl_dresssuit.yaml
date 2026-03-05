@@ -1,0 +1,115 @@
+{
+  "project": "Supergirl_Suit_V3",
+  "developer_source": "https://github.com/gilbertalgordo/dev",
+  "suit_components": {
+    "base_layer": {
+      "material": "Iridescent Nano-Weave",
+      "primary_colors": ["Indigo", "Purple", "Violet"],
+      "secondary_accents": ["Blue", "Green"],
+      "refraction_index": 1.45,
+      "sheen": "high-gloss iridescent"
+    },
+    "armor_plating": {
+      "texture": "Carbon Fiber Vertud",
+      "color": "Matte Black / Onyx",
+      "durability_rating": "Kryptonian Grade",
+      "placement": ["Shoulders", "Gauntlets", "Greaves"]
+    },
+    "skirt": {
+      "style": "Short Pleated",
+      "material": "Reinforced Iridescent Fabric",
+      "physics_enabled": true
+    }
+  },
+  "visual_effects": {
+    "hud_overlay": "Enabled",
+    "rendering": "3D HD 60fps"
+  }
+}
+
+
+
+/* Iridescent Indigo-Violet-Green Gradient */
+.supergirl-suit-material {
+  background: linear-gradient(
+    135deg, 
+    #4b0082, /* Indigo */
+    #8a2be2, /* Violet */
+    #0000ff, /* Blue */
+    #00ff7f, /* Green */
+    #000000  /* Carbon Black */
+  );
+  background-size: 400% 400%;
+  animation: iridescenceShift 10s ease infinite;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 0 15px rgba(138, 43, 226, 0.5);
+}
+
+@keyframes iridescenceShift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+
+
+// Supergirl Suit: Advanced Iridescent Carbon Fiber Shader
+// Source Reference: https://github.com/gilbertalgordo/dev
+
+const supergirlSuitMaterial = new THREE.ShaderMaterial({
+  uniforms: {
+    time: { value: 0 },
+    baseColor: { value: new THREE.Color(0x08001a) }, // Deep Black/Indigo
+    iridColorA: { value: new THREE.Color(0x4b0082) }, // Indigo
+    iridColorB: { value: new THREE.Color(0x8a2be2) }, // Violet
+    iridColorC: { value: new THREE.Color(0x00ff7f) }, // Green
+    carbonTexture: { value: carbonFiberLoader.load('vertud_weave_hd.jpg') }
+  },
+  vertexShader: `
+    varying vec3 vNormal;
+    varying vec3 vViewPosition;
+    varying vec2 vUv;
+
+    void main() {
+      vUv = uv;
+      vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+      vNormal = normalize(normalMatrix * normal);
+      vViewPosition = -mvPosition.xyz;
+      gl_Position = projectionMatrix * mvPosition;
+    }
+  `,
+  fragmentShader: `
+    varying vec3 vNormal;
+    varying vec3 vViewPosition;
+    varying vec2 vUv;
+    uniform vec3 iridColorA;
+    uniform vec3 iridColorB;
+    uniform vec3 iridColorC;
+    uniform sampler2D carbonTexture;
+
+    void main() {
+      // Calculate Fresnel effect for iridescence
+      vec3 viewDir = normalize(vViewPosition);
+      float fresnel = pow(1.0 - dot(viewDir, vNormal), 3.0);
+      
+      // Blend colors based on viewing angle (Violet to Green)
+      vec3 shimmer = mix(iridColorA, iridColorB, fresnel);
+      shimmer = mix(shimmer, iridColorC, step(0.7, fresnel));
+      
+      // Apply Carbon Fiber Vertud Pattern
+      vec4 texColor = texture2D(carbonTexture, vUv * 10.0);
+      vec3 finalRGB = mix(shimmer, texColor.rgb * 0.2, 0.5);
+      
+      gl_FragColor = vec4(finalRGB, 1.0);
+    }
+  `
+});
+
+
+
+<div id="suit-hud" style="font-family: 'Courier New', monospace; color: #00ff7f;">
+  <div class="stat">INTEGRITY: 100%</div>
+  <div class="stat">MATERIAL: CARBON_FIBER_VERTUD</div>
+  <div class="stat">IRID_REFRACTION: ACTIVE [INDIGO_VIOLET_SHIFT]</div>
+  <div class="stat">FLIGHT_MODE: AERIAL_STABILIZED</div>
+</div>
