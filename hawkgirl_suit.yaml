@@ -1,0 +1,100 @@
+// Material definition for the Hawkgirl Suit sections
+const goldenCarbonFiberMaterial = new THREE.MeshPhysicalMaterial({
+  color: 0xffd700, // Gold base
+  metalness: 1.0,
+  roughness: 0.2,
+  clearcoat: 1.0,
+  clearcoatRoughness: 0.05,
+  // Normal map would point to a 2x2 twill carbon weave texture
+  normalMap: carbonWeaveNormalTexture, 
+  normalScale: new THREE.Vector2(0.5, 0.5),
+});
+
+// Underwear/Base layer (Nth Metal Infused Fabric)
+const baseFabricMaterial = new THREE.MeshLambertMaterial({
+  color: 0x222222, // Dark charcoal
+  emissive: 0x111111,
+});
+
+
+
+<div id="suit-hud">
+  <div class="stat-box">
+    <h3>MK-7 HAWK ARMOR</h3>
+    <ul>
+      <li>MATERIAL: GOLDEN CARBON COMPOSITE</li>
+      <li>PLATE THICKNESS: 4.5mm</li>
+      <li>NTH METAL CORE: STABLE</li>
+      <li>WEIGHT: 12.4kg</li>
+    </ul>
+  </div>
+</div>
+
+<style>
+#suit-hud {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  font-family: 'Courier New', monospace;
+  color: #00ffcc; /* Cyberpunk HUD Teal */
+  border-left: 2px solid #00ffcc;
+  padding-left: 10px;
+  background: rgba(0, 0, 0, 0.4);
+}
+</style>
+
+
+
+
+// Advanced Material Shader: Golden Carbon Fiber (GCF-v1)
+uniform float time;
+uniform vec3 goldColor; // #D4AF37
+varying vec2 vUv;
+varying vec3 vNormal;
+
+void main() {
+    // 1. Create the weave pattern (2x2 Twill)
+    vec2 uv = vUv * 40.0; // Scale of the carbon weave
+    float weave = step(0.5, fract(uv.x + step(0.5, fract(uv.y)) * 0.5));
+    
+    // 2. Anisotropic Highlight (The "Shimmer")
+    float spec = pow(max(dot(vNormal, vec3(0.0, 0.0, 1.0)), 0.0), 32.0);
+    vec3 baseGold = goldColor * (0.8 + 0.4 * weave);
+    
+    // 3. Final Composite with Clearcoat effect
+    vec3 finalColor = baseGold + (spec * 0.5);
+    gl_FragColor = vec4(finalColor, 1.0);
+}
+
+
+
+import { useMemo } from 'react';
+import { MeshPhysicalMaterial } from 'three';
+
+const HawkgirlSuit = () => {
+  // Define the Golden Carbon Fiber Material
+  const gcfMaterial = useMemo(() => new MeshPhysicalMaterial({
+    color: 0xD4AF37,
+    metalness: 1.0,
+    roughness: 0.15,
+    clearcoat: 1.0,
+    clearcoatRoughness: 0.02,
+    sheen: 1.0,
+    sheenColor: 0xffffff,
+    // Add carbon fiber weave texture here
+  }), []);
+
+  return (
+    <group name="Hawkgirl_MK7_Instance">
+      {/* Upper Torso: Golden Carbon Fiber */}
+      <mesh material={gcfMaterial} geometry={assets.chest_plate} />
+      
+      {/* Lower: Underwear / Tactical Trunks (No Pants) */}
+      <mesh material={materials.matte_kevlar} geometry={assets.base_suit_lower} />
+      
+      {/* Wings: Nth Metal Structural Ribs */}
+      <mesh material={gcfMaterial} geometry={assets.wing_structure} />
+    </group>
+  );
+};
+
