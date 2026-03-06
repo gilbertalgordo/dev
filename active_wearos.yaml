@@ -1,0 +1,160 @@
+// Based on Google AI Edge / Gemini Nano implementation
+class ActiveWearAIAnalyzer(context: Context) {
+    private val generativeModel = GenerativeModel(
+        modelName = "gemini-1.5-flash", // Use Flash for speed or Nano for local-only
+        apiKey = "YOUR_SECURE_API_KEY"
+    )
+
+    suspend fun analyzeVitals(heartRate: Int, steps: Int): String {
+        val prompt = "Current Heart Rate: $heartRate bpm, Steps: $steps. " +
+                     "Provide a 10-word Kaizen motivation for an athlete."
+        
+        return try {
+            val response = generativeModel.generateContent(prompt)
+            response.text ?: "Keep moving forward."
+        } catch (e: Exception) {
+            "Maintain your steady pace."
+        }
+    }
+}
+
+
+
+@Composable
+fun WearAiHUD(hrValue: Double, aiMessage: String) {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        // 3D-effect background ring
+        CircularProgressIndicator(
+            progress = (hrValue / 200).toFloat(),
+            modifier = Modifier.fillMaxSize().padding(5.dp),
+            startAngle = 295f,
+            endAngle = 245f,
+            strokeWidth = 6.dp,
+            indicatorColor = Color.Cyan,
+            trackColor = Color.DarkGray
+        )
+
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = "${hrValue.toInt()}",
+                style = MaterialTheme.typography.display1,
+                color = Color.White
+            )
+            Text(
+                text = "BPM",
+                style = MaterialTheme.typography.caption2,
+                color = Color.Cyan
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            // AI-driven Kaizen Message
+            Text(
+                text = aiMessage,
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.body2,
+                modifier = Modifier.padding(horizontal = 10.dp)
+            )
+        }
+    }
+}
+
+
+
+// Integrating Gemini Nano via ML Kit (2026 Stable Release)
+class WearGuardianAI(context: Context) {
+    private val options = PromptOptions.builder()
+        .setModelName("gemini-nano")
+        .build()
+    
+    private val aiClient = MLKit.getPromptClient(context, options)
+
+    suspend fun provideProactiveGuidance(hrv: Double, activityLevel: String): String {
+        val kaizenPrompt = """
+            Context: Athlete HRV is $hrv (low), Activity: $activityLevel.
+            Task: Provide a 1-sentence 'Kaizen' tactical advice. 
+            Tone: Calm, authoritative, Archangel-inspired.
+        """.trimIndent()
+
+        return try {
+            val result = aiClient.generateContent(kaizenPrompt).await()
+            result.text ?: "Steady your breath; the path is clear."
+        } catch (e: Exception) {
+            "Maintain focus, Michael protects your stride."
+        }
+    }
+}
+
+
+
+// Advanced Health Services Integration
+val healthClient = HealthServices.getClient(context)
+val measureClient = healthClient.measureClient
+
+val configuration = MeasureConfiguration(
+    dataTypes = setOf(DataType.HEART_RATE_BPM, DataType.HRV_RMSSD),
+    // Batching frequency: 1 minute (Kaizen efficiency)
+    maxBatchReportLatency = Duration.ofMinutes(1) 
+)
+
+// Listening for batched data
+measureClient.registerMeasureCallback(configuration, object : MeasureCallback {
+    override fun onAvailabilityChanged(dataType: DataType<*, *>, availability: Availability) {
+        // Handle sensor readiness
+    }
+
+    override fun onDataReceived(data: DataBatch) {
+        // This only fires when the MCU sends a batch to the AP
+        val latestHRV = data.get(DataType.HRV_RMSSD).last().value
+        scope.launch {
+            val advice = aiGuardian.provideProactiveGuidance(latestHRV, "Active Running")
+            updateHUD(advice)
+        }
+    }
+})
+
+
+
+@Composable
+fun AdvancedHUD(aiAdvice: String, heartRate: Int) {
+    Scaffold {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+            // 3D Visual Ring (Outer HUD)
+            CircularProgressIndicator(
+                progress = 0.75f,
+                modifier = Modifier.fillMaxSize().scale(1.1f),
+                strokeWidth = 8.dp,
+                indicatorColor = Brush.verticalGradient(listOf(Color.Cyan, Color.Blue)),
+                trackColor = Color(0xFF1A1A1A)
+            )
+
+            Column(
+                modifier = Modifier.align(Alignment.Center).padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "$heartRate",
+                    style = MaterialTheme.typography.display1.copy(fontWeight = FontWeight.ExtraBold),
+                    color = Color.White
+                )
+                Text(
+                    text = "BPM | KAÏZEN MODE",
+                    style = MaterialTheme.typography.caption2,
+                    color = Color.Cyan
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                // AI Feedback Surface
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color.White.copy(alpha = 0.1f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = aiAdvice,
+                        style = MaterialTheme.typography.body2,
+                        modifier = Modifier.padding(8.dp),
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+    }
+}
