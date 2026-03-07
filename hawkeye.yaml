@@ -1,0 +1,112 @@
+{
+  "character_metadata": {
+    "name": "Hawkeye (Teen Variant)",
+    "archetype": "Marksman",
+    "aesthetic": "High-Tech Iridescence"
+  },
+  "physical_attributes": {
+    "hair": {
+      "color": "Silver / Platinum",
+      "style": "Long, low-bound ponytail",
+      "physics": "Dynamic strand simulation"
+    },
+    "headwear": {
+      "item": "Motorcycle Goggles",
+      "frame": "Gunmetal grey",
+      "lens": "Amber-tinted, anti-glare"
+    }
+  },
+  "tactical_suit": {
+    "material_composition": [
+      "Carbon Fiber (Structural)",
+      "Iridescent Vertud Fabric"
+    ],
+    "color_palette": {
+      "primary": "Indigo / Deep Violet",
+      "secondary": "Obsidian Black",
+      "accent": "Silver Shimmer",
+      "effect": "Angle-dependent color shift (Blue to Violet)"
+    },
+    "texture_maps": {
+      "diffuse": "iridescent_weave_d.png",
+      "normal": "carbon_fiber_knit_n.png",
+      "specular": "metallic_silver_gloss.png"
+    }
+  },
+  "equipment_set": {
+    "weapon": "Recurve Composite Bow",
+    "material": "Grade 5 Titanium / Reinforced Carbon",
+    "features": {
+      "string": "High-tensile synthetic polymer",
+      "quiver": "Hip-mounted, carbon fiber casing",
+      "arrows": "Titanium-tipped, indigo fletching"
+    }
+  }
+}
+
+
+
+// Simple Iridescent View Logic
+float view_angle = dot(Normal, ViewDirection);
+vec3 color_shift = mix(Indigo_Base, Violet_Peak, pow(1.0 - view_angle, 3.0));
+vec3 final_surface = color_shift + (Specular_Silver * fresnel_effect);
+
+
+
+using UnityEngine;
+using System.Collections.Generic;
+
+[System.Serializable]
+public class ArcheryOperative : MonoBehaviour 
+{
+    [Header("Biological Markers")]
+    public string CharacterID = "HT-07-Hawkeye";
+    public Color HairColor = new Color(0.85f, 0.85f, 0.9f); // Silver/Platinum
+    public string Hairstyle = "Long_Ponytail_Dynamic";
+
+    [Header("Material Physics: Vertud & Carbon Fiber")]
+    [Range(0, 1)] public float IridescenceIntensity = 0.85f;
+    public Gradient SuitColorShift; // Indigo -> Violet -> Deep Blue
+    public Texture2D CarbonFiberNormalMap;
+
+    [Header("Weaponry: Titanium Archery Set")]
+    public float BowTension = 75.0f; // High-tension Titanium
+    public GameObject ArrowPrefab;
+    
+    public struct Equipment {
+        public string Material; // Grade 5 Titanium
+        public string Headgear; // Motorcycle Goggles
+        public bool CarbonFiberReinforcement;
+    }
+
+    public void ApplyMaterialProperties(Material suitMat) 
+    {
+        suitMat.SetColor("_BaseColor", new Color(0.05f, 0.05f, 0.1f)); // Obsidian Black Base
+        suitMat.SetFloat("_Iridescence", IridescenceIntensity);
+        suitMat.SetTexture("_NormalMap", CarbonFiberNormalMap);
+    }
+}
+
+
+
+// High-Level Shader Logic for Iridescent Suit
+void VertudShading_float(float3 Normal, float3 ViewDir, out float3 OutColor)
+{
+    // 1. Calculate the view angle (Fresnel Effect)
+    float fresnel = 1.0 - saturate(dot(normalize(Normal), normalize(ViewDir)));
+    
+    // 2. Define the Color Ramp (Indigo to Violet to Blue)
+    float3 indigo = float3(0.29, 0.0, 0.51);
+    float3 violet = float3(0.56, 0.0, 1.0);
+    float3 cyanBlue = float3(0.0, 0.4, 0.8);
+    
+    // 3. Blend based on viewing angle
+    float3 iridColor = lerp(indigo, violet, pow(fresnel, 2.0));
+    iridColor = lerp(iridColor, cyanBlue, pow(fresnel, 4.5));
+    
+    // 4. Layer the Silver Carbon Fiber specular highlight
+    float specularMask = pow(fresnel, 8.0);
+    float3 silverHighlight = float3(0.75, 0.75, 0.8) * specularMask;
+    
+    OutColor = iridColor + silverHighlight;
+}
