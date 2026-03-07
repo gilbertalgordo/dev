@@ -1,0 +1,199 @@
+import * as THREE from 'three';
+
+// 1. Scene Setup
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// 2. Iridescent Carbon Fiber Shader Material
+// Simulates the indigo/purple/violet shift with a carbon fiber texture overlay
+const suitMaterial = new THREE.ShaderMaterial({
+  uniforms: {
+    time: { value: 0 },
+    baseColor: { value: new THREE.Color(0x08001a) }, // Deep Black/Indigo
+    iridColor1: { value: new THREE.Color(0x4b0082) }, // Indigo
+    iridColor2: { value: new THREE.Color(0x9400d3) }, // Violet
+    goldAccent: { value: new THREE.Color(0xffd700) },
+    redAccent: { value: new THREE.Color(0xff0000) }
+  },
+  vertexShader: `
+    varying vec3 vNormal;
+    varying vec3 vViewPosition;
+    void main() {
+      vNormal = normalize(normalMatrix * normal);
+      vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+      vViewPosition = -mvPosition.xyz;
+      gl_Position = projectionMatrix * mvPosition;
+    }
+  `,
+  fragmentShader: `
+    varying vec3 vNormal;
+    varying vec3 vViewPosition;
+    uniform vec3 iridColor1;
+    uniform vec3 iridColor2;
+    uniform float time;
+
+    void main() {
+      float fresnel = pow(1.0 - dot(normalize(vNormal), normalize(vViewPosition)), 3.0);
+      vec3 iridescence = mix(iridColor1, iridColor2, fresnel * sin(time * 0.5));
+      
+      // Simulating Carbon Fiber "Vertud" pattern
+      float pattern = step(0.5, fract(gl_FragCoord.x * 0.1) * fract(gl_FragCoord.y * 0.1));
+      vec3 finalColor = mix(iridescence * 0.5, iridescence, pattern);
+      
+      gl_FragColor = vec4(finalColor, 1.0);
+    }
+  `
+});
+
+// 3. Creating the Hero Character (Simplified Geometry)
+const bodyGroup = new THREE.Group();
+
+// Absolute Superman Torso
+const torso = new THREE.Mesh(new THREE.CapsuleGeometry(1, 2, 4, 8), suitMaterial);
+bodyGroup.add(torso);
+
+// New Bobcut Hair (Indigo-Black Tint)
+const hairGeo = new THREE.SphereGeometry(0.6, 32, 32);
+const hairMat = new THREE.MeshStandardMaterial({ color: 0x050010, roughness: 0.3 });
+const hair = new THREE.Mesh(hairGeo, hairMat);
+hair.position.set(0, 1.8, 0);
+hair.scale.set(1.1, 0.8, 1.2); // Mid-length bob shape
+bodyGroup.add(hair);
+
+// Gold/Red Embellishments (The "S" Shield)
+const shieldGeo = new THREE.BoxGeometry(0.8, 0.8, 0.2);
+const shieldMat = new THREE.MeshStandardMaterial({ color: 0xffd700, emissive: 0xff0000, emissiveIntensity: 0.5 });
+const shield = new THREE.Mesh(shieldGeo, shieldMat);
+shield.position.set(0, 1, 0.5);
+bodyGroup.add(shield);
+
+scene.add(bodyGroup);
+
+// 4. Lighting & Animation
+const light = new THREE.PointLight(0xffffff, 10, 100);
+light.position.set(5, 5, 5);
+scene.add(light);
+camera.position.z = 5;
+
+function animate(t) {
+  requestAnimationFrame(animate);
+  suitMaterial.uniforms.time.value = t * 0.001;
+  bodyGroup.rotation.y += 0.01; // Preview rotation
+  renderer.render(scene, camera);
+}
+
+animate();
+
+
+
+import * as THREE from 'three';
+
+// --- CONFIGURATION ---
+const SUIT_COLORS = {
+  indigo: new THREE.Color(0x310062),
+  violet: new THREE.Color(0x8a2be2),
+  gold: new THREE.Color(0xffd700),
+  black: new THREE.Color(0x050505)
+};
+
+// --- SHADER DEFINITION ---
+// This shader calculates iridescent interference based on the 'Vertud' carbon weave
+const vertudShader = {
+  uniforms: {
+    uTime: { value: 0 },
+    uIndigo: { value: SUIT_COLORS.indigo },
+    uViolet: { value: SUIT_COLORS.violet },
+    uGold: { value: SUIT_COLORS.gold }
+  },
+  vertexShader: `
+    varying vec3 vNormal;
+    varying vec2 vUv;
+    varying vec3 vViewDir;
+    
+    void main() {
+      vUv = uv;
+      vNormal = normalize(normalMatrix * normal);
+      vec4 modelViewPosition = modelViewMatrix * vec4(position, 1.0);
+      vViewDir = normalize(-modelViewPosition.xyz);
+      gl_Position = projectionMatrix * modelViewPosition;
+    }
+  `,
+  fragmentShader: `
+    varying vec3 vNormal;
+    varying vec2 vUv;
+    varying vec3 vViewDir;
+    uniform float uTime;
+    uniform vec3 uIndigo;
+    uniform vec3 uViolet;
+
+    void main() {
+      // Fresnel Effect for Iridescence
+      float fresnel = pow(1.0 - dot(vNormal, vViewDir), 3.0);
+      
+      // Procedural Vertud Carbon Fiber Weave
+      float weave = sin(vUv.x * 100.0) * cos(vUv.y * 100.0);
+      vec3 baseSuit = mix(uIndigo, uViolet, fresnel + (weave * 0.1));
+      
+      // Add a moving "G-Force" light streak
+      float streak = smoothstep(0.4, 0.5, sin(vUv.y * 5.0 + uTime * 10.0));
+      vec3 finalColor = baseSuit + (streak * 0.2);
+      
+      gl_FragColor = vec4(finalColor, 1.0);
+    }
+  `
+};
+
+// --- SCENE INITIALIZATION ---
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// --- CHARACTER MESHING ---
+const suitMaterial = new THREE.ShaderMaterial(vertudShader);
+
+// 1. The Suit (Absolute Physique)
+const body = new THREE.Mesh(new THREE.CapsuleGeometry(1, 2.5, 32), suitMaterial);
+scene.add(body);
+
+// 2. The Mid-Length Bobcut (Hair Physics Proxy)
+const hairGeo = new THREE.SphereGeometry(0.65, 32, 32);
+const hairMat = new THREE.MeshStandardMaterial({ 
+    color: 0x0a0a0a, 
+    roughness: 0.1, 
+    metalness: 0.5 
+});
+const hair = new THREE.Mesh(hairGeo, hairMat);
+hair.position.y = 2.1;
+hair.scale.set(1.1, 0.85, 1.3); // Sculpting the bobcut shape
+scene.add(hair);
+
+// 3. The Gold "S" Shield with Red Trimming
+const shield = new THREE.Mesh(
+  new THREE.PlaneGeometry(0.8, 0.8),
+  new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 1, emissive: 0xff0000, emissiveIntensity: 0.2 })
+);
+shield.position.set(0, 1.2, 0.95);
+scene.add(shield);
+
+camera.position.z = 6;
+
+// --- ANIMATION LOOP ---
+function animate(time) {
+  requestAnimationFrame(animate);
+  
+  // Update Shader Uniforms
+  vertudShader.uniforms.uTime.value = time * 0.001;
+  
+  // Subtle flight hover movement
+  body.position.y = Math.sin(time * 0.002) * 0.1;
+  hair.rotation.y = Math.sin(time * 0.001) * 0.05;
+  
+  renderer.render(scene, camera);
+}
+
+animate(0);
