@@ -1,0 +1,119 @@
+import time
+import pandas as pd
+import numpy as np
+
+class BuybackAI:
+    def __init__(self, ticker, budget):
+        self.ticker = ticker
+        self.budget = budget
+        self.active = True
+        
+    def get_market_data(self):
+        """
+        Simulates fetching real-time ticker data.
+        In production, replace with a WebSocket or REST API call.
+        """
+        # Placeholder for real-time price stream
+        return np.random.uniform(95, 105)
+
+    def analyze_indicators(self, price_history):
+        """
+        Calculates if the asset is oversold (RSI < 30).
+        """
+        if len(price_history) < 14: return False
+        
+        # Simple RSI Logic (Simplified for brevity)
+        delta = pd.Series(price_history).diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        
+        return rsi.iloc[-1] < 35  # Trigger threshold
+
+    def execute_buyback(self, price, amount):
+        """
+        Execution layer for the buyback order.
+        """
+        print(f"[HUD] EXECUTION: Buying {amount} units at ${price:.2f}")
+        self.budget -= (price * amount)
+
+    def run_kaizen_loop(self):
+        """
+        Superfast continuous monitoring loop.
+        """
+        history = []
+        print(f"--- AI ACTIVE: Monitoring {self.ticker} ---")
+        
+        try:
+            while self.active and self.budget > 0:
+                current_price = self.get_market_data()
+                history.append(current_price)
+                
+                # Accuracy Check & Analysis
+                if self.analyze_indicators(history):
+                    # Logical check: Ensure we don't overspend
+                    buy_amount = self.budget * 0.1 / current_price 
+                    self.execute_buyback(current_price, buy_amount)
+                
+                # Small sleep to manage rate limits (Kaizen optimization)
+                time.sleep(1) 
+        except KeyboardInterrupt:
+            print("System Paused.")
+
+# Initialize Instance
+buyback_system = BuybackAI("TECH_CORP", 50000)
+# buyback_system.run_kaizen_loop() # Uncomment to run
+
+
+
+import numpy as np
+import pandas as pd
+
+class AdvancedBuybackEnv:
+    """
+    A simplified Reinforcement Learning environment for Buyback optimization.
+    """
+    def __init__(self, data, total_budget, total_shares_to_buy):
+        self.data = data
+        self.total_budget = total_budget
+        self.shares_remaining = total_shares_to_buy
+        self.current_step = 0
+        
+    def get_state(self):
+        # State: [Current Price, Remaining Shares, Budget Left, 20-day SMA]
+        price = self.data.iloc[self.current_step]['Close']
+        sma = self.data['Close'].rolling(window=20).mean().iloc[self.current_step]
+        return np.array([price, self.shares_remaining, self.total_budget, sma])
+
+    def step(self, action):
+        """
+        Action: 0 = Hold, 1 = Small Buy, 2 = Aggressive Buy
+        """
+        price = self.data.iloc[self.current_step]['Close']
+        execution_cost = 0
+        shares_bought = 0
+        
+        if action == 1: # Small Buy (1% of target)
+            shares_bought = self.shares_remaining * 0.01
+        elif action == 2: # Aggressive Buy (5% of target)
+            shares_bought = self.shares_remaining * 0.05
+            
+        execution_cost = shares_bought * price
+        
+        # Apply Logic: Check if budget allows
+        if execution_cost <= self.total_budget:
+            self.total_budget -= execution_cost
+            self.shares_remaining -= shares_bought
+            reward = 1 if price < self.data['Close'].mean() else -1
+        else:
+            reward = -10 # Penalty for trying to spend more than budget
+            
+        self.current_step += 1
+        done = (self.shares_remaining <= 0) or (self.current_step >= len(self.data) - 1)
+        
+        return self.get_state(), reward, done
+
+# Example Usage:
+# df = pd.read_csv('market_data.csv')
+# env = AdvancedBuybackEnv(df, total_budget=1000000, total_shares_to_buy=10000)
