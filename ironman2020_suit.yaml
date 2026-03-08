@@ -1,0 +1,112 @@
+// A custom shader for the Iron Man 2020 Arno Stark Suit
+const ArnoStarkSuitMaterial = new THREE.ShaderMaterial({
+  uniforms: {
+    time: { value: 0 },
+    baseColor: { value: new THREE.Color(0x4B0082) }, // Indigo Base
+    accentColor1: { value: new THREE.Color(0xFF0000) }, // Red
+    accentColor2: { value: new THREE.Color(0x8A2BE2) }, // Violet/Purple
+    energyColor: { value: new THREE.Color(0x0000FF) }, // Blue Nanotech Glow
+  },
+  vertexShader: `
+    varying vec2 vUv;
+    varying vec3 vNormal;
+    void main() {
+      vUv = uv;
+      vNormal = normalize(normalMatrix * normal);
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    varying vec2 vUv;
+    varying vec3 vNormal;
+    uniform float time;
+    
+    // Carbon Fiber Weave Pattern
+    float carbonFiber(vec2 uv) {
+      vec2 grid = fract(uv * 50.0);
+      return step(0.5, grid.x) * step(0.5, grid.y) + step(0.5, 1.0-grid.x) * step(0.5, 1.0-grid.y);
+    }
+
+    void main() {
+      // Base indigo-violet gradient
+      vec3 color = mix(vec3(0.29, 0.0, 0.51), vec3(0.54, 0.17, 0.89), vUv.y);
+      
+      // Apply Carbon Fiber Texture
+      float pattern = carbonFiber(vUv);
+      color *= (0.8 + 0.2 * pattern);
+
+      // Nanotech "Vertud" Pulse (Moving Blue/Violet Lines)
+      float pulse = sin(vUv.y * 20.0 + time * 2.0) * 0.5 + 0.5;
+      vec3 nanotechGlow = vec3(0.0, 0.5, 1.0) * pulse * 0.3;
+      
+      // Edge Highlight (Fresnel effect)
+      float fresnel = pow(1.0 - dot(vNormal, vec3(0,0,1)), 3.0);
+      color += fresnel * vec3(1.0, 0.0, 0.0); // Red highlights on edges
+
+      gl_FragColor = vec4(color + nanotechGlow, 1.0);
+    }
+  `
+});
+
+
+
+#include <iostream>
+#include <vector>
+#include <string>
+
+// Advanced Material State for Arno Stark 2020
+struct SuitMaterial {
+    float carbonFiberDensity = 0.95f;
+    std::string primaryHex = "#4B0082"; // Indigo
+    std::string accentHex = "#8A2BE2";  // Violet
+    bool nanotechActive = true;
+};
+
+class ArnoStarkArmor {
+private:
+    float vertudEnergyLevel;
+    SuitMaterial currentSurface;
+
+public:
+    ArnoStarkArmor() : vertudEnergyLevel(100.0f) {}
+
+    // Manages the indigo/violet/red color shift based on energy output
+    void updateVisualState(float powerDraw) {
+        if (powerDraw > 75.0f) {
+            currentSurface.accentHex = "#FF0000"; // Shifts to Red in high-power mode
+            std::cout << "Red Overdrive Detected: Carbon Fiber Reinforcing..." << std::endl;
+        } else {
+            currentSurface.accentHex = "#8A2BE2"; // Standard Violet/Purple
+        }
+    }
+
+    void deployNanotech(std::string weaponType) {
+        std::cout << "Deploying " << weaponType << " via Indigo Nanotech Latice." << std::endl;
+        vertudEnergyLevel -= 15.5f;
+    }
+};
+
+
+
+uniform float u_time;
+varying vec3 v_normal;
+varying vec2 v_uv;
+
+void main() {
+    // 1. Base Carbon Fiber Pattern
+    float pattern = step(0.5, fract(v_uv.x * 100.0)) * step(0.5, fract(v_uv.y * 100.0));
+    vec3 carbonColor = vec3(0.05, 0.05, 0.07); // Dark carbon base
+
+    // 2. The Arno 2020 Color Gradient (Indigo to Purple)
+    vec3 indigo = vec3(0.29, 0.0, 0.51);
+    vec3 violet = vec3(0.58, 0.0, 0.82);
+    vec3 baseArmor = mix(indigo, violet, sin(u_time * 0.5) * 0.5 + 0.5);
+
+    // 3. Vertud Energy Glow (Blue/Violet Nanotech seams)
+    float seamGlow = pow(1.0 - pattern, 3.0);
+    vec3 energyStream = vec3(0.2, 0.4, 1.0) * (sin(u_time * 2.0) * 0.5 + 0.5);
+
+    // Final Composite
+    vec3 finalColor = mix(carbonColor, baseArmor, 0.6) + (energyStream * seamGlow);
+    gl_FragColor = vec4(finalColor, 1.0);
+}
