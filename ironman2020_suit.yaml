@@ -110,3 +110,211 @@ void main() {
     vec3 finalColor = mix(carbonColor, baseArmor, 0.6) + (energyStream * seamGlow);
     gl_FragColor = vec4(finalColor, 1.0);
 }
+
+
+// Fragment Shader Snippet
+uniform vec3 baseColor; // Red/Indigo
+uniform vec3 iridColor; // Violet/Blue
+varying vec3 vNormal;
+varying vec3 vViewPosition;
+
+void main() {
+    float fresnel = dot(normalize(vNormal), normalize(vViewPosition));
+    fresnel = clamp(1.0 - fresnel, 0.0, 1.0);
+    
+    // Mix colors based on viewing angle for iridescence
+    vec3 finalColor = mix(baseColor, iridColor, pow(fresnel, 2.0));
+    
+    // Simulating Carbon Fiber Micro-pattern
+    float pattern = sin(gl_FragCoord.x * 0.5) * cos(gl_FragCoord.y * 0.5);
+    finalColor *= (0.9 + 0.1 * pattern);
+
+    gl_FragColor = vec4(finalColor, 1.0);
+}
+
+
+
+import * as THREE from 'three';
+
+// Suit Configuration
+const suitSpecs = {
+    primary: 0x4b0082, // Indigo
+    secondary: 0x9400d3, // Violet
+    accent: 0xff0000,   // Red
+    nanotech: true,
+    vertudSystem: "Active"
+};
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+// Arno Stark Material: Iridescent Carbon Fiber
+const arnoMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+        baseColor: { value: new THREE.Color(suitSpecs.primary) },
+        iridColor: { value: new THREE.Color(suitSpecs.secondary) },
+        time: { value: 0.0 }
+    },
+    vertexShader: `
+        varying vec3 vNormal;
+        varying vec3 vViewPosition;
+        void main() {
+            vNormal = normalize(normalMatrix * normal);
+            vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+            vViewPosition = -mvPosition.xyz;
+            gl_Position = projectionMatrix * mvPosition;
+        }
+    `,
+    fragmentShader: `
+        uniform vec3 baseColor;
+        uniform vec3 iridColor;
+        varying vec3 vNormal;
+        varying vec3 vViewPosition;
+        void main() {
+            float viewDotNormal = dot(normalize(vNormal), normalize(vViewPosition));
+            float fresnel = pow(1.0 - clamp(viewDotNormal, 0.0, 1.0), 3.0);
+            
+            // Nano-carbon weave simulation
+            vec3 color = mix(baseColor, iridColor, fresnel);
+            if(mod(gl_FragCoord.x + gl_FragCoord.y, 4.0) > 2.0) color *= 0.8; 
+            
+            gl_FragColor = vec4(color, 1.0);
+        }
+    `
+});
+
+// HUD Overlay Logic (Vertud Interface)
+function updateVertudHUD() {
+    const hudData = {
+        power: "98%",
+        nanobots: "Stable",
+        target: "Arno-2020-Flight"
+    };
+    console.log(`[VERTUD]: ${hudData.target} - Power: ${hudData.power}`);
+}
+
+// Initializing the "Iron Man 2020" mesh (Placeholder Box)
+const geometry = new THREE.BoxGeometry(1, 2, 0.5);
+const suitMesh = new THREE.Mesh(geometry, arnoMaterial);
+scene.add(suitMesh);
+
+camera.position.z = 5;
+
+function animate() {
+    requestAnimationFrame(animate);
+    suitMesh.rotation.y += 0.01; // Spin to show iridescence
+    updateVertudHUD();
+    // renderer.render(scene, camera); 
+}
+
+animate();
+
+
+
+import * as THREE from 'three';
+
+// 1. Define the Vertud System Configuration
+const VERTUD_CONFIG = {
+    iridescenceIntensity: 1.5,
+    nanoScale: 50.0,
+    primaryColor: new THREE.Color('#4b0082'), // Indigo
+    secondaryColor: new THREE.Color('#9400d3'), // Violet
+    glowColor: new THREE.Color('#ff0000')      // Red Energy
+};
+
+// 2. Advanced Material with Custom Shader Injection
+class ArnoStarkMaterial extends THREE.MeshPhysicalMaterial {
+    constructor() {
+        super({
+            color: VERTUD_CONFIG.primaryColor,
+            metalness: 0.9,
+            roughness: 0.2,
+            clearcoat: 1.0,
+            clearcoatRoughness: 0.1,
+        });
+
+        this.onBeforeCompile = (shader) => {
+            // Inject uniforms for the Nano-Weave
+            shader.uniforms.uTime = { value: 0 };
+            shader.uniforms.uIridColor = { value: VERTUD_CONFIG.secondaryColor };
+            
+            shader.fragmentShader = `
+                uniform float uTime;
+                uniform vec3 uIridColor;
+                ${shader.fragmentShader}
+            `.replace(
+                `#include <color_fragment>`,
+                `
+                #include <color_fragment>
+                
+                // Procedural Carbon Fiber / Nanotech Weave
+                vec2 uv = gl_FragCoord.xy / 100.0;
+                float weave = sin(uv.x * 50.0) * cos(uv.y * 50.0);
+                diffuseColor.rgb *= (0.8 + 0.2 * step(0.1, weave));
+
+                // Iridescent Fresnel Shift (Indigo to Violet)
+                float fresnel = pow(1.0 - dot(normalize(vNormal), normalize(vViewPosition)), 3.0);
+                diffuseColor.rgb = mix(diffuseColor.rgb, uIridColor, fresnel * ${VERTUD_CONFIG.iridescenceIntensity});
+                
+                // Pulse effect for Red Nanotech Energy
+                float pulse = (sin(uTime * 2.0) * 0.5 + 0.5);
+                if (weave > 0.8) {
+                    diffuseColor.rgb += vec3(1.0, 0.0, 0.0) * pulse * 0.3;
+                }
+                `
+            );
+            this.userData.shader = shader;
+        };
+    }
+}
+
+// 3. Vertud HUD System Logic (Management Layer)
+class VertudOS {
+    constructor() {
+        this.status = "FLIGHT_READY";
+        this.nanobots = 100.0;
+    }
+
+    syncSuit(time) {
+        // Simulating Kaizen-style efficiency adjustments
+        this.nanobots -= Math.sin(time) * 0.01;
+        return {
+            power: (98.5 + Math.random()).toFixed(2),
+            temp: "32°C",
+            integrity: "99.9%"
+        };
+    }
+}
+
+// 4. Scene Initialization
+const scene = new THREE.Scene();
+const suitMaterial = new ArnoStarkMaterial();
+const geometry = new THREE.BoxGeometry(1, 2.5, 0.8); // Placeholder for Suit Geometry
+const suit = new THREE.Mesh(geometry, suitMaterial);
+scene.add(suit);
+
+// Lighting for Metalness
+const light = new THREE.DirectionalLight(0xffffff, 2);
+light.position.set(5, 5, 5);
+scene.add(light);
+scene.add(new THREE.AmbientLight(0x404040));
+
+// 5. Animation Loop
+const vertud = new VertudOS();
+function animate(time) {
+    requestAnimationFrame(animate);
+    
+    const timestamp = time * 0.001;
+    if (suitMaterial.userData.shader) {
+        suitMaterial.userData.shader.uniforms.uTime.value = timestamp;
+    }
+
+    const telemetry = vertud.syncSuit(timestamp);
+    // In a real HUD, this would update your UI overlays
+    // console.log(`[VERTUD HUD] Power: ${telemetry.power}%`);
+
+    suit.rotation.y += 0.005;
+    // renderer.render(scene, camera);
+}
+animate(0);
+
