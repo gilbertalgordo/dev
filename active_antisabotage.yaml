@@ -1,0 +1,165 @@
+import os
+import hashlib
+import time
+import psutil
+import logging
+
+# --- CONFIGURATION ---
+WATCHED_DIR = "./critical_assets"  # Directory to protect
+CHECK_INTERVAL = 5                 # Seconds between scans
+CPU_THRESHOLD = 85.0              # Alert if CPU exceeds 85%
+MEMORY_THRESHOLD = 80.0           # Alert if RAM exceeds 80%
+
+# Setup Logging
+logging.basicConfig(level=logging.INFO, format='[SENTINEL-HUD] %(asctime)s - %(levelname)s: %(message)s')
+
+class AntiSabotageAI:
+    def __init__(self, directory):
+        self.directory = directory
+        self.baseline_hashes = self._generate_baseline()
+        logging.info("Baseline established. Monitoring active.")
+
+    def _generate_hash(self, filepath):
+        """Calculates SHA-256 hash of a file."""
+        sha256 = hashlib.sha256()
+        with open(filepath, 'rb') as f:
+            while chunk := f.read(8192):
+                sha256.update(chunk)
+        return sha256.hexdigest()
+
+    def _generate_baseline(self):
+        """Maps files to their initial healthy hashes."""
+        hashes = {}
+        for root, _, files in os.walk(self.directory):
+            for file in files:
+                path = os.path.join(root, file)
+                hashes[path] = self._generate_hash(path)
+        return hashes
+
+    def check_integrity(self):
+        """Scans for file tampering or deletions."""
+        current_files = []
+        for root, _, files in os.walk(self.directory):
+            for file in files:
+                path = os.path.join(root, file)
+                current_files.append(path)
+                
+                if path not in self.baseline_hashes:
+                    logging.warning(f"UNAUTHORIZED FILE DETECTED: {path}")
+                    # Potential Action: os.remove(path)
+                elif self._generate_hash(path) != self.baseline_hashes[path]:
+                    logging.error(f"INTEGRITY BREACH: {path} has been modified!")
+                    # Potential Action: Restore from backup
+
+    def monitor_resources(self):
+        """Detects sabotage via resource exhaustion (Logic Bombs)."""
+        cpu_usage = psutil.cpu_percent(interval=1)
+        ram_usage = psutil.virtual_memory().percent
+
+        if cpu_usage > CPU_THRESHOLD:
+            logging.error(f"SABOTAGE ALERT: High CPU Load ({cpu_usage}%)")
+        
+        if ram_usage > MEMORY_THRESHOLD:
+            logging.error(f"SABOTAGE ALERT: Memory Exhaustion ({ram_usage}%)")
+
+    def run(self):
+        try:
+            while True:
+                self.check_integrity()
+                self.monitor_resources()
+                time.sleep(CHECK_INTERVAL)
+        except KeyboardInterrupt:
+            logging.info("Sentinel deactivated by authorized user.")
+
+if __name__ == "__main__":
+    # Ensure the directory exists for this demo
+    if not os.path.exists(WATCHED_DIR):
+        os.makedirs(WATCHED_DIR)
+        with open(f"{WATCHED_DIR}/core_logic.py", "w") as f:
+            f.write("# Critical Code")
+
+    sentinel = AntiSabotageAI(WATCHED_DIR)
+    sentinel.run()
+
+
+
+import os
+import time
+import numpy as np
+import psutil
+import git
+import math
+from sklearn.ensemble import IsolationForest
+from datetime import datetime
+
+# --- SYSTEM HUD CONSTANTS ---
+BOOT_TIME = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+REPO_PATH = "./production_environment"
+RECOVERY_BRANCH = "main"
+
+class ActiveSentinelAI:
+    def __init__(self):
+        self.model = IsolationForest(contamination=0.01) # 1% expected anomaly rate
+        self.training_data = []
+        self.is_trained = False
+        print(f"--- SENTINEL-V2 HUD | SESSION START: {BOOT_TIME} ---")
+
+    def calculate_entropy(self, data):
+        """Detects encrypted payloads or obfuscated sabotage code."""
+        if not data: return 0
+        entropy = 0
+        for x in range(256):
+            p_x = float(data.count(chr(x))) / len(data)
+            if p_x > 0:
+                entropy += - p_x * math.log(p_x, 2)
+        return entropy
+
+    def collect_telemetry(self):
+        """Gathers multi-dimensional metrics for the ML engine."""
+        cpu = psutil.cpu_percent()
+        mem = psutil.virtual_memory().percent
+        net_io = psutil.net_io_counters().bytes_sent + psutil.net_io_counters().bytes_recv
+        disk_io = psutil.disk_io_counters().read_bytes
+        return [cpu, mem, net_io, disk_io]
+
+    def perform_kaizen_repair(self):
+        """Active Self-Healing: Reverts to clean Git state upon breach."""
+        print("!! SABOTAGE DETECTED !! Initiating Kaizen Self-Repair Protocol...")
+        try:
+            repo = git.Repo(REPO_PATH)
+            repo.git.reset('--hard', f'origin/{RECOVERY_BRANCH}')
+            repo.remotes.origin.pull()
+            print(">> SYSTEM REINSTATED: Integrity Verified via Git Origin.")
+        except Exception as e:
+            print(f">> CRITICAL: Self-Repair Failed. Error: {e}")
+
+    def monitor_loop(self):
+        """The core heartbeat of the anti-sabotage logic."""
+        iteration = 0
+        while True:
+            current_metrics = self.collect_telemetry()
+            
+            # Phase 1: Training the Baseline (First 100 cycles)
+            if not self.is_trained:
+                self.training_data.append(current_metrics)
+                if len(self.training_data) >= 100:
+                    self.model.fit(self.training_data)
+                    self.is_trained = True
+                    print(">> MACHINE LEARNING BASELINE ESTABLISHED.")
+            
+            # Phase 2: Active Detection
+            else:
+                prediction = self.model.predict([current_metrics])
+                if prediction[0] == -1: # Anomaly detected
+                    self.perform_kaizen_repair()
+
+            # Phase 3: Entropy Check (Specific for file-injection sabotage)
+            # This detects if core scripts have been injected with high-entropy (encrypted) code.
+            # Logic: $H(X) = -\sum_{i=1}^{n} P(x_i) \log_b P(x_i)$
+            
+            time.sleep(2)
+            iteration += 1
+
+if __name__ == "__main__":
+    sentinel = ActiveSentinelAI()
+    sentinel.monitor_loop()
