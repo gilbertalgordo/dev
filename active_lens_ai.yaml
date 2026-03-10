@@ -1,0 +1,120 @@
+import os
+from google.cloud import vision
+
+# Set your Google Cloud credentials path
+os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'path/to/your/service-account-file.json'
+
+def perform_visual_search(image_path):
+    client = vision.ImageAnnotatorClient()
+
+    with open(image_path, 'rb') as image_file:
+        content = image_file.read()
+
+    image = vision.Image(content=content)
+
+    # Use Web Detection to get results similar to Google Lens
+    response = client.web_detection(image=image)
+    annotations = response.web_detection
+
+    print("--- Visual Matches (Google Lens style) ---")
+    if annotations.web_entities:
+        for entity in annotations.web_entities:
+            print(f"Entity: {entity.description} (Score: {entity.score})")
+
+    if annotations.pages_with_matching_images:
+        print("\n--- Matching Web Pages ---")
+        for page in annotations.pages_with_matching_images:
+            print(f"URL: {page.url}")
+
+# Example usage
+perform_visual_search('my_photo.jpg')
+
+
+
+from google.cloud import vision
+
+def search_products_by_image(project_id, location, product_set_id, image_path):
+    client = vision.ImageAnnotatorClient()
+    
+    with open(image_path, 'rb') as image_file:
+        content = image_file.read()
+
+    # Define the product search parameters
+    product_search_params = vision.ProductSearchParams(
+        product_set=f"projects/{project_id}/locations/{location}/productSets/{product_set_id}",
+        product_categories=['apparel-v2'], # Example category
+    )
+    
+    image_context = vision.ImageContext(product_search_params=product_search_params)
+    response = client.product_search(vision.Image(content=content), image_context=image_context)
+
+    # Process results
+    for result in response.product_search_results.results:
+        print(f"Found Product: {result.product.display_name} with score {result.score}")
+
+
+
+Intent intent = new Intent(Intent.ACTION_VIEW);
+intent.setData(Uri.parse("googlelens://v1/...")); // Specific Lens URI
+startActivity(intent);
+
+
+
+import os
+from google.cloud import vision
+
+# 1. Setup Environment
+os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'your-service-account.json'
+
+def advanced_lens_search(image_path):
+    """Performs an advanced visual search similar to Google Lens."""
+    client = vision.ImageAnnotatorClient()
+
+    with open(image_path, 'rb') as image_file:
+        content = image_file.read()
+
+    image = vision.Image(content=content)
+    
+    # Use Web Detection for "Lens-like" visual matching
+    # We also include Label Detection for general context
+    features = [
+        vision.Feature(type_=vision.Feature.Type.WEB_DETECTION),
+        vision.Feature(type_=vision.Feature.Type.LABEL_DETECTION),
+        vision.Feature(type_=vision.Feature.Type.OBJECT_LOCALIZATION)
+    ]
+    
+    request = vision.AnnotateImageRequest(image=image, features=features)
+    response = client.annotate_image(request)
+    
+    # --- Process Web Results (The "Lens" Part) ---
+    web_detection = response.web_detection
+    
+    print("### Visual Matches & Entities")
+    for entity in web_detection.web_entities:
+        print(f"- {entity.description} (Confidence: {entity.score:.2%})")
+
+    print("\n### Matching Pages with Images")
+    for page in web_detection.pages_with_matching_images:
+        print(f"- Title: {page.page_title}\n  URL: {page.url}")
+
+    # --- Process Object Bounding Boxes ---
+    print("\n### Identified Objects in Scene")
+    for obj in response.localized_object_annotations:
+        print(f"- Object: {obj.name} | Score: {obj.score:.2%}")
+
+# Run the search
+advanced_lens_search('product_photo.jpg')
+
+
+
+const { getJson } = require("serpapi");
+
+getJson({
+  engine: "google_lens",
+  url: "https://example.com/your-image.jpg",
+  api_key: "YOUR_API_KEY"
+}, (json) => {
+    // This returns the exact 'Visual Matches' and 'Knowledge Graph' 
+    // data found in the Google Lens mobile app.
+    console.log(json["visual_matches"]);
+});
