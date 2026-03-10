@@ -1,0 +1,116 @@
+// Initialization of the suit material using Three.js MeshPhysicalMaterial
+const vergilSuitMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0x080010, // Base Deep Black/Indigo
+    metalness: 0.9,
+    roughness: 0.2,
+    
+    // Iridescence: Creates the purple/violet/indigo shifting effect
+    iridescence: 1.0,
+    iridescenceIOR: 2.2,
+    iridescenceThicknessRange: [100, 400], // Shifting between violet and indigo
+    
+    // Clearcoat: To give that polished, high-end "Vertud" finish
+    clearcoat: 1.0,
+    clearcoatRoughness: 0.1,
+    
+    // Sheen: Used to add the Maroon/Red highlights on the edges
+    sheen: 1.0,
+    sheenColor: new THREE.Color(0x800000), // Maroon accents
+    sheenRoughness: 0.5
+});
+
+// Carbon Fiber Texture Mapping
+const loader = new THREE.TextureLoader();
+const carbonFiberNormal = loader.load('textures/carbon_fiber_normal.jpg');
+carbonFiberNormal.wrapS = carbonFiberNormal.wrapT = THREE.RepeatWrapping;
+carbonFiberNormal.repeat.set(10, 10); // Fine weave pattern
+
+vergilSuitMaterial.normalMap = carbonFiberNormal;
+
+
+
+// Concept for the Iridescent Ramp
+vec3 getIridescence(float cosTheta) {
+    vec3 purple = vec3(0.5, 0.0, 1.0);
+    vec3 indigo = vec3(0.29, 0.0, 0.51);
+    vec3 maroon = vec3(0.5, 0.0, 0.0);
+    
+    // Shift color based on viewing angle
+    return mix(maroon, mix(purple, indigo, cosTheta), cosTheta);
+}
+
+
+
+
+uniform vec3 colorIndigo;   // 0x4B0082
+uniform vec3 colorViolet;   // 0x8A2BE2
+uniform vec3 colorMaroon;   // 0x800000
+uniform sampler2D carbonFiberTexture;
+
+varying vec3 vNormal;
+varying vec3 vViewPosition;
+varying vec2 vUv;
+
+void main() {
+    // Normalize vectors for Fresnel calculation
+    vec3 normal = normalize(vNormal);
+    vec3 viewDir = normalize(vViewPosition);
+    
+    // Fresnel factor: 0.0 at center, 1.0 at edges
+    float fresnel = pow(1.0 - dot(normal, viewDir), 3.0);
+    
+    // Calculate Iridescent Shift
+    vec3 baseColor = mix(colorIndigo, colorViolet, fresnel);
+    vec3 finalColor = mix(baseColor, colorMaroon, fresnel * 0.5);
+    
+    // Apply Carbon Fiber Micro-detail
+    vec4 carbonPattern = texture2D(carbonFiberTexture, vUv * 10.0);
+    finalColor *= carbonPattern.rgb; // Darkens the "valleys" of the weave
+    
+    gl_FragColor = vec4(finalColor, 1.0);
+}
+
+
+
+
+// Define the Palette
+const palette = {
+    indigo: new THREE.Color(0x2E0854),
+    violet: new THREE.Color(0x4B0082),
+    maroon: new THREE.Color(0x500000),
+    black: new THREE.Color(0x050505)
+};
+
+// Advanced ShaderMaterial
+const vergilAdvancedMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+        colorIndigo: { value: palette.indigo },
+        colorViolet: { value: palette.violet },
+        colorMaroon: { value: palette.maroon },
+        carbonFiberTexture: { value: loader.load('carbon_weave_alpha.png') },
+        time: { value: 0.0 } // For pulsing the Amulet or Weapons
+    },
+    vertexShader: document.getElementById('vertexShader').textContent,
+    fragmentShader: document.getElementById('fragmentShader').textContent,
+    side: THREE.DoubleSide
+});
+
+// Amulet Logic: Adding a PointLight for the Red Gem
+const amuletGem = new THREE.Mesh(
+    new THREE.SphereGeometry(0.05),
+    new THREE.MeshStandardMaterial({ 
+        color: 0xff0000, 
+        emissive: 0xff0000, 
+        emissiveIntensity: 5 
+    })
+);
+
+
+
+
+// HUD Instance Logic (Simplified)
+function updateHUD(concentrationLevel) {
+    const hudScale = Math.min(concentrationLevel / 100, 1.0);
+    hologramMesh.scale.set(hudScale, hudScale, hudScale);
+    hologramMaterial.opacity = 0.5 + (0.5 * Math.sin(Date.now() * 0.005));
+}
