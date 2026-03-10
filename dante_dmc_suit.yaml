@@ -1,0 +1,124 @@
+// Uniforms for the iridescent color ramp
+uniform vec3 colorRed;     // #FF0000
+uniform vec3 colorMaroon;  // #800000
+uniform vec3 colorMagenta; // #FF00FF
+uniform vec3 colorPurple;  // #800080
+uniform sampler2D carbonFiberNormal;
+
+varying vec3 vNormal;
+varying vec3 vViewPosition;
+varying vec2 vUv;
+
+void main() {
+    // 1. Calculate Fresnel (View Angle)
+    vec3 normal = normalize(vNormal);
+    vec3 viewDir = normalize(vViewPosition);
+    float fresnel = dot(normal, viewDir);
+    fresnel = clamp(1.0 - fresnel, 0.0, 1.0);
+
+    // 2. Map Fresnel to the Iridescent Spectrum
+    vec3 iridColor;
+    if (fresnel < 0.33) {
+        iridColor = mix(colorMaroon, colorRed, fresnel * 3.0);
+    } else if (fresnel < 0.66) {
+        iridColor = mix(colorRed, colorMagenta, (fresnel - 0.33) * 3.0);
+    } else {
+        iridColor = mix(colorMagenta, colorPurple, (fresnel - 0.66) * 3.0);
+    }
+
+    // 3. Apply Carbon Fiber Texture (Simulated via UV tiling)
+    vec4 carbonTex = texture2D(carbonFiberNormal, vUv * 10.0);
+    float weaveDarkness = smoothstep(0.4, 0.6, carbonTex.r);
+    
+    // 4. Final Composition
+    vec3 finalColor = mix(iridColor * 0.2, iridColor, weaveDarkness);
+    
+    gl_FragColor = vec4(finalColor, 1.0);
+}
+
+
+
+// Advanced Dante Suit Shader: Iridescent Carbon Fiber + Demonic Pulse
+Shader "Custom/Dante_Iridescent_Carbon"
+{
+    Properties
+    {
+        _MainTex ("Carbon Fiber Weave", 2D) = "white" {}
+        [Header(Iridescence)]
+        _ColorMaroon ("Deep Maroon", Color) = (0.2, 0, 0, 1)
+        _ColorRed ("Core Red", Color) = (0.8, 0, 0, 1)
+        _ColorMagenta ("Magenta Peak", Color) = (1, 0, 1, 1)
+        _ColorPurple ("Edge Purple", Color) = (0.3, 0, 0.5, 1)
+        
+        [Header(Demonic Amulet)]
+        _AmuletGlow ("Amulet Pulse Intensity", Range(0, 5)) = 1.0
+        _PulseSpeed ("Pulse Speed", Float) = 2.0
+    }
+
+    SubShader
+    {
+        Tags { "RenderType"="Opaque" "RenderPipeline"="UniversalPipeline" }
+
+        Pass
+        {
+            HLSLPROGRAM
+            #pragma vertex vert
+            #pragma fragment frag
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+            struct Attributes {
+                float4 positionOS : POSITION;
+                float3 normalOS   : NORMAL;
+                float2 uv         : TEXCOORD0;
+            };
+
+            struct Varyings {
+                float4 positionCS : SV_POSITION;
+                float3 normalWS   : TEXCOORD1;
+                float3 viewDirWS  : TEXCOORD2;
+                float2 uv         : TEXCOORD0;
+            };
+
+            // Uniforms
+            float4 _ColorMaroon, _ColorRed, _ColorMagenta, _ColorPurple;
+            float _AmuletGlow, _PulseSpeed;
+            sampler2D _MainTex;
+
+            Varyings vert (Attributes IN) {
+                Varyings OUT;
+                OUT.positionCS = TransformObjectToHClip(IN.positionOS.xyz);
+                OUT.normalWS = TransformObjectToWorldNormal(IN.normalOS);
+                OUT.viewDirWS = GetWorldSpaceViewDir(TransformObjectToWorld(IN.positionOS.xyz));
+                OUT.uv = IN.uv;
+                return OUT;
+            }
+
+            float4 frag (Varyings IN) : SV_Target {
+                // 1. Fresnel Calculation for Iridescence
+                float3 normal = normalize(IN.normalWS);
+                float3 viewDir = normalize(IN.viewDirWS);
+                float fresnel = 1.0 - saturate(dot(normal, viewDir));
+                
+                // 2. Multistage Color Ramp (Maroon -> Red -> Magenta -> Purple)
+                float3 iridColor;
+                if (fresnel < 0.3) 
+                    iridColor = lerp(_ColorMaroon.rgb, _ColorRed.rgb, fresnel / 0.3);
+                else if (fresnel < 0.7) 
+                    iridColor = lerp(_ColorRed.rgb, _ColorMagenta.rgb, (fresnel - 0.3) / 0.4);
+                else 
+                    iridColor = lerp(_ColorMagenta.rgb, _ColorPurple.rgb, (fresnel - 0.7) / 0.3);
+
+                // 3. Carbon Fiber Micro-Detailing
+                float4 carbon = tex2D(_MainTex, IN.uv * 20.0); // Tiling for weave
+                float3 finalBase = iridColor * (carbon.r * 0.8 + 0.2);
+
+                // 4. Demonic Pulse (Amulet / Weapon Glow)
+                float pulse = sin(_Time.y * _PulseSpeed) * 0.5 + 0.5;
+                float3 emission = _ColorMagenta.rgb * pulse * _AmuletGlow;
+
+                return float4(finalBase + (emission * 0.1), 1.0);
+            }
+            ENDHLSL
+        }
+    }
+}
