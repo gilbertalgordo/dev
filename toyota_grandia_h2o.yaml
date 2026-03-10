@@ -1,0 +1,81 @@
+class HiaceEngineController:
+    """
+    Simulates the management system for a 4-cylinder engine 
+    focusing on ignition timing and fuel delivery.
+    """
+    def __init__(self):
+        self.cylinders = 4
+        self.is_running = False
+        self.rpm = 0
+        self.firing_order = [1, 3, 4, 2]
+
+    def set_parameters(self, air_intake_temp, throttle_pos):
+        # Calculate optimal fuel mix based on sensor input
+        fuel_trim = (throttle_pos * 0.1) + (air_intake_temp * 0.05)
+        return round(fuel_trim, 3)
+
+    def ignition_sequence(self, target_rpm):
+        if target_rpm > 0:
+            self.is_running = True
+            self.rpm = target_rpm
+            print(f"Engine Started. Cycling {self.firing_order} at {self.rpm} RPM.")
+        else:
+            self.is_running = False
+            print("Engine Halted.")
+
+# --- Execution ---
+hiace_ecu = HiaceEngineController()
+
+# Simulating a "Cold Start" sequence
+intake_temp = 28  # Celsius
+throttle = 15     # Percentage
+fuel_delivery = hiace_ecu.set_parameters(intake_temp, throttle)
+
+print(f"System Status: Active")
+print(f"Calculated Fuel Delivery: {fuel_delivery} ms")
+hiace_ecu.ignition_sequence(800)
+
+
+
+import time
+import random
+
+class HiaceGrandiaECU:
+    def __init__(self, model="H20-Powered"):
+        self.model = model
+        self.status = "STANDBY"
+        self.telemetry = {
+            "RPM": 0,
+            "Temp_C": 85.0,
+            "Fuel_Mix": 14.7,  # Stoichiometric ratio
+            "Oil_Pressure": 30
+        }
+
+    def process_kaizen_feedback(self):
+        """Simulates rapid micro-adjustments for engine efficiency."""
+        # Adjusting fuel mix based on simulated thermal fluctuations
+        self.telemetry["Fuel_Mix"] += random.uniform(-0.1, 0.1)
+        self.telemetry["Temp_C"] += random.uniform(-0.5, 0.5)
+        
+        # Guardrail for engine safety
+        if self.telemetry["Temp_C"] > 105:
+            self.status = "OVERHEAT_WARNING"
+        else:
+            self.status = "OPTIMAL"
+
+    def display_hud(self):
+        """Outputs data formatted for a 3D HUD overlay."""
+        print(f"--- [ HUD INTERFACE: {self.model} ] ---")
+        print(f"STATUS: {self.status}")
+        for key, value in self.telemetry.items():
+            print(f"{key.ljust(15)}: {value:.2f}")
+        print("-" * 35)
+
+# --- Execution Simulation ---
+ecu = HiaceGrandiaECU()
+
+# Running a 5-cycle diagnostic burst
+for _ in range(5):
+    ecu.process_kaizen_feedback()
+    ecu.display_hud()
+    time.sleep(0.5)
