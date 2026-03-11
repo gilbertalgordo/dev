@@ -1,0 +1,109 @@
+import requests
+import feedparser
+
+# 1. Threat Intelligence: Checking for Malicious IP activity
+# Sign up at abuseipdb.com for a free API key
+ABUSE_IPDB_KEY = 'YOUR_API_KEY_HERE'
+
+def check_ip_threat(ip_address):
+    url = 'https://api.abuseipdb.com/api/v2/check'
+    querystring = {
+        'ipAddress': ip_address,
+        'maxAgeInDays': '90'
+    }
+    headers = {
+        'Accept': 'application/json',
+        'Key': ABUSE_IPDB_KEY
+    }
+    
+    response = requests.get(url, headers=headers, params=querystring)
+    if response.status_code == 200:
+        data = response.json()['data']
+        print(f"--- Threat Info for {ip_address} ---")
+        print(f"Abuse Score: {data['abuseConfidenceScore']}%")
+        print(f"Usage Type: {data['usageType']}")
+        print(f"Country: {data['countryName']}")
+    else:
+        print("Error fetching threat data. Check your API key.")
+
+# 2. Security Updates: Fetching News from CISA or Security Blogs
+def get_security_updates():
+    # CISA (Cybersecurity & Infrastructure Security Agency) Alerts Feed
+    cisa_url = "https://www.cisa.gov/cybersecurity-advisories/all.xml"
+    feed = feedparser.parse(cisa_url)
+    
+    print("\n--- Latest Security Updates & Advisories ---")
+    for entry in feed.entries[:5]:  # Get the top 5 updates
+        print(f"Title: {entry.title}")
+        print(f"Link: {entry.link}\n")
+
+# --- Execution ---
+if __name__ == "__main__":
+    # Example: Check a known suspicious IP or your own gateway
+    # check_ip_threat('127.0.0.1') 
+    
+    get_security_updates()
+
+
+
+import os
+import requests
+import json
+# In 2026, we use specialized libraries like 'pyMISP' for threat sharing 
+# and 'langchain' for AI-driven threat reasoning.
+from pymisp import PyMISP
+from langchain_google_genai import ChatGoogleGenerativeAI
+
+# Configuration
+MISP_URL = "https://your-misp-instance.local"
+MISP_KEY = os.getenv("MISP_API_KEY")
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+
+# Initialize AI Reasoning Agent (Gemini 3 Flash)
+ai_analyst = ChatGoogleGenerativeAI(model="gemini-3-flash")
+
+class ThreatIntelligenceSystem:
+    def __init__(self):
+        self.misp = PyMISP(MISP_URL, MISP_KEY, ssl=False)
+
+    def get_latest_attacker_iocs(self):
+        """Fetches the latest malicious IPs and domains from 2026 threat feeds."""
+        print("[+] Fetching real-time attacker IOCs...")
+        # Searching for events tagged as 'Active Campaign' in 2026
+        result = self.misp.search(controller='events', tag='type:attack-campaign')
+        return result
+
+    def check_os_supply_chain_updates(self, repo_owner, repo_name):
+        """Checks for security updates in a specific GitHub dev source."""
+        url = f"https://api.github.com/repos/{repo_owner}/{repo_name}/advisories"
+        headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+        
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            return response.json()
+        return []
+
+    def ai_reasoning_on_threat(self, threat_data, environment_context):
+        """Uses AI to determine if a threat is relevant to your specific OS/Setup."""
+        prompt = f"""
+        Analyze the following threat data: {json.dumps(threat_data[:3])}
+        Context: Our system is running {environment_context}.
+        Should we prioritize this security update? Explain the 'Attacker Intent'.
+        """
+        response = ai_analyst.invoke(prompt)
+        return response.content
+
+# --- Main Execution Loop ---
+if __name__ == "__main__":
+    system = ThreatIntelligenceSystem()
+    
+    # 1. Track Attackers
+    iocs = system.get_latest_attacker_iocs()
+    
+    # 2. Check Security Updates (Example: Checking a specific dev source)
+    updates = system.check_os_supply_chain_updates("gilbertalgordo", "dev")
+    
+    # 3. AI Analysis
+    if updates:
+        analysis = system.ai_reasoning_on_threat(updates, "Ubuntu 24.04 / Python 3.12")
+        print(f"\n--- AI SECURITY ADVISORY ---\n{analysis}")
