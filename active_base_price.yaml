@@ -1,0 +1,103 @@
+import time
+from datetime import datetime, date
+
+class PriceManager:
+    def __init__(self, initial_price):
+        self.base_price = initial_price
+        self.current_price = initial_price
+        self.last_reset_date = date.today()
+
+    def update_price(self, new_price):
+        """Active check before updating or fetching price."""
+        self._check_daily_reset()
+        self.current_price = new_price
+
+    def _check_daily_reset(self):
+        """Resets price if the current date has progressed."""
+        today = date.today()
+        if today > self.last_reset_date:
+            print(f"[{datetime.now()}] System Trigger: Daily reset to ${self.base_price}")
+            self.current_price = self.base_price
+            self.last_reset_date = today
+
+    def get_price(self):
+        self._check_daily_reset()
+        return self.current_price
+
+# Execution Example
+store = PriceManager(100.00)
+print(f"Current Price: {store.get_price()}")
+
+
+
+-- Create a scheduled event to reset prices at midnight
+CREATE EVENT daily_price_reset
+ON SCHEDULE EVERY 1 DAY
+STARTS (TIMESTAMP(CURRENT_DATE) + INTERVAL 1 DAY)
+DO
+  UPDATE products 
+  SET current_price = base_price 
+  WHERE is_active = 1;
+
+
+
+const redis = require('redis');
+const client = redis.createClient();
+
+async function getActivePrice(productId) {
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const lockKey = `lock:reset:${productId}:${today}`;
+    const statusKey = `status:reset:${productId}`;
+
+    // 1. Check if already reset today
+    const lastResetDate = await client.get(statusKey);
+
+    if (lastResetDate !== today) {
+        // 2. Attempt to grab a distributed lock (PX 5000 = 5s expiry)
+        const acquiredLock = await client.set(lockKey, "processing", { NX: true, PX: 5000 });
+
+        if (acquiredLock) {
+            try {
+                console.log(`[System] Executing atomic reset for Product: ${productId}`);
+                
+                // Perform the Database Update
+                await db.query("UPDATE products SET current_price = base_price WHERE id = ?", [productId]);
+                
+                // 3. Mark as reset for today
+                await client.set(statusKey, today);
+            } finally {
+                // Release lock
+                await client.del(lockKey);
+            }
+        }
+    }
+
+    // Return the fresh price from DB
+    return await db.query("SELECT current_price FROM products WHERE id = ?", [productId]);
+}
+
+
+
+WITH price_check AS (
+    SELECT 
+        id,
+        base_price,
+        current_price,
+        last_reset_timestamp,
+        -- Check if current time is past 00:00:00 of the current day
+        (CURRENT_DATE > last_reset_timestamp::date) AS needs_reset
+    FROM products
+    WHERE id = :product_id
+),
+updater AS (
+    UPDATE products
+    SET 
+        current_price = price_check.base_price,
+        last_reset_timestamp = CURRENT_TIMESTAMP
+    FROM price_check
+    WHERE products.id = price_check.id AND price_check.needs_reset = TRUE
+    RETURNING products.current_price
+)
+SELECT current_price FROM updater
+UNION ALL
+SELECT current_price FROM price_check WHERE NOT needs_reset;
