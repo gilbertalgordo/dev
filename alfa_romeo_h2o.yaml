@@ -1,0 +1,114 @@
+class AlfaRomeoGiuliaH2O:
+    def __init__(self):
+        self.model = "Giulia H2O"
+        # 700 bar Type-IV Tanks
+        self.h2_capacity_kg = 5.6 
+        # Fuel Cell Efficiency (Stack)
+        self.fc_efficiency = 0.60 
+        # Electric Motor Power (kW)
+        self.peak_power_kw = 210  # ~280 hp equivalent
+        self.current_h2_level = 5.6
+
+    def calculate_range(self, driving_mode='balanced'):
+        """
+        Calculates remaining range based on H2 energy density.
+        Lower Heating Value (LHV) of Hydrogen is ~33.3 kWh/kg.
+        """
+        lhv_h2 = 33.3 
+        total_energy_kwh = self.current_h2_level * lhv_h2 * self.fc_efficiency
+        
+        # Consumption rates (kWh/km) based on Giulia aerodynamics
+        modes = {
+            'dynamic': 0.25,
+            'balanced': 0.18,
+            'advanced_efficiency': 0.14
+        }
+        
+        consumption = modes.get(driving_mode, 0.18)
+        range_km = total_energy_kwh / consumption
+        return round(range_km, 2)
+
+    def get_telemetry_hud(self):
+        """Outputs current system status for the HUD."""
+        return {
+            "System": "Hydrogen Fuel Cell Power Unit",
+            "H2_Level": f"{self.current_h2_level} kg",
+            "Exhaust": "Pure H2O Vapor",
+            "Range_Est": f"{self.calculate_range()} km",
+            "Status": "Superfast Kaizen Optimized"
+        }
+
+# Instance creation
+giulia_h2o = AlfaRomeoGiuliaH2O()
+telemetry = giulia_h2o.get_telemetry_hud()
+
+print(f"--- {giulia_h2o.model} Telemetry ---")
+for key, value in telemetry.items():
+    print(f"{key}: {value}")
+
+
+
+import math
+import time
+
+class GiuliaH2OAdvanced:
+    def __init__(self):
+        # Physics & Vehicle Constants
+        self.mass_kg = 1605  # Standard Giulia kerb weight
+        self.cd = 0.26       # Aerodynamic drag coefficient
+        self.frontal_area = 2.18 # m^2
+        self.air_density = 1.225 # kg/m^3
+        
+        # H2 Powertrain Components
+        self.h2_lhv = 33.3   # Lower Heating Value (kWh/kg)
+        self.fuel_cell_max_eff = 0.65 
+        self.battery_buffer_kwh = 1.5  # Hybrid buffer for regen
+        self.current_h2_kg = 5.6
+        
+        # Telemetry
+        self.velocity_ms = 0
+        self.total_dist_km = 0
+
+    def calculate_drag_force(self, velocity):
+        """Fd = 1/2 * rho * v^2 * Cd * A"""
+        return 0.5 * self.air_density * (velocity**2) * self.cd * self.frontal_area
+
+    def energy_management_step(self, target_v_ms, duration_s=1):
+        """Simulates one time-step of the Kaizen energy logic."""
+        # Calculate Power required to overcome drag and accelerate
+        drag_force = self.calculate_drag_force(self.velocity_ms)
+        accel_force = self.mass_kg * (target_v_ms - self.velocity_ms) / duration_s
+        total_force = drag_force + accel_force
+        
+        # Power in Watts (P = F * v)
+        power_w = max(0, total_force * target_v_ms) 
+        power_kwh = (power_w / 1000) * (duration_s / 3600)
+        
+        # H2 Consumption (incorporating variable stack efficiency)
+        # Efficiency drops slightly at peak power
+        load_factor = min(1.0, power_w / 210000) 
+        dynamic_eff = self.fuel_cell_max_eff - (0.1 * load_factor)
+        
+        h2_consumed = power_kwh / (self.h2_lhv * dynamic_eff)
+        self.current_h2_kg -= h2_consumed
+        
+        # Update State
+        self.velocity_ms = target_v_ms
+        self.total_dist_km += (self.velocity_ms * duration_s) / 1000
+        
+        return {
+            "Speed_KPH": round(self.velocity_ms * 3.6, 1),
+            "H2_Remaining": round(self.current_h2_kg, 4),
+            "Instant_Eff": f"{round(dynamic_eff * 100, 1)}%"
+        }
+
+# --- Execution Simulation ---
+giulia = GiuliaH2OAdvanced()
+print(f"{'Time(s)':<10} | {'Speed(km/h)':<12} | {'H2 (kg)':<10} | {'Efficiency'}")
+print("-" * 55)
+
+for t in range(0, 60, 10):
+    # Simulating a speed ramp (0 to 100 km/h)
+    target = min(27.7, (t + 10) * 2.8) 
+    stats = giulia.energy_management_step(target, duration_s=10)
+    print(f"{t+10:<10} | {stats['Speed_KPH']:<12} | {stats['H2_Remaining']:<10} | {stats['Instant_Eff']}")
