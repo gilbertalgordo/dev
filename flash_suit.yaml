@@ -1,0 +1,172 @@
+import * as THREE from 'three';
+
+// 1. Scene Setup
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// 2. Custom Iridescent Carbon Fiber Shader
+const flashSuitMaterial = new THREE.ShaderMaterial({
+  uniforms: {
+    time: { value: 0 },
+    baseColor: { value: new THREE.Color(0x800000) }, // Maroon
+    iridColor1: { value: new THREE.Color(0xff00ff) }, // Magenta
+    iridColor2: { value: new THREE.Color(0x4b0082) }, // Indigo
+    energyColor: { value: new THREE.Color(0x9400d3) } // Violet
+  },
+  vertexShader: `
+    varying vec2 vUv;
+    varying vec3 vNormal;
+    varying vec3 vViewPosition;
+    void main() {
+      vUv = uv;
+      vNormal = normalize(normalMatrix * normal);
+      vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+      vViewPosition = -mvPosition.xyz;
+      gl_Position = projectionMatrix * mvPosition;
+    }
+  `,
+  fragmentShader: `
+    varying vec2 vUv;
+    varying vec3 vNormal;
+    varying vec3 vViewPosition;
+    uniform float time;
+    uniform vec3 baseColor;
+    uniform vec3 iridColor1;
+    uniform vec3 iridColor2;
+
+    void main() {
+      // Carbon Fiber Pattern (Grid)
+      float pattern = step(0.5, fract(vUv.x * 100.0)) * step(0.5, fract(vUv.y * 100.0));
+      vec3 carbonBase = mix(vec3(0.05), baseColor, pattern * 0.3);
+
+      // Iridescence Logic (Fresnel Effect)
+      vec3 viewDir = normalize(vViewPosition);
+      float fresnel = pow(1.0 - dot(vNormal, viewDir), 3.0);
+      vec3 iridescence = mix(iridColor1, iridColor2, sin(fresnel + time) * 0.5 + 0.5);
+
+      // Final Composite
+      vec3 finalColor = mix(carbonBase, iridescence, fresnel * 0.6);
+      
+      // Add pulsing energy boosters
+      float booster = sin(time * 5.0) * 0.5 + 0.5;
+      if(vUv.x > 0.8 && vUv.y > 0.8) finalColor += vec3(1.0, 0.5, 0.0) * booster;
+
+      gl_FragColor = vec4(finalColor, 1.0);
+    }
+  `
+});
+
+// 3. Geometry (Placeholder for the suit mesh)
+const geometry = new THREE.TorusKnotGeometry(10, 3, 100, 16);
+const suitMesh = new THREE.Mesh(geometry, flashSuitMaterial);
+scene.add(suitMesh);
+
+camera.position.z = 30;
+
+// 4. Animation Loop
+function animate() {
+  requestAnimationFrame(animate);
+  flashSuitMaterial.uniforms.time.value += 0.05;
+  suitMesh.rotation.y += 0.01;
+  renderer.render(scene, camera);
+}
+animate();
+
+
+
+import * as THREE from 'three';
+
+// 1. Scene setup with High Dynamic Range (HDR) support
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+renderer.toneMapping = THREE.ReinhardToneMapping;
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// 2. The "Vertud" Advanced Shader Material
+const suitShader = {
+  uniforms: {
+    uTime: { value: 0 },
+    uResolution: { value: new THREE.Vector2() },
+    uBaseColor: { value: new THREE.Color(0x400000) },      // Deep Maroon
+    uIridescentA: { value: new THREE.Color(0xFF00FF) },    // Magenta
+    uIridescentB: { value: new THREE.Color(0x4B0082) },    // Indigo
+    uEnergyColor: { value: new THREE.Color(0xEE82EE) },    // Violet Glow
+  },
+  vertexShader: `
+    varying vec2 vUv;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    
+    void main() {
+      vUv = uv;
+      vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+      vNormal = normalize(normalMatrix * normal);
+      vViewDir = normalize(cameraPosition - worldPosition.xyz);
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    varying vec2 vUv;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    uniform float uTime;
+    uniform vec3 uBaseColor;
+    uniform vec3 uIridescentA;
+    uniform vec3 uIridescentB;
+    uniform vec3 uEnergyColor;
+
+    // Procedural Carbon Fiber "Vertud" Weave
+    float carbonWeave(vec2 uv) {
+      vec2 grid = fract(uv * 150.0);
+      float d = step(0.5, grid.x) == step(0.5, grid.y) ? 0.9 : 0.6;
+      return d;
+    }
+
+    void main() {
+      // 1. Fresnel calculation for Iridescence
+      float fresnel = pow(1.0 - max(dot(vNormal, vViewDir), 0.0), 3.0);
+      
+      // 2. Color Shifting Logic
+      vec3 iridShift = mix(uIridescentA, uIridescentB, fresnel);
+      vec3 surfaceColor = mix(uBaseColor, iridShift, fresnel * 0.8);
+      
+      // 3. Apply Carbon Fiber Micro-Detail
+      float detail = carbonWeave(vUv);
+      surfaceColor *= detail;
+
+      // 4. Kinetic Energy Boosters (Pulsing Emissive)
+      float boosterMask = smoothstep(0.48, 0.5, sin(vUv.y * 20.0 + uTime * 2.0));
+      float pulse = (sin(uTime * 10.0) * 0.5 + 0.5) * boosterMask;
+      vec3 finalEmissive = uEnergyColor * pulse * 2.0;
+
+      gl_FragColor = vec4(surfaceColor + finalEmissive, 1.0);
+    }
+  `
+};
+
+// 3. Application to Geometry
+const material = new THREE.ShaderMaterial(suitShader);
+const suitGeometry = new THREE.SphereGeometry(5, 128, 128); // Placeholder for suit mesh
+const suitInstance = new THREE.Mesh(suitGeometry, material);
+scene.add(suitInstance);
+
+// Lighting for PBR context
+const light = new THREE.PointLight(0xffffff, 1, 100);
+light.position.set(10, 10, 10);
+scene.add(light);
+camera.position.z = 12;
+
+// 4. Real-time Animation Loop
+function animate(time) {
+  requestAnimationFrame(animate);
+  material.uniforms.uTime.value = time * 0.001;
+  suitInstance.rotation.y += 0.005;
+  renderer.render(scene, camera);
+}
+animate(0);
