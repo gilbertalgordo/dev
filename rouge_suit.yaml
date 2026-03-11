@@ -1,0 +1,112 @@
+// Conceptual Three.js Material for Rogue's Suit
+const suitMaterial = new THREE.ShaderMaterial({
+  uniforms: {
+    time: { value: 0 },
+    carbonTexture: { value: new THREE.TextureLoader().load('carbon_fiber_grain.jpg') },
+    baseColor: { value: new THREE.Color(0x888888) } // Silver base
+  },
+  vertexShader: `
+    varying vec3 vNormal;
+    varying vec2 vUv;
+    varying vec3 vViewPosition;
+
+    void main() {
+      vUv = uv;
+      vNormal = normalize(normalMatrix * normal);
+      vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+      vViewPosition = -mvPosition.xyz;
+      gl_Position = projectionMatrix * mvPosition;
+    }
+  `,
+  fragmentShader: `
+    varying vec3 vNormal;
+    varying vec2 vUv;
+    varying vec3 vViewPosition;
+    uniform sampler2D carbonTexture;
+
+    void main() {
+      // Carbon Fiber Micro-texture
+      vec4 carbon = texture2D(carbonTexture, vUv * 10.0);
+      
+      // Iridescent Logic: Color shifts based on view angle
+      vec3 viewDir = normalize(vViewPosition);
+      float fresnel = dot(viewDir, vNormal);
+      
+      // Gradient Map: Red -> Purple -> Blue -> Green -> Yellow -> Silver/White
+      vec3 iridColor = vec3(0.0);
+      if(fresnel < 0.2) iridColor = vec3(1.0, 0.0, 0.0); // Red edge
+      else if(fresnel < 0.4) iridColor = vec3(0.5, 0.0, 0.5); // Purple
+      else if(fresnel < 0.6) iridColor = vec3(0.0, 0.0, 1.0); // Blue
+      else if(fresnel < 0.8) iridColor = vec3(0.0, 1.0, 0.5); // Green/Yellow
+      else iridColor = vec3(0.9, 0.9, 1.0); // Silver/White highlight
+
+      vec3 finalColor = mix(carbon.rgb, iridColor, 0.6);
+      gl_FragColor = vec4(finalColor, 1.0);
+    }
+  `
+});
+
+
+
+// Advanced PBR Material for Rogue's High-Tech Suit
+// Targeting: WebGPU / GLSL 4.5+
+
+precision highp float;
+
+varying vec3 vNormal;
+varying vec3 vViewDir;
+varying vec2 vUv;
+
+uniform float uTime;
+uniform sampler2D uCarbonFiberNormal; // Detail map for the weave
+uniform sampler2D uIridescentSpectralMap; // Custom lookup for your color palette
+
+// Fresnel Schlick approximation for the Iridescent layer
+vec3 calculateIridescence(float cosTheta, vec3 n) {
+    // Defines the shift through: Red -> Purple -> Blue -> Green -> Yellow -> Silver/White
+    // Based on the interference of light at different incident angles
+    float thickness = 450.0; // Nanometers (Adjusts the color "tightness")
+    float n_film = 1.5;      // Refractive index of the iridescent coating
+    
+    // Simplified interference calculation
+    float pathDiff = 2.0 * n_film * thickness * cosTheta;
+    vec3 spectralShift = vec3(
+        cos(pathDiff * 0.01 + 0.0), // Red channel
+        cos(pathDiff * 0.01 + 2.0), // Green channel
+        cos(pathDiff * 0.01 + 4.0)  // Blue channel
+    );
+    
+    return clamp(spectralShift * 0.5 + 0.5, 0.0, 1.0);
+}
+
+void main() {
+    // 1. Carbon Fiber Normal Mapping
+    // Tiling the carbon fiber 'vertud' (weave) 20x for micro-detail
+    vec3 carbonNormal = texture2D(uCarbonFiberNormal, vUv * 20.0).rgb * 2.0 - 1.0;
+    vec3 blendedNormal = normalize(vNormal + carbonNormal * 0.1); 
+    
+    // 2. View Dynamics
+    vec3 viewDir = normalize(vViewDir);
+    float cosTheta = dot(viewDir, blendedNormal);
+    
+    // 3. Iridescent Layering
+    // We mix your specific palette: Green, Yellow, Silver, White, Red, Purple, Blue
+    vec3 iridColor = calculateIridescence(cosTheta, blendedNormal);
+    
+    // 4. Carbon Fiber Surface Logic (Anisotropy)
+    // Carbon fiber absorbs light differently depending on the weave direction
+    float weaveDarkening = step(0.5, fract(vUv.x * 20.0)) * 0.2 + 0.8;
+    
+    // 5. Final Composition
+    // Base is Silver/Carbon (dark) with the iridescent highlight on top
+    vec3 baseAlbedo = vec3(0.1); // Dark base for carbon fiber
+    vec3 finalColor = mix(baseAlbedo, iridColor, 0.7);
+    
+    // Add specular highlight for the "Silver/White" peaks
+    float specular = pow(max(cosTheta, 0.0), 32.0);
+    finalColor += vec3(0.9) * specular; 
+
+    gl_FragColor = vec4(finalColor * weaveDarkening, 1.0);
+}
+
+
