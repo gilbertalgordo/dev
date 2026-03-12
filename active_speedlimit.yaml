@@ -1,0 +1,89 @@
+import cv2
+import torch
+import numpy as np
+
+class ActiveSpeedLimitAI:
+    def __init__(self, model_path='yolov8n.pt'):
+        # Load the computer vision model
+        self.model = torch.hub.load('ultralytics/yolov8', 'custom', path=model_path)
+        self.current_limit = 55  # Default/fallback limit
+        self.vehicle_speed = 0
+
+    def get_vehicle_speed(self):
+        """Mock function to simulate reading vehicle speed from CAN bus."""
+        return self.vehicle_speed
+
+    def process_frame(self, frame):
+        """Detects speed signs in the current video frame."""
+        results = self.model(frame)
+        detections = results.pandas().xyxy[0] # Get bounding boxes
+
+        for index, row in detections.iterrows():
+            if 'speed_limit' in row['name']:
+                # Extract the integer from the label (e.g., 'speed_limit_60')
+                new_limit = int(''.join(filter(str.isdigit, row['name'])))
+                self.update_limit(new_limit)
+        
+        return results
+
+    def update_limit(self, new_limit):
+        if new_limit != self.current_limit:
+            print(f"[AI INFO] Speed Limit Changed: {new_limit} mph")
+            self.current_limit = new_limit
+            self.apply_kaizen_adjustment()
+
+    def apply_kaizen_adjustment(self):
+        """Logic to gradually adjust speed (Continuous Improvement)."""
+        self.vehicle_speed = self.get_vehicle_speed()
+        if self.vehicle_speed > self.current_limit:
+            diff = self.vehicle_speed - self.current_limit
+            print(f"[ACTION] Reducing speed by {diff} units for safety.")
+            # Interface with vehicle braking/throttle here
+
+
+
+import numpy as np
+import time
+
+class AdvancedActiveSpeedLimit:
+    def __init__(self):
+        self.target_limit = 55.0
+        self.current_velocity = 0.0
+        self.map_limit = 55.0
+        self.camera_limit = 55.0
+        
+        # PID Controller Constants for smooth deceleration
+        self.Kp = 0.5  # Proportional
+        self.Ki = 0.1  # Integral
+        self.Kd = 0.05 # Derivative
+        self.prev_error = 0
+        self.integral = 0
+
+    def sensor_fusion(self, cam_val, cam_conf, gps_val):
+        """
+        Weights the camera detection vs GPS map data.
+        If Camera confidence < 80%, trust the GPS Map.
+        """
+        if cam_conf > 0.80:
+            self.target_limit = cam_val
+        else:
+            self.target_limit = gps_val
+        return self.target_limit
+
+    def pid_actuation(self, current_v, target_v):
+        """Calculates the necessary throttle/brake percentage."""
+        error = target_v - current_v
+        self.integral += error
+        derivative = error - self.prev_error
+        
+        # Output is limited to -1.0 (Full Brake) to 1.0 (Full Throttle)
+        output = (self.Kp * error) + (self.Ki * self.integral) + (self.Kd * derivative)
+        self.prev_error = error
+        return np.clip(output, -1.0, 0.2) # Limit acceleration for safety
+
+# Example Usage Logic
+asl = AdvancedActiveSpeedLimit()
+limit = asl.sensor_fusion(cam_val=35, cam_conf=0.92, gps_val=45)
+actuation = asl.pid_actuation(current_v=50, target_v=limit)
+
+print(f"Target: {limit} mph | Actuation Signal: {actuation:.2f}")
