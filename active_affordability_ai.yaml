@@ -1,0 +1,150 @@
+import datetime
+import json
+
+class AffordabilityAI:
+    def __init__(self, base_price, min_margin=0.15):
+        self.current_price = base_price
+        self.min_margin = min_margin # Protection for sustainability
+        self.affordability_index = 1.0
+        self.price_history = []
+
+    def calculate_new_price(self, market_avg, user_demand_score, cost_basis):
+        """
+        Logic: Adjusts price daily to meet the 'Affordability' threshold
+        while maintaining a sustainable margin.
+        """
+        # Aim for a sweet spot between market average and demand
+        target_price = (market_avg * 0.9) + (user_demand_score * 0.1)
+        
+        # Floor check: Ensure we don't go below cost + minimum margin
+        absolute_floor = cost_basis * (1 + self.min_margin)
+        
+        # Final recalibration
+        new_price = max(target_price, absolute_floor)
+        return round(new_price, 2)
+
+    def daily_reset(self, data_feed):
+        """Executes the automatic reset."""
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        new_price = self.calculate_new_price(
+            data_feed['market_avg'],
+            data_feed['demand_score'],
+            data_feed['cost_basis']
+        )
+        
+        self.current_price = new_price
+        self.price_history.append({"time": timestamp, "price": new_price})
+        
+        return {
+            "status": "SUCCESS",
+            "reset_time": timestamp,
+            "new_price": f"${new_price}",
+            "message": "Price recalibrated for maximum affordability."
+        }
+
+# --- Execution Simulation ---
+market_conditions = {
+    "market_avg": 45.00,
+    "demand_score": 42.00,
+    "cost_basis": 30.00
+}
+
+ai_manager = AffordabilityAI(base_price=50.00)
+update_log = ai_manager.daily_reset(market_conditions)
+
+print(json.dumps(update_log, indent=2))
+
+
+
+import datetime
+import math
+import random
+from dataclasses import dataclass
+from typing import List, Dict
+
+@dataclass
+class MarketTelemetry:
+    volatility: float  # 0.0 to 1.0
+    user_purchasing_power: float
+    competitor_avg: float
+    inventory_velocity: float
+
+class KaizenAffordabilityEngine:
+    """
+    Active Automatic Daily Price Reset (AADPR) 
+    Focus: Continuous micro-optimization for affordability.
+    """
+    def __init__(self, base_cost: float, profit_floor: float = 0.12):
+        self.base_cost = base_cost
+        self.min_margin = profit_floor
+        self.current_price = base_cost * 1.5
+        self.affordability_score = 0.0
+        self.evolution_log = []
+
+    def _calculate_hud_metrics(self, price: float, telemetry: MarketTelemetry):
+        """Generates real-time HUD data for system transparency."""
+        efficiency = (price / telemetry.competitor_avg) if telemetry.competitor_avg > 0 else 1.0
+        return {
+            "DELTA_V": round(telemetry.volatility, 3),
+            "AFFORD_INDEX": round(self.affordability_score, 4),
+            "EFFICACY": f"{round(efficiency * 100, 1)}%"
+        }
+
+    def execute_daily_reset(self, data: MarketTelemetry) -> Dict:
+        """
+        The Core AI Logic: Uses a sigmoid-weighted adjustment 
+        to prevent price shocks while seeking the affordability floor.
+        """
+        timestamp = datetime.datetime.now().isoformat()
+        
+        # 1. Define the 'Affordability Target'
+        # Logic: Weighted average of purchasing power and competitor undercut
+        target = (data.user_purchasing_power * 0.7) + (data.competitor_avg * 0.3)
+        
+        # 2. Apply Kaizen Constraint (Never drop below sustainable floor)
+        absolute_floor = self.base_cost * (1 + self.min_margin)
+        optimized_price = max(target, absolute_floor)
+
+        # 3. Smoothing Function (Prevents erratic daily jumps)
+        # $P_{new} = P_{old} + \alpha(P_{target} - P_{old})$
+        learning_rate = 0.15 # Kaizen step size
+        self.current_price += learning_rate * (optimized_price - self.current_price)
+        
+        # 4. Update Affordability Score
+        self.affordability_score = data.user_purchasing_power / self.current_price
+
+        hud_data = self._calculate_hud_metrics(self.current_price, data)
+        
+        status_report = {
+            "TIMESTAMP": timestamp,
+            "ACTIVE_PRICE": f"${self.current_price:.2f}",
+            "HUD_TELEMETRY": hud_data,
+            "SYSTEM_STATUS": "STABLE_EVOLUTION" if data.volatility < 0.5 else "HIGH_VOLATILITY_ADAPT"
+        }
+        
+        self.evolution_log.append(status_report)
+        return status_report
+
+# --- Simulation of Active Reset Instance ---
+def run_instance():
+    # Simulated Real-time Data Feed
+    telemetry_feed = MarketTelemetry(
+        volatility=0.24,
+        user_purchasing_power=45.50,
+        competitor_avg=52.00,
+        inventory_velocity=0.85
+    )
+
+    ai_node = KaizenAffordabilityEngine(base_cost=30.00)
+    
+    # Execute Reset
+    result = ai_node.execute_daily_reset(telemetry_feed)
+    
+    print(">>> AFFORDABILITY AI: DAILY RESET INITIALIZED <<<")
+    print(f"STATUS: {result['SYSTEM_STATUS']}")
+    print(f"NEW PRICE POINT: {result['ACTIVE_PRICE']}")
+    print(f"HUD VIEW: {result['HUD_TELEMETRY']}")
+
+if __name__ == "__main__":
+    run_instance()
