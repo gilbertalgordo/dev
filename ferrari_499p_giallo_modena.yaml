@@ -1,0 +1,259 @@
+class Ferrari499P:
+    def __init__(self):
+        # Technical Specifications
+        self.chassis = "Carbon Fiber Monocoque"
+        self.engine = "2.9L Twin-Turbo V6 (Stressed Member)"
+        self.livery = "Rosso Scuderia with Giallo Modena (Yellow) accents"
+        
+        # Power Specs (Regulatory Limits)
+        self.ice_power_limit = 500  # kW (~680 hp)
+        self.ers_power_limit = 200  # kW (~272 hp)
+        self.deployment_threshold = 190  # km/h (WEC Regulation)
+        
+        # State Variables
+        self.current_speed = 0
+        self.battery_soc = 1.0  # 100% Charge (800V System)
+        self.ers_active = False
+
+    def update_drive_state(self, speed_kmh, throttle_input, braking_input):
+        """
+        Calculates power distribution based on speed and energy recovery.
+        """
+        self.current_speed = speed_kmh
+        ers_output = 0
+        ice_output = throttle_input * self.ice_power_limit
+
+        # 1. Energy Recovery (Brake-by-Wire)
+        if braking_input > 0:
+            recovery = braking_input * 0.5  # Simulated recovery rate
+            self.battery_soc = min(1.0, self.battery_soc + recovery)
+            return f"Braking: Recovering energy to 800V Battery. SoC: {self.battery_soc:.2%}"
+
+        # 2. Hybrid Deployment Logic (4WD Engagement)
+        if speed_kmh >= self.deployment_threshold and self.battery_soc > 0.05:
+            self.ers_active = True
+            ers_output = throttle_input * self.ers_power_limit
+            self.battery_soc -= 0.01  # Energy consumption
+        else:
+            self.ers_active = False
+
+        total_power = ice_output + ers_output
+        drive_type = "4WD (Hybrid)" if self.ers_active else "RWD (ICE Only)"
+
+        return {
+            "Speed": f"{speed_kmh} km/h",
+            "Drive Mode": drive_type,
+            "Total Power": f"{total_power:.1f} kW",
+            "Battery": f"{self.battery_soc:.1%}"
+        }
+
+# --- Execution Example ---
+hypercar = Ferrari499P()
+
+# Test Case: Acceleration through the 190 km/h threshold
+print(f"Livery: {hypercar.livery}")
+for speed in [100, 180, 200, 250]:
+    status = hypercar.update_drive_state(speed, throttle_input=1.0, braking_input=0)
+    print(f"At {status['Speed']}: {status['Drive Mode']} - Output: {status['Total Power']}")
+
+
+
+import math
+
+class Ferrari499P:
+    def __init__(self, car_number=51):
+        # Chassis & Livery (2026 Spec)
+        self.car_number = car_number
+        self.chassis = "Carbon Fiber Monocoque"
+        self.livery = {
+            "primary": "Rosso Scuderia (Gloss)",
+            "accent": "Giallo Modena (Yellow Arrow)",
+            "details": "FIA World Champion Laurels"
+        }
+        
+        # Powertrain Componentry
+        self.engine_v6 = "F163CG 2.9L 120° Twin-Turbo (Stressed Member)"
+        self.mgu_front = {"power_limit_kw": 200, "torque_nm": 373}
+        self.battery_800v = {"capacity_mj": 3.5, "current_soc": 1.0}
+        
+        # FIA WEC Regulation Constraints
+        self.max_total_power_kw = 500  # Total combined output at wheels
+        self.awd_threshold_kmh = 190   # BoP deployment limit
+        self.min_weight_kg = 1030
+        
+    def calculate_power_distribution(self, velocity_ms, throttle_request):
+        """
+        Simulates the complex handover between the ICE and ERS.
+        Velocity is handled in m/s for physics accuracy.
+        """
+        velocity_kmh = velocity_ms * 3.6
+        ice_output = 0
+        ers_output = 0
+        
+        # 1. Total Power Limit (BoP Virtual Motor)
+        # Regulations limit the SUM of power at any given moment to 500kW
+        allowed_power = self.max_total_power_kw * throttle_request
+        
+        # 2. AWD Deployment Logic
+        if velocity_kmh >= self.awd_threshold_kmh and self.battery_800v['current_soc'] > 0.05:
+            # ERS takes priority for front-axle traction/efficiency
+            ers_output = min(allowed_power, self.mgu_front['power_limit_kw'])
+            ice_output = allowed_power - ers_output # Rear axle gets the remainder
+            drive_mode = "4WD Hybrid"
+        else:
+            # Below 190km/h, the front motor is a 'passenger' for torque
+            ice_output = allowed_power
+            ers_output = 0
+            drive_mode = "RWD ICE-Only"
+            
+        return {
+            "Mode": drive_mode,
+            "ICE_kW": round(ice_output, 1),
+            "ERS_kW": round(ers_output, 1),
+            "Total_kW": round(ice_output + ers_output, 1)
+        }
+
+    def brake_by_wire_recovery(self, deceleration_force, time_step=1.0):
+        """
+        Simulates kinetic energy recovery (MGU-K) into the 800V battery.
+        """
+        recovered_energy = deceleration_force * 0.85 # 85% efficiency factor
+        self.battery_800v['current_soc'] += (recovered_energy / 1000)
+        self.battery_800v['current_soc'] = min(1.0, self.battery_800v['current_soc'])
+        return f"Battery SoC: {self.battery_800v['current_soc']:.2%}"
+
+# --- Telemetry Simulation ---
+ferrari_hypercar = Ferrari499P(car_number=50)
+print(f"Initializing {ferrari_hypercar.livery['primary']} Hypercar...")
+
+telemetry_points = [40, 55, 65] # Speeds in m/s (144km/h, 198km/h, 234km/h)
+
+for v in telemetry_points:
+    stats = ferrari_hypercar.calculate_power_distribution(v, throttle_request=1.0)
+    print(f"Speed: {int(v*3.6)}km/h | Mode: {stats['Mode']} | Front Power: {stats['ERS_kW']}kW")
+
+
+
+import math
+
+class Ferrari499P:
+    def __init__(self, team="AF Corse", number=83):
+        # Chassis & Livery (2026 Specification)
+        self.chassis = "Carbon Fiber Monocoque (Dallara-manufactured)"
+        self.livery = "Giallo Modena (Yellow) with Rosso Scuderia accents"
+        self.team = team
+        self.number = number
+        
+        # Powertrain Componentry
+        self.engine = "2.9L 120° Twin-Turbo V6 (Structural Member)"
+        self.mgu_front = {"power_limit_kw": 200, "torque_nm": 373}
+        self.battery_800v = {"soc": 1.0, "voltage": 800} # F1-derived tech
+        
+        # Regulatory Performance Window (2026 BoP)
+        self.max_total_power_kw = 500  # Combined limit at wheels
+        self.awd_threshold_kmh = 190   # Engagement floor for ERS
+        
+    def calculate_deployment(self, speed_kmh, throttle_input):
+        """
+        Simulates the logic where the front motor acts as a 'passenger'
+        until the 190 km/h threshold is reached.
+        """
+        requested_power = self.max_total_power_kw * throttle_input
+        ice_output = 0
+        ers_output = 0
+        
+        # Hybrid Deployment Logic
+        if speed_kmh >= self.awd_threshold_kmh and self.battery_800v['soc'] > 0.05:
+            # AWD Mode: ERS takes the first 200kW, ICE provides the remainder
+            ers_output = min(requested_power, self.mgu_front['power_limit_kw'])
+            ice_output = requested_power - ers_output
+            drive_mode = "AWD (Hybrid)"
+            self.battery_800v['soc'] -= 0.005 # Simulated discharge
+        else:
+            # RWD Mode: Rear-mounted V6 handles 100% of the load
+            ice_output = requested_power
+            ers_output = 0
+            drive_mode = "RWD (ICE Only)"
+            
+        return {
+            "Speed": f"{speed_kmh} km/h",
+            "Mode": drive_mode,
+            "ICE Power": f"{ice_output:.1f} kW",
+            "Front MGU": f"{ers_output:.1f} kW",
+            "Battery": f"{self.battery_800v['soc']:.1%}"
+        }
+
+# --- Telemetry Run Example ---
+hypercar_83 = Ferrari499P(number=83)
+print(f"Initializing {hypercar_83.team} No. {hypercar_83.number}...")
+
+for speed in [100, 185, 195, 250]:
+    telemetry = hypercar_83.calculate_deployment(speed, throttle_input=1.0)
+    print(f"[{telemetry['Speed']}] {telemetry['Mode']} | Front: {telemetry['Front MGU']}")
+
+
+
+import numpy as np
+
+class Ferrari499P_2026:
+    def __init__(self, team="AF Corse", car_no=83):
+        # 2026 Livery: Glossy Rosso Scuderia with "Reversed Arrow" Giallo Modena
+        self.metadata = {
+            "team": team,
+            "chassis": "Carbon Fiber Monocoque (Structural V6)",
+            "livery": "Giallo Modena Reversed Arrow (Rear-Pointing)",
+            "voltage": "800V High-Performance Bus"
+        }
+        
+        # Technical Constants
+        self.ice_peak_kw = 500.0  # Twin-turbo V6
+        self.ers_peak_kw = 200.0  # Front MGU-K
+        self.deployment_floor = 190.0 / 3.6  # 190 km/h in m/s
+        self.total_power_limit = 500.0  # BoP Virtual Power Limit
+        
+        # 800V Battery State
+        self.battery_capacity_mj = 3.5
+        self.current_energy_mj = 3.5
+        self.six_phase_efficiency = 0.98  # Advanced switching logic
+        
+    def manage_power_deployment(self, velocity_ms, throttle_cmd):
+        """
+        Simulates the 'Virtual Motor' logic where MGU-K supplants ICE power
+        rather than adding to it, adhering to the 500kW total cap.
+        """
+        requested_power = self.total_power_limit * throttle_cmd
+        ers_out = 0.0
+        
+        # 1. Front Axle Engagement Logic (Regulation-based)
+        if velocity_ms >= self.deployment_floor and self.current_energy_mj > 0.1:
+            # AWD Engagement: MGU-K provides torque up to its 200kW limit
+            ers_out = min(requested_power, self.ers_peak_kw)
+            # ICE fills the remaining delta to hit the BoP limit
+            ice_out = requested_power - ers_out
+            mode = "AWD_HYBRID"
+        else:
+            # Below threshold: Front MGU is a 'passenger'
+            ice_out = requested_power
+            ers_out = 0.0
+            mode = "RWD_ICE"
+
+        # Update Battery SoC
+        energy_used = (ers_out / self.six_phase_efficiency) * 0.001 # kJ to MJ sim
+        self.current_energy_mj = max(0, self.current_energy_mj - energy_used)
+        
+        return {
+            "Mode": mode,
+            "ICE_Output": f"{ice_out:.1f} kW",
+            "MGU_Output": f"{ers_out:.1f} kW",
+            "Total_System_Power": f"{ice_out + ers_out:.1f} kW",
+            "SoC": f"{(self.current_energy_mj/self.battery_capacity_mj):.2%}"
+        }
+
+# --- Simulation Run ---
+car_83 = Ferrari499P_2026()
+telemetry_speeds = [150/3.6, 195/3.6, 280/3.6] # 150km/h, 195km/h, 280km/h
+
+print(f"Simulation: {car_83.metadata['team']} 499P | Livery: {car_83.metadata['livery']}")
+for v in telemetry_speeds:
+    log = car_83.manage_power_deployment(v, throttle_cmd=1.0)
+    print(f"Speed: {int(v*3.6)}km/h | {log['Mode']} | ICE: {log['ICE_Output']} | ERS: {log['MGU_Output']}")
