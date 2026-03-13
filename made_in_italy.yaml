@@ -1,0 +1,138 @@
+<svg width="200" height="60" viewBox="0 0 200 60" xmlns="http://www.w3.org/2000/svg">
+  <rect x="2" y="2" width="196" height="56" rx="5" fill="none" stroke="#333" stroke-width="2"/>
+  
+  <rect x="10" y="15" width="15" height="30" fill="#009246"/> <rect x="25" y="15" width="15" height="30" fill="#ffffff"/> <rect x="40" y="15" width="15" height="30" fill="#ce2b37"/> <text x="65" y="38" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="bold" fill="#333">
+    MADE IN ITALY
+  </text>
+</svg>
+
+
+
+import datetime
+
+class ProductionEtiquetteAI:
+    def __init__(self, product_id):
+        self.product_id = product_id
+        self.timestamp = datetime.datetime.now().isoformat()
+        self.compliance_status = False
+
+    def verify_origin(self, cost_in_italy, total_cost, transformation_steps):
+        """
+        Logic to determine if 'Made in Italy' can be legally applied.
+        Standard: Significant production stages must happen in Italy.
+        """
+        local_content_ratio = cost_in_italy / total_cost
+        
+        # Criteria: > 50% cost or 2+ major transformation steps
+        if local_content_ratio > 0.50 or transformation_steps >= 2:
+            self.compliance_status = True
+            return True
+        return False
+
+    def generate_marker(self):
+        if self.compliance_status:
+            return {
+                "product_id": self.product_id,
+                "label": "MADE IN ITALY",
+                "status": "CERTIFIED",
+                "issued_at": self.timestamp,
+                "ui_element": "svg_tricolore_v1.0"
+            }
+        else:
+            raise ValueError("Production does not meet 'Made in Italy' requirements.")
+
+# Example Instance
+ai_manager = ProductionEtiquetteAI(product_id="ITA-LUX-001")
+if ai_manager.verify_origin(cost_in_italy=75, total_cost=100, transformation_steps=3):
+    marker_data = ai_manager.generate_marker()
+    print(f"Marker Generated: {marker_data}")
+
+
+
+<svg width="400" height="120" viewBox="0 0 400 120" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#d4af37;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#f9f295;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#b8860b;stop-opacity:1" />
+    </linearGradient>
+    <filter id="softShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <rect x="5" y="5" width="390" height="110" rx="12" fill="#1a1a1a" filter="url(#softShadow)"/>
+  <rect x="7" y="7" width="386" height="106" rx="10" fill="none" stroke="url(#goldGrad)" stroke-width="1.5"/>
+
+  <path d="M20 30 h10 v60 h-10 z" fill="#009246"/>
+  <path d="M30 30 h10 v60 h-10 z" fill="#ffffff"/>
+  <path d="M40 30 h10 v60 h-10 z" fill="#ce2b37"/>
+
+  <text x="70" y="55" font-family="monospace" font-size="24" font-weight="900" fill="#ffffff" letter-spacing="2">
+    MADE IN ITALY
+  </text>
+  <text x="70" y="85" font-family="monospace" font-size="10" fill="url(#goldGrad)" opacity="0.8">
+    AI-VERIFIED PRODUCTION // REF: [TOKEN_ID]
+  </text>
+
+  <polyline points="350,30 370,30 370,50" fill="none" stroke="#00ffcc" stroke-width="1"/>
+  <circle cx="360" cy="75" r="15" fill="none" stroke="url(#goldGrad)" stroke-width="1" stroke-dasharray="4,2"/>
+</svg>
+
+
+
+import hashlib
+import time
+from dataclasses import dataclass, asdict
+
+@dataclass
+class ProductionStage:
+    stage_name: str
+    location: str
+    contribution_value: float  # Percentage of total value added
+    efficiency_score: float    # Kaizen metric (0.0 to 1.0)
+
+class ItalyProductionAI:
+    def __init__(self, sku: str):
+        self.sku = sku
+        self.stages = []
+        self.min_it_value = 0.60  # Require 60% value added in Italy
+        self.min_kaizen_score = 0.85
+
+    def add_production_stage(self, stage: ProductionStage):
+        self.stages.append(stage)
+
+    def calculate_origin_integrity(self):
+        it_value = sum(s.contribution_value for s in self.stages if s.location.upper() == "ITALY")
+        avg_efficiency = sum(s.efficiency_score for s in self.stages) / len(self.stages)
+        
+        # Verify against EU 'last substantial transformation' logic
+        is_compliant = it_value >= self.min_it_value and avg_efficiency >= self.min_kaizen_score
+        return is_compliant, it_value, avg_efficiency
+
+    def generate_cryptographic_marker(self):
+        is_valid, it_val, k_score = self.calculate_origin_integrity()
+        
+        if not is_valid:
+            return {"status": "REJECTED", "reason": "Insufficient Italian value or low Kaizen efficiency"}
+
+        # Create a unique hash for the etiquette (Digital Twin ID)
+        raw_data = f"{self.sku}-{it_val}-{time.time()}"
+        digital_signature = hashlib.sha256(raw_data.encode()).hexdigest()[:16].upper()
+
+        return {
+            "marker_id": f"IT-{digital_signature}",
+            "origin_ratio": f"{it_val*100}%",
+            "kaizen_efficiency": f"{k_score*100}%",
+            "etiquette_tier": "PREMIUM" if it_val > 0.8 else "STANDARD",
+            "timestamp": time.ctime()
+        }
+
+# --- Execution Instance ---
+engine = ItalyProductionAI(sku="LUX-BAG-001")
+engine.add_production_stage(ProductionStage("Design", "Italy", 0.20, 0.95))
+engine.add_production_stage(ProductionStage("Tanning", "Italy", 0.30, 0.90))
+engine.add_production_stage(ProductionStage("Assembly", "Italy", 0.45, 0.92))
+
+production_data = engine.generate_cryptographic_marker()
+print(f"AI Marker Metadata: {production_data}")
