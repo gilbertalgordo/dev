@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+  </head>
+  <body>
+    <a-scene background="color: #1a1a1a">
+      <a-entity light="type: ambient; intensity: 0.5"></a-entity>
+      <a-entity light="type: directional; intensity: 0.8" position="1 4 3"></a-entity>
+
+      <a-entity id="shotgun" position="0 1.5 -3" rotation="0 90 0">
+        
+        <a-cylinder id="barrel" 
+                    height="4" radius="0.05" 
+                    rotation="0 0 90"
+                    material="src: carbon_fiber_diffuse.jpg; 
+                              normalMap: carbon_fiber_normal.jpg; 
+                              repeat: 20 5; 
+                              roughness: 0.2; 
+                              metalness: 0.7">
+        </a-cylinder>
+
+        <a-entity id="stock_handle" 
+                  obj-model="src: url(stock_mesh.obj)" 
+                  position="-2.5 0 0"
+                  material="src: walnut_grain.jpg; 
+                            normalMap: carving_details_normal.jpg; 
+                            roughness: 0.6; 
+                            color: #5d4037">
+        </a-entity>
+
+      </a-entity>
+
+      <a-camera>
+        <a-entity cursor="fuse: false" position="0 0 -1"
+                  geometry="primitive: ring; radiusInner: 0.02; radiusOuter: 0.03"
+                  material="color: #00ffff; shader: flat; opacity: 0.5">
+        </a-entity>
+      </a-camera>
+    </a-scene>
+  </body>
+</html>
+
+
+
+// Advanced Fragment Shader for Carbon Fiber & Carved Wood
+precision highp float;
+
+varying vec2 vUv;
+varying vec3 vNormal;
+varying vec3 vViewPosition;
+
+uniform float uTime;
+uniform sampler2D uWoodGrain; // High-res wood texture
+uniform sampler2D uCarvingMap; // Height/Normal map for the carving
+
+void main() {
+    // 1. CARBON FIBER GENERATION (Procedural Weave)
+    vec2 weaveUV = vUv * 40.0; // Scale of the carbon weave
+    float weave = step(0.5, fract(weaveUV.x)) * step(0.5, fract(weaveUV.y));
+    weave += step(fract(weaveUV.x), 0.5) * step(fract(weaveUV.y), 0.5);
+    
+    // Simulating Anisotropy (light shifting on the fibers)
+    vec3 cfColor = mix(vec3(0.05), vec3(0.15), weave);
+    float spec = pow(max(dot(vNormal, vec3(0.0, 1.0, 1.0)), 0.0), 32.0);
+    vec3 finalCarbon = cfColor + (spec * 0.4);
+
+    // 2. WOOD CARVING LAYER
+    vec4 woodBase = texture2D(uWoodGrain, vUv);
+    float carvingDepth = texture2D(uCarvingMap, vUv).r;
+    
+    // Darken the "carved" grooves for ambient occlusion
+    vec3 finalWood = woodBase.rgb * (0.4 + 0.6 * carvingDepth);
+
+    // 3. LAYER BLENDING (The "Mask")
+    // Assuming the handle is mapped to specific UV coordinates
+    float handleMask = step(0.6, vUv.x); 
+    
+    vec3 finalColor = mix(finalCarbon, finalWood, handleMask);
+
+    gl_FragColor = vec4(finalColor, 1.0);
+}
