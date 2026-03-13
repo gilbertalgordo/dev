@@ -1,0 +1,214 @@
+using UnityEngine;
+using System.Collections;
+
+public class LaserShockPistol : MonoBehaviour
+{
+    [Header("Power Settings")]
+    public float maxBattery = 100f;
+    public float currentBattery;
+    public float consumptionPerShot = 5f;
+    public float rechargeRate = 10f; // Battery per second
+
+    [Header("Heat Management")]
+    public float currentHeat = 0f;
+    public float heatPerShot = 15f;
+    public float coolingRate = 20f;
+    public float overheatThreshold = 100f;
+    private bool isOverheated = false;
+
+    [Header("Laser Shock Properties")]
+    public float shockDamage = 25f;
+    public float fireRate = 0.25f;
+    private float nextFireTime;
+
+    void Start()
+    {
+        currentBattery = maxBattery;
+    }
+
+    void Update()
+    {
+        HandleCooldown();
+        HandleRecharge();
+
+        if (Input.GetButton("Fire1") && Time.time >= nextFireTime)
+        {
+            if (CanFire())
+            {
+                FireLaser();
+                nextFireTime = Time.time + fireRate;
+            }
+        }
+    }
+
+    bool CanFire()
+    {
+        return currentBattery >= consumptionPerShot && !isOverheated;
+    }
+
+    void FireLaser()
+    {
+        currentBattery -= consumptionPerShot;
+        currentHeat += heatPerShot;
+
+        // Logic for "Laser Shock" (Physics Raycast)
+        RaycastHit hit;
+        if (Physics.Raycast(transform.position, transform.forward, out hit))
+        {
+            Debug.Log("Laser Shock hit: " + hit.collider.name);
+            // Apply shock damage logic here
+        }
+
+        if (currentHeat >= overheatThreshold)
+        {
+            StartCoroutine(OverheatSequence());
+        }
+    }
+
+    void HandleCooldown()
+    {
+        if (currentHeat > 0)
+        {
+            currentHeat -= coolingRate * Time.deltaTime;
+        }
+        currentHeat = Mathf.Clamp(currentHeat, 0, overheatThreshold);
+    }
+
+    void HandleRecharge()
+    {
+        if (currentBattery < maxBattery)
+        {
+            currentBattery += rechargeRate * Time.deltaTime;
+        }
+        currentBattery = Mathf.Clamp(currentBattery, 0, maxBattery);
+    }
+
+    IEnumerator OverheatSequence()
+    {
+        isOverheated = true;
+        Debug.Log("Weapon Overheated! Cooling down...");
+        yield return new WaitForSeconds(3.0f); // Shutdown duration
+        isOverheated = false;
+        currentHeat = 0;
+    }
+}
+
+
+
+using UnityEngine;
+using System;
+using System.Collections;
+
+public class AdvancedLaserPistol : MonoBehaviour
+{
+    // --- Custom Types ---
+    public enum WeaponState { Idle, Firing, Overheated, Recharging }
+    
+    [Serializable]
+    public struct PistolSpecs {
+        public float MaxEnergy;
+        public float EnergyPerPulse;
+        public float RechargeJoulePerSec;
+        public float ThermalCapacity;
+        public float CoolingCoefficient;
+    }
+
+    // --- Configuration ---
+    [SerializeField] private PistolSpecs specs = new PistolSpecs { 
+        MaxEnergy = 500f, EnergyPerPulse = 12f, RechargeJoulePerSec = 25f, 
+        ThermalCapacity = 100f, CoolingCoefficient = 15f 
+    };
+
+    [Header("Laser Shock Physics")]
+    [SerializeField] private LayerMask impactLayers;
+    [SerializeField] private float shockForce = 50f;
+    [SerializeField] private float beamRange = 100f;
+
+    // --- State Variables ---
+    private float _currentEnergy;
+    private float _currentHeat;
+    private WeaponState _currentState = WeaponState.Idle;
+    
+    // --- Events for UI/VFX ---
+    public static event Action<float> OnHeatChanged;     // For HUD Heat Bar
+    public static event Action<float> OnEnergyChanged;   // For HUD Battery
+    public static event Action OnWeaponOverheat;
+
+    void Awake() {
+        _currentEnergy = specs.MaxEnergy;
+    }
+
+    void Update() {
+        ProcessThermodynamics();
+        ProcessEnergyRecovery();
+        
+        if (_currentState != WeaponState.Overheated) {
+            HandleInput();
+        }
+    }
+
+    private void HandleInput() {
+        if (Input.GetButton("Fire1") && _currentEnergy >= specs.EnergyPerPulse) {
+            ExecuteLaserShock();
+        } else if (_currentState == WeaponState.Firing) {
+            _currentState = WeaponState.Idle;
+        }
+    }
+
+    private void ExecuteLaserShock() {
+        _currentState = WeaponState.Firing;
+        
+        // Consume Energy & Generate Heat
+        _currentEnergy -= specs.EnergyPerPulse;
+        _currentHeat += specs.EnergyPerPulse * 0.8f; // 80% efficiency, 20% heat waste
+
+        // Physics: The "Shock" Component
+        if (Physics.Raycast(transform.position, transform.forward, out RaycastHit hit, beamRange, impactLayers)) {
+            if (hit.rigidbody != null) {
+                hit.rigidbody.AddForceAtPosition(transform.forward * shockForce, hit.point, ForceMode.Impulse);
+            }
+            // Trigger visual shock effects at hit.point here
+        }
+
+        NotifySubscribers();
+
+        if (_currentHeat >= specs.ThermalCapacity) {
+            StartCoroutine(ThermalShutdownRoutine());
+        }
+    }
+
+    private void ProcessThermodynamics() {
+        if (_currentHeat > 0) {
+            // Cooling is faster when the gun is hotter (Newton's Law of Cooling)
+            float coolingFactor = _currentState == WeaponState.Overheated ? 2.0f : 1.0f;
+            _currentHeat -= specs.CoolingCoefficient * coolingFactor * Time.deltaTime;
+            _currentHeat = Mathf.Max(0, _currentHeat);
+            OnHeatChanged?.Invoke(_currentHeat / specs.ThermalCapacity);
+        }
+    }
+
+    private void ProcessEnergyRecovery() {
+        if (_currentEnergy < specs.MaxEnergy && _currentState != WeaponState.Firing) {
+            _currentEnergy += specs.RechargeJoulePerSec * Time.deltaTime;
+            _currentEnergy = Mathf.Min(_currentEnergy, specs.MaxEnergy);
+            OnEnergyChanged?.Invoke(_currentEnergy / specs.MaxEnergy);
+        }
+    }
+
+    private IEnumerator ThermalShutdownRoutine() {
+        _currentState = WeaponState.Overheated;
+        OnWeaponOverheat?.Invoke();
+        
+        // Lock firing until heat reaches 0 (Full vent)
+        while (_currentHeat > 0) {
+            yield return null; 
+        }
+
+        _currentState = WeaponState.Idle;
+    }
+
+    private void NotifySubscribers() {
+        OnEnergyChanged?.Invoke(_currentEnergy / specs.MaxEnergy);
+        OnHeatChanged?.Invoke(_currentHeat / specs.ThermalCapacity);
+    }
+}
