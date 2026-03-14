@@ -1,0 +1,126 @@
+attribute vec3 position;
+attribute float intensity;
+varying float vIntensity;
+
+void main() {
+    vIntensity = intensity;
+    gl_Position = vec4(position, 1.0);
+    gl_PointSize = 4.0 + (intensity * 10.0); // Size reacts to AI activity
+}
+
+
+
+precision medium precision float;
+varying float vIntensity;
+
+void main() {
+    float dist = distance(gl_PointCoord, vec2(0.5));
+    if (dist > 0.5) discard; // Circular particles
+    gl_FragColor = vec4(0.0, 0.8, 1.0, 1.0 - (dist * 2.0)) * vIntensity;
+}
+
+
+
+const canvas = document.querySelector("#glCanvas");
+const gl = canvas.getContext("webgl");
+
+// Initialize Shaders and Buffers (Simplified for brevity)
+function initPipeline() {
+    // 1. Create Shader Program
+    // 2. Bind Attribute Locations
+    // 3. Create Buffers for 3D coordinates
+}
+
+// AI Simulation Logic (Superfast Kaizen approach: optimize every frame)
+let intensities = new Float32Array(100); 
+
+function updateAI() {
+    for(let i = 0; i < intensities.length; i++) {
+        // Simulate neural firing
+        intensities[i] = Math.random() * Math.sin(Date.now() * 0.001 + i);
+    }
+}
+
+function render() {
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    updateAI();
+    
+    // Update the intensity buffer and draw
+    gl.bufferData(gl.ARRAY_BUFFER, intensities, gl.DYNAMIC_DRAW);
+    gl.drawArrays(gl.POINTS, 0, 100);
+    
+    requestAnimationFrame(render);
+}
+
+render();
+
+
+
+#version 300 es
+layout(location = 0) in vec3 a_position;    // Base geometry (e.g., a sphere)
+layout(location = 1) in vec3 a_offset;      // Neuron position in 3D space
+layout(location = 2) in float a_activation; // AI "firing" state
+
+uniform mat4 u_viewProjection;
+out float v_activation;
+
+void main() {
+    v_activation = a_activation;
+    // Scale the neuron based on its current activity level
+    vec3 scaledPos = a_position * (1.0 + a_activation * 0.5);
+    gl_Position = u_viewProjection * vec4(scaledPos + a_offset, 1.0);
+}
+
+
+
+#version 300 es
+precision highp float;
+in float v_activation;
+out vec4 outColor;
+
+void main() {
+    // Dynamic color shifting from blue (idle) to gold/white (active)
+    vec3 idleColor = vec3(0.1, 0.4, 0.8);
+    vec3 activeColor = vec3(1.0, 0.9, 0.5);
+    vec3 color = mix(idleColor, activeColor, v_activation);
+    
+    outColor = vec4(color, 0.9);
+}
+
+
+
+class AIArchitecture {
+    constructor(nodeCount) {
+        this.nodes = new Float32Array(nodeCount * 3); // X, Y, Z
+        this.activations = new Float32Array(nodeCount);
+        this.initNetwork();
+    }
+
+    initNetwork() {
+        for (let i = 0; i < this.nodes.length; i++) {
+            this.nodes[i] = (Math.random() - 0.5) * 10.0;
+        }
+    }
+
+    // Advanced update loop: Simulates a simple propagation
+    update(time) {
+        for (let i = 0; i < this.activations.length; i++) {
+            // Sinusoidal "pulse" mimicking neural signal processing
+            this.activations[i] = Math.max(0, Math.sin(time * 0.002 + i * 0.5));
+        }
+    }
+}
+
+// WebGL Rendering Loop
+function frame(time) {
+    aiCore.update(time);
+    
+    gl.bindBuffer(gl.ARRAY_BUFFER, activationBuffer);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, aiCore.activations);
+    
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, vertexCount, nodeCount);
+    
+    updateHUD(time); // Telemetry update
+    requestAnimationFrame(frame);
+}
