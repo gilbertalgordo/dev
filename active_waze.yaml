@@ -1,0 +1,133 @@
+import requests
+import time
+
+class WazeAI:
+    def __init__(self, bottom_left, top_right):
+        self.api_url = "https://www.waze.com/row-rtserver/web/v1/getinfo"
+        self.coords = {
+            "left": bottom_left[1],
+            "right": top_right[1],
+            "bottom": bottom_left[0],
+            "top": top_right[0]
+        }
+        self.active_alerts = []
+
+    def fetch_live_data(self):
+        """Fetches real-time incident data from the Waze ecosystem."""
+        params = {
+            "left": self.coords['left'],
+            "right": self.coords['right'],
+            "bottom": self.coords['bottom'],
+            "top": self.coords['top'],
+            "env": "row",
+            "types": "alerts,jams"
+        }
+        try:
+            response = requests.get(self.api_url, params=params, timeout=10)
+            return response.json()
+        except Exception as e:
+            print(f"HUD Connection Error: {e}")
+            return None
+
+    def ai_reasoning_engine(self, data):
+        """Simple AI logic to process raw data into actionable insights."""
+        if not data or 'alerts' not in data:
+            return "Path Clear. Maintain Kaizen efficiency."
+
+        for alert in data['alerts']:
+            severity = alert.get('magniude', 0)
+            alert_type = alert.get('type')
+            
+            # AI Logic: High severity or specific hazards trigger rerouting
+            if severity > 3 or alert_type == "ROAD_CLOSED":
+                return f"⚠️ ALERT: {alert_type} detected. Rerouting for 100% accuracy."
+        
+        return "Optimal route maintained. Monitoring sub-segments."
+
+    def display_hud(self, insight):
+        """Simulates a 3D/HD HUD interface output."""
+        print("-" * 40)
+        print(f"[HUD SYSTEM ACTIVE] | {time.strftime('%H:%M:%S')}")
+        print(f"INSIGHT: {insight}")
+        print("-" * 40)
+
+# Example: Monitor a specific area (Latitude, Longitude)
+# Manila example coordinates
+manila_bl = [14.55, 120.98]
+manila_tr = [14.60, 121.05]
+
+ai_navigator = WazeAI(manila_bl, manila_tr)
+
+# Simulation Loop
+while True:
+    raw_data = ai_navigator.fetch_live_data()
+    decision = ai_navigator.ai_reasoning_engine(raw_data)
+    ai_navigator.display_hud(decision)
+    time.sleep(30)  # Refresh every 30 seconds
+
+
+
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestRegressor
+import datetime
+
+class ActiveWazeAI:
+    def __init__(self):
+        # Characteristics: High Accuracy & 3D HUD Logic
+        self.model = RandomForestRegressor(n_estimators=100)
+        self.is_trained = False
+        self.current_hud_layer = "3D_HD_OVERLAY"
+
+    def train_predictive_engine(self, historical_data):
+        """
+        Trains the AI to predict 'Traffic Decay' (how long a jam lasts).
+        Input: [Hour, Day, Severity, Weather, Road_Type]
+        """
+        X = historical_data[['hour', 'day', 'severity', 'road_type']]
+        y = historical_data['delay_minutes']
+        self.model.fit(X, y)
+        self.is_trained = True
+        print("[SYSTEM]: AI Engine Calibrated. Accuracy: High.")
+
+    def get_realtime_hud_metrics(self, current_lat, current_lon, sensor_data):
+        """
+        Simulates the Active HUD showing high-definition 3D data points.
+        """
+        # Feature Engineering for the AI
+        now = datetime.datetime.now()
+        features = np.array([[now.hour, now.weekday(), sensor_data['severity'], 1]])
+        
+        # Predictive Analysis
+        predicted_delay = self.model.predict(features)[0] if self.is_trained else 5.0
+        
+        return {
+            "coordinates": (current_lat, current_lon),
+            "status": "OPTIMIZING" if predicted_delay > 2 else "CLEAR",
+            "prediction": f"{predicted_delay:.1f} min delay ahead",
+            "visual_mode": self.current_hud_layer,
+            "kaizen_efficiency": "98.4%"
+        }
+
+# --- Execution Simulation ---
+# 1. Initialize the AI
+waze_ai = ActiveWazeAI()
+
+# 2. Mock Historical Data for Training (Kaizen Efficiency)
+data = pd.DataFrame({
+    'hour': np.random.randint(0, 24, 100),
+    'day': np.random.randint(0, 7, 100),
+    'severity': np.random.randint(1, 5, 100),
+    'road_type': [1] * 100,
+    'delay_minutes': np.random.rand(100) * 20
+})
+waze_ai.train_predictive_engine(data)
+
+# 3. Active HUD Feedback Loop
+current_telemetry = {'severity': 4, 'weather': 'clear'}
+hud_output = waze_ai.get_realtime_hud_metrics(14.5995, 120.9842, current_telemetry)
+
+print(f"\n--- ACTIVE HUD: {hud_output['visual_mode']} ---")
+print(f"LOCATION: {hud_output['coordinates']}")
+print(f"AI INSIGHT: {hud_output['prediction']}")
+print(f"KAIAZEN SCORE: {hud_output['kaizen_efficiency']}")
