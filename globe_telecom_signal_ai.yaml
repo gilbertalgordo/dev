@@ -1,0 +1,103 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report
+
+# 1. Synthetic Data Generation (Simulating Signal Metrics)
+def generate_signal_data(n_samples=1000):
+    np.random.seed(42)
+    data = {
+        'latitude': np.random.uniform(14.0, 15.0, n_samples),
+        'longitude': np.random.uniform(120.0, 121.0, n_samples),
+        'rsrp': np.random.uniform(-140, -44, n_samples),  # Signal power (dBm)
+        'rsrq': np.random.uniform(-20, -3, n_samples),    # Signal quality (dB)
+        'distance_to_tower': np.random.uniform(0.1, 5.0, n_samples) # km
+    }
+    df = pd.DataFrame(data)
+    
+    # Define Target: 0 = Dead Spot, 1 = Weak, 2 = Reliable
+    # Logic: If RSRP < -120 dBm, it's a Dead Spot
+    df['status'] = np.where(df['rsrp'] < -120, 0, 
+                   np.where(df['rsrp'] < -100, 1, 2))
+    return df
+
+# 2. Preprocessing & Training
+df = generate_signal_data()
+X = df[['latitude', 'longitude', 'rsrp', 'rsrq', 'distance_to_tower']]
+y = df['status']
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+
+# Using Random Forest for robust classification
+model = RandomForestClassifier(n_estimators=100, random_state=42)
+model.fit(X_train, y_train)
+
+# 3. Predict & Analyze
+predictions = model.predict(X_test)
+print("Signal Reliability Report:")
+print(classification_report(y_test, predictions, target_names=['Dead Spot', 'Weak', 'Reliable']))
+
+# 4. Identifying Dead Spots for Optimization
+dead_spots = X_test[predictions == 0]
+print(f"Detected {len(dead_spots)} critical dead spots requiring infrastructure intervention.")
+
+
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import pandas as pd
+from sklearn.preprocessing import StandardScaler
+
+# 1. Define Advanced Reliability Network (ARN)
+class ReliabilityNet(nn.Module):
+    def __init__(self, input_size):
+        super(ReliabilityNet, self).__init__()
+        self.layer1 = nn.Linear(input_size, 64)
+        self.layer2 = nn.Linear(64, 32)
+        self.layer3 = nn.Linear(32, 16)
+        self.output = nn.Linear(16, 1) # Probability of being a Dead Spot
+        self.relu = nn.ReLU()
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        x = self.relu(self.layer1(x))
+        x = self.relu(self.layer2(x))
+        x = self.relu(self.layer3(x))
+        x = self.sigmoid(self.output(x))
+        return x
+
+# 2. Data Preparation (Simulation of 2026 Data)
+# Inputs: RSRP, RSRQ, Elevation, Rain Intensity, Satellite Visibility
+features = ['rsrp', 'rsrq', 'elevation', 'rain_mm', 'sat_count']
+X_data = torch.randn(1000, 5) # 1000 samples, 5 features
+y_data = torch.randint(0, 2, (1000, 1)).float() # 1 = Dead Spot, 0 = Healthy
+
+# 3. Model Initialization
+model = ReliabilityNet(input_size=5)
+criterion = nn.BCELoss() # Binary Cross Entropy for Dead Spot detection
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+# 4. Training Loop (Kaizen-style iterative optimization)
+for epoch in range(100):
+    optimizer.zero_grad()
+    outputs = model(X_data)
+    loss = criterion(outputs, y_data)
+    loss.backward()
+    optimizer.step()
+    
+    if (epoch + 1) % 20 == 0:
+        print(f'Epoch [{epoch+1}/100], Reliability Loss: {loss.item():.4f}')
+
+# 5. Prediction Logic
+def check_area_reliability(metrics):
+    model.eval()
+    with torch.no_grad():
+        tensor_metrics = torch.tensor([metrics], dtype=torch.float32)
+        prob = model(tensor_metrics).item()
+        status = "Dead Spot High Risk" if prob > 0.7 else "Reliable"
+        return f"Reliability Score: {1-prob:.2%}, Status: {status}"
+
+# Example Check: Low RSRP (-115) and Heavy Rain
+print(check_area_reliability([-115, -15, 10, 50.0, 1]))
