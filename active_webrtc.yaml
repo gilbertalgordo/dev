@@ -1,0 +1,121 @@
+import asyncio
+import aiohttp
+import os
+
+from pipecat.frames.frames import EndFrame
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.task import PipelineTask
+from pipecat.processors.aggregators.llm_response import LLMUserResponseAggregator
+from pipecat.services.openai import OpenAILLMService
+from pipecat.services.deepgram import DeepgramSTTService
+from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.transports.services.daily import DailyTransport
+
+async def main():
+    async with aiohttp.ClientSession() as session:
+        # 1. Initialize Services
+        # Replace with your actual API keys
+        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+        tts = CartesiaTTSService(api_key=os.getenv("CARTESIA_API_KEY"), voice_id="your-voice-id")
+
+        # 2. Configure WebRTC Transport
+        transport = DailyTransport(
+            room_url="https://your-domain.daily.co/room-name",
+            token="your-token",
+            bot_name="Active AI"
+        )
+
+        # 3. Define the Pipeline
+        # User Audio -> STT -> LLM -> TTS -> WebRTC Output
+        pipeline = Pipeline([
+            transport.input(),    # Receive WebRTC audio
+            stt,                  # Speech to Text
+            llm,                  # Logic / Brain
+            tts,                  # Text to Speech
+            transport.output(),   # Send WebRTC audio back
+        ])
+
+        # 4. Create and run the task
+        task = PipelineTask(pipeline)
+        
+        @transport.event_handler("on_first_participant_joined")
+        async def on_joined(transport, participant):
+            # Kick off the conversation
+            await task.queue_frame(LLMUserResponseAggregator())
+
+        await task.run()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+
+
+// Quick snippet to capture mic and connect to the WebRTC server
+async function startRealtimeAI() {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const pc = new RTCPeerConnection();
+  
+  stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+  // Negotiation (SDP Offer/Answer) occurs here with your signaling server
+  // ...
+}
+
+
+
+import asyncio
+import os
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.task import PipelineTask
+from pipecat.services.openai import OpenAIRealtimeService
+from pipecat.transports.services.daily import DailyTransport
+from pipecat.processors.aggregators.llm_response import LLMUserResponseAggregator
+from pipecat.vad.silero import SileroVADAnalyzer
+
+async def main():
+    # 1. Setup WebRTC Transport with 2026 low-latency defaults
+    transport = DailyTransport(
+        room_url=os.getenv("DAILY_ROOM_URL"),
+        token=os.getenv("DAILY_TOKEN"),
+        bot_name="ActiveAI-Pro",
+        vad_analyzer=SileroVADAnalyzer() # High-precision Voice Activity Detection
+    )
+
+    # 2. Configure Native Realtime AI (Speech-to-Speech)
+    # This bypasses separate STT/TTS modules for <300ms latency
+    llm = OpenAIRealtimeService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        session_config={
+            "instructions": "You are a proactive assistant. Interrupt if necessary.",
+            "turn_detection": {"type": "server_vad"},
+            "modalities": ["audio", "text"]
+        }
+    )
+
+    # 3. Define the "Active" Pipeline
+    # We include a 'user_response' aggregator to manage turn-taking state
+    pipeline = Pipeline([
+        transport.input(),        # Capture WebRTC stream
+        llm,                      # Multi-modal LLM handles STT/Logic/TTS
+        transport.output(),       # Direct WebRTC media output
+    ])
+
+    task = PipelineTask(pipeline, params={"allow_interruptions": True})
+
+    # 4. Handle Active Events (Barge-in)
+    @transport.event_handler("on_participant_joined")
+    async def on_joined(transport, participant):
+        # AI initiates the conversation actively
+        await task.queue_frames([LLMUserResponseAggregator()])
+
+    @transport.event_handler("on_user_started_speaking")
+    async def on_interruption(transport):
+        # Stop the AI immediately when user speaks
+        print("Barge-in detected: Flushing AI buffers.")
+        await task.cancel_queued_frames()
+
+    await task.run()
+
+if __name__ == "__main__":
+    asyncio.run(main())
