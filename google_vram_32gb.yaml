@@ -1,0 +1,131 @@
+import torch
+import psutil
+import time
+
+class AICoreController:
+    def __init__(self, vram_limit_gb=32):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.vram_limit_bytes = vram_limit_gb * 1024**3
+        
+    def get_system_status(self):
+        # Monitor CPU and VRAM
+        cpu_usage = psutil.cpu_percent(interval=1)
+        vram_allocated = torch.cuda.memory_allocated(self.device)
+        vram_reserved = torch.cuda.memory_reserved(self.device)
+        
+        return {
+            "cpu": cpu_usage,
+            "vram_used_gb": vram_allocated / 1024**3,
+            "vram_reserved_gb": vram_reserved / 1024**3
+        }
+
+    def optimize_workflow(self, task_load):
+        stats = self.get_system_status()
+        
+        # AI Logic: If CPU > 90%, throttle the GPU feed to prevent system hang
+        if stats['cpu'] > 90.0:
+            print(f"[AI Control] High CPU Load ({stats['cpu']}%). Throttling...")
+            time.sleep(0.5) # Artificial wait to let CPU catch up
+            
+        # VRAM Management: Clear cache if approaching 32GB limit
+        if stats['vram_reserved_gb'] > 30.0:
+            print("[AI Control] VRAM nearing 32GB limit. Clearing Cache.")
+            torch.cuda.empty_cache()
+
+# Usage Example
+controller = AICoreController(vram_limit_gb=32)
+while True:
+    status = controller.get_system_status()
+    print(f"CPU: {status['cpu']}% | VRAM: {status['vram_used_gb']:.2f} GB")
+    controller.optimize_workflow(task_load="high")
+    time.sleep(2)
+
+
+
+#include <iostream>
+#include <cuda_runtime.h>
+
+void allocateVRAM() {
+    size_t free_mem, total_mem;
+    cudaMemGetInfo(&free_mem, &total_mem);
+    
+    std::cout << "Total VRAM: " << total_mem / (1024 * 1024) << " MB" << std::endl;
+
+    // Allocate a specific 30GB chunk for an AI model
+    float* d_model_weights;
+    size_t size = 30ULL * 1024 * 1024 * 1024; // 30 GB
+    
+    cudaError_t err = cudaMalloc(&d_model_weights, size);
+    
+    if (err == cudaSuccess) {
+        std::cout << "Successfully locked 30GB in VRAM." << std::endl;
+    } else {
+        std::cerr << "Allocation failed: " << cudaGetErrorString(err) << std::endl;
+    }
+
+    cudaFree(d_model_weights);
+}
+
+
+
+import torch
+import psutil
+import os
+
+class GEngineController:
+    """
+    AI-driven Controller for 32GB VRAM Systems.
+    Orchestrates Google Axion/TPU or NVIDIA single-slot hardware.
+    """
+    def __init__(self, target_vram_gb=32):
+        self.max_vram = target_vram_gb * 1024**3 # 32GB in bytes
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    def get_telemetry(self):
+        # Fetches VRAM and CPU state
+        vram_reserved = torch.cuda.memory_reserved(0)
+        cpu_load = psutil.cpu_percent()
+        return vram_reserved, cpu_load
+
+    def apply_ai_governance(self):
+        vram, cpu = self.get_telemetry()
+        load_factor = vram / self.max_vram
+
+        # AI Control Logic: Dynamic Throttle
+        if load_factor > 0.90:
+            print(f"⚠️ VRAM CRITICAL ({load_factor*100:.1f}%). Throttling CPU intake.")
+            # Set CPU process to lower priority to save cycles for memory management
+            os.nice(10) 
+            torch.cuda.empty_cache()
+        elif load_factor < 0.50 and cpu < 70:
+            print("🚀 VRAM OPTIMAL. Boosting CPU Pre-processing.")
+            os.nice(-5) # Requires root/admin for negative values
+            
+# Initialize Governor
+governor = GEngineController(32)
+
+
+
+#include <cuda_runtime.h>
+#include <iostream>
+
+// Target: 32GB Single Slot Hardware
+void InitializeVRAMManagement() {
+    size_t free, total;
+    cudaMemGetInfo(&free, &total);
+
+    // Reserved block for AI Model Weights (approx 30GB)
+    const size_t reservation_size = 30ULL * 1024 * 1024 * 1024;
+    void* d_buffer;
+
+    cudaError_t status = cudaMalloc(&d_buffer, reservation_size);
+
+    if (status == cudaSuccess) {
+        std::cout << "SUCCESS: 30GB VRAM Reserved for AI Control." << std::endl;
+    } else {
+        std::cerr << "FAIL: VRAM Allocation error: " << cudaGetErrorString(status) << std::endl;
+    }
+
+    // Clean up
+    cudaFree(d_buffer);
+}
