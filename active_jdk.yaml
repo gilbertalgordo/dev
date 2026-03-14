@@ -1,0 +1,116 @@
+import java.util.concurrent.StructuredTaskScope;
+import java.util.List;
+
+/**
+ * Active JDK AI Agent
+ * Focuses on high-concurrency and structured concurrency (JDK 21+).
+ */
+public class ActiveAiAgent {
+
+    public record AiResponse(String content, long latencyMs) {}
+
+    public static void main(String[] args) {
+        ActiveAiAgent agent = new ActiveAiAgent();
+        agent.executeParallelTask(List.of("Analyze market trends", "Summarize latest tech news"));
+    }
+
+    /**
+     * Executes multiple AI prompts in parallel using Virtual Threads.
+     */
+    public void executeParallelTask(List<String> prompts) {
+        // StructuredTaskScope ensures that if one task fails, the others are managed correctly
+        try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
+            List<StructuredTaskScope.Subtask<AiResponse>> subtasks = prompts.stream()
+                .map(prompt -> scope.fork(() -> callAiModel(prompt)))
+                .toList();
+
+            scope.join();           // Join all subtasks
+            scope.throwIfFailed();  // Propagate the first exception if any occurred
+
+            subtasks.forEach(subtask -> {
+                AiResponse res = subtask.get();
+                System.out.printf("[Result] Latency: %dms | Data: %s%n", res.latencyMs(), res.content());
+            });
+
+        } catch (Exception e) {
+            System.err.println("AI Processing Failed: " + e.getMessage());
+        }
+    }
+
+    private AiResponse callAiModel(String prompt) throws InterruptedException {
+        long start = System.currentTimeMillis();
+        // Simulate an AI call (e.g., via LangChain4j or Spring AI)
+        Thread.sleep(500); 
+        return new AiResponse("Processed: " + prompt, System.currentTimeMillis() - start);
+    }
+}
+
+
+
+import jdk.incubator.vector.FloatVector;
+import jdk.incubator.vector.VectorSpecies;
+import java.util.concurrent.StructuredTaskScope;
+import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
+
+public class ActiveVectorAi {
+
+    // Define the SIMD species for the current hardware (e.g., AVX-512)
+    private static final VectorSpecies<Float> SPECIES = FloatVector.SPECIES_PREFERRED;
+
+    /**
+     * Calculates the Dot Product of two high-dimensional embeddings using SIMD.
+     * This is the "active" math layer for AI similarity.
+     */
+    public float computeSimilarity(float[] a, float[] b) {
+        var sum = FloatVector.zero(SPECIES);
+        int i = 0;
+        int upperBound = SPECIES.loopBound(a.length);
+
+        // Vectorized loop
+        for (; i < upperBound; i += SPECIES.length()) {
+            var va = FloatVector.fromArray(SPECIES, a, i);
+            var vb = FloatVector.fromArray(SPECIES, b, i);
+            sum = va.fma(vb, sum); // Fused Multiply-Add
+        }
+
+        float result = sum.reduceLanes(FloatVector.VectorOperators.ADD);
+
+        // Scalar tail for remaining elements
+        for (; i < a.length; i++) {
+            result += a[i] * b[i];
+        }
+        return result;
+    }
+
+    /**
+     * Orchestrates multiple AI similarity checks using Structured Concurrency.
+     */
+    public void processActiveInference(List<float[]> database, float[] query) {
+        try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
+            System.out.println("Starting AI Inference on " + Thread.ofVirtual().name() + "...");
+
+            // Forking tasks into Virtual Threads for high throughput
+            List<StructuredTaskScope.Subtask<Float>> tasks = database.stream()
+                .map(vec -> scope.fork(() -> computeSimilarity(vec, query)))
+                .toList();
+
+            scope.join();
+            scope.throwIfFailed();
+
+            double topScore = tasks.stream().mapToDouble(StructuredTaskScope.Subtask::get).max().orElse(0.0);
+            System.out.printf("Highest Similarity Score Detected: %.4f%n", topScore);
+
+        } catch (Exception e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    public static void main(String[] args) {
+        ActiveVectorAi engine = new ActiveVectorAi();
+        float[] query = new float[512]; // 512-dimension embedding
+        List<float[]> mockDb = List.of(new float[512], new float[512], new float[512]);
+        
+        engine.processActiveInference(mockDb, query);
+    }
+}
