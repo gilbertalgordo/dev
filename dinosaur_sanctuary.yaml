@@ -1,0 +1,135 @@
+class Dinosaur:
+    def __init__(self, name, species, diet, aggression_level):
+        self.name = name
+        self.species = species
+        self.diet = diet  # Herbivore or Carnivore
+        self.aggression_level = aggression_level # 1 to 10
+        self.health = 100
+
+    def __str__(self):
+        return f"[{self.species}] {self.name} - Health: {self.health}%"
+
+class Sanctuary:
+    def __init__(self, location):
+        self.location = location
+        self.enclosures = {}
+
+    def add_enclosure(self, zone_name, capacity):
+        self.enclosures[zone_name] = {"capacity": capacity, "dinosaurs": []}
+
+    def intake_dinosaur(self, zone_name, dino):
+        zone = self.enclosures.get(zone_name)
+        if zone and len(zone["dinosaurs"]) < zone["capacity"]:
+            zone["dinosaurs"].append(dino)
+            print(f"Successfully moved {dino.name} to {zone_name}.")
+        else:
+            print(f"Alert: {zone_name} is full or does not exist!")
+
+    def generate_status_report(self):
+        print(f"\n--- {self.location.upper()} STATUS REPORT ---")
+        for zone, data in self.enclosures.items():
+            print(f"Zone: {zone} ({len(data['dinosaurs'])}/{data['capacity']})")
+            for dino in data['dinosaurs']:
+                print(f"  - {dino}")
+
+
+
+# Initialize the Sanctuary
+isla_nublar = Sanctuary("Isla Nublar")
+
+# Setup Zones
+isla_nublar.add_enclosure("T-Rex Paddock", 1)
+isla_nublar.add_enclosure("Herbivore Valley", 10)
+
+# Create Dinosaurs
+rexy = Dinosaur("Rexy", "Tyrannosaurus Rex", "Carnivore", 9)
+blue = Dinosaur("Blue", "Velociraptor", "Carnivore", 7)
+stumpy = Dinosaur("Stumpy", "Triceratops", "Herbivore", 3)
+
+# Assign to Enclosures
+isla_nublar.intake_dinosaur("T-Rex Paddock", rexy)
+isla_nublar.intake_dinosaur("Herbivore Valley", stumpy)
+
+# View Current Status
+isla_nublar.generate_status_report()
+
+
+
+import asyncio
+import random
+from enum import Enum
+
+class SecurityLevel(Enum):
+    LOW = "Green"
+    STABLE = "Blue"
+    CAUTION = "Yellow"
+    BREACH = "Red"
+
+class Dinosaur:
+    def __init__(self, species, aggression):
+        self.species = species
+        self.aggression = aggression  # 0.0 to 1.0
+        self.integrity = 100.0
+        self.is_contained = True
+
+    async def live(self):
+        """Simulates life cycles and potential escape attempts."""
+        while self.integrity > 0:
+            await asyncio.sleep(random.uniform(1, 3))
+            # Chance to challenge containment based on aggression
+            if random.random() < (self.aggression * 0.1):
+                self.is_contained = False
+                break
+
+
+
+class CommandCenter:
+    def __init__(self):
+        self.population = []
+        self.grid_status = SecurityLevel.STABLE
+
+    def boot_hud(self):
+        print("="*40)
+        print("  SYSTEM BOOT: JURASSIC OS v4.0  ")
+        print("  MONITORING ACTIVE...          ")
+        print("="*40)
+
+    async def monitor_perimeter(self):
+        """The Security HUD loop."""
+        while True:
+            escaped = [d for d in self.population if not d.is_contained]
+            
+            if escaped:
+                self.grid_status = SecurityLevel.BREACH
+                print(f"\n[!] HUD ALERT: {self.grid_status.value} ALERT")
+                for e in escaped:
+                    print(f"    >> WARNING: {e.species} has breached containment!")
+                return # Stop simulation on breach
+            else:
+                print(f"--- Grid Status: {self.grid_status.value} | Pop: {len(self.population)} ---", end="\r")
+            
+            await asyncio.sleep(1)
+
+    async def run_sanctuary(self):
+        self.boot_hud()
+        
+        # Initialize prehistoric instances
+        self.population = [
+            Dinosaur("Velociraptor", 0.8),
+            Dinosaur("Brachiosaurus", 0.1),
+            Dinosaur("T-Rex", 0.95)
+        ]
+
+        # Start all life cycles and the monitor simultaneously
+        tasks = [d.live() for d in self.population]
+        tasks.append(self.monitor_perimeter())
+        
+        await asyncio.gather(*tasks)
+
+# Entry Point
+if __name__ == "__main__":
+    hub = CommandCenter()
+    try:
+        asyncio.run(hub.run_sanctuary())
+    except KeyboardInterrupt:
+        print("\nSystem Manually Overridden.")
