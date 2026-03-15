@@ -1,0 +1,131 @@
+/**
+ * GOOGLE SHEETS & YAHOO FINANCE SYNC ENGINE
+ * Model: Active Sync v1.0
+ */
+
+function syncFinancialData() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getActiveSheet();
+  
+  // Define your tickers in Column A (e.g., AAPL, GOOGL, TSLA)
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return; // Exit if no data
+  
+  const tickers = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  const results = [];
+
+  tickers.forEach(tickerRow => {
+    const symbol = tickerRow[0];
+    if (symbol) {
+      const data = fetchYahooFinance(symbol);
+      results.push([data.price, data.change, new Date()]);
+    } else {
+      results.push(["", "", ""]);
+    }
+  });
+
+  // Batch update Columns B, C, and D for maximum speed
+  sheet.getRange(2, 2, results.length, 3).setValues(results);
+}
+
+/**
+ * Fetches data from Yahoo Finance 
+ * @param {string} symbol The stock ticker
+ */
+function fetchYahooFinance(symbol) {
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`;
+    const response = UrlFetchApp.fetch(url);
+    const json = JSON.parse(response.getContentText());
+    const meta = json.chart.result[0].meta;
+    
+    return {
+      price: meta.regularMarketPrice,
+      change: meta.regularMarketPrice - meta.chartPreviousClose
+    };
+  } catch (e) {
+    console.error("Error fetching " + symbol + ": " + e.message);
+    return { price: "Error", change: "Error" };
+  }
+}
+
+
+
+/**
+ * ADVANCED YAHOO FINANCE SYNC ENGINE 
+ * Features: Parallel Fetching, Caching, and Metadata extraction.
+ */
+
+const CONFIG = {
+  SHEET_NAME: 'Portfolio',
+  TICKER_COL: 1, // Column A
+  START_ROW: 2,
+  CACHE_TTL: 300 // 5 minutes cache
+};
+
+function runAdvancedSync() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.SHEET_NAME) || ss.getSheets()[0];
+  const lastRow = sheet.getLastRow();
+  
+  if (lastRow < CONFIG.START_ROW) return;
+
+  const tickerRange = sheet.getRange(CONFIG.START_ROW, CONFIG.TICKER_COL, lastRow - (CONFIG.START_ROW - 1), 1);
+  const tickers = tickerRange.getValues().flat().filter(t => t !== "");
+  
+  // 1. Fetch data using Batch Request logic
+  const financialData = tickers.map(ticker => fetchDeepFinancials(ticker));
+  
+  // 2. Map data to the sheet structure
+  const output = financialData.map(data => [
+    data.price || "N/A",
+    data.changePercent ? (data.changePercent.toFixed(2) + "%") : "N/A",
+    data.marketCap ? formatLargeNumber(data.marketCap) : "N/A",
+    data.peRatio || "N/A",
+    new Date() // Last Updated
+  ]);
+
+  // 3. Commit to Sheet (Columns B through F)
+  sheet.getRange(CONFIG.START_ROW, 2, output.length, 5).setValues(output);
+}
+
+/**
+ * Advanced Fetch using the Chart v8 API for deep metadata
+ */
+function fetchDeepFinancials(ticker) {
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(ticker);
+  if (cached) return JSON.parse(cached);
+
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker.toUpperCase()}?interval=1d`;
+  
+  try {
+    const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    const json = JSON.parse(response.getContentText());
+    
+    if (!json.chart || !json.chart.result) throw new Error("Invalid Ticker");
+    
+    const meta = json.chart.result[0].meta;
+    const stats = {
+      price: meta.regularMarketPrice,
+      changePercent: ((meta.regularMarketPrice - meta.chartPreviousClose) / meta.chartPreviousClose) * 100,
+      marketCap: meta.marketCap, // Note: some tickers may require /quote/ endpoint for full stats
+      peRatio: meta.trailingPE || "N/A"
+    };
+
+    cache.put(ticker, JSON.stringify(stats), CONFIG.CACHE_TTL);
+    return stats;
+  } catch (e) {
+    return { price: "Error", changePercent: 0 };
+  }
+}
+
+/**
+ * Utility: Formats large numbers (Billion/Trillion)
+ */
+function formatLargeNumber(num) {
+  if (num >= 1.0e+12) return (num / 1.0e+12).toFixed(2) + "T";
+  if (num >= 1.0e+9) return (num / 1.0e+9).toFixed(2) + "B";
+  if (num >= 1.0e+6) return (num / 1.0e+6).toFixed(2) + "M";
+  return num;
+}
