@@ -1,0 +1,158 @@
+import json
+import requests
+import time
+from google.shopping.content_v2_1 import ContentApiClient
+from google.oauth2 import service_account
+
+# --- CONFIGURATION ---
+TEMU_API_URL = "https://open-api.temu.com/router/rest"
+GMC_ID = "YOUR_MERCHANT_ID"
+SERVICE_ACCOUNT_FILE = 'service_account.json'
+
+class CrossPostBot:
+    def __init__(self):
+        # Authenticate with Google
+        self.creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE)
+        self.client = ContentApiClient(self.creds)
+
+    def get_temu_discounts(self):
+        """Fetches active sale items from Temu."""
+        # Note: Actual Temu API requires signature generation (HMAC-SHA256)
+        payload = {
+            "method": "temu.goods.list.get",
+            "app_key": "YOUR_APP_KEY",
+            "timestamp": str(int(time.time())),
+            "page_size": 20,
+            "status": "ON_SALE"
+        }
+        # Placeholder for signed request
+        response = requests.post(TEMU_API_URL, data=payload)
+        return response.json().get('data', [])
+
+    def format_for_google(self, item):
+        """Maps Temu product data to Google Shopping schema."""
+        return {
+            "offerId": item['goods_id'],
+            "title": item['goods_name'],
+            "description": item['goods_desc'],
+            "link": f"https://www.temu.com/item-{item['goods_id']}.html",
+            "imageLink": item['main_image'],
+            "contentLanguage": "en",
+            "targetCountry": "US",
+            "channel": "online",
+            "availability": "in stock",
+            "condition": "new",
+            "price": {"value": item['sale_price'], "currency": "USD"},
+            "salePrice": {"value": item['discounted_price'], "currency": "USD"}
+        }
+
+    def sync_to_google(self):
+        """Executes the cross-posting."""
+        items = self.get_temu_discounts()
+        for item in items:
+            g_item = self.format_for_google(item)
+            try:
+                self.client.products().insert(merchantId=GMC_ID, body=g_item).execute()
+                print(f"Successfully posted: {g_item['title']}")
+            except Exception as e:
+                print(f"Error posting {item['goods_id']}: {e}")
+
+# Run Bot
+if __name__ == "__main__":
+    bot = CrossPostBot()
+    bot.sync_to_google()
+
+
+
+import hashlib
+import hmac
+import time
+import json
+import requests
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+
+# --- CONFIGURATION ---
+TEMU_CONFIG = {
+    "app_key": "YOUR_TEMU_KEY",
+    "app_secret": "YOUR_TEMU_SECRET",
+    "api_url": "https://open-api.temu.com/router/rest"
+}
+
+G_CONFIG = {
+    "merchant_id": "YOUR_MERCHANT_ID",
+    "key_file": "service_account.json"
+}
+
+class TemuToGoogleAI:
+    def __init__(self):
+        self.creds = service_account.Credentials.from_service_account_file(G_CONFIG['key_file'])
+        self.service = build('content', 'v2.1', credentials=self.creds)
+
+    def _generate_signature(self, params):
+        """Advanced HMAC-SHA256 signature for Temu API."""
+        query_string = "".join(f"{k}{params[k]}" for k in sorted(params))
+        query_string = f"{TEMU_CONFIG['app_secret']}{query_string}{TEMU_CONFIG['app_secret']}"
+        return hashlib.sha256(query_string.encode('utf-8')).hexdigest().upper()
+
+    def fetch_temu_discounts(self):
+        """Retrieves active sale instances from Temu."""
+        params = {
+            "method": "temu.goods.list.get",
+            "app_key": TEMU_CONFIG['app_key'],
+            "timestamp": str(int(time.time())),
+            "page_size": "50",
+            "status": "1" # Active/On Sale
+        }
+        params["sign"] = self._generate_signature(params)
+        
+        response = requests.post(TEMU_CONFIG['api_url'], data=params)
+        return response.json().get('data', {}).get('list', [])
+
+    def sync_batch_to_google(self, temu_items):
+        """Batch upload to Google Shopping for superfast execution."""
+        batch_entries = []
+        
+        for idx, item in enumerate(temu_items):
+            # Transformation logic for Google AI Accuracy
+            entry = {
+                "batchId": idx,
+                "merchantId": G_CONFIG['merchant_id'],
+                "method": "insert",
+                "product": {
+                    "offerId": str(item['goods_id']),
+                    "title": item['goods_name'][:150], # Trim for Google limits
+                    "description": item['goods_desc'],
+                    "link": f"https://www.temu.com/k-{item['goods_id']}.html",
+                    "imageLink": item['hd_image_url'], # Priority for HD
+                    "contentLanguage": "en",
+                    "targetCountry": "US",
+                    "feedLabel": "US",
+                    "channel": "online",
+                    "availability": "in stock" if item['stock'] > 0 else "out of stock",
+                    "condition": "new",
+                    "price": {"value": str(item['original_price']), "currency": "USD"},
+                    "salePrice": {"value": str(item['sale_price']), "currency": "USD"}
+                }
+            }
+            batch_entries.append(entry)
+
+        # Execute Batch Request
+        request_body = {"entries": batch_entries}
+        result = self.service.products().custombatch(body=request_body).execute()
+        self._display_hud(result)
+
+    def _display_hud(self, result):
+        """Heads-Up Display for real-time monitoring."""
+        success = sum(1 for e in result.get('entries', []) if 'product' in e)
+        errors = len(result.get('entries', [])) - success
+        print(f"--- SYNC HUD ---")
+        print(f"Successful Syncs: {success}")
+        print(f"Failed Syncs: {errors}")
+        print(f"----------------")
+
+if __name__ == "__main__":
+    engine = TemuToGoogleAI()
+    items = engine.fetch_temu_discounts()
+    if items:
+        engine.sync_batch_to_google(items)
