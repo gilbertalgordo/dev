@@ -1,0 +1,74 @@
+import requests
+
+def sync_finances(api_key, user_id):
+    # Endpoint for a financial aggregator supporting GCash
+    url = "https://api.aggregator.com/v1/accounts/sync"
+    
+    payload = {
+        "provider": "gcash",
+        "user_id": user_id,
+        "sync_metadata": ["transactions", "balance"]
+    }
+    
+    headers = {"Authorization": f"Bearer {api_key}"}
+    
+    response = requests.post(url, json=payload, headers=headers)
+    
+    if response.status_code == 200:
+        return "Sync Successful: Data sent to AI Engine."
+    else:
+        return "Sync Failed: Check provider credentials."
+
+
+
+import os
+import json
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+
+# CONFIGURATION
+SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
+SERVICE_ACCOUNT_FILE = 'keys.json' # Your Google Cloud Console Key
+SPREADSHEET_ID = 'YOUR_SHEET_ID_HERE'
+
+def update_google_finance_ledger(transaction_data):
+    """
+    Syncs a dictionary of GCash transactions to a Google Sheet.
+    """
+    creds = service_account.Credentials.from_service_account_file(
+        SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+    
+    service = build('sheets', 'v4', credentials=creds)
+    sheet = service.spreadsheets()
+
+    # Prepare data for insertion
+    # Format: [Date, Description, Amount, Category]
+    values = [
+        [
+            transaction_data['date'],
+            transaction_data['desc'],
+            transaction_data['amount'],
+            transaction_data['category']
+        ]
+    ]
+    body = {'values': values}
+
+    # Append to the next available row
+    result = sheet.values().append(
+        spreadsheetId=SPREADSHEET_ID,
+        range="Sheet1!A1",
+        valueInputOption="USER_ENTERED",
+        body=body
+    ).execute()
+
+    return f"Synced: {result.get('updates').get('updatedCells')} cells updated."
+
+# Example GCash Data Object (Usually parsed from App/Email Webhooks)
+mock_gcash_data = {
+    "date": "2026-03-15",
+    "desc": "Google Play Subscription",
+    "amount": -149.00,
+    "category": "Entertainment"
+}
+
+print(update_google_finance_ledger(mock_gcash_data))
