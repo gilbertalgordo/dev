@@ -1,0 +1,101 @@
+// Material Properties
+struct HorusMaterial {
+    float3 BaseGoldColor;     // Rich Egyptian Gold
+    float IridescenceStrength; // Spectral "rogebev" shift
+    float CarbonRoughness;    // Matte vs Gloss for fiber
+    sampler2D CarbonWeaveMap; // Vertical "vertud" weave pattern
+    sampler2D SuitMask;       // Black = Carbon, White = Gold
+};
+
+// Simplified Iridescence Function (The "rogebev" effect)
+float3 GetSpectralShift(float cosTheta) {
+    // Creates a rainbow-like shift based on viewing angle
+    float3 shift = 0.5 + 0.5 * cos(6.28318 * (float3(1.0, 0.6, 0.0) * cosTheta + float3(0.0, 0.33, 0.67)));
+    return shift;
+}
+
+float4 FragmentShader(PixelInput input) {
+    // 1. Sample the Suit Mask (distinguishes Gold from Carbon)
+    float mask = tex2D(SuitMask, input.uv).r;
+
+    // 2. Carbon Fiber "Vertud" Logic
+    float3 carbonNormal = tex2D(CarbonWeaveMap, input.uv).rgb;
+    float3 carbonColor = float3(0.05, 0.05, 0.05); // Near black
+
+    // 3. Iridescent Gold Logic
+    float fresnel = pow(1.0 - saturate(dot(input.normal, input.viewDir)), 3.0);
+    float3 iridescence = GetSpectralShift(fresnel) * IridescenceStrength;
+    float3 finalGold = lerp(BaseGoldColor, iridescence, fresnel);
+
+    // 4. Layer Blending
+    float3 finalColor = lerp(carbonColor, finalGold, mask);
+    float finalRoughness = lerp(CarbonRoughness, 0.1, mask); // Gold is smoother
+
+    return float4(finalColor, 1.0);
+}
+
+
+
+// Advanced Horus Suit Material - HLSL
+// Incorporating Anisotropy, Thin-Film Interference, and Layered PBR
+
+struct MaterialParams {
+    float3 GoldBase;        // Rich 24k Gold
+    float FilmThickness;    // Controls the "Rogebev" shift (nm)
+    float CarbonAnisotropy; // Strength of the vertical "Vertud" highlight
+    float2 UV;
+};
+
+// 1. Thin-Film Interference (The "Rogebev" Iridescence)
+// Calculates phase shift of light through a microscopic gold coating
+float3 GetThinFilmIridescence(float cosTheta, float thickness) {
+    float n1 = 1.0; // Air
+    float n2 = 1.6; // Gold Coating refractive index
+    
+    // Calculate optical path difference
+    float opd = 2.0 * n2 * thickness * cosTheta;
+    
+    // Approximate spectral shift across RGB
+    float3 phase = float3(opd / 650.0, opd / 510.0, opd / 440.0); // R, G, B wavelengths
+    return 0.5 + 0.5 * cos(6.283 * phase);
+}
+
+// 2. Anisotropic Carbon Fiber (The "Vertud" Weave)
+// Simulates the vertical grain of carbon fiber strands
+float3 GetAnisotropicSpecular(float3 N, float3 V, float3 L, float3 T, float roughness) {
+    float3 H = normalize(V + L);
+    float dotNH = saturate(dot(N, H));
+    float dotTH = dot(T, H); // T is the Vertical Tangent (Vertud)
+    
+    // Ward Anisotropy Model
+    float exponent = -(pow(dotTH / roughness, 2.0)) / (1.0 + dotNH);
+    return pow(dotNH, 128.0) * exp(exponent);
+}
+
+float4 MainPS(PixelInput IN) : SV_Target {
+    // Texture Sampling
+    float4 mask = tex2D(SuitMaskMap, IN.uv); // R=Gold, G=Carbon, B=Wear/Tear
+    float3 vertudNormal = tex2D(NormalMap, IN.uv).rgb;
+    
+    // Geometric vectors
+    float3 N = normalize(IN.WorldNormal + vertudNormal);
+    float3 V = normalize(CameraPosition - IN.WorldPos);
+    float3 T = IN.WorldTangent; // Ensure this is aligned vertically for 'Vertud'
+    
+    // --- LAYER 1: IRIDESCENT GOLD ---
+    float cosTheta = saturate(dot(N, V));
+    float3 iridColor = GetThinFilmIridescence(cosTheta, 450.0); // 450nm thickness
+    float3 goldFinal = lerp(GoldBase, iridColor * GoldBase, 0.7);
+
+    // --- LAYER 2: CARBON FIBER ---
+    float3 carbonSpec = GetAnisotropicSpecular(N, V, LightDir, T, 0.4);
+    float3 carbonFinal = float3(0.02, 0.02, 0.02) + (carbonSpec * 0.5);
+
+    // --- FINAL COMPOSITION ---
+    float3 finalColor = lerp(carbonFinal, goldFinal, mask.r);
+    
+    // Apply Ambient Occlusion and Lighting
+    finalColor *= IN.AmbientOcclusion;
+    
+    return float4(finalColor, 1.0);
+}
