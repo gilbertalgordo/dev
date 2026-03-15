@@ -1,0 +1,185 @@
+{
+  "manifest_version": 3,
+  "name": "Active Web Inspector AI",
+  "version": "1.0",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  }
+}
+
+
+
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey && e.shiftKey && e.key === 'X') {
+    const hoveredElement = document.querySelectorAll(':hover');
+    const target = hoveredElement[hoveredElement.length - 1];
+
+    if (target) {
+      const elementData = {
+        tagName: target.tagName,
+        className: target.className,
+        attributes: Array.from(target.attributes).map(attr => ({[attr.name]: attr.value})),
+        innerText: target.innerText.substring(0, 100), // Limit text for token efficiency
+        computedStyles: getComputedStyle(target).cssText
+      };
+
+      // Send data to the background script for AI processing
+      chrome.runtime.sendMessage({type: "ANALYZE_ELEMENT", data: elementData});
+      
+      // Visual feedback: highlight the element
+      target.style.outline = "2px solid #00ff00";
+      setTimeout(() => target.style.outline = "", 2000);
+    }
+  }
+});
+
+
+
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.type === "ANALYZE_ELEMENT") {
+    analyzeWithAI(request.data);
+  }
+});
+
+async function analyzeWithAI(elementData) {
+  const apiKey = "YOUR_API_KEY";
+  const prompt = `Analyze this HTML element for accessibility (a11y), SEO, and best practices: 
+                  ${JSON.stringify(elementData)}`;
+
+  try {
+    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=' + apiKey, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }]
+      })
+    });
+    
+    const result = await response.json();
+    console.log("AI Insight:", result.candidates[0].content.parts[0].text);
+    // You could then send this back to a popup or an overlay in content.js
+  } catch (error) {
+    console.error("AI Inspector Error:", error);
+  }
+}
+
+
+
+class ActiveAIInspector {
+  constructor() {
+    this.container = document.createElement('div');
+    this.shadow = this.container.attachShadow({ mode: 'open' });
+    this.setupHUD();
+    this.initMutationObserver();
+    document.body.appendChild(this.container);
+  }
+
+  setupHUD() {
+    this.shadow.innerHTML = `
+      <style>
+        :host { position: fixed; top: 10px; right: 10px; z-index: 2147483647; font-family: 'Segoe UI', system-ui, sans-serif; }
+        .hud { background: rgba(15, 15, 25, 0.95); color: #00ffcc; padding: 15px; border-radius: 8px; 
+               border: 1px solid #00ffcc; width: 300px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); backdrop-filter: blur(4px); }
+        .metric { font-size: 10px; color: #888; text-transform: uppercase; margin-bottom: 5px; }
+        #ai-status { color: #fff; font-size: 13px; line-height: 1.4; margin-top: 10px; border-top: 1px solid #333; pt: 10px; }
+        .node-tag { color: #ff00ff; font-weight: bold; }
+        .pulse { animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+      </style>
+      <div class="hud">
+        <div class="metric">AI System Active <span class="pulse">●</span></div>
+        <div id="node-info">Target: <span class="node-tag">Select Element (Ctrl+M)</span></div>
+        <div id="ai-status">Ready to optimize...</div>
+      </div>
+    `;
+  }
+
+  // Monitor DOM changes to alert the AI of dynamic updates
+  initMutationObserver() {
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (mutation.type === 'childList') {
+          this.updateStatus("DOM Mutation detected. Re-evaluating context...");
+        }
+      });
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+
+  updateStatus(text) {
+    this.shadow.getElementById('ai-status').innerText = text;
+  }
+
+  async analyzeNode(el) {
+    const data = {
+      tag: el.tagName,
+      id: el.id,
+      classes: [...el.classList],
+      styles: window.getComputedStyle(el).cssText.split(';').slice(0, 10), // Top 10 styles
+      accessibility: el.getAttribute('aria-label') || 'None'
+    };
+
+    this.shadow.getElementById('node-info').innerHTML = `Target: <span class="node-tag">${data.tag}</span>`;
+    this.updateStatus("AI reasoning in progress...");
+
+    // Send to Background Script for LLM processing
+    const response = await chrome.runtime.sendMessage({ action: "AI_REASONING", payload: data });
+    this.updateStatus(response.insight);
+  }
+}
+
+const inspector = new ActiveAIInspector();
+
+// Selection Logic
+document.addEventListener('mouseover', (e) => {
+  if (e.ctrlKey) {
+    e.target.style.outline = "2px dashed #ff00ff";
+    inspector.analyzeNode(e.target);
+  }
+});
+document.addEventListener('mouseout', (e) => { e.target.style.outline = ""; });
+
+
+
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === "AI_REASONING") {
+    generateAdvancedInsight(request.payload).then(sendResponse);
+    return true; // Keep channel open for async
+  }
+});
+
+async function generateAdvancedInsight(nodeData) {
+  const PROMPT = `
+    You are an Expert Web Architect. Analyze this DOM Node:
+    ${JSON.stringify(nodeData)}
+    
+    Tasks:
+    1. Identify 1 performance bottleneck.
+    2. Suggest a modern CSS replacement (e.g., Flex vs Grid).
+    3. Check ARIA compliance.
+    
+    Keep response under 60 words. Be direct.
+  `;
+
+  try {
+    // Integration with an LLM Provider (Example: Gemini/OpenAI API)
+    const res = await fetch('https://api.your-ai-gateway.com/v1/analyze', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: PROMPT })
+    });
+    const data = await res.json();
+    return { insight: data.choices[0].text };
+  } catch (err) {
+    return { insight: "Optimization: Use 'content-visibility: auto' for heavy DOM subtrees." };
+  }
+}
