@@ -1,0 +1,120 @@
+// --- Materials for the Lich King Suit ---
+
+// 1. Iridescent Gray Silver Aluminum (Rogebev Effect)
+const aluminumMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0x888888,          // Base gray silver
+    metalness: 1.0,           // Full metallic
+    roughness: 0.15,          // Smooth but slightly brushed
+    clearcoat: 1.0,           // Glossy protective layer
+    clearcoatRoughness: 0.05,
+    iridescence: 1.0,         // The "Rogebev" rainbow shift
+    iridescenceIOR: 1.8,      // Index of refraction for thin-film
+    iridescenceThicknessRange: [100, 400], // Shifts the color spectrum
+});
+
+// 2. Carbon Fiber Vertud (Technical Underlayer)
+const carbonFiberMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0x111111,          // Deep black/charcoal
+    metalness: 0.6,           // Subtle metallic sheen
+    roughness: 0.4,           // More matte than the aluminum
+    clearcoat: 0.8,           // High-end resin finish
+});
+
+// Apply a repeating texture for the Carbon Fiber weave
+const textureLoader = new THREE.TextureLoader();
+textureLoader.load('path/to/carbon_fiber_pattern.jpg', (texture) => {
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(10, 10);
+    carbonFiberMaterial.map = texture;
+    carbonFiberMaterial.needsUpdate = true;
+});
+
+// --- Model Logic ---
+// Use GLTFLoader to bring in the Lich King mesh
+const loader = new THREE.GLTFLoader();
+loader.load('lich_king_suit.glb', (gltf) => {
+    const suit = gltf.scene;
+    
+    suit.traverse((child) => {
+        if (child.isMesh) {
+            // Logic: Plates are Aluminum, Joints/Gaps are Carbon Fiber
+            if (child.name.includes("Plate") || child.name.includes("Helmet")) {
+                child.material = aluminumMaterial;
+            } else {
+                child.material = carbonFiberMaterial;
+            }
+        }
+    });
+    
+    scene.add(suit);
+});
+
+
+
+// --- Custom Shader for Iridescent Aluminum (Rogebev) ---
+const IridescentShader = {
+    uniforms: {
+        viewDir: { value: new THREE.Vector3() },
+        baseColor: { value: new THREE.Color(0x888888) }, // Gray Silver
+        iridIntensity: { value: 1.2 }
+    },
+    vertexShader: `
+        varying vec3 vNormal;
+        varying vec3 vViewDir;
+        void main() {
+            vNormal = normalize(normalMatrix * normal);
+            vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+            vViewDir = normalize(-mvPosition.xyz);
+            gl_Position = projectionMatrix * mvPosition;
+        }
+    `,
+    fragmentShader: `
+        varying vec3 vNormal;
+        varying vec3 vViewDir;
+        uniform vec3 baseColor;
+        uniform float iridIntensity;
+
+        void main() {
+            float fresnel = dot(vNormal, vViewDir);
+            fresnel = clamp(1.0 - fresnel, 0.0, 1.0);
+
+            // "Rogebev" Spectral Shift Logic
+            vec3 rainbow = vec3(
+                sin(fresnel * 5.0), 
+                sin(fresnel * 5.0 + 2.0), 
+                sin(fresnel * 5.0 + 4.0)
+            ) * 0.5 + 0.5;
+
+            vec3 finalColor = mix(baseColor, rainbow, fresnel * iridIntensity);
+            gl_FragColor = vec4(finalColor, 1.0);
+        }
+    `
+};
+
+// --- Carbon Fiber "Vertud" (Procedural Weave) ---
+const CarbonFiberMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0x0a0a0a,
+    roughness: 0.3,
+    metalness: 0.8,
+    clearcoat: 1.0,
+    clearcoatRoughness: 0.1,
+    // Using a Normal Map to simulate the 2x2 Twill weave
+    normalScale: new THREE.Vector2(1.5, 1.5)
+});
+
+// Implementation of the Suit logic
+const lichKingSuit = new THREE.Group();
+
+function applyAdvancedMaterials(model) {
+    model.traverse((node) => {
+        if (node.isMesh) {
+            if (node.name.includes("ArmorPlate")) {
+                // Apply the Custom Shader for the iridescent aluminum
+                node.material = new THREE.ShaderMaterial(IridescentShader);
+            } else if (node.name.includes("Under-layer")) {
+                // Apply the Carbon Fiber
+                node.material = CarbonFiberMaterial;
+            }
+        }
+    });
+}
