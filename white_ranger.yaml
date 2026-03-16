@@ -1,0 +1,120 @@
+// Initialization of the suit materials
+const textureLoader = new THREE.TextureLoader();
+
+// 1. Carbon Fiber Vertud Material
+// Uses a normal map to simulate the woven carbon fiber texture
+const carbonFiberMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0x111111,
+    roughness: 0.4,
+    metalness: 0.8,
+    normalMap: textureLoader.load('textures/carbon_fiber_normal.jpg'),
+    clearcoat: 1.0, // High-gloss finish for the "Vertud" look
+    clearcoatRoughness: 0.1
+});
+
+// 2. White Gold ROGEBEV Material
+// ROGEBEV (Red-Orange-Gold-Emerald-Blue-Indigo-Violet) 
+// Simulated via a custom environment map for pearlescent reflections
+const whiteGoldMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0xE5E4E2, // Platinum/White Gold base
+    metalness: 1.0,
+    roughness: 0.1,
+    iridescence: 0.8, // Creates the ROGEBEV color shifting effect
+    iridescenceIOR: 2.2,
+    sheen: 1.0,
+    sheenColor: 0xffd700 // Golden highlights
+});
+
+// 3. White Samurai Fabric Material
+const samuraiFabric = new THREE.MeshLambertMaterial({
+    color: 0xffffff,
+    side: THREE.DoubleSide
+});
+
+// Function to apply to a loaded GLTF model
+function applyRangerMaterials(gltf) {
+    gltf.scene.traverse((node) => {
+        if (node.isMesh) {
+            if (node.name.includes("Armor_Carbon")) node.material = carbonFiberMaterial;
+            if (node.name.includes("Trim_Gold")) node.material = whiteGoldMaterial;
+            if (node.name.includes("Under_Suit")) node.material = samuraiFabric;
+        }
+    });
+}
+
+
+
+// Custom Fragment Shader: ROGEBEV_WhiteGold.frag
+varying vec3 vNormal;
+varying vec3 vViewPosition;
+
+uniform vec3 uBaseColor; // White Gold (0xE5E4E2)
+uniform float uIridescenceIntensity;
+
+void main() {
+    vec3 normal = normalize(vNormal);
+    vec3 viewDir = normalize(vViewPosition);
+    
+    // Calculate Fresnel effect (viewing angle)
+    float fresnel = pow(1.0 - dot(normal, viewDir), 3.0);
+    
+    // Generate ROGEBEV Spectrum via Sine waves
+    vec3 rogebev;
+    rogebev.r = sin(fresnel * 6.28 + 0.0) * 0.5 + 0.5;
+    rogebev.g = sin(fresnel * 6.28 + 2.1) * 0.5 + 0.5;
+    rogebev.b = sin(fresnel * 6.28 + 4.2) * 0.5 + 0.5;
+    
+    // Blend the spectrum into the White Gold base
+    vec3 finalColor = mix(uBaseColor, rogebev, fresnel * uIridescenceIntensity);
+    
+    gl_FragColor = vec4(finalColor, 1.0);
+}
+
+
+
+// PowerRangerSuitController.js
+const loader = new THREE.TextureLoader();
+
+// 1. CARBON FIBER VERTUD (Anisotropic High-Tech Mesh)
+const carbonFiberVertud = new THREE.MeshPhysicalMaterial({
+    color: 0x0A0A0A,
+    metalness: 0.9,
+    roughness: 0.2,
+    clearcoat: 1.0, 
+    clearcoatRoughness: 0.05,
+    // Loading a high-res carbon weave pattern
+    normalMap: loader.load('/assets/textures/vertud_weave_normal.jpg'),
+    normalScale: new THREE.Vector2(2, 2),
+    anisotropy: 16 // Enhances the "brushed" look of the weave
+});
+
+// 2. WHITE SAMURAI ARMOR (Matte Ceramic finish)
+const whiteSamuraiArmor = new THREE.MeshPhysicalMaterial({
+    color: 0xffffff,
+    roughness: 0.5,
+    metalness: 0.0,
+    sheen: 0.8,
+    sheenRoughness: 0.2,
+    sheenColor: new THREE.Color(0xdcdcdc)
+});
+
+// 3. APPLY TO MODEL
+const updateSuitMaterials = (model) => {
+    model.traverse((child) => {
+        if (child.isMesh) {
+            switch(child.name) {
+                case 'Chest_Shield':
+                case 'Helmet_Trim':
+                    child.material = whiteGoldRogebevShader; // Custom Shader from Step 1
+                    break;
+                case 'Gauntlets_Carbon':
+                case 'Leg_Armor':
+                    child.material = carbonFiberVertud;
+                    break;
+                case 'Under_Suit_Fabric':
+                    child.material = whiteSamuraiArmor;
+                    break;
+            }
+        }
+    });
+};
