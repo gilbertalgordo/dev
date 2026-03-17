@@ -1,0 +1,156 @@
+character: Shotaro Kaneda
+aesthetic: Live-Action Cyberpunk (Weathered)
+components:
+  suit:
+    material: "Distressed heavy-grain bovine leather"
+    color_hex: "#B22222" # Deep crimson
+    features:
+      - "Internal carbon-fiber padding"
+      - "Functioning pneumatic joint actuators"
+      - "Hand-painted 'Good for Health, Bad for Education' patch (weathered)"
+  motorcycle:
+    model: "1988 Power-Bike Prototype"
+    finish: "High-gloss ceramic coating with rain-streaked grime"
+    lighting: 
+      - "Cyan LED dashboard HUD"
+      - "Halogen pop-up headlight"
+    physics:
+      low_center_of_gravity: true
+      electric_drive_hum: "800Hz - 12kHz"
+
+
+
+// High-fidelity material for the Akira Bike (Three.js PBR approach)
+const akiraBikeMaterial = new THREE.MeshPhysicalMaterial({
+  color: 0xb22222,
+  metalness: 0.7,
+  roughness: 0.2,
+  clearcoat: 1.0,           // The "live action" shiny finish
+  clearcoatRoughness: 0.1,
+  reflectivity: 0.9,
+  envMap: neoTokyoHDR,      // Crucial for city-light reflections
+  normalMap: leatherScuffMap, 
+  normalScale: new THREE.Vector2(0.5, 0.5)
+});
+
+// Custom Shader Chunk for the Neon HUD glow on the bike
+const hudGlowShader = {
+  uniforms: {
+    time: { value: 0 },
+    glowColor: { value: new THREE.Color(0x00ffff) }
+  },
+  vertexShader: `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    varying vec2 vUv;
+    uniform float time;
+    void main() {
+      float pulse = 0.8 + 0.2 * sin(time * 2.0);
+      gl_FragColor = vec4(0.0, 1.0, 1.0, pulse);
+    }
+  `
+};
+
+
+
+import random
+
+def apply_neo_tokyo_weathering(asset_name, intensity=0.7):
+    """
+    Simulates asphalt scrapes and rain-wash on Akira assets.
+    """
+    scuffs = ["low_side_scrape", "exhaust_burn", "acid_rain_pitting"]
+    
+    print(f"Applying live-action shaders to: {asset_name}")
+    for effect in scuffs:
+        impact = random.uniform(0.1, intensity)
+        print(f" -> Adding {effect} at {impact*100:.1f}% opacity.")
+
+    return "Material: Cinematic_Weathered_Red"
+
+# Execute for live-action suit
+apply_neo_tokyo_weathering("Kaneda_Leather_Jacket")
+
+
+
+using UnityEngine;
+
+public class AkiraBikeController : MonoBehaviour 
+{
+    [Header("Engine Specs")]
+    public float ceramicDriveTorque = 2500f;
+    public float maxLeanAngle = 45f;
+    
+    [Header("Live-Action VFX")]
+    public ParticleSystem electricityArc; // For the iconic wheel sparks
+    public TrailRenderer wheelLightTrail;
+
+    private void Update() {
+        float move = Input.GetAxis("Vertical");
+        float steer = Input.GetAxis("Horizontal");
+
+        // Handle the unique low-center-of-gravity lean
+        float targetLean = -steer * maxLeanAngle;
+        Quaternion leanRotation = Quaternion.Euler(0, transform.eulerAngles.y, targetLean);
+        transform.rotation = Quaternion.Slerp(transform.rotation, leanRotation, Time.deltaTime * 5f);
+
+        // Advanced: Trigger wheel sparks only during high-speed drifts
+        if (Mathf.Abs(steer) > 0.8f && move > 0.5f) {
+            if (!electricityArc.isPlaying) electricityArc.Play();
+        } else {
+            electricityArc.Stop();
+        }
+    }
+}
+
+
+
+// Advanced Micro-Fold Shader for Leather
+float3 CalculateLeatherCrease(float2 uv, float stressValue) {
+    // Generate procedural noise based on the 'stress' of the joint animation
+    float creaseNoise = snoise(uv * 50.0); 
+    float foldDepth = smoothstep(0.4, 0.6, creaseNoise * stressValue);
+    
+    // Return a normal offset to simulate deep leather folds
+    return float3(0, 0, foldDepth * 0.15);
+}
+
+fixed4 frag (v2f i) : SV_Target {
+    float stress = tex2D(_JointStressMap, i.uv).r;
+    float3 normalOffset = CalculateLeatherCrease(i.uv, stress);
+    
+    // Mix with the base "Capsule" Crimson color and metallic weathering
+    float3 baseColor = _BaseColor.rgb;
+    float3 weatheredColor = lerp(baseColor, _ScrapeColor.rgb, i.weathering);
+    
+    return float4(weatheredColor, 1.0);
+}
+
+
+
+import React, { useState, useEffect } from 'react';
+
+const AkiraDashboardHUD = ({ bikeSpeed, batteryTemp }) => {
+  return (
+    <div style={{ fontFamily: 'monospace', color: '#00ffff', padding: '20px' }}>
+      <div className="telemetry-box">
+        <h2>NEO-TOKYO SYSTEM v3.1</h2>
+        <hr />
+        <div>VELOCITY: {bikeSpeed} KM/H</div>
+        <div style={{ color: batteryTemp > 90 ? 'red' : '#00ffff' }}>
+          CERAMIC CORE TEMP: {batteryTemp}°C
+        </div>
+        <div className="status-bars">
+          {[...Array(10)].map((_, i) => (
+            <div key={i} className={`bar ${i < bikeSpeed/20 ? 'active' : ''}`} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
