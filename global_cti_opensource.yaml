@@ -1,0 +1,265 @@
+from taxii2client.v21 import Server, Collection
+
+def fetch_global_intel(api_root_url, collection_id, username, password):
+    """Connects to a global TAXII server and retrieves threat data."""
+    server = Server(api_root_url, user=username, password=password)
+    api_root = server.api_roots[0]  # Standard API root
+    collection = Collection(f"{api_root.url}collections/{collection_id}/", 
+                            user=username, password=password)
+    
+    # Fetching the last 100 threat intelligence objects
+    envelope = collection.get_objects()
+    return envelope.objects
+
+# Example usage with a public feed (placeholder credentials)
+# intel_objects = fetch_global_intel("https://cti-taxii.provider.com/", "uuid-123", "admin", "password")
+
+
+
+import openai # Or use local frameworks like DeepSeek/Llama-3
+
+def ai_extract_threat_context(unstructured_report):
+    """Uses Agentic AI to extract TTPs and IoCs from raw text."""
+    prompt = f"""
+    Analyze the following security report and return a JSON object 
+    containing: 'malware_family', 'threat_actor', 'ips', 'domains', and 'urgency_score' (1-10).
+    Report: {unstructured_report}
+    """
+    
+    response = openai.ChatCompletion.create(
+        model="gpt-4-turbo-preview", # Replace with local DeepSeek-R1 for privacy
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return response.choices[0].message.content
+
+
+
+import requests
+
+def update_active_defense(threat_data):
+    """Pushes new malicious IPs to a centralized firewall or SIEM."""
+    # Logic to filter for high-confidence threats
+    if threat_data['urgency_score'] > 8:
+        for ip in threat_data['ips']:
+            print(f"[ACTIVE DEFENSE] Blocking IP: {ip}")
+            # Example API call to a firewall (e.g., Palo Alto, Fortinet)
+            # requests.post("https://firewall/api/v1/blocklist", json={"ip": ip})
+
+# Example flow
+raw_data = "New Ransomware 'ShadowV' observed using IP 192.168.50.1 targeting healthcare."
+extracted_intel = ai_extract_threat_context(raw_data)
+update_active_defense(extracted_intel)
+
+
+
+import json
+from stix2 import Indicator, Bundle, Relationship, Identity
+
+def ai_reasoning_agent(raw_intel_text):
+    """
+    Uses a Reasoning LLM (DeepSeek-R1) to analyze unstructured global reports.
+    """
+    system_prompt = "You are a Tier-3 CTI Analyst. Extract IoCs and TTPs in STIX 2.1 format."
+    user_prompt = f"Analyze this report for active global threats: {raw_intel_text}"
+    
+    # In a real 2026 production environment, this calls your local or cloud LLM API
+    # response = llm.generate(system_prompt, user_prompt)
+    
+    # Simulated Structured Output
+    analysis = {
+        "threat_actor": "APT-41 Variant",
+        "confidence": 95,
+        "indicators": [{"type": "ipv4-addr", "value": "1.2.3.4", "desc": "C2 Server"}],
+        "mitre_tactics": ["Initial Access", "Exfiltration"]
+    }
+    return analysis
+
+
+
+class ActiveDefenseController:
+    def __init__(self, threshold=85):
+        self.threshold = threshold
+
+    def deploy_mitigation(self, ai_analysis):
+        """Automatically updates Firewalls/EDR if confidence exceeds threshold."""
+        if ai_analysis['confidence'] >= self.threshold:
+            print(f"🚨 CRITICAL THREAT DETECTED: {ai_analysis['threat_actor']}")
+            
+            for ioc in ai_analysis['indicators']:
+                if ioc['type'] == 'ipv4-addr':
+                    self._block_ip(ioc['value'])
+                    self._create_stix_indicator(ioc)
+
+    def _block_ip(self, ip):
+        # Implementation for Cisco/Palo Alto/Fortinet API
+        print(f"[ACTION] Null-routing IP {ip} across global edge nodes.")
+
+    def _create_stix_indicator(self, ioc):
+        indicator = Indicator(
+            name="AI-Detected Malicious IP",
+            indicator_types=["malicious-activity"],
+            pattern=f"[ipv4-addr:value = '{ioc['value']}']",
+            pattern_type="stix",
+            description=ioc['desc']
+        )
+        print(f"[STIX] Created Object: {indicator.id}")
+        return indicator
+
+# Execution Flow
+controller = ActiveDefenseController(threshold=90)
+intel_data = "Recent logs show coordinated brute force from 1.2.3.4 targeting EU financial hubs."
+insight = ai_reasoning_agent(intel_data)
+controller.deploy_mitigation(insight)
+
+
+
+import requests
+import json
+
+def local_ai_analyze(raw_report):
+    """
+    Uses Ollama (running DeepSeek-R1) to analyze threats locally for free.
+    """
+    url = "http://localhost:11434/api/generate"
+    prompt = f"""
+    Analyze this cyber threat report: '{raw_report}'
+    Extract the following in JSON format:
+    - malicious_ips (list)
+    - threat_level (High, Medium, Low)
+    - malware_family (string)
+    - mitre_attack_technique (string)
+    """
+    
+    payload = {
+        "model": "deepseek-r1:8b",
+        "prompt": prompt,
+        "stream": False,
+        "format": "json"
+    }
+    
+    response = requests.post(url, json=payload)
+    return json.loads(response.json()['response'])
+
+# Example Input
+# report = "Spotted Emotet variant communicating with C2 at 185.25.120.4"
+# print(local_ai_analyze(report))
+
+
+
+from pymisp import PyMISP
+
+# Credentials for your local free MISP instance
+misp_url = 'https://your-misp-instance.local'
+misp_key = 'YOUR_API_KEY'
+misp_verifycert = False 
+
+def fetch_global_iocs():
+    misp = PyMISP(misp_url, misp_key, misp_verifycert)
+    # Fetch attributes from the last 24 hours with a 'High' threat level
+    result = misp.search(controller='attributes', type_attribute='ip-dst', last='1d')
+    
+    iocs = [attr['value'] for attr in result['Attribute']]
+    return iocs
+
+
+
+import subprocess
+
+def active_block(ip_list):
+    """
+    Active Defense: Blocks malicious IPs using iptables.
+    """
+    for ip in ip_list:
+        try:
+            # Check if already blocked to avoid duplicates
+            subprocess.run(["iptables", "-C", "INPUT", "-s", ip, "-j", "DROP"], check=True, capture_output=True)
+        except subprocess.CalledProcessError:
+            # If not found, add the block rule
+            subprocess.run(["iptables", "-A", "INPUT", "-s", ip, "-j", "DROP"])
+            print(f"[ACTIVE DEFENSE] Blocked malicious IP: {ip}")
+
+# Main Loop Logic
+# iocs = fetch_global_iocs()
+# for ioc in iocs:
+#    analysis = local_ai_analyze(f"Investigate IP: {ioc}")
+#    if analysis['threat_level'] == 'High':
+#        active_block(analysis['malicious_ips'])
+
+
+
+import os
+import json
+from typing import TypedDict, List
+from langgraph.graph import StateGraph, END
+from ollama import Client as OllamaClient
+from stix2 import Indicator, Relationship, Bundle
+
+# --- CONFIGURATION ---
+OLLAMA_MODEL = "deepseek-r1:14b"
+CTI_CONFIDENCE_THRESHOLD = 90
+
+class AgentState(TypedDict):
+    raw_intel: str
+    parsed_iocs: List[dict]
+    risk_score: int
+    is_active: bool
+    mitigation_plan: str
+
+# 1. THE REASONING NODE
+def analyze_threat(state: AgentState):
+    client = OllamaClient()
+    prompt = f"""
+    [SYSTEM] Act as an Autonomous CTI Analyst. 
+    [REPORT] {state['raw_intel']}
+    [TASK] Extract malicious IPs/URLs and provide a risk score (0-100).
+    Return ONLY JSON: {{"iocs": [], "score": 85, "reason": ""}}
+    """
+    response = client.generate(model=OLLAMA_MODEL, prompt=prompt)
+    data = json.loads(response['response'])
+    
+    return {
+        **state,
+        "parsed_iocs": data['iocs'],
+        "risk_score": data['score'],
+        "is_active": data['score'] >= CTI_CONFIDENCE_THRESHOLD
+    }
+
+# 2. THE MITIGATION NODE (Active Defense)
+def execute_mitigation(state: AgentState):
+    if state['is_active']:
+        plan = []
+        for ioc in state['parsed_iocs']:
+            # Simulation of an 'Active' API call to a Firewall or EDR
+            # In production: requests.post(FIREWALL_API, json=ioc)
+            plan.append(f"EXEC: Blocked {ioc} on Global Edge.")
+        
+        return {**state, "mitigation_plan": "\n".join(plan)}
+    return state
+
+# 3. DEFINE THE GRAPH
+workflow = StateGraph(AgentState)
+workflow.add_node("analyze", analyze_threat)
+workflow.add_node("mitigate", execute_mitigation)
+
+workflow.set_entry_point("analyze")
+workflow.add_edge("analyze", "mitigate")
+workflow.add_edge("mitigate", END)
+
+cti_agent = workflow.compile()
+
+
+
+def generate_global_broadcast(state: AgentState):
+    """Packages findings into a STIX 2.1 Bundle for sharing."""
+    indicator = Indicator(
+        name="AI-Detected C2",
+        indicator_types=["malicious-activity"],
+        pattern=f"[ipv4-addr:value = '{state['parsed_iocs'][0]}']",
+        pattern_type="stix",
+        confidence=state['risk_score']
+    )
+    
+    # Relationship: Indicator 'indicates' a generic Malware object
+    # This allows other global partners to understand WHY the IP is blocked.
+    bundle = Bundle(objects=[indicator])
+    return bundle.serialize()
