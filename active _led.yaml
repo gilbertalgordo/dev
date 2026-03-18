@@ -1,0 +1,154 @@
+import numpy as np
+import psutil
+import time
+import random
+
+class LEDControlAI:
+    def __init__(self, states_count=10, actions_count=5):
+        # Initialize Q-table: States (CPU usage 0-100%) x Actions (LED Brightness)
+        self.q_table = np.zeros((states_count, actions_count))
+        self.learning_rate = 0.1
+        self.discount_factor = 0.9
+        self.epsilon = 0.1  # Exploration rate
+
+    def get_state(self):
+        # Map CPU usage (0-100) to state index (0-9)
+        usage = psutil.cpu_percent()
+        return min(int(usage / 10), 9)
+
+    def choose_action(self, state):
+        if random.uniform(0, 1) < self.epsilon:
+            return random.randint(0, 4) # Explore
+        return np.argmax(self.q_table[state]) # Exploit
+
+    def update_q_table(self, state, action, reward, next_state):
+        best_next_action = np.argmax(self.q_table[next_state])
+        td_target = reward + self.discount_factor * self.q_table[next_state][best_next_action]
+        self.q_table[state][action] += self.learning_rate * (td_target - self.q_table[state][action])
+
+    def apply_led_signal(self, action):
+        brightness_levels = [0, 25, 50, 75, 100]
+        current_level = brightness_levels[action]
+        # In a real setup, you would call GPIO.PWM functions here
+        print(f"Device Load High -> AI Setting LED Brightness to: {current_level}%")
+
+# Simulation Loop
+ai_controller = LEDControlAI()
+
+try:
+    print("Starting Superfast AI LED Management...")
+    while True:
+        current_state = ai_controller.get_state()
+        action = ai_controller.choose_action(current_state)
+        
+        # Execute action
+        ai_controller.apply_led_signal(action)
+        
+        # Define Reward: High reward if action (brightness) matches state (load)
+        # e.g., Action 4 (100%) for State 9 (90-100% load)
+        reward = 1 if action == (current_state // 2) else -1
+        
+        time.sleep(1)
+        next_state = ai_controller.get_state()
+        ai_controller.update_q_table(current_state, action, reward, next_state)
+
+except KeyboardInterrupt:
+    print("Shutting down AI Controller.")
+
+
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
+import psutil
+import time
+from collections import deque
+import random
+
+# --- Neural Network Architecture ---
+class LEDBrain(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(LEDBrain, self).__init__()
+        self.fc = nn.Sequential(
+            nn.Linear(input_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, output_dim)
+        )
+
+    def forward(self, x):
+        return self.fc(x)
+
+# --- AI Controller ---
+class AdvancedLEDController:
+    def __init__(self):
+        self.state_dim = 4 # CPU, RAM, Disk, Net
+        self.action_dim = 10 # 10 Brightness/Pattern levels
+        self.model = LEDBrain(self.state_dim, self.action_dim)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
+        self.memory = deque(maxlen=2000)
+        self.gamma = 0.95
+        self.epsilon = 1.0
+        self.epsilon_min = 0.01
+        self.epsilon_decay = 0.995
+
+    def get_telemetry(self):
+        """Captures multi-dimensional device activity."""
+        cpu = psutil.cpu_percent() / 100.0
+        ram = psutil.virtual_memory().percent / 100.0
+        disk = psutil.disk_usage('/').percent / 100.0
+        net = (psutil.net_io_counters().bytes_sent % 1000) / 1000.0
+        return np.array([cpu, ram, disk, net], dtype=np.float32)
+
+    def act(self, state):
+        if np.random.rand() <= self.epsilon:
+            return random.randrange(self.action_dim)
+        state_t = torch.FloatTensor(state).unsqueeze(0)
+        act_values = self.model(state_t)
+        return torch.argmax(act_values).item()
+
+    def train(self, batch_size=32):
+        if len(self.memory) < batch_size: return
+        minibatch = random.sample(self.memory, batch_size)
+        
+        for state, action, reward, next_state in minibatch:
+            state_t = torch.FloatTensor(state)
+            next_state_t = torch.FloatTensor(next_state)
+            
+            target = reward + self.gamma * torch.max(self.model(next_state_t)).item()
+            target_f = self.model(state_t)
+            target_f[action] = target
+            
+            self.optimizer.zero_grad()
+            loss = nn.MSELoss()(self.model(state_t), target_f)
+            loss.backward()
+            self.optimizer.step()
+
+        if self.epsilon > self.epsilon_min:
+            self.epsilon *= self.epsilon_decay
+
+# --- Main Execution Instance ---
+controller = AdvancedLEDController()
+
+try:
+    print("Initializing Advanced AI LED Control...")
+    while True:
+        state = controller.get_telemetry()
+        action = controller.act(state)
+        
+        # Execute LED Command (Visual HUD Simulation)
+        intensity = (action + 1) * 10
+        print(f"[HUD] Active Load: {state[0]:.2f} | AI Action: LED {intensity}% Intensity")
+        
+        # Define Reward (Higher reward if LED intensity tracks with CPU load)
+        reward = 1.0 - abs(state[0] - (action / 10.0))
+        
+        time.sleep(0.5)
+        next_state = controller.get_telemetry()
+        controller.memory.append((state, action, reward, next_state))
+        controller.train()
+
+except KeyboardInterrupt:
+    print("\nAI Session Terminated.")
