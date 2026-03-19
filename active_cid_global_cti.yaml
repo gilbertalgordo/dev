@@ -1,0 +1,182 @@
+import asyncio
+import json
+import logging
+from datetime import datetime
+from typing import Dict, Any
+
+# Mock AI Intelligence Engine (e.g., using a model like Claude or GPT-4)
+class ThreatIntelligenceAI:
+    async def analyze_indicator(self, indicator_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Simulates AI reasoning to determine threat severity and intent.
+        """
+        # In a real scenario, this would call an LLM or ML model
+        severity_map = {"malicious": 0.9, "suspicious": 0.5, "benign": 0.1}
+        label = indicator_data.get("label", "suspicious")
+        
+        return {
+            "score": severity_map.get(label, 0.4),
+            "reasoning": f"Pattern matches known {label} activity in global datasets.",
+            "action_required": severity_map.get(label, 0) > 0.7
+        }
+
+class ActiveConnectDemand:
+    def __init__(self):
+        self.ai_engine = ThreatIntelligenceAI()
+        self.is_running = True
+
+    async def fetch_global_threat_feed(self):
+        """
+        Simulates an 'Active Connect' to global CTI sources (STIX/TAXII).
+        """
+        mock_feed = [
+            {"id": "cti-01", "type": "ipv4", "value": "192.168.100.50", "label": "malicious"},
+            {"id": "cti-02", "type": "domain", "value": "auth-update-verify.com", "label": "suspicious"},
+        ]
+        for incident in mock_feed:
+            yield incident
+            await asyncio.sleep(2) # Simulating real-time arrival
+
+    async def execute_active_response(self, threat: Dict[str, Any], ai_analysis: Dict[str, Any]):
+        """
+        Automated response based on AI demand.
+        """
+        print(f"--- [ACTIVE RESPONSE TRIGGERED] ---")
+        print(f"Target: {threat['value']}")
+        print(f"AI Score: {ai_analysis['score']}")
+        print(f"Action: Isolating endpoint and updating edge firewall rules.")
+        print(f"Timestamp: {datetime.now().isoformat()}\n")
+
+    async def start_intelligence_loop(self):
+        print("Initializing Global CTI Active Connect...")
+        async for threat in self.fetch_global_threat_feed():
+            print(f"Incoming Intelligence: {threat['value']} ({threat['type']})")
+            
+            # AI Analysis Phase
+            analysis = await self.ai_engine.analyze_indicator(threat)
+            
+            if analysis["action_required"]:
+                await self.execute_active_response(threat, analysis)
+            else:
+                print(f"Monitoring: {threat['value']} marked as low risk.\n")
+
+if __name__ == "__main__":
+    ac_system = ActiveConnectDemand()
+    try:
+        asyncio.run(ac_system.start_intelligence_loop())
+    except KeyboardInterrupt:
+        print("System shutdown.")
+
+
+
+import asyncio
+import json
+import uuid
+import logging
+from dataclasses import dataclass, asdict
+from datetime import datetime, timezone
+from typing import List, Dict, Optional, Any
+
+# Configure structured logging for SIEM integration
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - [%(levelname)s] - %(message)s')
+logger = logging.getLogger("ActiveConnect-CTI")
+
+@dataclass
+class ThreatIndicator:
+    id: str
+    type: str  # e.g., 'ipv4-addr', 'domain-name', 'file-hash'
+    value: str
+    source: str
+    timestamp: str = datetime.now(timezone.utc).isoformat()
+    context: Optional[Dict] = None
+
+class GlobalIntelligenceStream:
+    """Simulates a persistent connection to Global TAXII/MISP feeds."""
+    def __init__(self, feed_url: str):
+        self.feed_url = feed_url
+        self.active = True
+
+    async def stream_ingest(self, queue: asyncio.Queue):
+        """Persistent 'Active Connect' loop."""
+        logger.info(f"Establishing Active Connect to {self.feed_url}...")
+        
+        # Simulated stream of incoming global indicators
+        mock_data = [
+            {"type": "ipv4-addr", "value": "185.220.101.42", "source": "Tor-Exit-Node-Feed"},
+            {"type": "domain-name", "value": "secure-update-login.top", "source": "PhishTank-Global"},
+            {"type": "file-hash", "value": "e3b0c44298fc1c149afbf4c8996fb924", "source": "MalwareBazaar"}
+        ]
+
+        while self.active:
+            for item in mock_data:
+                indicator = ThreatIndicator(id=str(uuid.uuid4()), **item)
+                await queue.put(indicator)
+                logger.debug(f"Ingested: {indicator.value}")
+                await asyncio.sleep(3)  # Rate-limited ingestion
+
+class CTIReasoningAgent:
+    """The 'In-Demand' AI logic for autonomous decision making."""
+    def __init__(self, threshold: float = 0.75):
+        self.threshold = threshold
+
+    async def evaluate_risk(self, indicator: ThreatIndicator) -> Dict[str, Any]:
+        """
+        Simulates an LLM/ML call to analyze the threat context.
+        In production, this would interface with Ollama, DeepSeek, or OpenAI.
+        """
+        # Advanced heuristic/AI simulation
+        risk_score = 0.85 if "malware" in indicator.source.lower() else 0.50
+        
+        return {
+            "indicator_id": indicator.id,
+            "risk_score": risk_score,
+            "recommendation": "BLOCK" if risk_score >= self.threshold else "MONITOR",
+            "confidence": 0.92,
+            "analysis": f"High correlation with known C2 infrastructure patterns from {indicator.source}."
+        }
+
+class ActiveDefenseOrchestrator:
+    """Executes mitigation based on AI demand."""
+    async def apply_mitigation(self, indicator: ThreatIndicator, analysis: Dict):
+        """Interface for SOAR/EDR/Firewall automation."""
+        action = analysis["recommendation"]
+        if action == "BLOCK":
+            logger.warning(f"!!! ACTIVE DEFENSE TRIGGERED !!! Action: {action} | Target: {indicator.value}")
+            # Logic for API calls to CrowdStrike, Fortigate, or AWS WAF would go here
+        else:
+            logger.info(f"Policy: {action} for {indicator.value}. Logging to telemetry.")
+
+async def main():
+    # 1. Initialize Components
+    event_queue = asyncio.Queue(maxsize=100)
+    stream = GlobalIntelligenceStream("https://cti.global-intel.org/taxii2")
+    agent = CTIReasoningAgent(threshold=0.7)
+    orchestrator = ActiveDefenseOrchestrator()
+
+    # 2. Launch Ingestion and Analysis Workers
+    logger.info("Starting Global Cybersecurity AI Controller...")
+    
+    # Producer: Active Connect
+    producer = asyncio.create_task(stream.stream_ingest(event_queue))
+
+    # Consumer: In-Demand AI Reasoning
+    try:
+        while True:
+            indicator = await event_queue.get()
+            
+            # AI Analysis
+            analysis = await agent.evaluate_risk(indicator)
+            
+            # Active Response
+            await orchestrator.apply_mitigation(indicator, analysis)
+            
+            event_queue.task_done()
+    except asyncio.CancelledError:
+        producer.cancel()
+        logger.info("Shutting down controller...")
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
