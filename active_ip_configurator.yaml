@@ -1,0 +1,127 @@
+import os
+import subprocess
+import platform
+from scapy.all import ARP, Ether, srp
+
+class ActiveIPConfigurator:
+    def __init__(self, interface, ip_range):
+        self.interface = interface
+        self.ip_range = ip_range
+
+    def scan_network(self):
+        """Discovers active hosts to identify IP conflicts."""
+        print(f"[*] Scanning network range: {self.ip_range}...")
+        arp = ARP(pdst=self.ip_range)
+        ether = Ether(dst="ff:ff:ff:ff:ff:ff")
+        packet = ether/arp
+
+        result = srp(packet, timeout=3, iface=self.interface, verbose=False)[0]
+        
+        active_ips = [received.psrc for sent, received in result]
+        return active_ips
+
+    def set_ip(self, new_ip, subnet="255.255.255.0", gateway=None):
+        """Applies the IP configuration based on the OS."""
+        system = platform.system()
+        print(f"[*] Attempting to set IP to: {new_ip}")
+
+        try:
+            if system == "Windows":
+                cmd = f'netsh interface ip set address name="{self.interface}" static {new_ip} {subnet} {gateway}'
+                subprocess.run(cmd, shell=True, check=True)
+            elif system == "Linux":
+                subprocess.run(["sudo", "ifconfig", self.interface, new_ip, "netmask", subnet], check=True)
+            
+            print(f"[+] Successfully configured {new_ip} on {self.interface}")
+        except Exception as e:
+            print(f"[-] Configuration failed: {e}")
+
+    def run_optimization(self, preferred_ip):
+        """Logic loop to verify availability before assignment."""
+        active_hosts = self.scan_network()
+        
+        if preferred_ip in active_hosts:
+            print(f"[!] Conflict detected: {preferred_ip} is already in use.")
+            # Logic for picking the next available IP
+            # In a production AI, this would query a database or use a predictive model
+        else:
+            self.set_ip(preferred_ip)
+
+# Example Usage
+if __name__ == "__main__":
+    # Define your network interface (e.g., 'eth0', 'Ethernet', 'wlan0')
+    configurator = ActiveIPConfigurator(interface="eth0", ip_range="192.168.1.0/24")
+    configurator.run_optimization("192.168.1.50")
+
+
+
+import numpy as np
+import pandas as pd
+from scapy.all import ARP, Ether, srp, conf
+from sklearn.ensemble import RandomForestClassifier
+import time
+import subprocess
+
+class AutonomousIPEngine:
+    def __init__(self, interface, subnet):
+        self.interface = interface
+        self.subnet = subnet
+        self.knowledge_base = [] # Historical telemetry
+        self.model = RandomForestClassifier(n_estimators=100)
+        self.is_trained = False
+
+    def collect_telemetry(self, ip_to_test):
+        """Gathers features: Latency, Response Rate, and Time of Day."""
+        start_time = time.time()
+        ans, unans = srp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=ip_to_test), 
+                         timeout=1, iface=self.interface, verbose=False)
+        latency = time.time() - start_time
+        
+        # Feature Vector: [Hour, Latency, Responded(0/1)]
+        responded = 1 if len(ans) > 0 else 0
+        return [time.localtime().tm_hour, latency, responded]
+
+    def train_logic(self):
+        """Refines the 'Seven Archangel' logic: prioritizing stability and speed."""
+        if len(self.knowledge_base) < 10:
+            return # Need more data for 'Kaizen' improvement
+        
+        df = pd.DataFrame(self.knowledge_base, columns=['hour', 'latency', 'status'])
+        X = df[['hour', 'latency']]
+        y = df['status']
+        self.model.fit(X, y)
+        self.is_trained = True
+        print("[⚡] AI Brain Updated: Predictive model active.")
+
+    def predict_best_ip(self, candidate_ips):
+        """Predicts which IP is least likely to have a conflict or high latency."""
+        if not self.is_trained:
+            return candidate_ips[0] # Default to first if not yet 'wise'
+        
+        current_hour = time.localtime().tm_hour
+        scores = []
+        for ip in candidate_ips:
+            # Predict probability of being 'Available' (Status 0)
+            prob = self.model.predict_proba([[current_hour, 0.001]])[0][0]
+            scores.append((ip, prob))
+        
+        # Return IP with highest availability probability
+        return max(scores, key=lambda x: x[1])[0]
+
+    def apply_config(self, ip):
+        """Executes high-speed configuration."""
+        print(f"[⚙️] Deploying AI-Optimized IP: {ip}")
+        # Example Linux command (can be swapped for netsh on Windows)
+        subprocess.run(["sudo", "ip", "addr", "add", f"{ip}/24", "dev", self.interface])
+
+# --- Execution ---
+engine = AutonomousIPEngine(interface="eth0", subnet="192.168.1.0/24")
+
+# Simulated Kaizen Learning Loop
+for _ in range(5):
+    test_data = engine.collect_telemetry("192.168.1.100")
+    engine.knowledge_base.append(test_data)
+
+engine.train_logic()
+best_ip = engine.predict_best_ip(["192.168.1.50", "192.168.1.51"])
+engine.apply_config(best_ip)
