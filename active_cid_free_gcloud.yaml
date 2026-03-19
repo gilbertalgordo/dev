@@ -1,0 +1,105 @@
+#!/bin/bash
+# GCP On-Demand Connector
+
+PROJECT_ID="your-project-id"
+
+# Check if gcloud is authenticated
+if ! gcloud auth list --filter=status:ACTIVE --format="value(account)" > /dev/null 2>&1; then
+    echo "No active session found. Connecting on-demand..."
+    # --no-launch-browser is useful for remote dev environments
+    gcloud auth login --no-launch-browser
+else
+    echo "Active session detected: $(gcloud auth list --filter=status:ACTIVE --format="value(account)")"
+fi
+
+# Set project context
+gcloud config set project $PROJECT_ID
+
+# Verify connection with a free-tier resource check (e.g., Cloud Storage)
+echo "Verifying connection to project: $PROJECT_ID"
+gcloud storage ls
+
+
+
+import os
+from google.auth import default
+from google.cloud import storage
+
+def connect_gcp_on_demand():
+    try:
+        # Automatically finds credentials in environment or via gcloud ADC
+        credentials, project = default()
+        print(f"Connected to Project: {project}")
+        
+        # Test connection using the Free Tier (Cloud Storage 5GB limit)
+        client = storage.Client(credentials=credentials, project=project)
+        buckets = list(client.list_buckets(max_results=1))
+        print("Connection Active.")
+        return client
+    except Exception as e:
+        print(f"Connection failed: {e}")
+        print("Run 'gcloud auth application-default login' to fix.")
+
+if __name__ == "__main__":
+    connect_gcp_on_demand()
+
+
+
+import os
+import subprocess
+from google.auth import default
+from google.cloud import storage
+
+class GCPConnector:
+    def __init__(self, project_id=None):
+        self.project_id = project_id
+        self._credentials = None
+        self._client = None
+
+    def _ensure_active_session(self):
+        """Checks for active ADC or triggers gcloud login."""
+        try:
+            self._credentials, self.project_id = default()
+            print(f"Session Active: {self.project_id}")
+        except Exception:
+            print("No active credentials found. Initializing gcloud handshake...")
+            # Automatically triggers the browser/console login flow
+            subprocess.run(["gcloud", "auth", "application-default", "login"], check=True)
+            self._credentials, self.project_id = default()
+
+    @property
+    def storage_client(self):
+        """On-demand access to Cloud Storage (Free Tier: 5GB)."""
+        if self._client is None:
+            self._ensure_active_session()
+            self._client = storage.Client(credentials=self._credentials, project=self.project_id)
+        return self._client
+
+# Usage for gilbertalgordo/dev environment
+if __name__ == "__main__":
+    connector = GCPConnector(project_id="your-gcp-project-id")
+    # This triggers the 'Active Connect' only when the client is accessed
+    print(f"Buckets found: {list(connector.storage_client.list_buckets(max_results=5))}")
+
+
+
+#!/bin/bash
+# GCP Active Connect On-Demand Utility
+
+# Function to refresh tokens silently
+refresh_gcp_session() {
+    echo "[$(date)] Refreshing GCP Active Session..."
+    gcloud auth print-access-token > /dev/null 2>&1
+    if [ $? -eq 0 ]; then
+        echo "Connection: STABLE"
+    else
+        echo "Connection: EXPIRED. Reconnecting..."
+        gcloud auth login --brief
+    fi
+}
+
+# Advanced: Set up a crontab-style background loop for 'Always-On'
+while true; do
+    refresh_gcp_session
+    sleep 3000 # Refresh every 50 minutes to prevent token expiry
+done
