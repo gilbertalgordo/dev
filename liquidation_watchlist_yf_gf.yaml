@@ -1,0 +1,108 @@
+pip install yfinance pandas
+
+
+
+import yfinance as yf
+import pandas as pd
+
+# 1. Define your portfolio holdings 
+# (You can export your Yahoo Portfolio to CSV and load it here)
+portfolio_data = {
+    "Ticker": ["AAPL", "GOOGL", "TSLA", "MSFT"],
+    "Shares": [10, 5, 15, 8]
+}
+
+def liquidate_portfolio(data):
+    df = pd.DataFrame(data)
+    
+    print("Fetching current market prices...")
+    
+    # Get current prices for all tickers
+    tickers = " ".join(df["Ticker"].tolist())
+    market_data = yf.download(tickers, period="1d", interval="1m")['Close'].iloc[-1]
+    
+    # Map prices back to the dataframe
+    df["Current_Price"] = df["Ticker"].map(market_data)
+    
+    # Calculate liquidation value per position
+    df["Liquidation_Value"] = df["Shares"] * df["Current_Price"]
+    
+    total_value = df["Liquidation_Value"].sum()
+    
+    print("\n--- Liquidation Summary ---")
+    print(df[["Ticker", "Shares", "Current_Price", "Liquidation_Value"]])
+    print(f"\nTotal Estimated Liquidation Value: ${total_value:,.2f}")
+    
+    return df
+
+if __name__ == "__main__":
+    liquidate_portfolio(portfolio_data)
+
+
+
+=GOOGLEFINANCE(A2, "price")
+
+
+
+=B2 * C2
+
+
+
+df = pd.read_csv("your_exported_file.csv")
+# Then proceed with the yfinance logic above
+
+
+
+import yfinance as yf
+import pandas as pd
+import numpy as np
+
+# 1. Advanced Portfolio Configuration
+# Replace these with your actual Yahoo Portfolio holdings
+portfolio = {
+    'AAPL': {'shares': 150, 'avg_cost': 175.00},
+    'GOOGL': {'shares': 80, 'avg_cost': 140.00},
+    'TSLA': {'shares': 200, 'avg_cost': 180.00},
+    'NVDA': {'shares': 50, 'avg_cost': 450.00}
+}
+
+def simulate_liquidation(portfolio_dict, simulations=1000):
+    tickers = list(portfolio_dict.keys())
+    data = yf.download(tickers, period="1mo", interval="1d")['Close']
+    
+    # Calculate daily returns and volatility for risk assessment
+    returns = data.pct_change().dropna()
+    volatility = returns.std()
+    current_prices = data.iloc[-1]
+    
+    results = []
+    
+    print(f"--- Running {simulations} Liquidation Scenarios ---")
+    
+    for ticker in tickers:
+        shares = portfolio_dict[ticker]['shares']
+        price = current_prices[ticker]
+        vol = volatility[ticker]
+        
+        # Stochastic modeling: Price - (Slippage + Volatility Drift)
+        # We assume a 0.1% slippage cost for market orders
+        slippage_factor = 0.001 
+        simulated_outcomes = price * (1 - slippage_factor) * (1 + np.random.normal(0, vol, simulations))
+        
+        results.append({
+            'Ticker': ticker,
+            'Current Price': round(price, 2),
+            'Est. Value': round(price * shares, 2),
+            'Worst Case (95% CI)': round(np.percentile(simulated_outcomes, 5) * shares, 2),
+            'Best Case (95% CI)': round(np.percentile(simulated_outcomes, 95) * shares, 2)
+        })
+
+    df = pd.DataFrame(results)
+    total_est = df['Est. Value'].sum()
+    
+    print(df.to_string(index=False))
+    print(f"\nTotal Portfolio Liquidation Estimate: ${total_est:,.2f}")
+    return df
+
+if __name__ == "__main__":
+    simulate_liquidation(portfolio)
