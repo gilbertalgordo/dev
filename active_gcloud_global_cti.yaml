@@ -1,0 +1,142 @@
+import requests
+import json
+import os
+
+class GlobalCTIConnector:
+    def __init__(self, api_key=None):
+        # Fallback to environment variable for GCloud deployments
+        self.api_key = api_key or os.getenv('GTI_API_KEY')
+        self.base_url = "https://www.virustotal.com/api/v3"
+        self.headers = {
+            "accept": "application/json",
+            "x-apikey": self.api_key
+        }
+
+    def inspect_indicator(self, indicator_type, value):
+        """
+        Queries the global threat database for a specific indicator.
+        Types: 'ip_addresses', 'urls', 'files', 'domains'
+        """
+        endpoint = f"{self.base_url}/{indicator_type}/{value}"
+        
+        try:
+            response = requests.get(endpoint, headers=self.headers)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.HTTPError as e:
+            return {"error": str(e), "status_code": response.status_code}
+
+# Example Usage for GCloud Function / On-Demand Request
+def main():
+    # Replace with your actual key or set environment variable
+    cti = GlobalCTIConnector(api_key="YOUR_GTI_API_KEY")
+    
+    # 1. Check a suspicious IP
+    ip_result = cti.inspect_indicator("ip_addresses", "8.8.8.8")
+    
+    # 2. Extract specific threat score (Google TI Threat Score)
+    data = ip_result.get('data', {})
+    attributes = data.get('attributes', {})
+    reputation = attributes.get('reputation', 0)
+    
+    print(f"Indicator: {data.get('id')}")
+    print(f"Global Reputation Score: {reputation}")
+    print(f"Last Analysis Stats: {json.dumps(attributes.get('last_analysis_stats'), indent=2)}")
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+gcloud functions deploy cti-on-demand \
+  --runtime python311 \
+  --trigger-http \
+  --allow-unauthenticated \
+  --set-env-vars GTI_API_KEY=your_key_here
+
+
+import os
+import asyncio
+import aiohttp
+from google.cloud import secretmanager
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
+
+# --- Configuration ---
+PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT")
+SECRET_ID = "cti-api-key"  # Name of your secret in Secret Manager
+
+def get_api_key():
+    """Fetches the API Key securely from GCP Secret Manager."""
+    client = secretmanager.SecretManagerServiceClient()
+    name = f"projects/{PROJECT_ID}/secrets/{SECRET_ID}/versions/latest"
+    response = client.access_secret_version(request={"name": name})
+    return response.payload.data.decode("UTF-8")
+
+class GlobalCTIEngine:
+    def __init__(self, api_key):
+        self.api_key = api_key
+        self.base_url = "https://www.virustotal.com/api/v3"
+        self.headers = {"x-apikey": self.api_key}
+
+    async def fetch_indicator(self, session, category, indicator):
+        """Asynchronous lookup for specific threat categories."""
+        url = f"{self.base_url}/{category}/{indicator}"
+        async with session.get(url, headers=self.headers) as response:
+            if response.status == 200:
+                data = await response.json()
+                # Advanced parsing of the 'last_analysis_stats'
+                stats = data['data']['attributes'].get('last_analysis_stats', {})
+                reputation = data['data']['attributes'].get('reputation', 0)
+                return {
+                    "indicator": indicator,
+                    "malicious_votes": stats.get("malicious", 0),
+                    "reputation_score": reputation,
+                    "status": "high_risk" if stats.get("malicious", 0) > 3 else "clear"
+                }
+            return {"indicator": indicator, "error": "Not Found", "code": response.status}
+
+@app.route('/analyze', methods=['POST'])
+async def analyze_on_demand():
+    """
+    On-Demand Endpoint
+    Payload: {"ips": ["1.1.1.1"], "domains": ["example.com"]}
+    """
+    api_key = get_api_key()
+    engine = GlobalCTIEngine(api_key)
+    request_data = request.get_json()
+    
+    tasks = []
+    async with aiohttp.ClientSession() as session:
+        # Process IPs
+        for ip in request_data.get('ips', []):
+            tasks.append(engine.fetch_indicator(session, 'ip_addresses', ip))
+        
+        # Process Domains
+        for domain in request_data.get('domains', []):
+            tasks.append(engine.fetch_indicator(session, 'domains', domain))
+            
+        results = await asyncio.gather(*tasks)
+        
+    return jsonify({"global_threat_intel": results})
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+
+
+
+# Create the secret holder
+gcloud secrets create cti-api-key --replication-policy="automatic"
+
+# Add your free VirusTotal/Google TI API key
+echo -n "YOUR_API_KEY_HERE" | gcloud secrets versions add cti-api-key --data-file=-
+
+
+
+gcloud run deploy global-cti-connector \
+  --source . \
+  --region us-central1 \
+  --update-env-vars GOOGLE_CLOUD_PROJECT=$(gcloud config get-value project) \
+  --no-allow-unauthenticated
