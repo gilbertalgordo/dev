@@ -1,0 +1,145 @@
+pip install sec-api feedparser requests
+
+
+
+import feedparser
+import requests
+import urllib.parse
+from sec_api import FullTextSearchApi
+
+# Configuration
+SEC_API_KEY = "YOUR_SEC_API_KEY"
+SEARCH_TOPIC = "Artificial Intelligence"
+
+def search_google_news(query):
+    """Fetches latest news from Google via RSS feed."""
+    encoded_query = urllib.parse.quote(query)
+    url = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
+    
+    feed = feedparser.parse(url)
+    print(f"\n--- Google News Results for: {query} ---")
+    for entry in feed.entries[:5]:  # Limit to top 5
+        print(f"Title: {entry.title}")
+        print(f"Link: {entry.link}")
+        print(f"Published: {entry.published}\n")
+
+def search_sec_filings(query):
+    """Fetches SEC filings matching the search topic."""
+    try:
+        full_text_search = FullTextSearchApi(api_key=SEC_API_KEY)
+        
+        search_query = {
+            "query": f"\"{query}\"",
+            "formTypes": ["8-K", "10-Q", "10-K"], # Material events, Quarterly, Annual
+            "startDate": "2025-01-01",
+            "endDate": "2026-03-21"
+        }
+        
+        filings = full_text_search.get_filings(search_query)
+        
+        print(f"--- SEC Filings Results for: {query} ---")
+        for filing in filings.get('filings', [])[:5]:
+            print(f"Company: {filing['companyName']}")
+            print(f"Form: {filing['formType']}")
+            print(f"Filed: {filing['filedAt']}")
+            print(f"Link: {filing['linkToHtml']}\n")
+            
+    except Exception as e:
+        print(f"SEC Search Error: {e}. Check if your API key is valid.")
+
+if __name__ == "__main__":
+    search_google_news(SEARCH_TOPIC)
+    search_sec_filings(SEARCH_TOPIC)
+
+
+
+pip install httpx feedparser sec-api pandas
+
+
+
+import asyncio
+import httpx
+import feedparser
+import pandas as pd
+from datetime import datetime
+from sec_api import FullTextSearchApi
+
+# Configuration
+SEC_API_KEY = "YOUR_SEC_API_KEY"  # Get free at sec-api.io
+SEARCH_QUERY = "Semiconductor Supply Chain"
+
+class FinancialIntelligenceSuite:
+    def __init__(self, sec_key):
+        self.sec_api = FullTextSearchApi(api_key=sec_key)
+        self.headers = {
+            "User-Agent": "YourCompanyName (admin@example.com)" # SEC requires a valid UA
+        }
+
+    async def fetch_google_news(self, query):
+        """Asynchronously fetches and parses Google News RSS."""
+        url = f"https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url)
+            feed = feedparser.parse(response.text)
+            
+            results = []
+            for entry in feed.entries[:10]:
+                results.append({
+                    "Source": "Google News",
+                    "Title": entry.title,
+                    "Link": entry.link,
+                    "Date": entry.published,
+                    "Summary": entry.summary[:200] + "..."
+                })
+            return results
+
+    def fetch_sec_filings(self, query):
+        """Searches SEC EDGAR full-text for the topic."""
+        # Query parameters for material event filings
+        query_params = {
+            "query": f"\"{query}\"",
+            "formTypes": ["8-K", "10-Q", "10-K", "S-1"],
+            "startDate": "2025-01-01",
+            "endDate": datetime.now().strftime("%Y-%m-%d")
+        }
+        
+        filings = self.sec_api.get_filings(query_params)
+        
+        results = []
+        for f in filings.get('filings', []):
+            results.append({
+                "Source": "SEC EDGAR",
+                "Title": f"{f['companyName']} - {f['formType']}",
+                "Link": f['linkToHtml'],
+                "Date": f['filedAt'],
+                "Summary": f.get('description', 'Regulatory Disclosure')
+            })
+        return results
+
+async def main():
+    suite = FinancialIntelligenceSuite(SEC_API_KEY)
+    
+    # Run searches in parallel
+    print(f"🚀 Searching for: {SEARCH_QUERY}...")
+    
+    # Google News (Async) and SEC (Sync-wrapped or called directly)
+    news_task = suite.fetch_google_news(SEARCH_QUERY)
+    sec_results = suite.fetch_sec_filings(SEARCH_QUERY)
+    news_results = await news_task
+    
+    # Merge and Export
+    all_results = news_results + sec_results
+    df = pd.DataFrame(all_results)
+    
+    # Clean output
+    pd.set_option('display.max_colwidth', 50)
+    print("\n--- TOP RESULTS ---")
+    print(df[['Source', 'Title', 'Date']].head(10))
+    
+    # Export to CSV
+    filename = f"search_results_{datetime.now().strftime('%Y%m%d')}.csv"
+    df.to_csv(filename, index=False)
+    print(f"\n✅ Results exported to {filename}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
