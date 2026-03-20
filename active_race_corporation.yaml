@@ -1,0 +1,150 @@
+pip install yfinance pandas
+
+
+import yfinance as yf
+import pandas as pd
+from datetime import datetime
+
+class PortfolioManager:
+    def __init__(self):
+        # Initialize an empty portfolio
+        self.portfolio = pd.DataFrame(columns=[
+            'Ticker', 'Shares', 'Avg_Cost', 'Total_Cost'
+        ])
+
+    def add_position(self, ticker, shares, avg_cost):
+        """Adds or updates a stock position."""
+        total_cost = shares * avg_cost
+        new_row = {
+            'Ticker': ticker.upper(),
+            'Shares': shares,
+            'Avg_Cost': avg_cost,
+            'Total_Cost': total_cost
+        }
+        self.portfolio = pd.concat([self.portfolio, pd.DataFrame([new_row])], ignore_index=True)
+
+    def get_live_data(self):
+        """Fetches live market data and calculates gains/losses."""
+        if self.portfolio.empty:
+            return "Portfolio is empty."
+
+        tickers = self.portfolio['Ticker'].tolist()
+        # Fetching data from Yahoo Finance
+        data = yf.download(tickers, period="1d", interval="1m", progress=False)
+        
+        # Get the latest closing prices
+        current_prices = {}
+        for ticker in tickers:
+            current_prices[ticker] = data['Close'][ticker].iloc[-1]
+
+        # Map prices to the dataframe
+        self.portfolio['Current_Price'] = self.portfolio['Ticker'].map(current_prices)
+        self.portfolio['Market_Value'] = self.portfolio['Shares'] * self.portfolio['Current_Price']
+        self.portfolio['P/L_Amount'] = self.portfolio['Market_Value'] - self.portfolio['Total_Cost']
+        self.portfolio['P/L_Percent'] = (self.portfolio['P/L_Amount'] / self.portfolio['Total_Cost']) * 100
+        
+        return self.portfolio
+
+# --- Execution ---
+if __name__ == "__main__":
+    manager = PortfolioManager()
+
+    # Example: Adding RACE (Ferrari) to the tracker
+    # Ticker, Number of Shares, Average Purchase Price
+    manager.add_position('RACE', 10, 380.50)
+
+    print(f"Fetching Active Race Corporation Data ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})...")
+    
+    report = manager.get_live_data()
+    
+    # Clean output formatting
+    pd.options.display.float_format = '{:.2f}'.format
+    print("\n--- Active Portfolio Tracker ---")
+    print(report[['Ticker', 'Shares', 'Avg_Cost', 'Current_Price', 'Market_Value', 'P/L_Percent']])
+
+
+
+pip install yfinance pandas streamlit plotly ta
+
+
+
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import plotly.graph_objects as go
+from datetime import datetime, timedelta
+
+# --- Configuration & HUD Styling ---
+st.set_page_config(page_title="RACE Corp Asset Tracker", layout="wide")
+st.markdown("""
+    <style>
+    .main { background-color: #0e1117; color: #ffffff; }
+    .metric-card { background-color: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 15px; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- Core Logic ---
+@st.cache_data(ttl=60)
+def fetch_race_data():
+    ticker = yf.Ticker("RACE")
+    hist = ticker.history(period="1y")
+    info = ticker.info
+    return ticker, hist, info
+
+def calculate_technicals(df):
+    df['SMA_20'] = df['Close'].rolling(window=20).mean()
+    df['SMA_50'] = df['Close'].rolling(window=50).mean()
+    return df
+
+# --- UI Layout ---
+st.title("🏎️ Active Race Corporation | Portfolio HUD")
+ticker_obj, history, info = fetch_race_data()
+history = calculate_technicals(history)
+
+# HUD Top Row: Real-time Stats
+col1, col2, col3, col4 = st.columns(4)
+current_price = history['Close'].iloc[-1]
+prev_close = history['Close'].iloc[-2]
+change = current_price - prev_close
+pct_change = (change / prev_close) * 100
+
+with col1:
+    st.metric("Current Price (RACE)", f"${current_price:.2f}", f"{change:.2f} ({pct_change:.2f}%)")
+with col2:
+    st.metric("Market Cap", f"${info.get('marketCap', 0) / 1e9:.2f}B")
+with col3:
+    st.metric("52 Week High", f"${info.get('fiftyTwoWeekHigh', 0):.2f}")
+with col4:
+    st.metric("Volume", f"{info.get('regularMarketVolume', 0):,}")
+
+# Main Chart Area
+st.subheader("Interactive Performance Analysis")
+fig = go.Figure()
+fig.add_trace(go.Candlestick(x=history.index, open=history['Open'], high=history['High'], 
+                low=history['Low'], close=history['Close'], name='Price'))
+fig.add_trace(go.Scatter(x=history.index, y=history['SMA_20'], line=dict(color='orange', width=1), name='20-Day SMA'))
+fig.add_trace(go.Scatter(x=history.index, y=history['SMA_50'], line=dict(color='cyan', width=1), name='50-Day SMA'))
+
+fig.update_layout(template="plotly_dark", xaxis_rangeslider_visible=False, height=600)
+st.plotly_chart(fig, use_container_्यवाद=True)
+
+# --- Portfolio Management Section ---
+st.divider()
+st.subheader("Portfolio Simulation")
+with st.expander("Update Holdings"):
+    shares = st.number_input("Shares Owned", min_value=0, value=10)
+    avg_cost = st.number_input("Average Cost Per Share", min_value=0.0, value=350.0)
+
+total_cost = shares * avg_cost
+market_value = shares * current_price
+total_gain = market_value - total_cost
+
+# Display Results
+p_col1, p_col2, p_col3 = st.columns(3)
+p_col1.write(f"**Total Cost:** ${total_cost:,.2f}")
+p_col2.write(f"**Market Value:** ${market_value:,.2f}")
+p_col3.write(f"**Total P/L:** :green[+${total_gain:,.2f}]" if total_gain > 0 else f"**Total P/L:** :red[${total_gain:,.2f}]")
+
+
+
+streamlit run app.py
