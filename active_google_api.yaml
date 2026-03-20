@@ -1,0 +1,91 @@
+pip install -U google-genai
+
+
+
+import os
+from google import genai
+
+# Setup your API Key (Set this in your terminal/OS environment first)
+# export GEMINI_API_KEY='your_key_here'
+api_key = os.getenv("GEMINI_API_KEY")
+
+def generate_ai_response(prompt):
+    try:
+        # Initialize the client
+        client = genai.Client(api_key=api_key)
+        
+        # Using Gemini 3 Flash (Preview) - typical for 2026 free tier
+        model_id = "gemini-3-flash-preview"
+        
+        response = client.models.generate_content(
+            model=model_id,
+            contents=prompt
+        )
+        
+        return response.text
+    
+    except Exception as e:
+        return f"An error occurred: {e}"
+
+# Example Usage
+if __name__ == "__main__":
+    user_prompt = "Explain the concept of Kaizen in software development."
+    print("--- AI Response ---")
+    print(generate_ai_response(user_prompt))
+
+
+
+pip install -U google-genai
+
+
+
+import os
+import PIL.Image
+from google import genai
+from pydantic import BaseModel, Field
+
+# 1. Define the Schema for Structured Output
+class VideoAnalysis(BaseModel):
+    summary: str = Field(description="A brief summary of the visual content")
+    detected_objects: list[str] = Field(description="List of key objects visible")
+    action_description: str = Field(description="Description of any movement or action")
+    is_safe: bool = Field(description="Safety check based on visual content")
+
+# 2. Configure the Advanced Client
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+def analyze_multimodal_content(file_path):
+    # Load the media file (Supports PNG, JPEG, WEBP, HEIC, MP4, etc.)
+    media_file = PIL.Image.open(file_path)
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-3-flash-preview", # Current 2026 Free Tier Workhorse
+            contents=[
+                "Analyze this visual content and provide a structured JSON report.",
+                media_file
+            ],
+            config={
+                "system_instruction": "You are a professional vision analyst. Always return valid JSON.",
+                "response_mime_type": "application/json",
+                "response_schema": VideoAnalysis, # Forces the AI to follow your Pydantic class
+                "temperature": 0.2, # Lower temperature for higher accuracy/consistency
+            }
+        )
+        
+        # Access the parsed JSON directly
+        return response.parsed
+    
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
+
+# Example Execution
+if __name__ == "__main__":
+    # Ensure you have an image/frame named 'input.jpg' in your directory
+    # result = analyze_multimodal_content("input.jpg")
+    # if result:
+    #     print(f"Summary: {result.summary}")
+    #     print(f"Objects: {result.detected_objects}")
+    print("Code ready. Please ensure GEMINI_API_KEY is set in your environment.")
+    
