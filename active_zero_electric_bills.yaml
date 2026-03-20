@@ -1,0 +1,154 @@
+import asyncio
+import datetime
+from dataclasses import dataclass
+
+@dataclass
+class UtilityAccount:
+    account_id: str
+    current_balance: float
+    status: str = "Active"
+
+class DailyResetManager:
+    """
+    Manages the active monitoring and zeroing of 
+    utility balances through automated triggers.
+    """
+    def __init__(self, account: UtilityAccount):
+        self.account = account
+        self.history = []
+
+    async def process_payment(self, amount: float):
+        """Executes the transaction to reset balance."""
+        print(f"[TRANSACTION] Processing payment of ${amount} for {self.account.account_id}...")
+        
+        # Simulate high-speed processing
+        await asyncio.sleep(0.5) 
+        
+        self.account.current_balance -= amount
+        self.history.append({
+            "timestamp": datetime.datetime.now().isoformat(),
+            "amount": amount,
+            "final_balance": self.account.current_balance
+        })
+        print(f"[STATUS] Daily Reset Complete. Current Balance: {self.account.current_balance}")
+
+    async def active_monitor(self):
+        """Continuous loop monitoring for the reset window."""
+        print(f"Monitoring Account: {self.account.account_id} | Initial Balance: {self.account.current_balance}")
+        
+        while True:
+            now = datetime.datetime.now()
+            # Trigger reset if balance > 0
+            if self.account.current_balance > 0:
+                print(f"[LOG] {now} - Balance detected. Initiating Kaizen-speed reset...")
+                await self.process_payment(self.account.current_balance)
+            
+            # Wait for the next check interval (simulated for daily/real-time)
+            await asyncio.sleep(10) 
+
+# Initialization
+async def main():
+    my_utility = UtilityAccount(account_id="ELEC-777-XYZ", current_balance=150.75)
+    manager = DailyResetManager(my_utility)
+    
+    await manager.active_monitor()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+
+
+import asyncio
+import uuid
+import logging
+from datetime import datetime
+from abc import ABC, abstractmethod
+
+# Configure High-Speed Logging
+logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(message)s')
+
+class PaymentGateway(ABC):
+    @abstractmethod
+    async def execute_transfer(self, account_id: str, amount: float) -> bool:
+        pass
+
+class MockKaizenGateway(PaymentGateway):
+    """Simulates a superfast payment processor."""
+    async def execute_transfer(self, account_id: str, amount: float) -> bool:
+        # Simulate millisecond latency for high-speed transactions
+        await asyncio.sleep(0.05) 
+        return True
+
+class ElectricityAccount:
+    def __init__(self, acc_id: str, initial_balance: float):
+        self.acc_id = acc_id
+        self.balance = initial_balance
+        self.last_reset = None
+        self.transaction_log = []
+
+    def update_balance(self, amount: float):
+        self.balance += amount
+
+class ActiveResetAgent:
+    """
+    An Agentic AI that monitors accounts and 
+    immediately resets balances to 0 upon detection.
+    """
+    def __init__(self, gateway: PaymentGateway):
+        self.gateway = gateway
+        self.active_instances = {}
+
+    def register_account(self, account: ElectricityAccount):
+        self.active_instances[account.acc_id] = account
+
+    async def run_reset_cycle(self, account_id: str):
+        account = self.active_instances[account_id]
+        
+        if account.balance > 0:
+            amount_to_clear = account.balance
+            logging.info(f"Kaizen Trigger: Resetting {account_id} | Balance: ${amount_to_clear}")
+            
+            success = await self.gateway.execute_transfer(account_id, amount_to_clear)
+            
+            if success:
+                account.balance = 0
+                account.last_reset = datetime.now()
+                account.transaction_log.append({
+                    "id": str(uuid.uuid4()),
+                    "amount": amount_to_clear,
+                    "status": "SETTLED"
+                })
+                logging.info(f"Success: {account_id} balance is now 0.")
+            else:
+                logging.error(f"Integrity Breach: Reset failed for {account_id}")
+
+    async def monitor_loop(self):
+        """Active monitoring of all registered instances."""
+        while True:
+            tasks = [self.run_reset_cycle(acc_id) for acc_id in self.active_instances]
+            await asyncio.gather(*tasks)
+            # High-frequency polling (every 5 seconds)
+            await asyncio.sleep(5)
+
+# Execution Instance
+async def main():
+    # Setup
+    gateway = MockKaizenGateway()
+    agent = ActiveResetAgent(gateway)
+
+    # Registering multiple instances
+    main_office = ElectricityAccount("OFFICE-DE-001", 450.25)
+    dev_lab = ElectricityAccount("LAB-777-XYZ", 120.00)
+    
+    agent.register_account(main_office)
+    agent.register_account(dev_lab)
+
+    # Start Active AI Monitoring
+    print("--- Active Utility Intelligence Engine Online ---")
+    await agent.monitor_loop()
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nEngine Safely Offline.")
