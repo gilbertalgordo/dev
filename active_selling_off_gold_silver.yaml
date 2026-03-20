@@ -1,0 +1,98 @@
+import pandas as pd
+import numpy as np
+import yfinance as yf
+
+def generate_active_sell_signals(tickers, window=20, sell_threshold=2.0):
+    """
+    Generates active sell signals based on Z-Score.
+    Tickers: Gold (GC=F), Silver (SI=F), 'Bronze'/Copper (HG=F)
+    """
+    data = yf.download(tickers, period="1y")['Close']
+    signals = pd.DataFrame(index=data.index)
+
+    for ticker in tickers:
+        # Calculate Rolling Mean and Standard Deviation
+        rolling_mean = data[ticker].rolling(window=window).mean()
+        rolling_std = data[ticker].rolling(window=window).std()
+        
+        # AI/Stat Logic: Calculate Z-Score
+        # Formula: $Z = \frac{x - \mu}{\sigma}$
+        z_score = (data[ticker] - rolling_mean) / rolling_std
+        
+        signals[f'{ticker}_ZScore'] = z_score
+        
+        # Active Sell Trigger: If price is > 2 standard deviations from mean
+        signals[f'{ticker}_Action'] = np.where(z_score > sell_threshold, 'ACTIVE SELL', 'HOLD')
+        
+    return signals.tail(10)
+
+# Tickers: Gold, Silver, and Copper (serving as the 'Bronze' proxy)
+metal_tickers = ['GC=F', 'SI=F', 'HG=F']
+active_selling_report = generate_active_sell_signals(metal_tickers)
+
+print("--- Active Selling AI Report ---")
+print(active_selling_report)
+
+
+
+import pandas as pd
+import numpy as np
+import yfinance as yf
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.preprocessing import StandardScaler
+
+def advanced_ai_sell_engine(tickers):
+    # 1. Data Acquisition (Gold, Silver, Copper as Bronze)
+    data = yf.download(tickers, period="2y", interval="1d")['Close']
+    
+    report = {}
+    
+    for ticker in tickers:
+        df = pd.DataFrame(data[ticker])
+        df.columns = ['Close']
+        
+        # 2. Feature Engineering
+        df['Returns'] = df['Close'].pct_change()
+        df['RSI'] = 100 - (100 / (1 + df['Returns'].rolling(14).mean() / df['Returns'].rolling(14).std().abs()))
+        df['Volatility'] = df['Returns'].rolling(21).std()
+        df['MA_Diff'] = (df['Close'] - df['Close'].rolling(50).mean()) / df['Close'].rolling(50).mean()
+        df['Target'] = df['Returns'].shift(-1) # Predict next day return
+        
+        df = df.dropna()
+        
+        # 3. AI Model Training (Random Forest)
+        features = ['RSI', 'Volatility', 'MA_Diff']
+        X = df[features]
+        y = df['Target']
+        
+        model = RandomForestRegressor(n_estimators=100, random_state=42)
+        model.fit(X, y)
+        
+        # 4. Active Sell Signal Logic
+        current_state = X.iloc[-1:].values
+        predicted_return = model.predict(current_state)[0]
+        current_rsi = df['RSI'].iloc[-1]
+        
+        # Logic: Sell if RSI is high AND AI predicts negative upcoming returns
+        if current_rsi > 70 and predicted_return < 0:
+            action = "AGGRESSIVE SELL"
+        elif current_rsi > 65 or predicted_return < -0.005:
+            action = "SCALING OUT"
+        else:
+            action = "HOLD/NEUTRAL"
+            
+        report[ticker] = {
+            "Current Price": round(df['Close'].iloc[-1], 2),
+            "AI Predicted Move": f"{predicted_return:.2%}",
+            "RSI Level": round(current_rsi, 2),
+            "Recommended Action": action
+        }
+        
+    return pd.DataFrame(report).T
+
+# Execution
+metals = ['GC=F', 'SI=F', 'HG=F'] # Gold, Silver, Copper
+ai_signals = advanced_ai_sell_engine(metals)
+
+print("--- 2026 AI Metals Active Sell Report ---")
+print(ai_signals)
