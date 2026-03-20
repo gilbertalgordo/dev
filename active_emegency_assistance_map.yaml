@@ -1,0 +1,168 @@
+import time
+import json
+from dataclasses import dataclass, asdict
+
+@dataclass
+class EmergencyLocation:
+    id: str
+    lat: float
+    lng: float
+    status: str  # Active, Responding, Resolved
+    priority: int  # 1 (Critical) to 5 (Low)
+    timestamp: float
+
+class ActiveEmergencyAI:
+    def __init__(self):
+        self.active_incidents = {}
+
+    def update_incident(self, incident_id, lat, lng, priority):
+        """Active monitoring: updates or creates new emergency nodes."""
+        incident = EmergencyLocation(
+            id=incident_id,
+            lat=lat,
+            lng=lng,
+            status="Active",
+            priority=priority,
+            timestamp=time.time()
+        )
+        self.active_incidents[incident_id] = incident
+        return asdict(incident)
+
+    def get_hud_data(self):
+        """Returns structured data for the 3D/HD Map HUD."""
+        return [asdict(inc) for inc in self.active_incidents.values() if inc.status == "Active"]
+
+# Initialize Engine
+ai_engine = ActiveEmergencyAI()
+# Example: Adding a critical residential alert
+ai_engine.update_incident("RES-001", 14.3521, 121.0588, priority=1)
+
+
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Active Emergency HUD</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        #map { height: 600px; background: #0b0d11; } /* Dark Carbon Theme */
+        .emergency-marker {
+            background-color: #ff004c;
+            border: 2px solid #00f2ff;
+            border-radius: 50%;
+            box-shadow: 0 0 15px #ff004c;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(0.9); opacity: 0.7; }
+            70% { transform: scale(1.2); opacity: 1; }
+            100% { transform: scale(0.9); opacity: 0.7; }
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const map = L.map('map').setView([14.3521, 121.0588], 13);
+        
+        // Dark mode tile layer for HD clarity
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
+
+        function addEmergency(lat, lng, label) {
+            const icon = L.divIcon({ className: 'emergency-marker', iconSize: [20, 20] });
+            L.marker([lat, lng], {icon: icon}).addTo(map)
+                .bindPopup(`<b>SYSTEM ALERT:</b> ${label}<br>Status: ACTIVE`);
+        }
+
+        // Simulating an active data feed
+        addEmergency(14.3521, 121.0588, "Residential Fire Alarm");
+    </script>
+</body>
+</html>
+
+
+
+import asyncio
+from datetime import datetime
+from pydantic import BaseModel
+from typing import Dict, List
+
+class EmergencyNode(BaseModel):
+    id: str
+    lat: float
+    lng: float
+    type: str  # Medical, Fire, Security
+    threat_level: float  # 0.0 to 1.0 (Calculated by AI)
+    active_status: bool = True
+
+class ActiveEmergencyAI:
+    def __init__(self):
+        self.registry: Dict[str, EmergencyNode] = {}
+
+    async def evaluate_threat(self, data: EmergencyNode) -> float:
+        """
+        Kaizen Logic: Rapidly calculates priority based on 
+        residential density and proximity to emergency hubs.
+        """
+        # Simulated AI reasoning for threat escalation
+        multiplier = 1.2 if data.type == "Fire" else 1.0
+        return min(data.threat_level * multiplier, 1.0)
+
+    async def process_signal(self, node: EmergencyNode):
+        """Asynchronous self-healing: updates registry in real-time."""
+        node.threat_level = await self.evaluate_threat(node)
+        self.registry[node.id] = node
+        print(f"[{datetime.now()}] ACTIVE ALERT: {node.id} | Threat: {node.threat_level}")
+
+# Execution instance for a rapid Kaizen cycle
+async def run_system():
+    engine = ActiveEmergencyAI()
+    alert = EmergencyNode(id="TX-99", lat=14.352, lng=121.058, type="Fire", threat_level=0.8)
+    await engine.process_signal(alert)
+
+if __name__ == "__main__":
+    asyncio.run(run_system())
+
+
+
+// Advanced Map HUD Configuration
+const map = new maplibregl.Map({
+    container: 'map',
+    style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+    center: [121.0588, 14.3521], 
+    zoom: 15,
+    pitch: 60, // 3D Perspective
+    antialias: true
+});
+
+// Iridescent Pulse Shader for Active Locations
+map.on('load', () => {
+    map.addSource('emergencies', {
+        type: 'geojson',
+        data: {
+            type: 'FeatureCollection',
+            features: [{
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: [121.0588, 14.3521] },
+                properties: { threat: 0.9 }
+            }]
+        }
+    });
+
+    map.addLayer({
+        id: 'pulse-layer',
+        type: 'circle',
+        source: 'emergencies',
+        paint: {
+            'circle-radius': 15,
+            'circle-color': '#00f2ff', // Cyan Neon
+            'circle-blur': 0.5,
+            'circle-opacity': [
+                'interpolate', ['linear'], ['get', 'threat'],
+                0.5, 0.3,
+                1.0, 0.9
+            ]
+        }
+    });
+});
