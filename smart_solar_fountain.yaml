@@ -1,0 +1,295 @@
+// Pins for the RGB LED lights
+const int RED_PIN = 9;
+const int GREEN_PIN = 10;
+const int BLUE_PIN = 11;
+
+// Pin for the DC Water Pump (via Relay or MOSFET)
+const int PUMP_PIN = 5;
+
+// Light sensor or Solar Panel voltage divider pin
+const int SENSOR_PIN = A0; 
+
+void setup() {
+  pinMode(RED_PIN, OUTPUT);
+  pinMode(GREEN_PIN, OUTPUT);
+  pinMode(BLUE_PIN, OUTPUT);
+  pinMode(PUMP_PIN, OUTPUT);
+  
+  // Start the pump
+  digitalWrite(PUMP_PIN, HIGH);
+}
+
+void loop() {
+  // Simple "Rainbow" effect for the LED DC lights
+  for (int i = 0; i < 255; i++) {
+    setColor(i, 255 - i, 128); 
+    delay(20);
+  }
+  for (int i = 0; i < 255; i++) {
+    setColor(255 - i, 128, i);
+    delay(20);
+  }
+}
+
+// Function to handle the DC voltage output for LEDs
+void setColor(int red, int green, int blue) {
+  analogWrite(RED_PIN, red);
+  analogWrite(GREEN_PIN, green);
+  analogWrite(BLUE_PIN, blue);
+}
+
+
+
+#include <IRremote.h>
+
+// Pin Definitions
+const int RECV_PIN = 7;      // IR Receiver Pin
+const int PUMP_PIN = 5;      // DC Pump (Relay/MOSFET)
+const int RED_PIN = 9;       // RGB LED Red
+const int GREEN_PIN = 10;    // RGB LED Green
+const int BLUE_PIN = 11;     // RGB LED Blue
+
+IRrecv irrecv(RECV_PIN);
+decode_results results;
+
+bool pumpState = false;
+int colorMode = 0;
+
+void setup() {
+  pinMode(PUMP_PIN, OUTPUT);
+  pinMode(RED_PIN, OUTPUT);
+  pinMode(GREEN_PIN, OUTPUT);
+  pinMode(BLUE_PIN, OUTPUT);
+  
+  irrecv.enableIRIn(); // Start the receiver
+  digitalWrite(PUMP_PIN, LOW); // Start with pump off
+}
+
+void loop() {
+  if (irrecv.decode(&results)) {
+    handleRemote(results.value);
+    irrecv.resume(); // Receive the next value
+  }
+  
+  updateLEDs();
+}
+
+void handleRemote(unsigned long value) {
+  // Replace these hex codes with your specific remote's codes
+  switch(value) {
+    case 0xFF30CF: // Button 1
+      pumpState = !pumpState;
+      digitalWrite(PUMP_PIN, pumpState ? HIGH : LOW);
+      break;
+      
+    case 0xFF18E7: // Button 2
+      colorMode = (colorMode + 1) % 4; // Cycle through 4 modes
+      break;
+      
+    case 0xFF7A85: // Button 3 (Power Off)
+      pumpState = false;
+      colorMode = 0;
+      digitalWrite(PUMP_PIN, LOW);
+      break;
+  }
+}
+
+void updateLEDs() {
+  if (colorMode == 0) setColor(0, 0, 0);       // Off
+  if (colorMode == 1) setColor(255, 0, 0);     // Solid Red
+  if (colorMode == 2) setColor(0, 255, 150);   // Cyan/Teal
+  if (colorMode == 3) {                        // Cycle Mode
+    int rainbow = (millis() / 10) % 255;
+    setColor(rainbow, 255 - rainbow, 128);
+  }
+}
+
+void setColor(int r, int g, int b) {
+  analogWrite(RED_PIN, r);
+  analogWrite(GREEN_PIN, g);
+  analogWrite(BLUE_PIN, b);
+}
+
+
+
+
+#include <IRremote.h>
+#include <EEPROM.h>
+
+// --- PIN ASSIGNMENTS ---
+#define PUMP_PIN 5        // DC Pump (via MOSFET/PWM)
+#define RED_PIN 9         // RGB Red
+#define GREEN_PIN 10      // RGB Green
+#define BLUE_PIN 11       // RGB Blue
+#define IR_PIN 7          // IR Receiver
+
+// --- SYSTEM STATES ---
+IRrecv irrecv(IR_PIN);
+decode_results results;
+
+struct SystemConfig {
+  bool pumpActive;
+  int patternIndex;
+  int brightness;
+} config;
+
+unsigned long lastUpdate = 0;
+int fadeValue = 0;
+bool fadingUp = true;
+
+void setup() {
+  Serial.begin(9600);
+  irrecv.enableIRIn();
+  
+  // Load previous state from EEPROM
+  EEPROM.get(0, config);
+  if (config.brightness == 0) config.brightness = 255; // Default if empty
+
+  pinMode(PUMP_PIN, OUTPUT);
+  pinMode(RED_PIN, OUTPUT);
+  pinMode(GREEN_PIN, OUTPUT);
+  pinMode(BLUE_PIN, OUTPUT);
+
+  // Advanced Soft-Start for DC Pump
+  if(config.pumpActive) softStartPump();
+}
+
+void loop() {
+  // 1. Listen for Wireless Remote Commands
+  if (irrecv.decode(&results)) {
+    handleRemote(results.value);
+    irrecv.resume();
+    saveConfig(); // Save state to memory
+  }
+
+  // 2. Execute Non-Blocking LED Animations
+  if (millis() - lastUpdate > 30) { 
+    runLightingEngine();
+    lastUpdate = millis();
+  }
+}
+
+// --- HELPER FUNCTIONS ---
+
+void softStartPump() {
+  for (int i = 0; i <= 255; i++) {
+    analogWrite(PUMP_PIN, i);
+    delay(15); // Short delay only during boot/toggle
+  }
+}
+
+void handleRemote(unsigned long val) {
+  switch(val) {
+    case 0xFFA25D: // Power Button
+      config.pumpActive = !config.pumpActive;
+      if(config.pumpActive) softStartPump();
+      else digitalWrite(PUMP_PIN, LOW);
+      break;
+    case 0xFF629D: // Mode+ Button
+      config.patternIndex = (config.patternIndex + 1) % 5;
+      break;
+  }
+}
+
+void runLightingEngine() {
+  switch(config.patternIndex) {
+    case 0: // Breath Effect
+      if(fadingUp) fadeValue++; else fadeValue--;
+      if(fadeValue >= 255 || fadeValue <= 0) fadingUp = !fadingUp;
+      renderColor(0, fadeValue, 200); // Blue-Teal Pulse
+      break;
+    case 1: // Tropical Sun
+      renderColor(255, 100, 0); 
+      break;
+    case 2: // Dynamic Rainbow
+      int wheel = (millis() / 20) % 255;
+      renderColor(wheel, 255-wheel, 100);
+      break;
+  }
+}
+
+void renderColor(int r, int g, int b) {
+  analogWrite(RED_PIN, (r * config.brightness) / 255);
+  analogWrite(GREEN_PIN, (g * config.brightness) / 255);
+  analogWrite(BLUE_PIN, (b * config.brightness) / 255);
+}
+
+void saveConfig() {
+  EEPROM.put(0, config);
+}
+
+
+
+#include <WiFi.h>
+#include <ESPAsyncWebServer.h> // For the Mobile Web Interface
+#include <IRremoteESP8266.h>
+#include <IRrecv.h>
+
+// --- PIN DEFINITIONS ---
+const int PUMP_PWM_PIN = 12;   // DC Pump via MOSFET
+const int RGB_PINS[]   = {14, 27, 26}; // R, G, B pins
+const uint16_t RECV_PIN = 15;  // IR Receiver
+
+// --- SYSTEM VARIABLES ---
+AsyncWebServer server(80);
+IRrecv irrecv(RECV_PIN);
+decode_results results;
+
+String systemStatus = "Standby";
+int solarEfficiency = 85; // Simulated percentage from Solar Glass
+
+void setup() {
+  Serial.begin(115200);
+  irrecv.enableIRIn();
+
+  // Initialize Hardware
+  for(int i=0; i<3; i++) ledcSetup(i, 5000, 8); // 5kHz, 8-bit
+  ledcAttachPin(RGB_PINS[0], 0);
+  ledcAttachPin(RGB_PINS[1], 1);
+  ledcAttachPin(RGB_PINS[2], 2);
+
+  // Setup Startup Web Portal (Soft AP Mode)
+  WiFi.softAP("SolarFountain_Startup_Demo", "clean-energy");
+  
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+    String html = "<h1>Solar Fountain Dashboard</h1>";
+    html += "<p>Status: " + systemStatus + "</p>";
+    html += "<p>Solar Glass Efficiency: " + String(solarEfficiency) + "%</p>";
+    html += "<button onclick=\"location.href='/lightshow'\">Start Demo Mode</button>";
+    request->send(200, "text/html", html);
+  });
+
+  server.on("/lightshow", HTTP_GET, [](AsyncWebServerRequest *request){
+    systemStatus = "DEMO MODE ACTIVE";
+    request->send(200, "text/plain", "Starting Light Show...");
+    triggerShowreel();
+  });
+
+  server.begin();
+}
+
+void loop() {
+  // Check IR Remote for physical backup control
+  if (irrecv.decode(&results)) {
+    Serial.println(results.value, HEX);
+    irrecv.resume();
+  }
+}
+
+void triggerShowreel() {
+  // Startup Pitch: "The Symphony of Water and Light"
+  for(int i=0; i<5; i++) {
+    setRGB(255, 0, 255); // Pulse Magenta
+    analogWrite(PUMP_PWM_PIN, 200);
+    delay(500);
+    setRGB(0, 255, 255); // Pulse Cyan
+    analogWrite(PUMP_PWM_PIN, 100);
+    delay(500);
+  }
+}
+
+void setRGB(int r, int g, int b) {
+  ledcWrite(0, r);
+  ledcWrite(1, g);
+  ledcWrite(2, b);
+}
