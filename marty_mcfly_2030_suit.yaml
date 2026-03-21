@@ -1,0 +1,308 @@
+.carbon-fiber-iridescent {
+  width: 300px;
+  height: 400px;
+  background: 
+    linear-gradient(135deg, rgba(255, 0, 0, 0.4), rgba(75, 0, 130, 0.4), rgba(238, 130, 238, 0.4)),
+    repeating-linear-gradient(45deg, #111 0px, #111 2px, #222 2px, #222 4px);
+  background-blend-mode: overlay;
+  border-radius: 15px;
+  box-shadow: 0 0 20px rgba(255, 0, 255, 0.5);
+  animation: shiftRGB 5s infinite alternate;
+}
+
+@keyframes shiftRGB {
+  0% { filter: hue-rotate(0deg); }
+  100% { filter: hue-rotate(90deg); }
+}
+
+
+
+<html>
+  <head>
+    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+  </head>
+  <body>
+    <a-scene>
+      <a-sky color="#87CEEB"></a-sky>
+      <a-plane position="0 0 -4" rotation="-90 0 0" width="100" height="100" color="#7bc8a4"></a-plane>
+
+      <a-torso position="0 1.5 -3" scale="1 1.2 0.5" 
+               material="color: #4B0082; metalness: 0.8; roughness: 0.2; src: url(carbon_weave_alpha.png);">
+      </a-torso>
+
+      <a-box id="iphone" position="0.5 1.2 -2.5" rotation="0 45 0" depth="0.01" height="0.15" width="0.08" color="#000"></a-box>
+      
+      <a-ring id="smartwatch" position="-0.4 1.1 -2.5" radius-inner="0.04" radius-outer="0.05" color="#00FF00">
+        <a-text value="STATUS: 1950" color="#00FF00" scale="0.1 0.1 0.1" position="0 0.1 0"></a-text>
+      </a-ring>
+
+      <a-entity id="raybans" position="0 1.8 -2.8">
+        <a-box scale="0.2 0.05 0.01" color="#111"></a-box>
+      </a-entity>
+
+      <a-light type="directional" position="1 1 1" intensity="1" color="#ff00ff"></a-light>
+      <a-light type="ambient" color="#444"></a-light>
+    </a-scene>
+  </body>
+</html>
+
+
+import * as THREE from 'three';
+
+// 1. Custom Shader for Iridescent Carbon Fiber
+const IridescentShader = {
+  uniforms: {
+    "time": { value: 1.0 },
+    "baseColor": { value: new THREE.Color(0x111111) }, // Deep Carbon Black
+    "iridColor1": { value: new THREE.Color(0xFF0000) }, // Red
+    "iridColor2": { value: new THREE.Color(0x4B0082) }, // Indigo
+    "iridColor3": { value: new THREE.Color(0xEE82EE) }  // Violet
+  },
+  vertexShader: `
+    varying vec3 vNormal;
+    varying vec3 vViewPosition;
+    void main() {
+      vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );
+      vNormal = normalize( normalMatrix * normal );
+      vViewPosition = -mvPosition.xyz;
+      gl_Position = projectionMatrix * mvPosition;
+    }
+  `,
+  fragmentShader: `
+    uniform float time;
+    uniform vec3 baseColor;
+    uniform vec3 iridColor1;
+    uniform vec3 iridColor2;
+    uniform vec3 iridColor3;
+    varying vec3 vNormal;
+    varying vec3 vViewPosition;
+
+    void main() {
+      // Carbon Fiber Weave Simulation
+      float weave = step(0.5, sin(gl_FragCoord.x * 0.5) * cos(gl_FragCoord.y * 0.5));
+      
+      // Calculate Iridescence based on View Angle (Fresnel)
+      vec3 viewDir = normalize( vViewPosition );
+      float fresnel = pow(1.0 - dot(vNormal, viewDir), 3.0);
+      
+      // Shift RGB over time
+      vec3 iridMix = mix(iridColor1, iridColor2, sin(time + fresnel * 5.0));
+      iridMix = mix(iridMix, iridColor3, cos(time + fresnel * 2.0));
+      
+      vec3 finalColor = mix(baseColor, iridMix, fresnel + (weave * 0.1));
+      gl_FragColor = vec4(finalColor, 1.0);
+    }
+  `
+};
+
+// 2. Scene Initialization (The 1950s "Instance")
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87CEEB); // 1950s Blue Sky
+
+// 3. The 2030 Marty Vest Mesh
+const vestGeometry = new THREE.CapsuleGeometry(0.5, 1, 4, 16);
+const vestMaterial = new THREE.ShaderMaterial(IridescentShader);
+const vest = new THREE.Mesh(vestGeometry, vestMaterial);
+vest.position.set(0, 1.2, 0);
+scene.add(vest);
+
+// 4. 2030 Tech Attachments
+// iPhone 2030 (Ultra-thin Glass)
+const iphoneGeo = new THREE.BoxGeometry(0.07, 0.15, 0.005);
+const iphoneMat = new THREE.MeshPhysicalMaterial({ 
+    color: 0x000000, 
+    transmission: 0.5, 
+    thickness: 0.01 
+});
+const iphone = new THREE.Mesh(iphoneGeo, iphoneMat);
+iphone.position.set(0.6, 1.0, 0.2);
+scene.add(iphone);
+
+// Smartwatch HUD (Ray-traced Green Glow)
+const watchGeo = new THREE.TorusGeometry(0.04, 0.01, 16, 100);
+const watchMat = new THREE.MeshBasicMaterial({ color: 0x00FF00 });
+const watch = new THREE.Mesh(watchGeo, watchMat);
+watch.position.set(-0.5, 0.9, 0.2);
+scene.add(watch);
+
+// 5. Animation Loop
+function animate(t) {
+  requestAnimationFrame(animate);
+  vestMaterial.uniforms.time.value = t * 0.001;
+  vest.rotation.y += 0.01; // Preview rotation
+  // Render call here...
+}
+animate();
+
+
+
+import React, { useRef } from 'react';
+import { Canvas, useFrame } from '@react-three/fiber';
+import { MeshDistortMaterial, PerspectiveCamera, Text } from '@react-three/drei';
+import * as THREE from 'three';
+
+// 1. Iridescent Carbon Fiber Shader Component
+const MartyVestMaterial = () => {
+  const materialRef = useRef();
+
+  useFrame(({ clock }) => {
+    // Shifting the RGB spectrum over time
+    const t = clock.getElapsedTime();
+    materialRef.current.color.setHSL((t * 0.1) % 1, 0.8, 0.5);
+    materialRef.current.emissive.setHSL((t * 0.1 + 0.5) % 1, 0.9, 0.2);
+  });
+
+  return (
+    <meshStandardMaterial
+      ref={materialRef}
+      metalness={1}
+      roughness={0.1}
+      emissiveIntensity={2}
+      // Simulating Carbon Fiber texture with a bump map
+      onBeforeCompile={(shader) => {
+        shader.fragmentShader = shader.fragmentShader.replace(
+          `#include <map_fragment>`,
+          `
+          float weave = step(0.5, sin(gl_FragCoord.x * 0.8) * cos(gl_FragCoord.y * 0.8));
+          diffuseColor.rgb *= (0.8 + weave * 0.2);
+          `
+        );
+      }}
+    />
+  );
+};
+
+// 2. 2030 Tech Instance (The "Gear")
+const FuturisticGear = () => {
+  return (
+    <group>
+      {/* Iridescent Carbon Fiber Vest Instance */}
+      <mesh position={[0, 0, 0]}>
+        <cylinderGeometry args={[0.5, 0.6, 1.2, 32]} />
+        <MartyVestMaterial />
+      </mesh>
+
+      {/* 2030 Smartwatch with HUD */}
+      <mesh position={[-0.7, -0.2, 0.3]}>
+        <torusGeometry args={[0.05, 0.01, 16, 100]} />
+        <meshStandardMaterial color="#00ff00" emissive="#00ff00" emissiveIntensity={5} />
+        <Text
+          position={[0, 0.1, 0]}
+          fontSize={0.03}
+          color="#00ff00"
+          anchorX="center"
+        >
+          YEAR: 1950 | STATUS: STABLE
+        </Text>
+      </mesh>
+
+      {/* iPhone 2030 (Translucent Slate) */}
+      <mesh position={[0.7, -0.1, 0.4]} rotation={[0, -0.5, 0.2]}>
+        <boxGeometry args={[0.08, 0.16, 0.005]} />
+        <MeshDistortMaterial color="#000" speed={2} distort={0.1} radius={1} />
+      </mesh>
+    </group>
+  );
+};
+
+// 3. The 1950s "Backdrop" Scene
+export default function HillValley1950Scene() {
+  return (
+    <Canvas style={{ height: '500px', background: '#e0d8c3' }}>
+      <PerspectiveCamera makeDefault position={[0, 0, 5]} />
+      <ambientLight intensity={0.5} />
+      <pointLight position={[10, 10, 10]} intensity={1.5} color="#ffaa00" />
+      
+      {/* 2030 Marty Gear Instance */}
+      <FuturisticGear />
+      
+      {/* 1950s Floor (Matte Asphalt) */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1, 0]}>
+        <planeGeometry args={[100, 100]} />
+        <meshStandardMaterial color="#333" roughness={0.9} />
+      </mesh>
+    </Canvas>
+  );
+}
+
+
+
+// Fragment Shader: IridescentCarbonFiber.glsl
+varying vec3 vNormal;
+varying vec3 vViewPosition;
+uniform float uTime;
+
+void main() {
+    // 1. Carbon Fiber Weave Pattern (Procedural)
+    vec2 uv = gl_FragCoord.xy * 0.05;
+    float weave = step(0.5, sin(uv.x) * cos(uv.y));
+    
+    // 2. Iridescence Calculation (Fresnel)
+    vec3 viewDir = normalize(vViewPosition);
+    float fresnel = pow(1.0 - dot(vNormal, viewDir), 3.0);
+    
+    // 3. RGB Shift (Red -> Indigo -> Violet)
+    vec3 colorRed = vec3(0.9, 0.0, 0.1);
+    vec3 colorIndigo = vec3(0.29, 0.0, 0.51);
+    vec3 colorViolet = vec3(0.56, 0.0, 1.0);
+    
+    // Cycle hues based on time and angle
+    vec3 iridMix = mix(colorRed, colorIndigo, sin(uTime + fresnel * 4.0));
+    iridMix = mix(iridMix, colorViolet, cos(uTime + fresnel * 2.0));
+    
+    // Final composite: Dark carbon base + iridescent highlights
+    vec3 baseColor = vec3(0.05, 0.05, 0.05); // Carbon Fiber Black
+    vec3 finalColor = mix(baseColor, iridMix, fresnel + (weave * 0.05));
+    
+    gl_FragColor = vec4(finalColor, 1.0);
+}
+
+
+
+import * as THREE from 'three';
+
+// Initialize Scene
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xd4c4a8); // 1950s warm sepia sky
+
+// The 2030 Vest Geometry
+const vestGeo = new THREE.CylinderGeometry(0.5, 0.6, 1.2, 64);
+const vestMat = new THREE.ShaderMaterial({
+    uniforms: {
+        uTime: { value: 0 },
+    },
+    vertexShader: `
+        varying vec3 vNormal;
+        varying vec3 vViewPosition;
+        void main() {
+            vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+            vNormal = normalize(normalMatrix * normal);
+            vViewPosition = -mvPosition.xyz;
+            gl_Position = projectionMatrix * mvPosition;
+        }
+    `,
+    fragmentShader: document.getElementById('fragmentShader').textContent
+});
+
+const martyVest = new THREE.Mesh(vestGeo, vestMat);
+scene.add(martyVest);
+
+// iPhone 2030 (Translucent Slate Instance)
+const phoneGeo = new THREE.BoxGeometry(0.08, 0.16, 0.005);
+const phoneMat = new THREE.MeshPhysicalMaterial({ 
+    color: 0x000000, 
+    transmission: 0.9, 
+    thickness: 0.02,
+    roughness: 0.05
+});
+const iphone = new THREE.Mesh(phoneGeo, phoneMat);
+iphone.position.set(0.7, 0, 0.3);
+scene.add(iphone);
+
+// Animation Loop
+function animate(time) {
+    vestMat.uniforms.uTime.value = time * 0.001;
+    requestAnimationFrame(animate);
+    // Render logic here...
+}
+animate();
