@@ -1,0 +1,107 @@
+gcloud services enable \
+    compute.googleapis.com \
+    securitycenter.googleapis.com \
+    aiplatform.googleapis.com
+
+
+
+import os
+from google.cloud import securitycenter
+from vertexai.generative_models import GenerativeModel
+import vertexai
+
+# Configuration
+PROJECT_ID = "your-project-id"
+LOCATION = "us-central1"
+
+def active_sentinel_analysis():
+    # Initialize Vertex AI (Free tier available for Gemini Flash)
+    vertexai.init(project=PROJECT_ID, location=LOCATION)
+    model = GenerativeModel("gemini-1.5-flash")
+
+    # 1. Fetch Active Security Findings from SCC
+    client = securitycenter.SecurityCenterClient()
+    source_name = f"projects/{PROJECT_ID}/sources/-"
+    
+    findings = client.list_findings(
+        request={"parent": source_name, "filter": 'state="ACTIVE"'}
+    )
+
+    print("--- Active Sentinel AI Report ---")
+    
+    for response in findings:
+        finding = response.finding
+        finding_detail = f"Category: {finding.category}, Resource: {finding.resource_name}"
+        
+        # 2. Use AI to generate a 'Superfast Kaizen' remediation plan
+        prompt = f"Analyze this GCP security finding and provide a 3-step remediation code snippet: {finding_detail}"
+        
+        ai_response = model.generate_content(prompt)
+        
+        print(f"\n[ALERT] {finding.category}")
+        print(f"Target: {finding.resource_name}")
+        print(f"AI Remediation Strategy:\n{ai_response.text}")
+        print("-" * 30)
+
+if __name__ == "__main__":
+    active_sentinel_analysis()
+
+
+
+import os
+from google.cloud import securitycenter, resourcemanager_v3
+from vertexai.generative_models import GenerativeModel
+import vertexai
+
+# Configuration - Ensure these match your environment
+PROJECT_ID = "your-project-id"
+LOCATION = "us-central1"
+
+def active_sentinel_core():
+    # Initialize Google AI with 2026 'Superfast' optimized models
+    vertexai.init(project=PROJECT_ID, location=LOCATION)
+    sentinel_ai = GenerativeModel("gemini-1.5-flash")
+
+    # 1. Fetch live findings from Security Command Center (SCC)
+    scc_client = securitycenter.SecurityCenterClient()
+    parent = f"projects/{PROJECT_ID}/sources/-"
+    
+    # Filter for ACTIVE threats with HIGH/CRITICAL severity
+    findings = scc_client.list_findings(
+        request={
+            "parent": parent, 
+            "filter": 'state="ACTIVE" AND (severity="HIGH" OR severity="CRITICAL")'
+        }
+    )
+
+    print("--- 🛡️ ACTIVE SENTINEL AI: MONITORING ---")
+
+    for response in findings:
+        f = response.finding
+        
+        # 2. Advanced Reasoning: Ask AI to analyze the threat surface
+        analysis_prompt = f"""
+        ACT AS: Senior Cloud Security Architect.
+        THREAT: {f.category} 
+        RESOURCE: {f.resource_name}
+        CONTEXT: {f.source_properties}
+        
+        TASK: 
+        1. Evaluate if this is a false positive based on resource name.
+        2. Provide a 'Superfast Kaizen' gcloud CLI command to fix this immediately.
+        3. Explain the risk in one clear sentence.
+        """
+        
+        ai_insight = sentinel_ai.generate_content(analysis_prompt)
+        
+        # Displaying with 'HUD' style formatting
+        print(f"\n[!] ALERT: {f.category} detected on {f.resource_name}")
+        print(f"[AI ANALYSIS]:\n{ai_insight.text}")
+        print("="*50)
+
+if __name__ == "__main__":
+    active_sentinel_core()
+
+
+
+gcloud services enable securitycenter.googleapis.com aiplatform.googleapis.com
