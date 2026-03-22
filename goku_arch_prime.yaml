@@ -1,0 +1,147 @@
+from ursina import *
+import random
+
+app = Ursina()
+
+# --- Configuration ---
+window.title = "Goku: Arch Prime Evolution"
+window.borderless = False
+window.fps_counter.enabled = True
+
+# --- Environment ---
+Entity(model='sphere', scale=500, texture='sky_cloudy', double_sided=True)
+ground = Entity(model='plane', scale=100, texture='grass', collider='box')
+
+# --- Goku Arch Prime Entity ---
+class GokuArchPrime(Entity):
+    def __init__(self):
+        super().__init__(
+            model='cube', # Replace with 'goku_model.obj' if available
+            color=color.orange,
+            scale=(1, 2, 1),
+            position=(0, 1, 0)
+        )
+        self.power_level = 9001
+        self.is_evolving = False
+        
+        # Arch Prime Aura Particles
+        self.aura = Entity(
+            parent=self,
+            model='sphere',
+            scale=1.5,
+            color=color.rgba(0, 255, 255, 50), # Cyan/Divine glow
+            alpha=0.3
+        )
+
+    def update(self):
+        # Pulse Aura Effect
+        self.aura.scale = 1.5 + (sin(time.dt * 10) * 0.1)
+        
+        # Movement
+        if held_keys['w']: self.z += time.dt * 5
+        if held_keys['s']: self.z -= time.dt * 5
+        if held_keys['a']: self.x -= time.dt * 5
+        if held_keys['d']: self.x += time.dt * 5
+
+# --- HUD System ---
+hud_container = Entity(parent=camera.ui, position=(0, 0))
+power_text = Text(text="POWER: OVER 9000", position=(-0.8, 0.45), scale=1.5, color=color.cyan)
+
+def update():
+    # Dynamic HUD update
+    power_text.text = f"ARCH PRIME LVL: {int(goku.power_level + (random.random() * 100))}"
+
+goku = GokuArchPrime()
+EditorCamera() # Allow mouse look
+
+app.run()
+
+
+
+from ursina import *
+from ursina.prefabs.health_bar import HealthBar
+import random
+
+app = Ursina()
+
+# --- Global Configurations ---
+window.color = color.black
+window.fps_counter.enabled = True
+Entity.default_shader = lit_with_shadows_shader
+
+# --- Environment Setup ---
+Entity(model='sphere', scale=1000, texture='sky_dark', double_sided=True)
+ground = Entity(model='plane', scale=200, texture='grass', texture_scale=(20,20), collider='box')
+
+# --- Advanced Aura System ---
+class ArchPrimeAura(Entity):
+    def __init__(self, target):
+        super().__init__(parent=target, model='sphere', scale=1.2, color=color.rgba(0, 255, 255, 40))
+        self.particles = []
+        
+    def update(self):
+        # Procedural "Flicker" for the Prime State
+        self.scale = 1.2 + (random.uniform(0, 0.1) * sin(time.dt * 20))
+        self.alpha = 0.3 + (0.1 * cos(time.dt * 5))
+
+# --- The Arch Prime Entity ---
+class GokuArchPrime(Entity):
+    def __init__(self):
+        super().__init__(
+            model='cube', # Placeholder for high-poly 3D model
+            texture='white_cube',
+            color=color.orange,
+            scale=(1, 2, 1),
+            position=(0, 1, 0),
+            collider='box'
+        )
+        self.max_ki = 1000000
+        self.current_ki = 500000
+        self.evolution_stage = "Arch Prime 1"
+        self.resonance = 0.0
+        self.aura = ArchPrimeAura(self)
+
+    def update(self):
+        # Movement Logic
+        direction = Vec3(held_keys['d'] - held_keys['a'], 0, held_keys['w'] - held_keys['s']).normalized()
+        self.position += direction * time.dt * 15
+        
+        # Evolution Logic: Resonance builds over time
+        if self.resonance < 100.0:
+            self.resonance += time.dt * 2
+        
+        # Ki Depletion/Regen Simulation
+        self.current_ki = clamp(self.current_ki + (time.dt * 500), 0, self.max_ki)
+
+# --- Advanced HUD System ---
+class ArchPrimeHUD(Entity):
+    def __init__(self, target):
+        super().__init__(parent=camera.ui)
+        self.target = target
+        
+        # UI Elements
+        self.ki_bar = HealthBar(max_value=target.max_ki, value=target.current_ki, 
+                                position=(-0.8, 0.45), scale=(0.5, 0.03), bar_color=color.cyan)
+        
+        self.label = Text(text="[ ARCH PRIME STATUS ]", position=(-0.8, 0.4), scale=1, color=color.white)
+        self.resonance_text = Text(text="RESONANCE: 0%", position=(-0.8, 0.35), scale=0.8, color=color.yellow)
+        
+        # Scouter Overlay Effect
+        self.overlay = Entity(parent=self, model='quad', scale=(2, 1), 
+                             texture='scouter_grid', alpha=0.1, color=color.cyan)
+
+    def update(self):
+        self.ki_bar.value = self.target.current_ki
+        self.resonance_text.text = f"PRIME RESONANCE: {self.target.resonance:.2f}%"
+        
+        # Visual Warning if Resonance is High
+        if self.target.resonance > 90:
+            self.resonance_text.color = color.red
+            self.resonance_text.scale = 0.8 + (0.05 * sin(time.dt * 15))
+
+# --- Initialization ---
+goku = GokuArchPrime()
+hud = ArchPrimeHUD(goku)
+EditorCamera() # For 3D inspection
+
+app.run()
