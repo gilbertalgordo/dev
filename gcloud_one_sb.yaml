@@ -1,0 +1,133 @@
+gcloud auth application-default login
+
+
+
+import os
+import json
+from google import genai
+from google.genai import types
+
+# 1. BOILERPLATE: Singleton Client Setup
+# Uses your local 'gcloud' login automatically.
+client = genai.Client(
+    vertexai=True,
+    project="your-project-id", # Replace with your GCP Project ID
+    location="us-central1"
+)
+
+# 2. DEFINITION: The "Startup Builder" Engine
+class StartupAIEngine:
+    def __init__(self, model_name="gemini-2.0-flash"):
+        self.model = model_name
+
+    def generate_structured_mvp(self, feature_request: str):
+        """Generates structured JSON data for an app feature."""
+        
+        # We use a 'response_mime_type' to ensure the AI returns valid JSON
+        # that your startup's frontend can actually parse.
+        config = types.GenerateContentConfig(
+            temperature=0.4,
+            response_mime_type="application/json",
+            response_schema={
+                "type": "OBJECT",
+                "properties": {
+                    "feature_name": {"type": "STRING"},
+                    "implementation_steps": {"type": "ARRAY", "items": {"type": "STRING"}},
+                    "code_snippet": {"type": "STRING"},
+                    "estimated_complexity": {"type": "STRING"}
+                }
+            }
+        )
+
+        prompt = f"Design a production-ready startup feature for: {feature_request}"
+        
+        response = client.models.generate_content(
+            model=self.model,
+            contents=prompt,
+            config=config
+        )
+        
+        return json.loads(response.text)
+
+# 3. EXECUTION: Rapid Prototyping
+if __name__ == "__main__":
+    builder = StartupAIEngine()
+    
+    print("🚀 Building feature: User Auth System...")
+    result = builder.generate_structured_mvp("Firebase Auth with Google Login and custom profile sync")
+    
+    print(f"\nFeature: {result['feature_name']}")
+    print(f"Complexity: {result['estimated_complexity']}")
+    print("\nNext Steps:")
+    for step in result['implementation_steps']:
+        print(f"- {step}")
+
+
+
+gcloud auth application-default login
+pip install -U google-genai
+
+
+
+import os
+from google import genai
+from google.genai import types
+
+# 1. Initialize Client (Single Account / Developer Mode)
+client = genai.Client(
+    vertexai=True,
+    project="your-project-id", # Replace with your actual Project ID
+    location="us-central1"
+)
+
+# 2. Define Tools (Functions the AI can trigger)
+def create_mvp_file(filename: str, content: str):
+    """Creates a project file with specific code content."""
+    with open(filename, "w") as f:
+        f.write(content)
+    return f"Successfully created {filename}"
+
+# 3. The Startup Builder Class
+class StartupAgent:
+    def __init__(self):
+        self.model_id = "gemini-3-flash" # Optimized for speed/reasoning balance
+        self.tools = [create_mvp_file]
+
+    async def build_feature(self, user_goal: str):
+        # Configure advanced reasoning and structured tool use
+        config = types.GenerateContentConfig(
+            tools=self.tools,
+            temperature=1.0, # Recommended for Gemini 3 reasoning
+            # 'thinking_level' manages the depth of internal planning
+            thinking_level="high", 
+            include_thoughts=True
+        )
+
+        print(f"🚀 Builder Starting: {user_goal}...")
+        
+        # Async call for non-blocking UI/System interactions
+        response = await client.aio.models.generate_content(
+            model=self.model_id,
+            contents=user_goal,
+            config=config
+        )
+
+        # Handle Thought Signatures (Reasoning chain)
+        if response.candidates[0].thought:
+            print(f"\n[AI REASONING]: {response.candidates[0].thought}\n")
+
+        # Execute Function Calls automatically if requested
+        for part in response.candidates[0].content.parts:
+            if part.function_call:
+                # Logic to map function_call to local tools
+                print(f"🔧 AI is executing: {part.function_call.name}")
+                # (In production, use a dispatcher here)
+        
+        return response.text
+
+import asyncio
+if __name__ == "__main__":
+    agent = StartupAgent()
+    asyncio.run(agent.build_feature(
+        "Generate a FastAPI user authentication route and save it to 'auth.py'"
+    ))
