@@ -1,0 +1,87 @@
+import secrets
+import string
+
+def generate_secure_password(length=16):
+    # Define the character pool
+    alphabet = string.ascii_letters + string.digits + string.punctuation
+    
+    # Ensure the password meets complexity requirements
+    while True:
+        password = ''.join(secrets.choice(alphabet) for _ in range(length))
+        if (any(c.islower() for c in password)
+                and any(c.isupper() for c in password)
+                and sum(c.isdigit() for c in password) >= 3):
+            break
+    return password
+
+# Example usage
+print(f"Generated Password: {generate_secure_password()}")
+
+
+
+
+import secrets
+import string
+from cryptography.fernet import Fernet
+
+class SecureVault:
+    def __init__(self):
+        # Generate a master key for this session (In production, store this securely)
+        self.key = Fernet.generate_key()
+        self.cipher = Fernet(self.key)
+
+    def generate_complex_password(self, length=20):
+        """Generates a high-entropy password with guaranteed character diversity."""
+        alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+        while True:
+            password = ''.join(secrets.choice(alphabet) for _ in range(length))
+            # Logic check: Ensure at least 3 numbers and 2 symbols for 'Gmail' level security
+            if (sum(c.isdigit() for c in password) >= 3 and 
+                sum(c in "!@#$%^&*" for c in password) >= 2):
+                return password
+
+    def encrypt_data(self, plain_text):
+        return self.cipher.encrypt(plain_text.encode())
+
+    def decrypt_data(self, cipher_text):
+        return self.cipher.decrypt(cipher_text).decode()
+
+
+
+import customtkinter as ctk
+
+class AuthApp(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        self.vault = SecureVault()
+        self.title("Secure Credential HUD")
+        self.geometry("400x300")
+
+        # UI Element: Email Address (Auto-Hide)
+        self.email_label = ctk.CTkLabel(self, text="Email: ****************")
+        self.email_label.pack(pady=10)
+        self.email_label.bind("<Enter>", lambda e: self.reveal_email())
+        self.email_label.bind("<Leave>", lambda e: self.hide_email())
+
+        # UI Element: Password Display
+        self.pass_entry = ctk.CTkEntry(self, show="*", width=250)
+        self.pass_entry.pack(pady=10)
+
+        # Generate Button
+        self.gen_btn = ctk.CTkButton(self, text="Generate Secure Pass", command=self.update_pass)
+        self.gen_btn.pack(pady=20)
+
+    def update_pass(self):
+        new_pass = self.vault.generate_complex_password()
+        self.pass_entry.delete(0, 'end')
+        self.pass_entry.insert(0, new_pass)
+
+    def reveal_email(self):
+        self.email_label.configure(text="Email: user@gmail.com")
+
+    def hide_email(self):
+        self.email_label.configure(text="Email: ****************")
+
+if __name__ == "__main__":
+    app = AuthApp()
+    app.mainloop()
