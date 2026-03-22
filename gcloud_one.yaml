@@ -1,0 +1,107 @@
+pip install -U google-genai
+
+
+
+gcloud auth application-default login
+
+
+
+
+from google import genai
+from google.genai import types
+
+# 1. Initialize the Client
+# By setting 'vertexai=True', it uses your Google Cloud project context.
+# It automatically finds your credentials from the 'gcloud auth' step above.
+client = genai.Client(
+    vertexai=True, 
+    project="your-project-id", # Replace with your GCP Project ID
+    location="us-central1"     # Standard developer region
+)
+
+def generate_ai_response(prompt_text):
+    try:
+        # 2. Call the Model
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt_text,
+            config=types.GenerateContentConfig(
+                temperature=0.7,
+                max_output_tokens=500,
+            ),
+        )
+        
+        # 3. Output the text result
+        print(f"AI Response:\n{response.text}")
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+if __name__ == "__main__":
+    user_input = "Write a Python function to sort a list of strings by length."
+    generate_ai_response(user_input)
+
+
+
+
+gcloud auth application-default login
+pip install -U google-genai
+
+
+
+import asyncio
+from google import genai
+from google.genai import types
+
+# Initialize Client using Application Default Credentials (ADC)
+client = genai.Client(
+    vertexai=True,
+    project="your-project-id",
+    location="us-central1"
+)
+
+MODEL_ID = "gemini-3-flash" # Latest 2026 model
+
+async def setup_and_run():
+    # --- ADVANCED FEATURE: CONTEXT CACHING ---
+    # Caches large context to save tokens on repeated queries
+    print("Creating Context Cache...")
+    cache = client.caches.create(
+        model=MODEL_ID,
+        config=types.CreateCachedContentConfig(
+            display_name="dev-mode-cache",
+            contents=[
+                types.Content(
+                    role="user", 
+                    parts=[types.Part.from_text("Large developer documentation or system rules here...")]
+                )
+            ],
+            ttl="3600s", # Cache expires in 1 hour
+        ),
+    )
+
+    # --- ADVANCED FEATURE: ASYNC STREAMING ---
+    print(f"Querying {MODEL_ID} with Cache {cache.name}...")
+    
+    async def get_stream():
+        response_stream = await client.aio.models.generate_content_stream(
+            model=MODEL_ID,
+            contents="How do I optimize this specific function using the rules in the cache?",
+            config=types.GenerateContentConfig(
+                cached_content=cache.name,
+                temperature=0.2, # Lower for technical accuracy
+                # Thought signatures help in debugging complex reasoning
+                include_thoughts=True 
+            ),
+        )
+        
+        async for chunk in response_stream:
+            # Handle 'thought' parts for better developer transparency
+            if hasattr(chunk, 'thought'):
+                print(f"[Thinking]: {chunk.thought}", end="", flush=True)
+            print(chunk.text, end="", flush=True)
+
+    await get_stream()
+
+if __name__ == "__main__":
+    asyncio.run(setup_and_run())
