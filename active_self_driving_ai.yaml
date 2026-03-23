@@ -1,0 +1,140 @@
+import cv2
+import numpy as np
+
+def detect_lanes(frame):
+    # Convert to grayscale and apply Gaussian blur
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray, (5, 5), 0)
+    
+    # Canny Edge Detection
+    edges = cv2.Canny(blur, 50, 150)
+    
+    # Define a Region of Interest (ROI) - a trapezoid in front of the car
+    height, width = edges.shape
+    mask = np.zeros_like(edges)
+    polygon = np.array([[
+        (0, height), (width, height), (width // 2, height // 2)
+    ]], np.int32)
+    cv2.fillPoly(mask, polygon, 255)
+    cropped_edges = cv2.bitwise_and(edges, mask)
+    
+    # Hough Transform to find lines
+    lines = cv2.HoughLinesP(cropped_edges, 1, np.pi/180, 50, maxLineGap=50)
+    return lines
+
+
+
+class PIDController:
+    def __init__(self, kp, ki, kd):
+        self.kp = kp
+        self.ki = ki
+        self.kd = kd
+        self.prev_error = 0
+        self.integral = 0
+
+    def compute(self, setpoint, measured_value):
+        error = setpoint - measured_value
+        self.integral += error
+        derivative = error - self.prev_error
+        output = (self.kp * error) + (self.ki * self.integral) + (self.kd * derivative)
+        self.prev_error = error
+        return output
+
+# Usage: steering = controller.compute(lane_center, car_position)
+
+
+
+def active_driving_loop():
+    cap = cv2.VideoCapture('road_feed.mp4')
+    steering_ai = PIDController(kp=0.5, ki=0.01, kd=0.1)
+    
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret: break
+        
+        # 1. Perception
+        lines = detect_lanes(frame)
+        
+        # 2. Planning (Simplified: Midpoint of detected lines)
+        target_center = 640 # Assuming 1280px width
+        current_center = calculate_lane_midpoint(lines) 
+        
+        # 3. Control
+        steering_output = steering_ai.compute(target_center, current_center)
+        
+        # 4. Actuation (HUD Overlay)
+        display_hud(frame, steering_output, current_center)
+        
+        cv2.imshow("Active AI Feed", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+
+
+import torch
+import torch.nn as nn
+from vit_pytorch import ViT
+
+class MultiModalFusion(nn.Module):
+    def __init__(self):
+        super().__init__()
+        # Visual Transformer for 360-degree camera feeds
+        self.cam_encoder = ViT(image_size=256, patch_size=32, num_classes=512, dim=1024, depth=6, heads=16, mlp_dim=2048)
+        # PointNet++ or Sparse-Convolution for LiDAR
+        self.lidar_encoder = nn.Sequential(nn.Linear(3, 64), nn.ReLU(), nn.Linear(64, 512))
+        
+        # Cross-Attention to fuse Vision and Depth
+        self.fusion_layer = nn.MultiheadAttention(embed_dim=1024, num_heads=8)
+
+    def forward(self, img_batch, lidar_batch):
+        v_feat = self.cam_encoder(img_batch)   # (B, 512)
+        l_feat = self.lidar_encoder(lidar_batch) # (B, 512)
+        
+        # Concatenate and attend to create Global Context
+        combined = torch.cat([v_feat, l_feat], dim=-1)
+        fused_context, _ = self.fusion_layer(combined, combined, combined)
+        return fused_context
+
+
+
+class WaypointPlanner(nn.Module):
+    def __init__(self, context_dim=1024, horizon=50): # 5 seconds @ 10Hz
+        super().__init__()
+        self.gru = nn.GRU(context_dim, 256, batch_first=True)
+        self.regressor = nn.Linear(256, 2) # Outputs (x, y) per step
+
+    def forward(self, fused_context, horizon=50):
+        # Auto-regressively predict the future path
+        outputs = []
+        hidden = fused_context.unsqueeze(0)
+        curr_input = fused_context.unsqueeze(1)
+        
+        for _ in range(horizon):
+            out, hidden = self.gru(curr_input, hidden)
+            waypoint = self.regressor(out)
+            outputs.append(waypoint)
+            curr_input = out # Feedback loop
+            
+        return torch.cat(outputs, dim=1)
+
+
+
+def symbolic_safety_check(predicted_path, ego_state, obstacles):
+    """
+    Validates the AI path using hard-coded physics and traffic logic.
+    """
+    # 1. Kinematic Feasibility: Can the car actually turn this sharply?
+    curvature = calculate_curvature(predicted_path)
+    if curvature > ego_state.max_allowable_curvature:
+        return fallback_emergency_brake()
+
+    # 2. Occupancy Grid Check: Does the path collide with predicted actor positions?
+    for obstacle in obstacles:
+        if check_collision(predicted_path, obstacle.predicted_trajectory):
+            # Recalculate safe path using A* or Frenet Planner
+            return compute_evasive_maneuver(ego_state, obstacle)
+
+    return predicted_path # Path is "Active" and verified
