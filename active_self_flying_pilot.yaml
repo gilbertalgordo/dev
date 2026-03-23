@@ -1,0 +1,138 @@
+from dronekit import connect, VehicleMode, LocationGlobalRelative
+import time
+
+# --- INITIALIZATION ---
+# Connect to the Vehicle (UDP for SITL/Sim or Serial for Pixhawk)
+connection_string = '127.0.0.1:14550' 
+print(f"Connecting to vehicle on: {connection_string}")
+vehicle = connect(connection_string, wait_ready=True)
+
+def arm_and_takeoff(target_altitude):
+    """
+    Arms vehicle and flys to target_altitude.
+    """
+    print("Basic pre-arm checks...")
+    # Wait for vehicle to be ready (GPS lock, EKF check)
+    while not vehicle.is_armable:
+        print(" Waiting for vehicle to initialise...")
+        time.sleep(1)
+
+    print("Arming motors")
+    vehicle.mode = VehicleMode("GUIDED")
+    vehicle.armed = True
+
+    while not vehicle.armed:
+        print(" Waiting for arming...")
+        time.sleep(1)
+
+    print("Taking off!")
+    vehicle.simple_takeoff(target_altitude)
+
+    while True:
+        print(f" Altitude: {vehicle.location.global_relative_frame.alt}")
+        # Break when target altitude is reached (within 5% margin)
+        if vehicle.location.global_relative_frame.alt >= target_altitude * 0.95:
+            print("Reached target altitude")
+            break
+        time.sleep(1)
+
+# --- ACTIVE PILOT LOGIC ---
+try:
+    # 1. Takeoff to 10 meters
+    arm_and_takeoff(10)
+
+    # 2. Define 3D Waypoint (Lat, Lon, Alt)
+    # This represents the "Self-Flying" decision point
+    print("Setting next waypoint...")
+    point1 = LocationGlobalRelative(-35.361354, 149.165218, 15)
+    vehicle.simple_goto(point1)
+
+    # 3. Monitor flight HUD data
+    while vehicle.mode.name == "GUIDED":
+        # Simulate active decision making based on altitude and speed
+        curr_alt = vehicle.location.global_relative_frame.alt
+        print(f"HUD -> Alt: {curr_alt:.2f}m | GroundSpeed: {vehicle.groundspeed:.2f}m/s")
+        
+        if curr_alt > 14.5:
+            print("Waypoint reached. Initiating RTL (Return to Launch).")
+            vehicle.mode = VehicleMode("RTL")
+            break
+        time.sleep(1)
+
+except Exception as e:
+    print(f"Emergency: {e}")
+    vehicle.mode = VehicleMode("LAND")
+
+finally:
+    print("Closing vehicle connection")
+    vehicle.close()
+
+
+
+from dronekit import connect, VehicleMode, LocationGlobalRelative
+from pymavlink import mavutil
+import time
+import math
+
+# --- CONNECTION ---
+vehicle = connect('127.0.0.1:14550', wait_ready=True)
+
+def set_velocity_body(vx, vy, vz):
+    """
+    Advanced Command: Moves the drone relative to its OWN orientation (Body Frame).
+    vx: Forward/Backward | vy: Left/Right | vz: Up/Down
+    """
+    msg = vehicle.message_factory.set_position_target_local_ned_encode(
+        0, 0, 0,
+        mavutil.mavlink.MAV_FRAME_BODY_NED, # Relative to drone heading
+        0b0000111111000111, # Bitmask: only use velocity
+        0, 0, 0,            # Positions (ignored)
+        vx, vy, vz,         # Velocities in m/s
+        0, 0, 0,            # Acceleration (ignored)
+        0, 0)               # Yaw/Yaw-rate (ignored)
+    vehicle.send_mavlink(msg)
+    vehicle.flush()
+
+def active_evasion_logic():
+    """
+    Simulated Active Pilot: Adjusts flight path based on 3D sensor 'instances'.
+    """
+    print("AI Pilot: Active Engagement Mode Started")
+    
+    # 1. Initial Ascent
+    vehicle.simple_takeoff(15)
+    while vehicle.location.global_relative_frame.alt < 14:
+        time.sleep(1)
+
+    # 2. Continuous Decision Loop (The 'Active' Part)
+    duration = 20 # 20-second active patrol
+    start_time = time.time()
+    
+    while time.time() - start_time < duration:
+        # Example HUD Data
+        alt = vehicle.location.global_relative_frame.alt
+        heading = vehicle.heading
+        
+        print(f"HUD -> ALT: {alt:.1f}m | HDG: {heading}° | MODE: ACTIVE_PATROL")
+
+        # LOGIC: If too high, descend; if moving, push forward
+        if alt > 18:
+            set_velocity_body(2, 0, 0.5)  # Move forward 2m/s, Descend 0.5m/s
+        else:
+            set_velocity_body(3, 1, 0)    # Strafe slightly while moving forward
+            
+        time.sleep(1)
+
+    print("AI Pilot: Mission Complete. Returning to Base.")
+    vehicle.mode = VehicleMode("RTL")
+
+# --- EXECUTION ---
+try:
+    vehicle.mode = VehicleMode("GUIDED")
+    vehicle.armed = True
+    active_evasion_logic()
+except Exception as e:
+    print(f"AI SYSTEM FAILURE: {e}")
+    vehicle.mode = VehicleMode("LAND")
+finally:
+    vehicle.close()
