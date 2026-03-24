@@ -1,0 +1,152 @@
+// Configuration
+const GITHUB_TOKEN = 'YOUR_GITHUB_PAT';
+const GEMINI_API_KEY = 'YOUR_GEMINI_API_KEY';
+const REPO_OWNER = 'owner_name';
+const REPO_NAME = 'repo_name';
+
+/**
+ * Main function to sync GitHub data with AI Processing
+ */
+function syncGithubWithAI() {
+  const issues = fetchGithubIssues();
+  
+  if (issues.length === 0) {
+    Logger.log("No open issues found.");
+    return;
+  }
+
+  const prompt = "Summarize these GitHub issues into a prioritized bulleted list for a project manager: " + JSON.stringify(issues);
+  const aiSummary = callGeminiAI(prompt);
+  
+  Logger.log("AI Summary: " + aiSummary);
+  
+  // Optional: Save to a Google Doc
+  // DocumentApp.create('GitHub AI Summary').getBody().setText(aiSummary);
+}
+
+/**
+ * Connects to GitHub API
+ */
+function fetchGithubIssues() {
+  const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/issues?state=open`;
+  const options = {
+    'method': 'get',
+    'headers': {
+      'Authorization': 'token ' + GITHUB_TOKEN,
+      'Accept': 'application/vnd.github.v3+json'
+    },
+    'muteHttpExceptions': true
+  };
+  
+  const response = UrlFetchApp.fetch(url, options);
+  return JSON.parse(response.getContentText()).map(issue => ({
+    title: issue.title,
+    body: issue.body,
+    user: issue.user.login
+  }));
+}
+
+/**
+ * Connects to Google AI (Gemini)
+ */
+function callGeminiAI(text) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+  
+  const payload = {
+    "contents": [{
+      "parts": [{ "text": text }]
+    }]
+  };
+
+  const options = {
+    'method': 'post',
+    'contentType': 'application/json',
+    'payload': JSON.stringify(payload)
+  };
+
+  const response = UrlFetchApp.fetch(url, options);
+  const json = JSON.parse(response.getContentText());
+  return json.candidates[0].content.parts[0].text;
+}
+
+
+
+/**
+ * Configuration Constants
+ */
+const GITHUB_TOKEN = 'YOUR_GITHUB_PAT';
+const GEMINI_API_KEY = 'YOUR_GEMINI_API_KEY';
+const REPO_OWNER = 'owner_name';
+const REPO_NAME = 'repo_name';
+
+/**
+ * Main function to orchestrate the connection
+ */
+function runGithubAiIntegration() {
+  try {
+    const issues = fetchGithubIssues();
+    
+    if (issues.length === 0) {
+      Logger.log("No open issues found.");
+      return;
+    }
+
+    const prompt = "Please summarize these GitHub issues into a prioritized bulleted list for a developer: " + JSON.stringify(issues);
+    const aiResponse = callGeminiAI(prompt);
+    
+    Logger.log("AI Insights: " + aiResponse);
+    
+    // Example: Sending the result to a Google Sheet
+    // SpreadsheetApp.getActiveSpreadsheet().appendRow([new Date(), aiResponse]);
+    
+  } catch (e) {
+    Logger.log("Error: " + e.toString());
+  }
+}
+
+/**
+ * Fetches data from GitHub REST API
+ */
+function fetchGithubIssues() {
+  const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/issues?state=open`;
+  const options = {
+    'method': 'get',
+    'headers': {
+      'Authorization': 'token ' + GITHUB_TOKEN,
+      'Accept': 'application/vnd.github.v3+json'
+    },
+    'muteHttpExceptions': true
+  };
+  
+  const response = UrlFetchApp.fetch(url, options);
+  const data = JSON.parse(response.getContentText());
+  
+  return data.map(issue => ({
+    title: issue.title,
+    body: issue.body,
+    user: issue.user.login
+  }));
+}
+
+/**
+ * Sends data to Google AI (Gemini)
+ */
+function callGeminiAI(text) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+  
+  const payload = {
+    "contents": [{
+      "parts": [{ "text": text }]
+    }]
+  };
+
+  const options = {
+    'method': 'post',
+    'contentType': 'application/json',
+    'payload': JSON.stringify(payload)
+  };
+
+  const response = UrlFetchApp.fetch(url, options);
+  const json = JSON.parse(response.getContentText());
+  return json.candidates[0].content.parts[0].text;
+}
