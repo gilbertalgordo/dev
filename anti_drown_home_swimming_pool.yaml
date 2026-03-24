@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Anti-Drowning Pool Blueprint</title>
+    <style>
+        body { background-color: #001a33; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; font-family: 'Courier New', monospace; }
+        canvas { border: 2px solid #0055ff; box-shadow: 0 0 20px rgba(0, 85, 255, 0.5); background-color: #002b55; }
+    </style>
+</head>
+<body>
+
+<canvas id="poolCanvas" width="900" height="600"></canvas>
+
+<script>
+    const canvas = document.getElementById('poolCanvas');
+    const ctx = canvas.getContext('2d');
+
+    function drawBlueprint() {
+        // --- 1. Background Grid ---
+        ctx.strokeStyle = 'rgba(0, 85, 255, 0.2)';
+        ctx.lineWidth = 1;
+        for (let x = 0; x <= canvas.width; x += 30) {
+            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+        }
+        for (let y = 0; y <= canvas.height; y += 30) {
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+        }
+
+        // --- 2. Pool Structure ---
+        ctx.strokeStyle = '#00ffff';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(200, 150, 500, 300); // Main Pool Outer Rim
+        
+        // Water area
+        ctx.fillStyle = 'rgba(0, 255, 255, 0.1)';
+        ctx.fillRect(210, 160, 480, 280);
+
+        // --- 3. Safety Features (Sensors & Perimeter) ---
+        // Laser Perimeter Fence
+        ctx.setLineDash([5, 5]);
+        ctx.strokeStyle = '#ff3333';
+        ctx.strokeRect(170, 120, 560, 360);
+        ctx.setLineDash([]);
+
+        // Motion Sensors (Corner Units)
+        ctx.fillStyle = '#ffcc00';
+        const sensors = [[170,120], [730,120], [170,480], [730,480]];
+        sensors.forEach(pos => {
+            ctx.beginPath();
+            ctx.arc(pos[0], pos[1], 8, 0, Math.PI * 2);
+            ctx.fill();
+        });
+
+        // --- 4. HUD Overlay ---
+        ctx.fillStyle = '#00ffff';
+        ctx.font = 'bold 16px Courier New';
+        ctx.fillText("SYSTEM: ACTIVE MONITORING", 20, 40);
+        
+        // HUD Data Box
+        ctx.strokeStyle = '#00ffff';
+        ctx.strokeRect(20, 60, 220, 100);
+        ctx.font = '12px Courier New';
+        ctx.fillText("WATER DEPTH: 1.8m", 30, 85);
+        ctx.fillText("SONAR STATUS: NOMINAL", 30, 105);
+        ctx.fillText("PERIMETER: LOCKED", 30, 125);
+        ctx.fillText("AI OVERWATCH: ONLINE", 30, 145);
+
+        // Dimensional Markings
+        ctx.beginPath();
+        ctx.moveTo(200, 470); ctx.lineTo(700, 470);
+        ctx.stroke();
+        ctx.fillText("15.0m", 430, 490);
+
+        // Warning Label
+        ctx.fillStyle = '#ff3333';
+        ctx.font = 'bold 14px Courier New';
+        ctx.fillText("!!! AUTO-COVER READY !!!", 340, 100);
+    }
+
+    drawBlueprint();
+</script>
+</body>
+</html>
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI-Safety Pool Interface v3.0</title>
+    <style>
+        body { margin: 0; background-color: #010a16; overflow: hidden; font-family: 'Segoe UI', 'Courier New', monospace; color: #00f2ff; }
+        #ui-overlay { position: absolute; top: 20px; left: 20px; pointer-events: none; text-transform: uppercase; letter-spacing: 2px; }
+        .status-bar { border-left: 3px solid #00f2ff; padding-left: 10px; margin-bottom: 20px; background: rgba(0, 242, 255, 0.05); }
+        canvas { display: block; filter: contrast(1.1) brightness(1.1); }
+        .glitch-text { animation: flicker 2s infinite; }
+        @keyframes flicker { 0% { opacity: 1; } 50% { opacity: 0.8; } 100% { opacity: 1; } }
+    </style>
+</head>
+<body>
+
+<div id="ui-overlay">
+    <div class="status-bar">
+        <div class="glitch-text" style="font-weight: bold; font-size: 1.2rem;">System: Overwatch Active</div>
+        <div id="coordinates" style="font-size: 0.8rem;">LOC: 14.352° N, 121.056° E</div>
+    </div>
+    <div class="status-bar" style="border-color: #ff3c00;">
+        <div>Safety Level: Maximum</div>
+        <div id="sensor-data">Sonar: Scanning...</div>
+    </div>
+</div>
+
+<canvas id="blueprintCanvas"></canvas>
+
+<script>
+    const canvas = document.getElementById('blueprintCanvas');
+    const ctx = canvas.getContext('2d');
+    let scanLine = 0;
+    let pulseRadius = 0;
+
+    function init() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    }
+
+    class PoolBlueprint {
+        constructor(x, y, w, h) {
+            this.x = x; this.y = y; this.w = w; this.h = h;
+            this.sensors = [
+                {x: x, y: y}, {x: x+w, y: y}, 
+                {x: x, y: y+h}, {x: x+w, y: y+h}
+            ];
+        }
+
+        drawGrid() {
+            ctx.strokeStyle = 'rgba(0, 242, 255, 0.05)';
+            ctx.lineWidth = 1;
+            for(let i=0; i<canvas.width; i+=40) {
+                ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, canvas.height); ctx.stroke();
+            }
+            for(let i=0; i<canvas.height; i+=40) {
+                ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(canvas.width, i); ctx.stroke();
+            }
+        }
+
+        drawStructure() {
+            // Main Basin
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = '#00f2ff';
+            ctx.strokeStyle = '#00f2ff';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(this.x, this.y, this.w, this.h);
+            
+            // Sub-surface Depth Indicators
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = 'rgba(0, 242, 255, 0.3)';
+            ctx.setLineDash([10, 5]);
+            ctx.strokeRect(this.x + 20, this.y + 20, this.w - 40, this.h - 40);
+            ctx.setLineDash([]);
+
+            // Dimensions Label
+            ctx.fillStyle = '#00f2ff';
+            ctx.font = '12px Courier New';
+            ctx.fillText(`LENGTH: ${(this.w/20).toFixed(1)}m`, this.x + this.w/2 - 30, this.y - 15);
+            ctx.fillText(`WIDTH: ${(this.h/20).toFixed(1)}m`, this.x - 70, this.y + this.h/2);
+        }
+
+        drawSensors(time) {
+            this.sensors.forEach((s, i) => {
+                // Sensor Housing
+                ctx.fillStyle = '#ff3c00';
+                ctx.beginPath();
+                ctx.arc(s.x, s.y, 6, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Proximity Pulse
+                let r = (pulseRadius + (i * 20)) % 100;
+                ctx.strokeStyle = `rgba(255, 60, 0, ${1 - r/100})`;
+                ctx.beginPath();
+                ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+                ctx.stroke();
+            });
+        }
+    }
+
+    const myPool = new PoolBlueprint(window.innerWidth/2 - 300, window.innerHeight/2 - 150, 600, 300);
+
+    function animate(time) {
+        ctx.fillStyle = '#010a16';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        myPool.drawGrid();
+        myPool.drawStructure();
+        myPool.drawSensors(time);
+
+        // HUD Scanning Line
+        scanLine = (scanLine + 2) % canvas.height;
+        ctx.strokeStyle = 'rgba(0, 242, 255, 0.1)';
+        ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(0, scanLine); ctx.lineTo(canvas.width, scanLine); ctx.stroke();
+
+        pulseRadius += 1;
+        requestAnimationFrame(animate);
+    }
+
+    window.addEventListener('resize', init);
+    init();
+    animate();
+</script>
+</body>
+</html>
