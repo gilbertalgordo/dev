@@ -1,0 +1,67 @@
+import yfinance as yf
+import pandas as pd
+
+def get_active_nyse_stocks():
+    print("Fetching active NYSE market data...")
+    
+    # Using yfinance to get the most active stocks
+    # This returns a list of tickers with high volume/volatility
+    active_stocks = yf.Search("", listCount=10).quotes
+    
+    # Filter for stocks listed on the NYSE
+    nyse_active = [stock for stock in active_stocks if stock.get('exchange') == 'NYQ']
+    
+    if not nyse_active:
+        return "No active NYSE stocks found at this moment."
+
+    # Create a simple table for display
+    df = pd.DataFrame(nyse_active)
+    return df[['symbol', 'shortName', 'regularMarketPrice', 'regularMarketChangePercent']]
+
+# Run the function
+if __name__ == "__main__":
+    try:
+        data = get_active_nyse_stocks()
+        print(data)
+    except Exception as e:
+        print(f"Error fetching data: {e}")
+
+
+
+import time
+from polygon import WebSocketClient
+from polygon.websocket.models import WebSocketMessage, EquityTrade
+from typing import List
+
+# Replace 'YOUR_API_KEY' with a valid Polygon.io API key
+API_KEY = "YOUR_API_KEY"
+
+def handle_msg(msgs: List[WebSocketMessage]):
+    """
+    Callback function to process incoming market events.
+    """
+    for m in msgs:
+        if isinstance(m, EquityTrade):
+            # Filtering for NYSE (Exchange ID 1) or high-volume trades
+            # m.p = price, m.s = size (shares), m.sym = ticker symbol
+            print(f"[TRADE] {m.sym}: {m.s} shares @ ${m.p:.2f} (Time: {m.player_timestamp})")
+
+def main():
+    # 'T.*' subscribes to ALL real-time trades across US exchanges
+    # You can specify symbols like ["T.AAPL", "T.TSLA"] for a narrow watch
+    client = WebSocketClient(
+        api_key=API_KEY,
+        subscriptions=["T.*"], 
+        on_message=handle_msg
+    )
+
+    print("--- Starting NYSE Real-Time Firehose ---")
+    
+    # Run the client in the background
+    client.run()
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nStream stopped by user.")
