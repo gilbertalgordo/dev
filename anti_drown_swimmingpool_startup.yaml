@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AI Safety Pool Blueprint v4.0</title>
+    <style>
+        :root { --neon-blue: #00f2ff; --alarm-red: #ff3c00; --bg-dark: #020d1a; }
+        body { margin: 0; background: var(--bg-dark); color: var(--neon-blue); font-family: 'Segoe UI', monospace; overflow: hidden; }
+        
+        /* Remote Control Styling */
+        #remote {
+            position: absolute; bottom: 40px; right: 40px;
+            width: 120px; height: 200px;
+            background: #111; border: 2px solid #333;
+            border-radius: 20px; padding: 15px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.8), inset 0 0 10px rgba(0,242,255,0.2);
+            display: flex; flex-direction: column; justify-content: space-between; z-index: 10;
+        }
+        .btn { 
+            width: 100%; height: 35px; border-radius: 5px; background: #222; 
+            border: 1px solid var(--neon-blue); color: var(--neon-blue); font-size: 10px; cursor: pointer;
+            transition: 0.3s;
+        }
+        .btn:active { background: var(--neon-blue); color: black; }
+
+        /* HUD & Startup Overlay */
+        #hud-top { position: absolute; top: 20px; left: 20px; border-left: 4px solid var(--neon-blue); padding: 10px; }
+        #startup-log { position: absolute; top: 20px; right: 20px; font-size: 12px; text-align: right; }
+        .loading-bar { width: 200px; height: 4px; background: #111; margin-top: 5px; position: relative; }
+        #progress { width: 0%; height: 100%; background: var(--neon-blue); transition: 0.5s; }
+    </style>
+</head>
+<body>
+
+<div id="hud-top">
+    <div style="font-size: 1.5rem; font-weight: bold;">AI OVERWATCH CORE</div>
+    <div id="status-text">STATUS: INITIALIZING...</div>
+</div>
+
+<div id="startup-log">
+    <div>SYSTEM CHECK: <span id="sys-check">WAITING</span></div>
+    <div class="loading-bar"><div id="progress"></div></div>
+</div>
+
+<div id="remote">
+    <button class="btn" onclick="toggleCover()">AUTO-COVER</button>
+    <button class="btn" onclick="triggerAlarm()" style="border-color: var(--alarm-red); color: var(--alarm-red);">ALARM</button>
+    <button class="btn" onclick="bootAI()">BOOT AI</button>
+    <div style="text-align: center; font-size: 8px; margin-top: 10px;">REMOTE-X1</div>
+</div>
+
+<canvas id="blueprint"></canvas>
+
+<script>
+    const canvas = document.getElementById('blueprint');
+    const ctx = canvas.getContext('2d');
+    let isCovered = false;
+    let coverWidth = 0;
+    let aiActive = false;
+
+    function init() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        startSequence();
+    }
+
+    // Startup AI Sequence Logic
+    function startSequence() {
+        const logs = ["CONNECTING...", "SCANNING SONAR...", "CALIBRATING LASERS...", "AI ONLINE"];
+        let i = 0;
+        const interval = setInterval(() => {
+            document.getElementById('sys-check').innerText = logs[i];
+            document.getElementById('progress').style.width = (i + 1) * 25 + "%";
+            i++;
+            if (i >= logs.length) {
+                clearInterval(interval);
+                document.getElementById('status-text').innerText = "STATUS: ACTIVE PROTECT";
+                aiActive = true;
+            }
+        }, 1000);
+    }
+
+    function draw() {
+        ctx.fillStyle = '#020d1a';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const cx = canvas.width / 2;
+        const cy = canvas.height / 2;
+        const pW = 600;
+        const pH = 300;
+
+        // 1. Draw Grid
+        ctx.strokeStyle = 'rgba(0, 242, 255, 0.1)';
+        for(let x=0; x<canvas.width; x+=50) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke(); }
+        for(let y=0; y<canvas.height; y+=50) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke(); }
+
+        // 2. Pool Structure
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = var(--neon-blue);
+        ctx.strokeRect(cx - pW/2, cy - pH/2, pW, pH);
+
+        // 3. AI Scanning Visual
+        if(aiActive) {
+            ctx.fillStyle = 'rgba(0, 242, 255, 0.05)';
+            ctx.fillRect(cx - pW/2, cy - pH/2, pW, pH);
+            
+            // Sonar Pings
+            ctx.beginPath();
+            ctx.arc(cx, cy, (Date.now() % 2000) / 5, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(0, 242, 255, 0.3)';
+            ctx.stroke();
+        }
+
+        // 4. Remote-Controlled Auto Cover
+        ctx.fillStyle = 'rgba(100, 100, 100, 0.8)';
+        ctx.fillRect(cx - pW/2, cy - pH/2, coverWidth, pH);
+        
+        if (isCovered && coverWidth < pW) coverWidth += 5;
+        if (!isCovered && coverWidth > 0) coverWidth -= 5;
+
+        requestAnimationFrame(draw);
+    }
+
+    // Interaction Functions
+    function toggleCover() { isCovered = !isCovered; }
+    function triggerAlarm() { 
+        document.getElementById('status-text').style.color = 'red';
+        document.getElementById('status-text').innerText = "ALARM: BREACH DETECTED";
+        setTimeout(() => {
+            document.getElementById('status-text').style.color = '#00f2ff';
+            document.getElementById('status-text').innerText = "STATUS: ACTIVE PROTECT";
+        }, 3000);
+    }
+    function bootAI() { aiActive = false; startSequence(); }
+
+    window.addEventListener('resize', init);
+    init();
+    draw();
+</script>
+</body>
+</html>
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Overwatch v4.0 | Anti-Drown System</title>
+    <style>
+        :root { --hazard: #ffaa00; --safety: #00f2ff; --bg: #010811; }
+        body { margin: 0; background: var(--bg); color: var(--safety); font-family: 'Courier New', monospace; overflow: hidden; }
+        
+        #ui-layer { position: absolute; width: 100%; height: 100%; pointer-events: none; padding: 30px; box-sizing: border-box; }
+        .panel { border-left: 2px solid var(--safety); padding-left: 15px; background: rgba(0, 242, 255, 0.03); margin-bottom: 20px; }
+        
+        /* Interactive Remote */
+        #remote-dock { 
+            position: absolute; bottom: 40px; right: 40px; pointer-events: auto;
+            width: 180px; background: #0a1420; border: 1px solid #1a3a5a;
+            border-radius: 15px; padding: 20px; box-shadow: 0 0 30px rgba(0,0,0,0.9);
+        }
+        .control-btn { 
+            width: 100%; margin: 8px 0; padding: 10px; background: #112233;
+            border: 1px solid var(--safety); color: var(--safety); cursor: pointer;
+            text-transform: uppercase; font-size: 10px; transition: 0.2s;
+        }
+        .control-btn:hover { background: var(--safety); color: var(--bg); }
+        .control-btn.emergency { border-color: #ff3c00; color: #ff3c00; }
+        
+        #terminal { font-size: 12px; color: #66ccff; max-height: 150px; overflow: hidden; }
+    </style>
+</head>
+<body>
+
+<div id="ui-layer">
+    <div class="panel">
+        <h2 style="margin:0; letter-spacing: 4px;">AI-POOL BLUEPRINT v4.0</h2>
+        <div id="status-badge">STATUS: [INITIALIZING...]</div>
+    </div>
+    
+    <div id="terminal"></div>
+</div>
+
+<div id="remote-dock">
+    <div style="font-size: 10px; text-align: center; margin-bottom: 10px; opacity: 0.6;">REMOTE ACCESS X-1</div>
+    <button class="control-btn" onclick="system.toggleCover()">Deploy Auto-Cover</button>
+    <button class="control-btn" onclick="system.calibrate()">Calibrate Sonar</button>
+    <button class="control-btn emergency" onclick="system.panic()">Emergency Alarm</button>
+</div>
+
+<canvas id="mainCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById('mainCanvas');
+const ctx = canvas.getContext('2d');
+const term = document.getElementById('terminal');
+
+const log = (msg) => {
+    const line = document.createElement('div');
+    line.textContent = `> ${msg}`;
+    term.prepend(line);
+};
+
+class SmartPool {
+    constructor() {
+        this.width = 700;
+        this.height = 350;
+        this.coverPos = 0; // 0 to 1
+        this.isDeploying = false;
+        this.aiActive = false;
+        this.pulse = 0;
+        this.init();
+    }
+
+    init() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        this.startup();
+    }
+
+    startup() {
+        log("BOOTING AI KERNEL...");
+        setTimeout(() => log("LINKING PERIMETER SENSORS..."), 1000);
+        setTimeout(() => log("SONAR ARRAY ONLINE..."), 2000);
+        setTimeout(() => {
+            this.aiActive = true;
+            document.getElementById('status-badge').textContent = "STATUS: [OVERWATCH ACTIVE]";
+            log("SYSTEM SECURE.");
+        }, 3500);
+    }
+
+    toggleCover() {
+        this.isDeploying = !this.isDeploying;
+        log(this.isDeploying ? "DEPLOYING SAFETY MESH..." : "RETRACTING COVER...");
+    }
+
+    calibrate() {
+        log("CALIBRATING DEPTH SENSORS...");
+        this.pulse = 0;
+    }
+
+    panic() {
+        log("!!! EMERGENCY ALARM TRIGGERED !!!");
+        document.body.style.backgroundColor = "#220000";
+        setTimeout(() => document.body.style.backgroundColor = "#010811", 500);
+    }
+
+    draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const x = canvas.width / 2 - this.width / 2;
+        const y = canvas.height / 2 - this.height / 2;
+
+        // Draw Blueprint Grid
+        ctx.strokeStyle = 'rgba(0, 242, 255, 0.05)';
+        for(let i=0; i<canvas.width; i+=40) {
+            ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, canvas.height); ctx.stroke();
+        }
+
+        // Draw Pool Shell
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = 'rgba(0, 242, 255, 0.5)';
+        ctx.strokeStyle = '#00f2ff';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, this.width, this.height);
+
+        // AI Sonar Pings
+        if(this.aiActive) {
+            this.pulse = (this.pulse + 2) % 200;
+            ctx.beginPath();
+            ctx.arc(x + this.width/2, y + this.height/2, this.pulse * 2, 0, Math.PI*2);
+            ctx.strokeStyle = `rgba(0, 242, 255, ${1 - this.pulse/200})`;
+            ctx.stroke();
+        }
+
+        // Safety Cover Logic
+        if(this.isDeploying && this.coverPos < 1) this.coverPos += 0.01;
+        if(!this.isDeploying && this.coverPos > 0) this.coverPos -= 0.01;
+
+        ctx.fillStyle = 'rgba(0, 242, 255, 0.2)';
+        ctx.fillRect(x, y, this.width * this.coverPos, this.height);
+        
+        // Labeling
+        ctx.fillStyle = '#00f2ff';
+        ctx.font = '10px Courier New';
+        ctx.fillText("SONAR TRANSDUCER A-1", x - 130, y);
+        ctx.fillText(`COVER LOAD: ${(this.coverPos * 100).toFixed(0)}%`, x + 10, y + 20);
+
+        requestAnimationFrame(() => this.draw());
+    }
+}
+
+const system = new SmartPool();
+system.draw();
+
+window.onresize = () => system.init();
+</script>
+</body>
+</html>
