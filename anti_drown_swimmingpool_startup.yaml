@@ -297,3 +297,350 @@ window.onresize = () => system.init();
 </script>
 </body>
 </html>
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AI-Guardian Pool Interface | v5.0</title>
+    <style>
+        :root { --main: #00f2ff; --warn: #ffcc00; --danger: #ff3c00; --panel-bg: rgba(5, 15, 25, 0.95); }
+        body { margin: 0; background-color: #01050a; color: var(--main); font-family: 'Courier New', monospace; overflow: hidden; }
+        
+        /* 1. HUD & Visual Overlays */
+        #hud-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        .hud-corner { position: absolute; padding: 25px; border: 1px solid rgba(0, 242, 255, 0.1); background: var(--panel-bg); }
+        #top-left { top: 20px; left: 20px; border-left: 5px solid var(--main); }
+        #top-right { top: 20px; right: 20px; width: 250px; }
+        
+        /* 2. Remote Control Interface */
+        #remote-dock { 
+            position: absolute; bottom: 30px; right: 30px; pointer-events: auto;
+            width: 200px; background: #0a1118; border: 2px solid #1a2a3a;
+            border-radius: 20px; padding: 20px; box-shadow: 0 0 40px rgba(0,0,0,0.8);
+        }
+        .btn { 
+            width: 100%; margin: 10px 0; padding: 12px; background: #112233;
+            border: 1px solid var(--main); color: var(--main); cursor: pointer;
+            font-weight: bold; font-size: 11px; text-transform: uppercase;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .btn:hover { background: var(--main); color: #01050a; box-shadow: 0 0 15px var(--main); }
+        .btn.active { background: var(--danger); border-color: var(--danger); color: white; }
+
+        /* 3. Startup AI Terminal */
+        #terminal { font-size: 10px; color: #66ccff; height: 120px; overflow-y: hidden; }
+        .loading-bar { width: 100%; height: 3px; background: #111; margin: 10px 0; overflow: hidden; }
+        #progress { width: 0%; height: 100%; background: var(--main); transition: width 0.4s; }
+        
+        canvas { display: block; filter: contrast(1.2) saturate(1.2); }
+    </style>
+</head>
+<body>
+
+<div id="hud-container">
+    <div id="top-left" class="hud-corner">
+        <h1 style="margin:0; font-size: 1.4rem; letter-spacing: 5px;">AI-OVERWATCH v5</h1>
+        <div id="sys-status">STATUS: <span style="color:var(--warn)">BOOTING...</span></div>
+        <div id="terminal"></div>
+    </div>
+
+    <div id="top-right" class="hud-corner">
+        <div>DEPTH: <span id="val-depth">1.85m</span></div>
+        <div>TEMP: <span id="val-temp">26.4°C</span></div>
+        <div class="loading-bar"><div id="progress"></div></div>
+        <div style="font-size: 9px; opacity: 0.7;">AI CORE: ARCH-CHARACTERISTIC ENABLED</div>
+    </div>
+</div>
+
+<div id="remote-dock">
+    <button id="coverBtn" class="btn" onclick="ctrl.toggleCover()">Deploy Auto-Cover</button>
+    <button class="btn" onclick="ctrl.scan()">Initiate Sonar Scan</button>
+    <button class="btn" onclick="ctrl.emergency()" style="color:var(--danger); border-color:var(--danger);">Manual Alarm</button>
+    <div style="text-align: center; font-size: 10px; margin-top: 15px; opacity: 0.5;">SECURE REMOTE ID: X-2026</div>
+</div>
+
+<canvas id="poolCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById('poolCanvas');
+const ctx = canvas.getContext('2d');
+const term = document.getElementById('terminal');
+
+const log = (msg) => {
+    const d = new Date();
+    const time = `${d.getHours()}:${d.getMinutes()}:${d.getSeconds()}`;
+    term.innerHTML = `<div>[${time}] ${msg}</div>` + term.innerHTML;
+};
+
+class PoolController {
+    constructor() {
+        this.w = 800; this.h = 400;
+        this.coverLevel = 0;
+        this.isCovering = false;
+        this.isScanning = false;
+        this.scanRadius = 0;
+        this.booted = false;
+        this.init();
+    }
+
+    init() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        this.bootSequence();
+    }
+
+    async bootSequence() {
+        log("ESTABLISHING NEURAL LINK...");
+        await this.wait(1000); log("SENSORS SYNCED.");
+        document.getElementById('progress').style.width = "40%";
+        await this.wait(800); log("SONAR ARRAY ONLINE.");
+        document.getElementById('progress').style.width = "75%";
+        await this.wait(1200); log("AI GUARDIAN STANDING BY.");
+        document.getElementById('progress').style.width = "100%";
+        document.getElementById('sys-status').innerHTML = '<span style="color:var(--main)">SECURE</span>';
+        this.booted = true;
+    }
+
+    wait = (ms) => new Promise(res => setTimeout(res, ms));
+
+    toggleCover() {
+        if(!this.booted) return;
+        this.isCovering = !this.isCovering;
+        log(this.isCovering ? "COVER DEPLOYING..." : "COVER RETRACTING...");
+        document.getElementById('coverBtn').classList.toggle('active');
+    }
+
+    scan() { this.isScanning = true; this.scanRadius = 0; log("PULSE SCAN INITIATED."); }
+
+    emergency() {
+        log("!!! MANUAL OVERRIDE: ALARM ACTIVE !!!");
+        this.flashScreen();
+    }
+
+    flashScreen() {
+        document.body.style.backgroundColor = "#440000";
+        setTimeout(() => document.body.style.backgroundColor = "#01050a", 150);
+    }
+
+    render() {
+        ctx.fillStyle = '#01050a';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const x = canvas.width/2 - this.w/2;
+        const y = canvas.height/2 - this.h/2;
+
+        // Draw Blueprint Grid
+        ctx.strokeStyle = 'rgba(0, 242, 255, 0.05)';
+        for(let i=0; i<canvas.width; i+=40) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,canvas.height); ctx.stroke(); }
+
+        // Pool Basin
+        ctx.shadowBlur = 20; ctx.shadowColor = 'rgba(0, 242, 255, 0.3)';
+        ctx.strokeStyle = var(--main);
+        ctx.lineWidth = 3;
+        ctx.strokeRect(x, y, this.w, this.h);
+
+        // Sonar Animation
+        if(this.isScanning) {
+            this.scanRadius += 4;
+            ctx.beginPath();
+            ctx.arc(x + this.w/2, y + this.h/2, this.scanRadius, 0, Math.PI*2);
+            ctx.strokeStyle = `rgba(0, 242, 255, ${1 - this.scanRadius/600})`;
+            ctx.stroke();
+            if(this.scanRadius > 600) this.isScanning = false;
+        }
+
+        // Mechanical Cover
+        if(this.isCovering && this.coverLevel < 1) this.coverLevel += 0.005;
+        if(!this.isCovering && this.coverLevel > 0) this.coverLevel -= 0.005;
+        
+        ctx.fillStyle = 'rgba(0, 242, 255, 0.15)';
+        ctx.fillRect(x, y, this.w * this.coverLevel, this.h);
+
+        requestAnimationFrame(() => this.render());
+    }
+}
+
+const ctrl = new PoolController();
+ctrl.render();
+window.onresize = () => ctrl.init();
+</script>
+</body>
+</html>
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AI Pool Overwatch | Mission Control</title>
+    <style>
+        :root { --neon: #00f2ff; --warn: #ffcc00; --alarm: #ff3c00; --bg: #010a12; }
+        body { margin: 0; background: var(--bg); color: var(--neon); font-family: 'Segoe UI', 'Courier New', monospace; overflow: hidden; }
+        
+        /* Tactical HUD Elements */
+        #hud { position: absolute; width: 100%; height: 100%; pointer-events: none; padding: 25px; box-sizing: border-box; }
+        .panel { border: 1px solid rgba(0, 242, 255, 0.2); background: rgba(1, 10, 18, 0.85); padding: 15px; margin-bottom: 10px; backdrop-filter: blur(5px); }
+        #log-window { position: absolute; bottom: 30px; left: 30px; width: 300px; height: 150px; overflow-y: hidden; font-size: 11px; }
+        
+        /* Remote Control Module */
+        #remote { 
+            position: absolute; bottom: 30px; right: 30px; pointer-events: auto;
+            width: 220px; border: 2px solid #1a3a5a; border-radius: 15px; padding: 20px;
+            background: linear-gradient(145deg, #0a1420, #020d1a); box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+        }
+        .btn { 
+            width: 100%; margin: 8px 0; padding: 12px; background: #112233;
+            border: 1px solid var(--neon); color: var(--neon); cursor: pointer;
+            text-transform: uppercase; font-size: 10px; letter-spacing: 1px; transition: 0.2s;
+        }
+        .btn:hover:not(:disabled) { background: var(--neon); color: var(--bg); box-shadow: 0 0 15px var(--neon); }
+        .btn:disabled { opacity: 0.3; border-color: #444; cursor: not-allowed; }
+        .btn.active { background: var(--alarm); border-color: var(--alarm); color: #fff; }
+
+        .loading-bar { width: 100%; height: 2px; background: #111; margin-top: 10px; }
+        #bar-fill { width: 0%; height: 100%; background: var(--neon); transition: 0.3s; }
+    </style>
+</head>
+<body>
+
+<div id="hud">
+    <div class="panel" style="width: fit-content; border-left: 4px solid var(--neon);">
+        <div style="font-size: 0.8rem; opacity: 0.6;">SYSTEM IDENTIFIER: OVERWATCH-X7</div>
+        <div id="sys-status" style="font-weight: bold; font-size: 1.2rem;">STATUS: INITIALIZING...</div>
+    </div>
+    
+    <div id="log-window" class="panel"></div>
+</div>
+
+<div id="remote">
+    <div style="text-align: center; font-size: 9px; margin-bottom: 15px; opacity: 0.5;">BIOMETRIC REMOTE LINK ACTIVE</div>
+    <button id="coverBtn" class="btn" onclick="ai.toggleCover()" disabled>Cover: Standby</button>
+    <button id="sonarBtn" class="btn" onclick="ai.pingSonar()" disabled>Pulse Scan</button>
+    <button class="btn" onclick="ai.emergencyReset()" style="border-color: var(--alarm); color: var(--alarm);">Emergency Alarm</button>
+    <div class="loading-bar"><div id="bar-fill"></div></div>
+</div>
+
+<canvas id="blueprintCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById('blueprintCanvas');
+const ctx = canvas.getContext('2d');
+const logWin = document.getElementById('log-window');
+
+const writeLog = (msg) => {
+    const div = document.createElement('div');
+    div.textContent = `> ${new Date().toLocaleTimeString()} | ${msg}`;
+    logWin.prepend(div);
+};
+
+class AIOverwatch {
+    constructor() {
+        this.w = 700; this.h = 350;
+        this.coverLevel = 0;
+        this.isCovering = false;
+        this.isScanning = false;
+        this.pingRadius = 0;
+        this.online = false;
+        this.init();
+    }
+
+    init() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        this.startupAI();
+    }
+
+    // Startup Sequence (Kaizen-focused reliability check)
+    async startupAI() {
+        writeLog("INITIATING STARTUP SEQUENCE...");
+        const stages = ["KERNEL SYNC", "SONAR CALIBRATION", "LIDAR PERIMETER", "NEURAL OVERWATCH"];
+        for(let i=0; i<stages.length; i++) {
+            await new Promise(r => setTimeout(r, 800));
+            writeLog(`${stages[i]}... [OK]`);
+            document.getElementById('bar-fill').style.width = `${(i+1)*25}%`;
+        }
+        this.online = true;
+        document.getElementById('sys-status').innerHTML = 'STATUS: <span style="color:var(--neon)">SECURED</span>';
+        document.querySelectorAll('.btn').forEach(b => b.disabled = false);
+        writeLog("SYSTEM READY. ARCH-CHARACTERISTICS ACTIVE.");
+    }
+
+    toggleCover() {
+        this.isCovering = !this.isCovering;
+        const btn = document.getElementById('coverBtn');
+        btn.textContent = this.isCovering ? "Retract Cover" : "Deploy Cover";
+        btn.classList.toggle('active');
+        writeLog(this.isCovering ? "SAFETY COVER DEPLOYING..." : "SAFETY COVER RETRACTING...");
+    }
+
+    pingSonar() {
+        this.isScanning = true;
+        this.pingRadius = 0;
+        writeLog("SONAR PULSE EMITTED. SCANNING FOR MASS...");
+    }
+
+    emergencyReset() {
+        writeLog("!!! EMERGENCY OVERRIDE TRIGGERED !!!");
+        this.flashRed();
+    }
+
+    flashRed() {
+        document.body.style.boxShadow = "inset 0 0 100px #ff3c00";
+        setTimeout(() => document.body.style.boxShadow = "none", 500);
+    }
+
+    draw() {
+        ctx.fillStyle = '#010a12';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const cx = canvas.width/2 - this.w/2;
+        const cy = canvas.height/2 - this.h/2;
+
+        // Draw Blueprint Grid
+        ctx.strokeStyle = 'rgba(0, 242, 255, 0.05)';
+        ctx.lineWidth = 1;
+        for(let x=0; x<canvas.width; x+=50) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke(); }
+
+        // Pool Shell
+        ctx.strokeStyle = var(--neon);
+        ctx.lineWidth = 3;
+        ctx.shadowBlur = 15; ctx.shadowColor = var(--neon);
+        ctx.strokeRect(cx, cy, this.w, this.h);
+        ctx.shadowBlur = 0;
+
+        // Live Sonar Ping
+        if(this.isScanning) {
+            this.pingRadius += 5;
+            ctx.beginPath();
+            ctx.arc(cx + this.w/2, cy + this.h/2, this.pingRadius, 0, Math.PI*2);
+            ctx.strokeStyle = `rgba(0, 242, 255, ${1 - this.pingRadius/this.w})`;
+            ctx.stroke();
+            if(this.pingRadius > this.w) this.isScanning = false;
+        }
+
+        // Animated Mechanical Cover
+        if(this.isCovering && this.coverLevel < 1) this.coverLevel += 0.005;
+        if(!this.isCovering && this.coverLevel > 0) this.coverLevel -= 0.005;
+        ctx.fillStyle = 'rgba(0, 242, 255, 0.2)';
+        ctx.fillRect(cx, cy, this.w * this.coverLevel, this.h);
+
+        // Technical Notations
+        ctx.fillStyle = var(--neon);
+        ctx.font = '10px Courier New';
+        ctx.fillText(`COORD: ${cx.toFixed(0)}X / ${cy.toFixed(0)}Y`, cx, cy - 10);
+        ctx.fillText(`METERING: ${this.w/20}m x ${this.h/20}m`, cx + this.w - 120, cy + this.h + 20);
+
+        requestAnimationFrame(() => this.draw());
+    }
+}
+
+const ai = new AIOverwatch();
+ai.draw();
+window.onresize = () => ai.init();
+</script>
+</body>
+</html>
