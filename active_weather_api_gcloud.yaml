@@ -1,0 +1,98 @@
+import requests
+import json
+
+def get_google_weather(api_key, lat, lon):
+    """
+    Fetches current weather data from the Google Weather API.
+    """
+    endpoint = "https://weather.googleapis.com/v1/currentConditions:lookup"
+    
+    # Parameters for the request
+    params = {
+        'key': api_key,
+        'location.latitude': lat,
+        'location.longitude': lon,
+        'unitsSystem': 'METRIC',  # Options: METRIC, IMPERIAL
+        'languageCode': 'en-US'
+    }
+
+    try:
+        response = requests.get(endpoint, params=params)
+        response.raise_for_status() # Check for HTTP errors
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        return {"error": str(e)}
+
+# --- Configuration ---
+YOUR_API_KEY = "YOUR_ACTUAL_API_KEY_HERE"
+LATITUDE = 14.3517   # Example: San Pedro, Philippines
+LONGITUDE = 121.0503
+
+# Execute
+weather_data = get_google_weather(YOUR_API_KEY, LATITUDE, LONGITUDE)
+
+# Display formatted result
+print(json.dumps(weather_data, indent=2))
+
+
+
+import os
+from google import genai
+from google.genai.types import Tool, GoogleMaps, GenerateContentConfig
+
+# 1. Setup Client (Requires GOOGLE_CLOUD_PROJECT environment variable)
+client = genai.Client(vertexai=True, project="your-project-id", location="us-central1")
+
+# 2. Define the Weather Tool
+# The Weather API is now a first-class 'Tool' in the Gen AI SDK
+weather_tool = Tool(
+    google_maps=GoogleMaps() # This enables the Weather/Maps grounding
+)
+
+def ask_weather_ai(user_prompt):
+    """
+    Sends a prompt to Gemini with the ability to look up live weather.
+    """
+    response = client.models.generate_content(
+        model="gemini-2.0-flash-exp", # Or gemini-2.5-pro
+        contents=user_prompt,
+        config=GenerateContentConfig(
+            tools=[weather_tool],
+            # This 'grounds' the AI in real-time Google Weather data
+        )
+    )
+    
+    return response.text
+
+# --- Example Usage ---
+# "Should I bring an umbrella to San Pedro, Philippines today?"
+print(ask_weather_ai("Check the current weather in San Pedro, PH and give me a 3-day forecast summary."))
+
+
+
+
+import requests
+
+def get_advanced_weather(lat, lon, api_key):
+    # Endpoint for 240-hour (10-day) hourly forecasts
+    url = f"https://weather.googleapis.com/v1/forecast:lookup"
+    
+    params = {
+        "location.latitude": lat,
+        "location.longitude": lon,
+        "key": api_key,
+        "unitsSystem": "METRIC",
+        "hourlyForecastCount": 24 # Get the next 24 hours
+    }
+    
+    response = requests.get(url, params=params)
+    
+    if response.status_code == 200:
+        data = response.json()
+        # The data includes AI-driven 'WeatherNext' insights
+        return data
+    else:
+        return f"Error: {response.status_code} - {response.text}"
+
+# Example Coordinates for San Pedro
+# print(get_advanced_weather(14.35, 121.05, "YOUR_FREE_DEMO_KEY"))
