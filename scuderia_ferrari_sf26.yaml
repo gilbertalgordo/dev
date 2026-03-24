@@ -1,0 +1,376 @@
+class SF26_AARW_Controller:
+    def __init__(self):
+        # Constants for the SF-26 Aero Profile
+        self.NOMINAL_ANGLE = 12.0  # Degrees (High Downforce)
+        self.DRS_OPEN_ANGLE = 4.0   # Degrees (Minimum Drag)
+        self.VELOCITY_THRESHOLD = 77.7  # m/s (~280 km/h)
+        self.LATERAL_G_LIMIT = 0.5     # Max G-force for auto-rotation
+        
+        self.current_wing_angle = self.NOMINAL_ANGLE
+
+    def calculate_wing_angle(self, velocity, lat_accel, drs_active, braking):
+        """
+        Determines the target angle for the rear wing actuator.
+        """
+        # Priority 1: Heavy Braking or Cornering (Safety/Downforce)
+        if braking or abs(lat_accel) > self.LATERAL_G_LIMIT:
+            return self.NOMINAL_ANGLE
+
+        # Priority 2: Manual DRS Override
+        if drs_active:
+            return self.DRS_OPEN_ANGLE
+
+        # Priority 3: Automatic Rotation for Straight-Line Speed
+        if velocity > self.VELOCITY_THRESHOLD:
+            # Gradually reduce angle as speed increases (Linear Interpolation)
+            rotation_factor = min((velocity - self.VELOCITY_THRESHOLD) / 20, 1.0)
+            target = self.NOMINAL_ANGLE - (rotation_factor * (self.NOMINAL_ANGLE - self.DRS_OPEN_ANGLE))
+            return max(target, self.DRS_OPEN_ANGLE)
+
+        return self.NOMINAL_ANGLE
+
+# --- Simulation Instance ---
+ferrari_ecu = SF26_AARW_Controller()
+
+# Scenario: High speed straight, no braking, no lateral Gs
+target_angle = ferrari_ecu.calculate_wing_angle(
+    velocity=85.0,    # ~306 km/h
+    lat_accel=0.1,    # Straight line
+    drs_active=False, 
+    braking=False
+)
+
+print(f"SF-26 Actuator Command: {target_angle:.2f}°")
+
+
+
+#include <iostream>
+#include <algorithm>
+
+class SF26_Aero_ECU {
+private:
+    // Constants for SF-26 Wing Geometry
+    const float NOMINAL_ANGLE = 12.5f; // High Downforce (Degrees)
+    const float MIN_DRAG_ANGLE = 3.2f;  // Minimum profile (Degrees)
+    
+    // PID Gains for Actuator Smoothing
+    float Kp = 0.6f; 
+    float Ki = 0.1f;
+    float Kd = 0.05f;
+
+    float integral = 0;
+    float last_error = 0;
+
+public:
+    /**
+     * @brief Computes the optimal wing angle based on real-time physics.
+     * @param velocity Current speed in m/s
+     * @param lat_g Lateral G-force (Cornering load)
+     * @param is_braking Boolean for brake pressure
+     * @return Target Angle for the Hydraulic Actuator
+     */
+    float compute_target_angle(float velocity, float lat_g, bool is_braking) {
+        // SAFETY OVERRIDE: Max Downforce during braking or heavy cornering
+        if (is_braking || std::abs(lat_g) > 0.8f) {
+            return NOMINAL_ANGLE;
+        }
+
+        // AUTO-ROTATION LOGIC: Reducing drag based on Dynamic Pressure (q)
+        // Formula: q = 0.5 * rho * v^2
+        float velocity_threshold = 80.0f; // ~288 km/h
+        
+        if (velocity > velocity_threshold) {
+            // Calculate a decay factor to rotate the wing flatter as speed increases
+            float speed_delta = velocity - velocity_threshold;
+            float rotation_adjustment = std::min(speed_delta * 0.15f, (NOMINAL_ANGLE - MIN_DRAG_ANGLE));
+            return NOMINAL_ANGLE - rotation_adjustment;
+        }
+
+        return NOMINAL_ANGLE;
+    }
+
+    /**
+     * @brief Smooths the transition using PID to prevent mechanical stress.
+     */
+    float get_actuator_output(float current_angle, float target_angle, float dt) {
+        float error = target_angle - current_angle;
+        integral += error * dt;
+        float derivative = (error - last_error) / dt;
+        
+        float output = (Kp * error) + (Ki * integral) + (Kd * derivative);
+        last_error = error;
+
+        return std::clamp(current_angle + output, MIN_DRAG_ANGLE, NOMINAL_ANGLE);
+    }
+};
+
+int main() {
+    SF26_Aero_ECU ferrari_system;
+    float current_wing_pos = 12.5f;
+    float deltaTime = 0.01f; // 100Hz Refresh Rate
+
+    // Simulation: Car accelerating on a straight at 320 km/h (88.8 m/s)
+    float target = ferrari_system.compute_target_angle(88.8f, 0.1f, false);
+    float smoothed_pos = ferrari_system.get_actuator_output(current_wing_pos, target, deltaTime);
+
+    std::cout << "Target Angle: " << target << " | Actuator Position: " << smoothed_pos << " degrees" << std::endl;
+    return 0;
+}
+
+
+
+#include <iostream>
+#include <algorithm>
+#include <cmath>
+
+/**
+ * @brief Scuderia Ferrari SF-26 Performance Controller
+ * Integrates 2026 Active Aero (Z/X Modes) and MGU-K Energy Management.
+ */
+class SF26_Advanced_ECU {
+private:
+    // --- 2026 Regulation Constants ---
+    const float MGU_K_MAX_KW = 350.0f;     // Increased from 120kW
+    const float ICE_MAX_KW = 400.0f;       // Reduced from ~600kW
+    const float MIN_WEIGHT = 770.0f;       // kg (with driver)
+    const float ENERGY_RECOVERY_LAP = 8.5f; // MJ per lap limit
+
+    // --- Aero States ---
+    enum AeroMode { Z_MODE, X_MODE }; // Z = High Downforce, X = Low Drag
+
+    // --- System State ---
+    float battery_soc_mj = 4.0f; // State of Charge (Max 4MJ usable delta)
+    AeroMode current_aero = Z_MODE;
+
+public:
+    /**
+     * @brief Manages the 2026 "Manual Override" / Overtake Mode
+     * Provides 350kW boost up to 337 km/h.
+     */
+    float calculate_electrical_deployment(float velocity_ms, bool override_active) {
+        float velocity_kmh = velocity_ms * 3.6f;
+        
+        if (override_active && battery_soc_mj > 0.1f) {
+            // Override provides full 350kW up to 337km/h, then tapers to 355km/h
+            if (velocity_kmh < 337.0f) return MGU_K_MAX_KW;
+            if (velocity_kmh < 355.0f) return MGU_K_MAX_KW * (1.0f - (velocity_kmh - 337.0f) / 18.0f);
+        }
+        
+        // Standard deployment map (efficiency focused)
+        return std::min(200.0f, MGU_K_MAX_KW * 0.6f); 
+    }
+
+    /**
+     * @brief Active Aero Logic (SF-26 Venetian Blind System)
+     * Z-Mode: Cornering (Max Downforce)
+     * X-Mode: Straight (Min Drag)
+     */
+    void update_aerodynamics(float velocity_ms, float steering_angle, float lat_g) {
+        // Condition for X-Mode (Low Drag): High speed, low lateral load, straight wheel
+        if (velocity_ms > 70.0f && std::abs(lat_g) < 0.5f && std::abs(steering_angle) < 5.0f) {
+            current_aero = X_MODE;
+        } else {
+            // Instant snap-back to Z-Mode for stability in braking/turning
+            current_aero = Z_MODE;
+        }
+    }
+
+    void display_telemetry(float v_ms) {
+        std::cout << "--- SF-26 LIVE TELEMETRY ---" << std::endl;
+        std::cout << "Speed: " << (v_ms * 3.6f) << " km/h" << std::endl;
+        std::cout << "Aero Configuration: " << (current_aero == X_MODE ? "[X-MODE] LOW DRAG" : "[Z-MODE] HIGH GRIP") << std::endl;
+        std::cout << "Battery Charge: " << battery_soc_mj << " MJ" << std::endl;
+        std::cout << "----------------------------" << std::endl;
+    }
+};
+
+int main() {
+    SF26_Advanced_ECU sf26;
+    
+    // Simulation: Exiting a corner onto a long straight
+    float speed = 65.0f; // 234 km/h
+    sf26.update_aerodynamics(speed, 0.0f, 0.2f); // Straightening up
+    sf26.display_telemetry(speed);
+
+    // Simulation: High speed activation of X-Mode
+    speed = 85.0f; // 306 km/h
+    sf26.update_aerodynamics(speed, 0.0f, 0.1f);
+    sf26.display_telemetry(speed);
+
+    return 0;
+}
+
+
+
+#include <iostream>
+#include <algorithm>
+#include <string>
+
+/**
+ * @brief Scuderia Ferrari SF-26 ECU Core
+ * Implements 2026 regulations: Active Aero (Z/X Modes) & Manual Override.
+ */
+class SF26_VCU {
+private:
+    // --- SF-26 Power Unit (067/6) Constants ---
+    const float MAX_MGU_K_POWER_KW = 350.0f; // 470hp (Up from 120kW)
+    const float MAX_ICE_POWER_KW   = 400.0f; // 1.6L V6 Turbo (Sustainably fueled)
+    const float ENERGY_RECOVERY_LAP = 8.5f;  // MJ (Increased recovery)
+    
+    // --- Active Aero Parameters ---
+    enum AeroMode { CORNER_Z_MODE, STRAIGHT_X_MODE };
+    AeroMode current_aero = CORNER_Z_MODE;
+
+    // --- State Variables ---
+    float battery_soc_mj = 4.0f; // Max usable delta per lap
+    bool manual_override_available = false;
+
+public:
+    /**
+     * @brief 2026 "Manual Override Mode" (MOM) Logic
+     * Provides 350kW boost up to 337 km/h if within 1s of car ahead.
+     */
+    float get_mgu_k_deployment(float velocity_ms, bool drs_gap_met) {
+        float velocity_kmh = velocity_ms * 3.6f;
+        
+        // Manual Override (MOM) logic for chasing cars
+        if (drs_gap_met && battery_soc_mj > 0.1f) {
+            if (velocity_kmh <= 337.0f) return MAX_MGU_K_POWER_KW;
+            // Power tapers to zero at 355 km/h
+            if (velocity_kmh < 355.0f) {
+                return MAX_MGU_K_POWER_KW * (1.0f - (velocity_kmh - 337.0f) / 18.0f);
+            }
+        }
+        
+        // Standard Deployment: Full power up to 290 km/h, then tapers
+        if (velocity_kmh <= 290.0f) return MAX_MGU_K_POWER_KW;
+        return std::max(0.0f, MAX_MGU_K_POWER_KW * (1.0f - (velocity_kmh - 290.0f) / 55.0f));
+    }
+
+    /**
+     * @brief Active Aerodynamics Switch
+     * Operates front and rear wings like "Venetian blinds."
+     */
+    void update_aero_state(float velocity_ms, float lat_g, float steering_angle) {
+        // X-Mode (Low Drag) requirements: High speed, low lateral load
+        if (velocity_ms > 75.0f && std::abs(lat_g) < 0.6f && std::abs(steering_angle) < 5.0f) {
+            current_aero = STRAIGHT_X_MODE;
+        } else {
+            // Instant return to Z-Mode (High Downforce) for braking/turning stability
+            current_aero = CORNER_Z_MODE;
+        }
+    }
+
+    void log_status(float v_ms, bool gap) {
+        float p_elec = get_mgu_k_deployment(v_ms, gap);
+        std::cout << "[SF-26] Speed: " << (int)(v_ms * 3.6f) << " km/h | ";
+        std::cout << "Aero: " << (current_aero == STRAIGHT_X_MODE ? "X-MODE" : "Z-MODE") << " | ";
+        std::cout << "MGU-K: " << p_elec << " kW" << std::endl;
+    }
+};
+
+int main() {
+    SF26_VCU ferrari_ecu;
+
+    // Simulation 1: Full acceleration on the pit straight at Monza
+    std::cout << "--- Straight Line Acceleration ---" << std::endl;
+    for (float speed = 60.0f; speed <= 95.0f; speed += 10.0f) {
+        ferrari_ecu.update_aero_state(speed, 0.1f, 0.0f);
+        ferrari_ecu.log_status(speed, true); // Chasing car (gap met)
+    }
+
+    // Simulation 2: Entering Parabolica (Braking and Turning)
+    std::cout << "\n--- Corner Entry (Stability Priority) ---" << std::endl;
+    ferrari_ecu.update_aero_state(80.0f, 4.5f, 15.0f); // High lat-G, high steering
+    ferrari_ecu.log_status(80.0f, false);
+
+    return 0;
+}
+
+
+
+#include <iostream>
+#include <algorithm>
+#include <cmath>
+
+/**
+ * @brief Scuderia Ferrari SF-26 Integrated Control Unit
+ * Manages the 067/6 PU, 350kW MGU-K, and Active Aero Surfaces.
+ */
+class SF26_Advanced_ECU {
+private:
+    // --- 067/6 Power Unit & ERS Specs ---
+    const float MAX_MGU_K_POWER_KW = 350.0f; // 2026 Reg: ~470hp
+    const float MAX_ICE_POWER_KW   = 400.0f; // 1.6L V6 (Sustainable Fuel)
+    const float BATTERY_SOC_MAX_MJ = 4.0f;   // Usable delta per lap
+    
+    // --- Active Aero Configuration ---
+    enum AeroState { Z_MODE, X_MODE }; // Z: Cornering/Grip, X: Straight/Low-Drag
+    
+    struct Telemetry {
+        float velocity_ms;
+        float lateral_g;
+        float battery_mj;
+        bool mom_active; // Manual Override Mode
+    };
+
+public:
+    /**
+     * @brief Logic for the 2026 Manual Override Mode (MOM).
+     * Provides 350kW boost up to 337 km/h, then tapers to 355 km/h.
+     */
+    float compute_mgu_k_output(const Telemetry& data) {
+        float v_kmh = data.velocity_ms * 3.6f;
+        
+        // Manual Override Mode (MOM) - Replaces DRS for overtaking
+        if (data.mom_active && data.battery_mj > 0.1f) {
+            if (v_kmh <= 337.0f) return MAX_MGU_K_POWER_KW;
+            if (v_kmh < 355.0f) {
+                // Linear taper between 337 and 355 km/h
+                return MAX_MGU_K_POWER_KW * (1.0f - (v_kmh - 337.0f) / 18.0f);
+            }
+            return 0.0f;
+        }
+
+        // Standard Energy Map: Full power up to 290 km/h
+        if (v_kmh <= 290.0f) return MAX_MGU_K_POWER_KW;
+        // Natural energy clipping to prevent over-speeding
+        return std::max(0.0f, MAX_MGU_K_POWER_KW * (1.0f - (v_kmh - 290.0f) / 50.0f));
+    }
+
+    /**
+     * @brief SF-26 "Venetian Blind" Aero Logic.
+     * Synchronizes front and rear movable elements to maintain Aero Balance.
+     */
+    AeroState determine_aero_mode(const Telemetry& data, float steering_angle) {
+        // Requirements for X-Mode (Low Drag): High speed, straight wheel, low G-load
+        if (data.velocity_ms > 70.0f && std::abs(data.lateral_g) < 0.6f && std::abs(steering_angle) < 5.0f) {
+            return X_MODE;
+        }
+        // Fail-safe: Always return to Z-Mode (High Downforce) for stability
+        return Z_MODE;
+    }
+
+    void execute_control_cycle(Telemetry& data, float steering) {
+        AeroState aero = determine_aero_mode(data, steering);
+        float mgu_k = compute_mgu_k_output(data);
+
+        std::cout << "[SF-26] V: " << (int)(data.velocity_ms * 3.6f) << "km/h | "
+                  << "Mode: " << (aero == X_MODE ? "X-STRAIGHT" : "Z-CORNER ") << " | "
+                  << "MGU-K: " << (int)mgu_k << "kW" << std::endl;
+    }
+};
+
+int main() {
+    SF26_Advanced_ECU ferrari_system;
+    
+    // Scenario: Overtaking on the Baku straight
+    SF26_Advanced_ECU::Telemetry race_data = {88.0f, 0.1f, 3.5f, true}; 
+    ferrari_system.execute_control_cycle(race_data, 0.0f);
+
+    // Scenario: Heavy cornering (Z-Mode activation)
+    race_data = {65.0f, 4.2f, 3.2f, false};
+    ferrari_system.execute_control_cycle(race_data, 18.0f);
+
+    return 0;
+}
