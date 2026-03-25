@@ -1,0 +1,121 @@
+pip install yfinance pandas scikit-learn matplotlib
+
+
+
+import yfinance as yf
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+import matplotlib.pyplot as plt
+
+def fetch_gld_data(period="5y"):
+    """Fetches historical GLD data and adds technical indicators."""
+    print("Fetching active GLD data...")
+    data = yf.download("GLD", period=period, interval="1d")
+    
+    # Feature Engineering: Moving Averages & Returns
+    data['S_3'] = data['Close'].rolling(window=3).mean()
+    data['S_9'] = data['Close'].rolling(window=9).mean()
+    data['Next_Day_Price'] = data['Close'].shift(-1)
+    
+    return data.dropna()
+
+def train_ai_model(data):
+    """Trains a Random Forest model to predict the next day's price."""
+    # Features (X) and Target (y)
+    X = data[['Close', 'S_3', 'S_9']]
+    y = data['Next_Day_Price']
+    
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
+    
+    model = RandomForestRegressor(n_estimators=100, random_state=42)
+    model.fit(X_train, y_train)
+    
+    accuracy = model.score(X_test, y_test)
+    print(f"Model R-squared Accuracy: {accuracy:.4f}")
+    return model
+
+def predict_current(model):
+    """Fetches the most recent ticker data and predicts the next move."""
+    latest_data = yf.download("GLD", period="1mo", interval="1d").tail(10)
+    latest_data['S_3'] = latest_data['Close'].rolling(window=3).mean()
+    latest_data['S_9'] = latest_data['Close'].rolling(window=9).mean()
+    
+    current_features = latest_data[['Close', 'S_3', 'S_9']].tail(1)
+    prediction = model.predict(current_features)
+    
+    return current_features['Close'].values[0], prediction[0]
+
+# --- Execution ---
+if __name__ == "__main__":
+    gld_df = fetch_gld_data()
+    trained_model = train_ai_model(gld_df)
+    
+    current_price, predicted_price = predict_current(trained_model)
+    
+    print("-" * 30)
+    print(f"Current GLD Price:  ${current_price:.2f}")
+    print(f"AI Predicted Price: ${predicted_price:.2f}")
+    print(f"Forecasted Change:  {((predicted_price - current_price)/current_price)*100:.2f}%")
+
+
+
+pip install yfinance pandas numpy scikit-learn tensorflow
+
+
+
+import yfinance as yf
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+
+def prepare_advanced_data(symbol="GLD", window_size=60):
+    # Fetch high-fidelity historical data
+    df = yf.download(symbol, start="2015-01-01", end="2026-03-25")
+    data = df.filter(['Close']).values
+    
+    # Scale data to (0,1) for Neural Network optimization
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    scaled_data = scaler.fit_transform(data)
+    
+    # Create training sequences (Look-back windows)
+    train_data_len = int(np.ceil(len(data) * 0.8))
+    train_data = scaled_data[0:int(train_data_len), :]
+    
+    x_train, y_train = [], []
+    for i in range(window_size, len(train_data)):
+        x_train.append(train_data[i-window_size:i, 0])
+        y_train.append(train_data[i, 0])
+        
+    return np.array(x_train), np.array(y_train), scaler, scaled_data, data, train_data_len
+
+def build_lstm_model(input_shape):
+    model = Sequential([
+        LSTM(128, return_sequences=True, input_shape=input_shape),
+        Dropout(0.2), # Prevent overfitting
+        LSTM(64, return_sequences=False),
+        Dropout(0.2),
+        Dense(25),
+        Dense(1) # Single output: Next day's price
+    ])
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    return model
+
+# --- Main Logic ---
+x_train, y_train, scaler, scaled_all, raw_data, split_point = prepare_advanced_data()
+x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 1))
+
+# Initialize and train
+gld_ai = build_lstm_model((x_train.shape[1], 1))
+print("Training Advanced GLD LSTM Model...")
+gld_ai.fit(x_train, y_train, batch_size=32, epochs=10, verbose=1)
+
+# Predict Next Day
+last_60_days = scaled_all[-60:].reshape(1, 60, 1)
+predicted_scaled = gld_ai.predict(last_60_days)
+predicted_price = scaler.inverse_transform(predicted_scaled)
+
+print(f"\nAdvanced AI Prediction for Next Session: ${predicted_price[0][0]:.2f}")
