@@ -1,0 +1,131 @@
+// Mighty Thor Suit Material Definition
+const thorSuitMaterial = new THREE.ShaderMaterial({
+  uniforms: {
+    time: { value: 0.0 },
+    baseColor: { value: new THREE.Color(0x888888) }, // Iridescent Silver
+    rgbIntensity: { value: 1.0 },
+    carbonTexture: { value: carbonFiberLoader.load('carbon_weave.jpg') }
+  },
+  vertexShader: `
+    varying vec3 vNormal;
+    varying vec3 vViewPosition;
+    varying vec2 vUv;
+
+    void main() {
+      vUv = uv;
+      vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+      vNormal = normalize(normalMatrix * normal);
+      vViewPosition = -mvPosition.xyz;
+      gl_Position = projectionMatrix * mvPosition;
+    }
+  `,
+  fragmentShader: `
+    varying vec3 vNormal;
+    varying vec3 vViewPosition;
+    varying vec2 vUv;
+    uniform float time;
+
+    // Function to create iridescent rainbow shift
+    vec3 getIridescence(float cosTheta) {
+      vec3 color1 = vec3(1.0, 0.0, 1.0); // Magenta
+      vec3 color2 = vec3(0.0, 1.0, 1.0); // Cyan
+      return 0.5 + 0.5 * cos(6.28318 * (vec3(1.0, 1.0, 1.0) * cosTheta + vec3(0.0, 0.33, 0.67)));
+    }
+
+    void main() {
+      vec3 normal = normalize(vNormal);
+      vec3 viewDir = normalize(vViewPosition);
+      float fresnel = pow(1.0 - dot(normal, viewDir), 3.0);
+
+      // Iridescent Silver Base
+      vec3 iridescence = getIridescence(dot(normal, viewDir));
+      vec3 silverBase = vec3(0.75, 0.75, 0.8) + (iridescence * fresnel);
+
+      // Animated RGB Accents (Pulsing)
+      float rgbCycle = 0.5 + 0.5 * sin(time * 2.0);
+      vec3 rgbGlow = 0.5 + 0.5 * cos(time + vUv.xyx + vec3(0, 2, 4));
+      
+      // Mix in Carbon Fiber Vertud patterns (assuming dark weave)
+      float carbonPattern = sin(vUv.x * 100.0) * cos(vUv.y * 100.0);
+      vec3 finalColor = mix(silverBase, vec3(0.1), clamp(carbonPattern, 0.0, 0.2));
+      
+      // Apply RGB to edges/recesses
+      finalColor += rgbGlow * fresnel * rgbCycle;
+
+      gl_FragColor = vec4(finalColor, 1.0);
+    }
+  `
+});
+
+// Animation Loop logic
+function animate() {
+  requestAnimationFrame(animate);
+  thorSuitMaterial.uniforms.time.value += 0.05;
+  renderer.render(scene, camera);
+}
+
+
+
+// Uniforms for real-time RGB and HUD synchronization
+uniform float u_time;
+uniform sampler2D u_carbonWeave;
+uniform vec3 u_rgbAccent; // Controlled by external HUD logic
+
+varying vec3 v_ViewDir;
+varying vec3 v_Normal;
+varying vec2 v_Uv;
+
+// Spectral function for Iridescent Silver
+vec3 spectral_shift(float cosTheta) {
+    vec3 spectral = vec3(0.0);
+    spectral.r = abs(sin(cosTheta * 3.14 + u_time * 0.5));
+    spectral.g = abs(sin(u_time * 0.8));
+    spectral.b = abs(cos(cosTheta * 2.0));
+    return mix(vec3(0.9), spectral, 0.4); // Mix 40% rainbow into 90% silver
+}
+
+void main() {
+    // 1. Calculate Fresnel for Edge-Lit RGB
+    float fresnel = pow(1.0 - dot(v_Normal, v_ViewDir), 4.0);
+    
+    // 2. Carbon Fiber "Vertud" Micro-detail
+    vec4 carbonBase = texture2D(u_carbonWeave, v_Uv * 10.0); 
+    float weavePattern = smoothstep(0.4, 0.6, carbonBase.r);
+    
+    // 3. Iridescent Silver Calculation
+    vec3 silverArmor = spectral_shift(dot(v_Normal, v_ViewDir));
+    
+    // 4. RGB "Pulse" Logic (The 'Mighty' Aura)
+    float pulse = sin(u_time * 3.0) * 0.5 + 0.5;
+    vec3 rgbGlow = u_rgbAccent * fresnel * pulse;
+
+    // 5. Final Material Composition
+    // Dark carbon fiber weave in recessed areas, Iridescent silver on plates
+    vec3 finalComposite = mix(vec3(0.05), silverArmor, weavePattern);
+    finalComposite += rgbGlow;
+
+    gl_FragColor = vec4(finalComposite, 1.0);
+}
+
+
+
+# Logic for Mjolnir's RGB Cracks and HUD Instances
+class MjolnirController:
+    def __init__(self):
+        self.power_level = 1.0
+        self.rgb_cycle = [255, 0, 0] # Initial Red
+
+    def update_hud_instances(self, armor_integrity):
+        """
+        Calculates HUD data for the Carbon Fiber Vertud display
+        """
+        hud_data = {
+            "armor_status": f"{armor_integrity}%",
+            "mjolnir_charge": self.calculate_voltage(),
+            "iridescence_index": math.sin(time.time())
+        }
+        return hud_data
+
+    def trigger_rgb_burst(self):
+        # Rapidly cycle RGB values during 'Mighty' strike
+        pass
