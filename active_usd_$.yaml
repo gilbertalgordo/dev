@@ -1,0 +1,126 @@
+import pandas as pd
+import numpy as np
+import yfinance as yf
+from sklearn.ensemble import RandomForestClassifier
+
+def get_dxy_data():
+    # Define the basket of currencies
+    symbols = ['EURUSD=X', 'JPY=X', 'GBPUSD=X', 'CAD=X', 'SEK=X', 'CHF=X']
+    data = yf.download(symbols, period='2y', interval='1d')['Adj Close']
+    
+    # Calculate DXY using the weighted geometric mean formula
+    # Note: EURUSD and GBPUSD are inverted in the standard formula (USD is the base)
+    dxy = 50.14348112 * (
+        (data['EURUSD=X']**-0.576) * (data['JPY=X']**0.136) * (data['GBPUSD=X']**-0.119) * (data['CAD=X']**0.091) * (data['SEK=X']**0.042) * (data['CHF=X']**0.036)
+    )
+    return dxy.to_frame(name='DXY_Index')
+
+def generate_active_signals(df):
+    # Feature Engineering
+    df['Returns'] = df['DXY_Index'].pct_change()
+    df['MA10'] = df['DXY_Index'].rolling(window=10).mean()
+    df['Volatility'] = df['Returns'].rolling(window=10).std()
+    
+    # Target: 1 if DXY goes up tomorrow, 0 if down
+    df['Target'] = (df['DXY_Index'].shift(-1) > df['DXY_Index']).astype(int)
+    df = df.dropna()
+
+    # Simple AI Model (Random Forest)
+    X = df[['Returns', 'MA10', 'Volatility']]
+    y = df['Target']
+    
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    model.fit(X[:-1], y[:-1]) # Train on all but last row
+    
+    # Predict "Active" Signal for current state
+    current_state = X.tail(1)
+    prediction = model.predict(current_state)
+    
+    return "BULLISH" if prediction[0] == 1 else "BEARISH"
+
+# Execution
+dxy_df = get_dxy_data()
+signal = generate_active_signals(dxy_df)
+
+print(f"Current DXY Estimate: {dxy_df['DXY_Index'].iloc[-1]:.2f}")
+print(f"AI Active Signal: {signal}")
+
+
+
+import torch
+import torch.nn as nn
+import pandas as pd
+import numpy as np
+import yfinance as yf
+from sklearn.preprocessing import MinMaxScaler
+
+# 1. Data Acquisition & Feature Engineering
+def get_advanced_dxy_data():
+    symbols = ['EURUSD=X', 'JPY=X', 'GBPUSD=X', 'CAD=X', 'SEK=X', 'CHF=X']
+    raw_data = yf.download(symbols, period='5y', interval='1d')['Adj Close']
+    
+    # Base DXY Calculation
+    dxy = 50.14348112 * (
+        (raw_data['EURUSD=X']**-0.576) * (raw_data['JPY=X']**0.136) * (raw_data['GBPUSD=X']**-0.119) * (raw_data['CAD=X']**0.091) * (raw_data['SEK=X']**0.042) * (raw_data['CHF=X']**0.036)
+    )
+    
+    df = dxy.to_frame(name='Close')
+    # Technical Indicators for "Active" Analysis
+    df['RSI'] = 100 - (100 / (1 + df['Close'].diff().apply(lambda x: max(x, 0)).rolling(14).mean() / 
+                             df['Close'].diff().apply(lambda x: abs(min(x, 0))).rolling(14).mean()))
+    df['EMA_20'] = df['Close'].ewm(span=20).mean()
+    return df.dropna()
+
+# 2. LSTM Neural Network Definition
+class DXY_LSTM(nn.Module):
+    def __init__(self, input_size=3, hidden_size=64, num_layers=2):
+        super(DXY_LSTM, self).__init__()
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=0.2)
+        self.fc = nn.Linear(hidden_size, 1) # Output: Predicted DXY Price
+        
+    def forward(self, x):
+        out, _ = self.lstm(x)
+        out = self.fc(out[:, -1, :])
+        return out
+
+# 3. Active Training (Kaizen Loop)
+def train_active_ai(df):
+    scaler = MinMaxScaler()
+    scaled_data = scaler.fit_transform(df[['Close', 'RSI', 'EMA_20']])
+    
+    # Create sequences (lookback of 30 days)
+    lookback = 30
+    X, y = [], []
+    for i in range(lookback, len(scaled_data)):
+        X.append(scaled_data[i-lookback:i])
+        y.append(scaled_data[i, 0])
+        
+    X_train = torch.FloatTensor(np.array(X))
+    y_train = torch.FloatTensor(np.array(y)).view(-1, 1)
+
+    model = DXY_LSTM()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    criterion = nn.MSELoss()
+
+    # Training Loop
+    for epoch in range(50):
+        model.train()
+        optimizer.zero_grad()
+        output = model(X_train)
+        loss = criterion(output, y_train)
+        loss.backward()
+        optimizer.step()
+    
+    return model, scaler, X_train[-1:]
+
+# Execute
+df = get_advanced_dxy_data()
+model, scaler, last_sequence = train_active_ai(df)
+
+# Prediction
+with torch.no_grad():
+    prediction_scaled = model(last_sequence)
+    # Inverse transform to get real USD Index value
+    pred_val = prediction_scaled.item() * (df['Close'].max() - df['Close'].min()) + df['Close'].min()
+
+print(f"AI Projected DXY Target: {pred_val:.4f}")
