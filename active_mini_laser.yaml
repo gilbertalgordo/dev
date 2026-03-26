@@ -1,0 +1,164 @@
+import cv2
+import numpy as np
+
+class LaserDefenseAI:
+    def __init__(self):
+        # Initialize camera and gimbal coordinates
+        self.cap = cv2.VideoCapture(0)
+        self.center_x, self.center_y = 320, 240 # Based on 640x480 resolution
+        
+        # PID Constants for smooth tracking
+        self.kp = 0.1  # Proportional gain
+        self.ki = 0.01 # Integral gain
+        self.kd = 0.05 # Derivative gain
+        
+        self.last_error_x = 0
+        self.last_error_y = 0
+
+    def get_target_centroid(self, frame):
+        # Convert to HSV for robust color-based detection (e.g., tracking a red drone)
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        
+        # Define target color range (Example: Red)
+        lower_red = np.array([0, 120, 70])
+        upper_red = np.array([10, 255, 255])
+        
+        mask = cv2.inRange(hsv, lower_red, upper_red)
+        contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if contours:
+            # Track the largest moving object
+            largest = max(contours, key=cv2.contourArea)
+            M = cv2.moments(largest)
+            if M["m00"] > 0:
+                cX = int(M["m10"] / M["m00"])
+                cY = int(M["m01"] / M["m00"])
+                return (cX, cY), largest
+        return None, None
+
+    def calculate_motor_step(self, target_pos):
+        # Calculate error from center
+        error_x = target_pos[0] - self.center_x
+        error_y = target_pos[1] - self.center_y
+        
+        # PID Calculation for Pan (X) and Tilt (Y)
+        step_x = (error_x * self.kp) + ((error_x - self.last_error_x) * self.kd)
+        step_y = (error_y * self.kp) + ((error_y - self.last_error_y) * self.kd)
+        
+        self.last_error_x = error_x
+        self.last_error_y = error_y
+        
+        return step_x, step_y
+
+    def run(self):
+        while True:
+            ret, frame = self.cap.read()
+            target_pos, contour = self.get_target_centroid(frame)
+            
+            if target_pos:
+                # Draw HUD for tracking
+                cv2.drawContours(frame, [contour], -1, (0, 255, 0), 2)
+                cv2.circle(frame, target_pos, 7, (255, 0, 0), -1)
+                cv2.line(frame, (self.center_x, self.center_y), target_pos, (0, 255, 255), 2)
+                
+                # Logic to send step_x, step_y to Arduino/Microcontroller
+                dx, dy = self.calculate_motor_step(target_pos)
+                print(f"Target Locked. Adjusting Gimbal: Pan {dx:.2f}, Tilt {dy:.2f}")
+
+            # Display System HUD
+            cv2.putText(frame, "SYSTEM: ACTIVE - AUTO-TRACKING", (10, 30), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            cv2.imshow("Laser Defense AI Feed", frame)
+            
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+        self.cap.release()
+        cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    system = LaserDefenseAI()
+    system.run()
+
+
+
+import cv2
+import torch
+import numpy as np
+from ultralytics import YOLO
+from filterpy.kalman import KalmanFilter
+
+class AdvancedLaserDefense:
+    def __init__(self):
+        # Load high-speed Nano model for < 10ms inference
+        self.model = YOLO('yolo11n.pt') 
+        self.cap = cv2.VideoCapture(0)
+        
+        # Initialize Kalman Filter for 2D Constant Velocity Model
+        self.kf = KalmanFilter(dim_x=4, dim_z=2)
+        self.kf.x = np.array([0., 0., 0., 0.])       # state (x, y, vx, vy)
+        self.kf.F = np.array([[1,0,1,0], [0,1,0,1], [0,0,1,0], [0,0,0,1]]) # Transition
+        self.kf.H = np.array([[1,0,0,0], [0,1,0,0]]) # Measurement function
+        self.kf.P *= 1000.                           # Covariance
+        self.kf.R = 5                                # Measurement noise
+        self.kf.Q = 0.1                              # Process noise
+
+    def update_tracker(self, measurement):
+        self.kf.predict()
+        self.kf.update(measurement)
+        return self.kf.x[:2] # Returns predicted x, y
+
+    def render_hud(self, frame, target_box, prediction, status):
+        # Tactical HUD Overlay
+        h, w, _ = frame.shape
+        cx, cy = w // 2, h // 2
+        
+        # Draw Crosshairs
+        cv2.line(frame, (cx-20, cy), (cx+20, cy), (0, 255, 0), 1)
+        cv2.line(frame, (cx, cy-20), (cx, cy+20), (0, 255, 0), 1)
+        
+        if target_box is not None:
+            x1, y1, x2, y2 = map(int, target_box)
+            tx, ty = (x1 + x2) // 2, (y1 + y2) // 2
+            
+            # Draw Target Box and Vector
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            cv2.line(frame, (cx, cy), (tx, ty), (0, 255, 255), 1)
+            
+            # Draw Prediction Dot (Future impact point)
+            px, py = map(int, prediction)
+            cv2.circle(frame, (px, py), 5, (255, 0, 255), -1)
+            cv2.putText(frame, "PREDICTED IMPACT", (px+10, py), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 255), 1)
+
+        # Status Panel
+        cv2.rectangle(frame, (10, 10), (220, 80), (0, 0, 0), -1)
+        cv2.putText(frame, f"STATUS: {status}", (20, 35), 0, 0.6, (0, 255, 0), 2)
+        cv2.putText(frame, f"AI LENS: ACTIVE", (20, 60), 0, 0.5, (200, 200, 200), 1)
+
+    def run(self):
+        while True:
+            ret, frame = self.cap.read()
+            results = self.model(frame, stream=True, classes=[4, 14, 15, 16]) # Drone/Bird/etc
+            
+            best_target = None
+            prediction = [0, 0]
+            status = "SCANNING"
+
+            for r in results:
+                boxes = r.boxes
+                if len(boxes) > 0:
+                    status = "ENGAGED"
+                    best_target = boxes[0].xyxy[0] # Get first detected object
+                    tx, ty = (best_target[0] + best_target[2]) / 2, (best_target[1] + best_target[3]) / 2
+                    prediction = self.update_tracker([tx, ty])
+            
+            self.render_hud(frame, best_target, prediction, status)
+            cv2.imshow("Mini-Defense HUD v2.0", frame)
+            
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+if __name__ == "__main__":
+    system = AdvancedLaserDefense()
+    system.run()
