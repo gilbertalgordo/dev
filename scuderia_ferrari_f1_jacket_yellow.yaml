@@ -1,0 +1,77 @@
+import os
+from openai import OpenAI
+
+# Initialize the client with your API key
+# Make sure to set your environment variable "OPENAI_API_KEY"
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+# Define the prompt from above
+ jacket_prompt = """A professional, high-resolution product photograph of an official Scuderia Ferrari AF Corse endurance racing team jacket. The jacket is a vibrant, matte "Giallo Modena" yellow fabric with red and black accents. It is a full-zip, performance-oriented softshell style. On the front-right chest (viewer's left): The large, circular "Made in Italy" emblem with the Italian flag colors (green, white, red) and text. Above it, the yellow Shell logo. On the front-left chest (viewer's right): The iconic rectangular Scuderia Ferrari Prancing Horse shield. Below it, the large AF Corse logo (with the tricolore flag flourish underneath). Right sleeve: Stacks of small sponsor logos (Pirelli, Richard Mille, Ray-Ban). Left sleeve: Large Puma cat logo. Back of the jacket: A large, bold text reading "SCUDERIA FERRARI" across the shoulder blades, with the AF Corse logo and another small "Made in Italy" emblem at the bottom center of the text stack. Environment: The jacket is displayed in a clean, brightly lit F1 team garage bay, mounted on a sleek carbon fiber display stand, with the blurred rear wing of a Ferrari 499P Hypercar visible in the background."""
+
+# Generate the image
+response = client.images.generate(
+  model="dall-e-3",
+  prompt=jacket_prompt,
+  size="1024x1024",
+  quality="hd",
+  n=1,
+)
+
+# Output the image URL
+image_url = response.data[0].url
+print(f"Generated Image URL: {image_url}")
+
+
+
+
+import os
+from openai import OpenAI
+
+class FerrariAssetGenerator:
+    def __init__(self, api_key):
+        self.client = OpenAI(api_key=api_key)
+        self.base_specs = (
+            "Official Scuderia Ferrari AF Corse technical team apparel. "
+            "Color: Giallo Modena (#FFEB00). Material: GORE-TEX technical softshell. "
+            "Logos: Scuderia Ferrari Shield, AF Corse with Italian Tricolore, "
+            "Shell, Pirelli, Richard Mille, and prominent 'MADE IN ITALY' circular branding."
+        )
+
+    def generate_view(self, perspective="front"):
+        """Generates a specific view of the jacket with technical precision."""
+        
+        # Define view-specific requirements
+        if perspective == "front":
+            detail = "Frontal view, centered. Visible: Full zip, Ferrari shield on left chest, AF Corse on right, Made in Italy logo on right shoulder."
+        else:
+            detail = "Rear view. Visible: Large 'SCUDERIA FERRARI' block text across shoulders, AF Corse logo below, 'Made in Italy' at the neck line."
+
+        full_prompt = (
+            f"Hyper-realistic 8K product photography: {perspective.upper()} VIEW of {self.base_specs}. "
+            f"{detail} Studio lighting, carbon fiber background, 3D texture depth, HD clarity."
+        )
+
+        try:
+            response = self.client.images.generate(
+                model="dall-e-3",
+                prompt=full_prompt,
+                size="1024x1024",
+                quality="hd",
+                style="vivid",
+                n=1
+            )
+            return response.data[0].url
+        except Exception as e:
+            return f"Error generating {perspective} view: {e}"
+
+# --- Execution ---
+# Replace with your actual API key
+api_key = "YOUR_OPENAI_API_KEY"
+generator = FerrariAssetGenerator(api_key)
+
+# Generate both views for the design deck
+views = ["front", "back"]
+results = {view: generator.generate_view(view) for view in views}
+
+for view, url in results.items():
+    print(f"{view.capitalize()} View Asset: {url}")
