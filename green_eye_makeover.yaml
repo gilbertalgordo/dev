@@ -1,0 +1,49 @@
+import cv2
+import mediapipe as mp
+import numpy as np
+
+# Initialize Mediapipe
+mp_face_mesh = mp.solutions.face_mesh
+face_mesh = mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1)
+
+def face_makeover(image_path):
+    img = cv2.imread(image_path)
+    h, w, _ = img.shape
+    results = face_mesh.process(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+    
+    if not results.multi_face_landmarks:
+        return "No face detected"
+
+    # 1. Skin Smoothing (Bilateral Filter)
+    # This preserves edges while blurring the skin surface
+    smooth_skin = cv2.bilateralFilter(img, d=15, sigmaColor=75, sigmaSpace=75)
+    
+    # 2. Green Eye Effect
+    # Indices for the iris (varies by face mesh version)
+    LEFT_IRIS = [474, 475, 476, 477]
+    RIGHT_IRIS = [469, 470, 471, 472]
+    
+    landmarks = results.multi_face_landmarks[0].landmark
+    
+    for iris_indices in [LEFT_IRIS, RIGHT_IRIS]:
+        points = []
+        for idx in iris_indices:
+            pt = landmarks[idx]
+            points.append((int(pt.x * w), int(pt.y * h)))
+        
+        # Create a circular mask for the eye
+        center = np.mean(points, axis=0).astype(int)
+        radius = int(np.linalg.norm(np.array(points[0]) - center))
+        
+        overlay = smooth_skin.copy()
+        cv2.circle(overlay, tuple(center), radius, (0, 255, 0), -1) # Green color
+        
+        # Blend the green circle with the original eye for realism
+        alpha = 0.4 
+        cv2.addWeighted(overlay, alpha, smooth_skin, 1 - alpha, 0, smooth_skin)
+
+    return smooth_skin
+
+# Execute and Save
+result_img = face_makeover('image.png')
+cv2.imwrite('makeover_result.jpg', result_img)
