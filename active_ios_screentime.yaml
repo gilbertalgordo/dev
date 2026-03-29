@@ -1,0 +1,140 @@
+import FamilyControls
+import Foundation
+
+class ScreenTimeManager: ObservableObject {
+    static let shared = ScreenTimeManager()
+    
+    @Published var hasAuthorization = false
+    
+    func requestAuthorization() async {
+        do {
+            try await AuthorizationCenter.shared.requestAuthorization(for: .individual)
+            DispatchQueue.main.async {
+                self.hasAuthorization = true
+            }
+        } catch {
+            print("Failed to get authorization: \(error.localizedDescription)")
+        }
+    }
+}
+
+
+
+import DeviceActivity
+import ManagedSettings
+
+struct AIUsageMonitor {
+    let center = DeviceActivityCenter()
+    
+    func startMonitoring() {
+        // Define a schedule (e.g., 8:00 AM to 10:00 PM)
+        let schedule = DeviceActivitySchedule(
+            intervalStart: DateComponents(hour: 8, minute: 0),
+            intervalEnd: DateComponents(hour: 22, minute: 0),
+            repeats: true
+        )
+        
+        let activityName = DeviceActivityName("com.ai.screentime.monitor")
+        
+        do {
+            try center.startMonitoring(activityName, during: schedule)
+            print("AI Monitoring active.")
+        } catch {
+            print("Error starting monitor: \(error)")
+        }
+    }
+}
+
+
+
+import ManagedSettings
+
+class AppShieldManager {
+    let store = ManagedSettingsStore()
+    
+    func restrictApps(selection: FamilyActivitySelection) {
+        // Apply the shield to selected apps/categories
+        store.shield.applications = selection.applicationTokens
+        store.shield.applicationCategories = selection.categoryTokens
+    }
+    
+    func clearRestrictions() {
+        store.shield.applications = nil
+    }
+}
+
+
+
+
+import DeviceActivity
+import ManagedSettings
+import CoreML
+
+// This class is triggered by the system when activity thresholds are met.
+class ScreenTimeMonitorExtension: DeviceActivityMonitor {
+    let store = ManagedSettingsStore()
+
+    // Triggered when the user reaches the "Warning" threshold
+    override func intervalThresholdDidReach(for activity: DeviceActivityName, threshold: DeviceActivityThreshold) {
+        super.intervalThresholdDidReach(for: activity, threshold: threshold)
+        
+        // AI Logic: Check context before shielding
+        // For example, if the user is in a 'Focus' location, be stricter.
+        if shouldIntervene() {
+            applyRestrictions()
+        }
+    }
+
+    func shouldIntervene() -> Bool {
+        // Here you would call a lightweight CoreML model to analyze 
+        // if current usage matches 'doom-scrolling' patterns.
+        return true 
+    }
+
+    func applyRestrictions() {
+        // Access the saved selection from the main app via UserDefaults(suiteName:)
+        let selection = getSavedSelection()
+        store.shield.applications = selection.applicationTokens
+    }
+}
+
+
+
+
+import ManagedSettings
+import ManagedSettingsUI
+import UIKit
+
+class MyShieldConfiguration: ShieldConfigurationDataSource {
+    override func configuration(shielding application: Application) -> ShieldConfiguration {
+        return ShieldConfiguration(
+            backgroundBlurStyle: .dark,
+            backgroundColor: .black,
+            icon: UIImage(systemName: "brain.head.profile"),
+            title: ShieldConfiguration.Label(text: "AI Intervention", color: .white),
+            subtitle: ShieldConfiguration.Label(text: "Your usage patterns suggest high fatigue. Take a 5-minute break.", color: .lightGray),
+            primaryButtonLabel: ShieldConfiguration.Label(text: "Close App", color: .black),
+            secondaryButtonLabel: ShieldConfiguration.Label(text: "I really need this", color: .systemBlue)
+        )
+    }
+}
+
+
+
+func setupAdvancedMonitoring() {
+    let schedule = DeviceActivitySchedule(
+        intervalStart: DateComponents(hour: 0, minute: 0),
+        intervalEnd: DateComponents(hour: 23, minute: 59),
+        repeats: true
+    )
+    
+    // Trigger the 'intervalThresholdDidReach' after 30 minutes of total activity
+    let threshold = DeviceActivityThreshold(totalActivity: DateComponents(minute: 30))
+    
+    let center = DeviceActivityCenter()
+    do {
+        try center.startMonitoring(.dailyMonitor, during: schedule, thresholds: [.daily: threshold])
+    } catch {
+        print("Monitoring failed: \(error)")
+    }
+}
