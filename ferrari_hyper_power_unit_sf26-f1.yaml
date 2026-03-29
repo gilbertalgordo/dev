@@ -1,0 +1,124 @@
+/**
+ * Scuderia Ferrari SF26 - PU Multiplier Control AI
+ * Logic: 50/50 Hybrid Split (ICE/ERS) + Active Aero Integration
+ */
+
+class SF26_ActiveSentinel_PU {
+    constructor() {
+        this.max_ice_kw = 400; // ~536 hp
+        this.max_ers_kw = 350; // ~470 hp (2026 Regs)
+        this.battery_soc = 1.0; // State of Charge (0.0 to 1.0)
+        this.multiplier = 1.0;
+        this.mode = "Z-MODE"; // Initial mode
+    }
+
+    // Superfast Kaizen Optimization Loop
+    calculateMultiplier(telemetry) {
+        const { throttle, speed, drs_active, ers_deployment_mode } = telemetry;
+
+        // 1. Determine Aero State (X-Mode vs Z-Mode)
+        this.mode = (speed > 250 && throttle > 0.9) ? "X-MODE" : "Z-MODE";
+
+        // 2. Base Multiplier Logic
+        let targetMultiplier = 1.0;
+
+        if (this.mode === "X-MODE") {
+            // Maximum Overboost (Qualifying/Overtake)
+            targetMultiplier = 1.25; 
+        } else {
+            // Efficient Harvesting / Traction Limited
+            targetMultiplier = 0.85;
+        }
+
+        // 3. Energy Recovery Constraint (MGU-K)
+        if (this.battery_soc < 0.1) {
+            targetMultiplier *= 0.5; // Derating to protect cells
+        }
+
+        // 4. Smooth Kaizen Adjustment
+        this.multiplier += (targetMultiplier - this.multiplier) * 0.1;
+
+        return {
+            total_output: (this.max_ice_kw + (this.max_ers_kw * this.multiplier)).toFixed(2) + " kW",
+            active_mode: this.mode,
+            efficiency_index: (this.multiplier * 100).toFixed(1) + "%"
+        };
+    }
+}
+
+// Instance for the SF26 AF Corse Fleet
+const sf26_ai = new SF26_ActiveSentinel_PU();
+console.log(sf26_ai.calculateMultiplier({ throttle: 1.0, speed: 310, drs_active: true }));
+
+
+
+/**
+ * SF26 Hybrid Active Super - PU Multiplier Control AI
+ * Optimized for: Scuderia Ferrari AF Corse SF26 (2026 Regs)
+ * Logic: 50/50 Split (ICE 400kW : MGU-K 350kW)
+ */
+
+const SF26_PU_CONFIG = {
+    ICE_MAX_KW: 400.0,
+    MGUK_MAX_KW: 350.0,
+    MAX_RPM_TURBO: 150000,
+    MAX_SOC_DELTA: 4.0, // MJ per lap
+    THERMAL_LIMIT: 60.0 // Celsius
+};
+
+class SF26_ActiveAI_Controller {
+    constructor() {
+        this.current_mode = "Z-MODE"; // Default: High Downforce
+        this.ers_multiplier = 1.0;
+        this.active_sentinel_status = "STABLE";
+    }
+
+    /**
+     * Advance Multiplier Calculation
+     * @param {Object} data - Real-time telemetry (speed, throttle, battery_soc, temp)
+     */
+    calculateActiveMultiplier(data) {
+        let { speed, throttle, battery_soc, battery_temp, manual_override } = data;
+
+        // 1. Dynamic Mode Selection (Active Aero)
+        // X-Mode (Straight/Low Drag) vs Z-Mode (Corner/High Downforce)
+        this.current_mode = (speed > 240 && throttle > 0.85) ? "X-MODE" : "Z-MODE";
+
+        // 2. Base Power Multiplier Logic
+        // In 2026, the MGU-K deployment drops as speed increases to prevent "clipping"
+        // This AI uses a Kaizen-smoothing curve to maintain acceleration.
+        let base_mult = (this.current_mode === "X-MODE") ? 1.15 : 0.92;
+
+        // 3. Manual Override Mode (MOM) / Tactical Boost
+        if (manual_override && battery_soc > 0.15) {
+            base_mult *= 1.25; // "Super Active" Surge
+        }
+
+        // 4. Active Sentinel: Thermal & SOC Protection
+        if (battery_temp > SF26_PU_CONFIG.THERMAL_LIMIT) {
+            base_mult *= 0.7; // Emergency Derating
+            this.active_sentinel_status = "THERMAL_THROTTLING";
+        } else if (battery_soc < 0.10) {
+            base_mult *= 0.4; // Harvest Priority
+            this.active_sentinel_status = "LOW_SOC_RECHARGE";
+        } else {
+            this.active_sentinel_status = "OPTIMAL";
+        }
+
+        this.ers_multiplier = base_mult;
+
+        return {
+            mode: this.current_mode,
+            multiplier: this.ers_multiplier.toFixed(4),
+            ice_output: SF26_PU_CONFIG.ICE_MAX_KW.toFixed(1) + " kW",
+            mguk_deployment: (SF26_PU_CONFIG.MGUK_MAX_KW * this.ers_multiplier).toFixed(1) + " kW",
+            system_state: this.active_sentinel_status
+        };
+    }
+}
+
+// Global Execution
+const FerrariAI = new SF26_ActiveAI_Controller();
+const telemetry_snapshot = { speed: 315, throttle: 1.0, battery_soc: 0.85, battery_temp: 52.5, manual_override: true };
+
+console.table(FerrariAI.calculateActiveMultiplier(telemetry_snapshot));
