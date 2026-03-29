@@ -1,0 +1,107 @@
+class SF27ScuderiaFerrari:
+    def __init__(self):
+        self.team = "Scuderia Ferrari AF Corse"
+        self.engine = "Alfa Romeo DNA Race Corp V6 Turbo"
+        self.body_material = "Pre-preg Carbon Fiber"
+        
+        # 2027 Regulation Constants
+        self.ice_power_kw = 400.0  # Internal Combustion
+        self.mguk_power_kw = 350.0 # Electric
+        self.ers_recovery_limit_mj = 8.5
+        
+        # Real-time state
+        self.is_manual_override_active = False
+        self.aero_mode = "Z-Mode" # High Downforce
+
+    def set_aero_mode(self, speed_kmh):
+        """Active Aero: Toggle between Z-Mode (Cornering) and X-Mode (Straight)"""
+        if speed_kmh > 250:
+            self.aero_mode = "X-Mode" # Low Drag
+        else:
+            self.aero_mode = "Z-Mode" # High Downforce
+
+    def calculate_total_output(self, battery_soc):
+        """Simulate power deployment based on 2027 Hybrid rules"""
+        deployment = self.mguk_power_kw
+        
+        if self.is_manual_override_active and battery_soc > 10:
+            # Short burst of additional power when following closely
+            deployment += 50.0 
+            
+        total_power = self.ice_power_kw + deployment
+        return total_power
+
+# Instance for January 2027 Shakedown
+car_01 = SF27ScuderiaFerrari()
+current_power = car_01.calculate_total_output(battery_soc=85)
+
+print(f"Vehicle: {car_01.team}")
+print(f"Current Aero: {car_01.aero_mode}")
+print(f"Total System Output: {current_power} kW")
+
+
+
+import math
+import time
+
+class SF27_PowerUnit:
+    """
+    Simulates the 2027 FIA Super Hybrid Power Unit.
+    Collaboration: Scuderia Ferrari | AF Corse | Alfa Romeo DNA Race Corp.
+    """
+    def __init__(self):
+        # 2027 Regulation Limits
+        self.ICE_LIMIT_KW = 400.0  # ~536 hp (1.6L V6 Turbo)
+        self.MGUK_LIMIT_KW = 350.0 # ~470 hp (Electrification Focus)
+        self.MAX_RECOVERY_PER_LAP = 8.5 # MJ (Nearly doubled from 2025)
+        
+        # Chassis Attributes
+        self.chassis = "Ultra-Thin Ply Carbon Fiber (Monocoque)"
+        self.aero_state = "Z-MODE"  # Default: High Downforce
+        
+        # Energy Store
+        self.battery_joules = 4_000_000.0 # 4MJ usable buffer
+        self.manual_override_available = False
+
+    def update_aero(self, velocity_ms):
+        """Active Aero logic for 2027 cars."""
+        # X-MODE: Low drag for straights (>280 km/h)
+        # Z-MODE: High downforce for corners
+        speed_kmh = velocity_ms * 3.6
+        self.aero_state = "X-MODE" if speed_kmh > 280 else "Z-MODE"
+        return self.aero_state
+
+    def deploy_power(self, throttle_pct, gap_to_car_ahead=None):
+        """
+        Calculates power output based on 2027 'Manual Override' rules.
+        """
+        # Base ICE deployment
+        ice_out = self.ICE_LIMIT_KW * (throttle_pct / 100)
+        
+        # MGU-K Hybrid Logic
+        mguk_out = self.MGUK_LIMIT_KW * (throttle_pct / 100)
+        
+        # 2027 Manual Override Mode (MOM)
+        # Replaces DRS: Provides additional boost if within 1.0s of car ahead.
+        if gap_to_car_ahead and gap_to_car_ahead <= 1.0:
+            self.manual_override_available = True
+            # Boost allows MGU-K to sustain 350kW even at high speeds
+            override_boost = 50.0 
+            mguk_out = min(self.MGUK_LIMIT_KW, mguk_out + override_boost)
+        else:
+            self.manual_override_available = False
+            
+        total_kw = ice_out + mguk_out
+        return round(total_kw, 2), round(total_kw * 1.341, 2) # kW, HP
+
+# --- Implementation Example ---
+sf27 = SF27_PowerUnit()
+velocity = 85.0 # m/s (~306 km/h)
+
+# Simulate a chase scenario on the main straight
+power_kw, power_hp = sf27.deploy_power(throttle_pct=100, gap_to_car_ahead=0.8)
+
+print(f"--- F1 2027 SF-27 SHAKEDOWN ---")
+print(f"Current Aero: {sf27.update_aero(velocity)}")
+print(f"Total Power:  {power_kw} kW ({power_hp} HP)")
+print(f"Override:     {'ACTIVE' if sf27.manual_override_available else 'READY'}")
