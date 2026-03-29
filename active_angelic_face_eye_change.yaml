@@ -1,0 +1,111 @@
+import cv2
+import dlib
+import numpy as np
+
+# Initialize Dlib's face detector and landmark predictor
+detector = dlib.get_frontal_face_detector()
+# Replace with the path to your 'shape_predictor_68_face_landmarks.dat' file
+predictor = dlib.shape_predictor('shape_predictor_68_face_landmarks.dat')
+
+def angelic_eye_makeover(image_path, target_eye_color=(255, 230, 170)): # Target: Bright Blue/Gold
+    img = cv2.imread(image_path)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    faces = detector(gray)
+
+    for face in faces:
+        landmarks = predictor(gray, face)
+        
+        # 1. Skin Smoothing (for 'Angelic' glow)
+        # Use bilateral filter to smooth skin while preserving edges (eyes, hair, necklace)
+        img = cv2.bilateralFilter(img, d=15, sigmaColor=75, sigmaSpace=75)
+
+        # 2. Eye Color Changer
+        # Get coordinates for left and right eye regions
+        left_eye_region = np.array([(landmarks.part(36).x, landmarks.part(36).y),
+                                    (landmarks.part(37).x, landmarks.part(37).y),
+                                    # ... indices 38-41 ...
+                                    (landmarks.part(41).x, landmarks.part(41).y)], np.int32)
+        
+        right_eye_region = np.array([(landmarks.part(42).x, landmarks.part(42).y),
+                                     # ... indices 43-46 ...
+                                     (landmarks.part(47).x, landmarks.part(47).y)], np.int32)
+
+        # Create masks for the eyes and apply target color
+        for region in [left_eye_region, right_eye_region]:
+            mask = np.zeros(img.shape[:2], np.uint8)
+            cv2.fillPoly(mask, [region], 255)
+            
+            # Apply color mask with alpha blending for realism
+            eye_color_mask = np.full(img.shape, target_eye_color, dtype=np.uint8)
+            alpha = 0.3 # Transparency level for the color change
+            img = cv2.addWeighted(cv2.bitwise_and(eye_color_mask, eye_color_mask, mask=mask), alpha, img, 1-alpha, 0)
+
+        # 3. Increase overall brightness and add subtle bloom (angelic effect)
+        img = cv2.convertScaleAbs(img, alpha=1.1, beta=15)
+
+    return img
+
+# Execute and save
+# Note: You need dlib and the shape predictor file installed to run this successfully.
+transformed_image = angelic_eye_makeover('input_subject.jpg')
+cv2.imwrite('angelic_transformation.jpg', transformed_image)
+
+
+
+import cv2
+import dlib
+import numpy as np
+
+# Load the face detector and landmark predictor
+detector = dlib.get_frontal_face_detector()
+# Download 'shape_predictor_68_face_landmarks.dat' from dlib.net
+predictor = dlib.shape_predictor('shape_predictor_68_face_landmarks.dat')
+
+def angelic_makeover(img_path, eye_color=(255, 215, 0)): # Default: Golden Angelic
+    img = cv2.imread(img_path)
+    img_work = img.copy()
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    faces = detector(gray)
+
+    for face in faces:
+        landmarks = predictor(gray, face)
+        
+        # 1. PORCELAIN SKIN SMOOTHING
+        # Bilateral filter preserves edges (nose, lips) while smoothing skin texture
+        skin_smooth = cv2.bilateralFilter(img_work, d=9, sigmaColor=75, sigmaSpace=75)
+        
+        # 2. EYE COLOR CHANGER (High-Fidelity)
+        def change_eye_color(start_idx, end_idx):
+            points = []
+            for i in range(start_idx, end_idx):
+                points.append([landmarks.part(i).x, landmarks.part(i).y])
+            
+            points = np.array(points, np.int32)
+            mask = np.zeros(img.shape[:2], dtype=np.uint8)
+            cv2.fillPoly(mask, [points], 255)
+            
+            # Isolate the eye and apply color overlay
+            eye_roi = cv2.bitwise_and(img_work, img_work, mask=mask)
+            color_layer = np.full(eye_roi.shape, eye_color, dtype=np.uint8)
+            
+            # Blend color with original texture (keeps the pupil/shimmer visible)
+            blended_eye = cv2.addWeighted(eye_roi, 0.6, color_layer, 0.4, 0)
+            
+            # Replace eye in the smoothed image
+            inverse_mask = cv2.bitwise_not(mask)
+            bg = cv2.bitwise_and(skin_smooth, skin_smooth, mask=inverse_mask)
+            return cv2.add(bg, blended_eye)
+
+        # Apply to Left (36-42) and Right (42-48) eyes
+        skin_smooth = change_eye_color(36, 42)
+        skin_smooth = change_eye_color(42, 48)
+
+        # 3. ANGELIC BLOOM (Soft Glow)
+        glow = cv2.GaussianBlur(skin_smooth, (0, 0), 10)
+        img_final = cv2.addWeighted(skin_smooth, 1.0, glow, 0.2, 0)
+
+        return img_final
+
+# Execute
+result = angelic_makeover('input.jpg')
+cv2.imwrite('angelic_result.jpg', result)
