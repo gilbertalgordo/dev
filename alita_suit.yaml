@@ -1,0 +1,361 @@
+#ifdef GL_ES
+precision medium_depth float;
+#endif
+
+uniform float u_time;
+uniform vec2 u_resolution;
+uniform sampler2D u_noise_texture; // A seamless noise texture for iridescence
+
+varying vec2 v_texcoord;
+
+void main() {
+    vec2 st = v_texcoord;
+
+    // --- 1. Carbon Fiber Pattern (Vertud Grid) ---
+    // Create a woven grid pattern (simplified)
+    vec2 grid_st = st * 40.0; // Scale the pattern
+    float pattern = abs(sin(grid_st.x * 3.14159) * sin(grid_st.y * 3.14159));
+    pattern = smoothstep(0.48, 0.52, pattern);
+
+    // Make the carbon fiber base black/dark grey
+    vec3 carbon_color = vec3(0.05, 0.05, 0.05);
+
+    // Add depth to the weave
+    carbon_color *= (1.0 + pattern * 0.15); 
+
+
+    // --- 2. Iridescent Layer (Silver-Violet-Black) ---
+    // This part should respond to light/view angle (u_view_direction),
+    // but we'll use time and noise for a static iridescent wash.
+    float noise_val = texture2D(u_noise_texture, st + u_time * 0.01).r;
+    
+    // Shift color through the rainbow (but limited by our palette)
+    float hue_shift = noise_val + u_time * 0.02;
+
+    // Mix color based on noise (simplified color shifting)
+    vec3 iridescent_color = mix(
+        vec3(0.1, 0.05, 0.15), // Deep Black/Violet base
+        vec3(0.8, 0.7, 1.0),    // Silver-Violet transition
+        clamp(sin(hue_shift * 6.28318), 0.0, 1.0)
+    );
+
+    // Apply the "silver" reflectiveness (metalicity)
+    iridescent_color = mix(carbon_color, iridescent_color, 0.7); 
+    iridescent_color = clamp(iridescent_color + vec3(0.1), 0.0, 1.0); // Brighten the 'silver'
+
+
+    // --- 3. Composite the Final Base Material ---
+    // Combine the carbon texture and the iridescent wash
+    vec3 final_base = mix(carbon_color, iridescent_color, 0.5); 
+    final_base *= (1.0 - pattern * 0.5); // Let the weave pattern darken the shadows
+
+
+    // --- 4. RGB Lighting Emissive Overlay ---
+    // Create a sweeping RGB light strip effect
+    float rgb_stripe = abs(sin(st.y * 10.0 + u_time));
+    float rgb_mask = smoothstep(0.92, 0.98, rgb_stripe); // Thin glowing line
+
+    vec3 rgb_color = vec3(
+        abs(sin(u_time)),
+        abs(sin(u_time + 2.0)),
+        abs(sin(u_time + 4.0))
+    );
+
+    final_base += rgb_color * rgb_mask * 1.5; // High emissive brightness
+
+
+    gl_FragColor = vec4(final_base, 1.0);
+}
+
+
+
+/*
+  p5.js Sketch: Alita's Rollerblade & Helmet Component System
+  Visualize: Iridescent (Silver-Violet-Black), Carbon Fiber (Vertud), and RGB
+*/
+
+let time = 0;
+let base_angle = 0;
+
+function setup() {
+  createCanvas(600, 600, WEBGL);
+  angleMode(DEGREES);
+}
+
+function draw() {
+  background(10, 10, 15); // Cyberpunk background
+
+  // Setup basic lighting
+  orbitControl(); // Interactive view
+  ambientLight(20);
+  directionalLight(255, 255, 255, 0.5, 0.5, -1);
+
+  push();
+  rotateX(-15);
+  rotateY(frameCount * 0.1); // Slow rotation
+
+  // --- Draw the Rollerblade (Main Chassis) ---
+  drawRollerblade(0, 0, 0);
+
+  // --- Draw the Helmet (Above and behind) ---
+  translate(0, -180, -50);
+  drawHelmet();
+  pop();
+
+  time += 0.02;
+}
+
+// Function to visualize the 2-wheel rollerblade
+function drawRollerblade(x, y, z) {
+  push();
+  translate(x, y, z);
+
+  // 1. Carbon Fiber Chassis (Black Vertud)
+  fill(15, 15, 15);
+  stroke(40);
+  box(60, 160, 40); // Boot body
+
+  // Vertud (Carbon Fiber) detail pattern (Conceptual lines)
+  stroke(255, 50); // White lines for weave
+  for (let i = -70; i < 70; i += 10) {
+    line(-25, i, 20, 25, i, 20); // Horizontal weave
+    line(0, i, -20, 0, i, 20); // Spine weave
+  }
+
+  // 2. Iridescent Plating (Silver-Violet Wash)
+  let ir_t = map(mouseX, 0, width, 0, 1); // Use mouse to interact with effect
+  let ir_col = lerpColor(color(20, 10, 30), color(200, 180, 255), ir_t); // Base violet to silver
+  
+  // Add a silver specular highlight
+  ir_col = lerpColor(ir_col, color(255, 255, 255), 0.3 * (1 - ir_t)); 
+
+  fill(ir_col);
+  noStroke();
+  push();
+  translate(0, 0, 21); // Plating on the face
+  plane(55, 150);
+  pop();
+
+  // 3. Embedded RGB LED Strips (Moving color)
+  let rgb_col = color(
+    abs(sin(time)) * 255,
+    abs(sin(time + 2)) * 255,
+    abs(sin(time + 4)) * 255
+  );
+
+  emissiveMaterial(rgb_col); // Make it glow
+  push();
+  translate(0, -60, 23); // Side light strip
+  cylinder(3, 40); 
+  pop();
+
+  push();
+  translate(-32, 0, 0); // Side light strip
+  box(2, 100, 20);
+  pop();
+
+  // 4. Detailed 2-Wheel Assembly
+  let wheel_y = 60;
+  for (let i = 0; i < 2; i++) {
+    push();
+    translate(0, wheel_y + (i * 70), 0);
+    rotateZ(frameCount * 2); // Wheels spinning
+
+    // Hub (Metal)
+    fill(200);
+    ambientMaterial(150);
+    torus(25, 6);
+
+    // Internal RGB spoke lights
+    push();
+    rotateZ(time * 50);
+    fill(rgb_col);
+    noStroke();
+    for(let j = 0; j < 6; j++) {
+        push();
+        rotateZ(60 * j);
+        translate(15, 0, 0);
+        sphere(3);
+        pop();
+    }
+    pop();
+    
+    // Axle Detail
+    fill(255);
+    cylinder(3, 45); 
+    pop();
+  }
+
+  pop();
+}
+
+// Function to visualize the helmet
+function drawHelmet() {
+  push();
+
+  // 1. Carbon Fiber Helmet Shell (Black Vertud)
+  fill(15, 15, 20);
+  noStroke();
+  push();
+  scale(1, 1.2, 1);
+  sphere(60); // Main head shape
+  pop();
+
+  // Vertud weave pattern detail (Conceptual lines)
+  stroke(255, 40);
+  for (let i = -50; i < 50; i += 12) {
+    line(-50, i, 30, 50, i, 30); // Weave lines
+  }
+
+  // 2. Iridescent Plating (Silver-Violet)
+  let ir_t = map(mouseY, 0, height, 0, 1); // Interactive iridescence
+  let ir_col = lerpColor(color(180, 160, 240), color(30, 20, 50), ir_t); // Silver to dark
+  fill(ir_col);
+  noStroke();
+  
+  push();
+  translate(0, 0, 50); // Facemask plating
+  ellipsoid(40, 60, 20);
+  pop();
+
+  // 3. RGB Glowing Strips and Vents
+  let rgb_col = color(
+    abs(sin(time + 1)) * 255,
+    abs(sin(time + 3)) * 255,
+    abs(sin(time + 5)) * 255
+  );
+  emissiveMaterial(rgb_col);
+  
+  push();
+  translate(-55, -20, 0); // Ear vent light
+  box(10, 40, 10);
+  pop();
+
+  push();
+  translate(0, 70, 0); // Bottom jaw light strip
+  torus(50, 2);
+  pop();
+
+  // Visor (Blacked out)
+  fill(0);
+  push();
+  translate(0, -10, 40);
+  plane(70, 30);
+  pop();
+
+  pop();
+}
+
+
+
+import * as THREE from 'three';
+
+// --- Custom Shader Chunk: Vertud Carbon & Iridescence ---
+const vertexShader = `
+  varying vec3 vNormal;
+  varying vec3 vViewPosition;
+  varying vec2 vUv;
+
+  void main() {
+    vUv = uv;
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    vNormal = normalize(normalMatrix * normal);
+    vViewPosition = -mvPosition.xyz;
+    gl_Position = projectionMatrix * mvPosition;
+  }
+`;
+
+const fragmentShader = `
+  uniform float uTime;
+  varying vec3 vNormal;
+  varying vec3 vViewPosition;
+  varying vec2 vUv;
+
+  void main() {
+    // 1. Carbon Fiber "Vertud" Pattern
+    // Creating a 2x2 weave simulation
+    vec2 uv = vUv * 120.0; // Scale of the weave
+    float weave = step(0.5, fract(uv.x)) * step(0.5, fract(uv.y)) +
+                 step(fract(uv.x), 0.5) * step(fract(uv.y), 0.5);
+    
+    vec3 carbonBase = mix(vec3(0.02, 0.02, 0.02), vec3(0.08, 0.08, 0.1), weave);
+
+    // 2. Iridescent Silver-Violet Logic (Fresnel Effect)
+    vec3 viewDir = normalize(vViewPosition);
+    float fresnel = pow(1.0 - dot(viewDir, vNormal), 3.0);
+    
+    // Shift from Deep Violet (rim) to Bright Silver (center/angles)
+    vec3 silver = vec3(0.75, 0.75, 0.85);
+    vec3 violet = vec3(0.4, 0.2, 0.8);
+    vec3 iridescentFlow = mix(silver, violet, fresnel);
+
+    // 3. Dynamic RGB Strips
+    float rgbMask = smoothstep(0.9, 1.0, sin(vUv.y * 20.0 + uTime * 2.0));
+    vec3 rgbColor = 0.5 + 0.5 * cos(uTime + vUv.xyx + vec3(0, 2, 4));
+    
+    // 4. Final Composition
+    vec3 finalColor = mix(carbonBase, iridescentFlow, 0.6); // Layering armor plates
+    finalColor += rgbColor * rgbMask * 2.0; // Emissive RGB Glow
+
+    gl_FragColor = vec4(finalColor, 1.0);
+  }
+`;
+
+// --- Scene Setup ---
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// --- Component: Detailed 2-Wheel Rollerblade ---
+function createRollerblade() {
+    const group = new THREE.Group();
+
+    // Chassis (Carbon Fiber)
+    const chassisGeo = new THREE.BoxGeometry(0.4, 1.2, 0.3);
+    const suitMaterial = new THREE.ShaderMaterial({
+        uniforms: { uTime: { value: 0 } },
+        vertexShader,
+        fragmentShader
+    });
+    const chassis = new THREE.Mesh(chassisGeo, suitMaterial);
+    group.add(chassis);
+
+    // Two-Wheel System
+    const wheelGeo = new THREE.TorusGeometry(0.2, 0.05, 16, 100);
+    const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 1, roughness: 0.1 });
+    
+    for (let i = 0; i < 2; i++) {
+        const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+        wheel.position.y = -0.4 + (i * 0.8);
+        wheel.rotation.y = Math.PI / 2;
+        
+        // RGB Axle Light
+        const light = new THREE.PointLight(0xff00ff, 1, 1);
+        wheel.add(light);
+        group.add(wheel);
+    }
+    
+    return group;
+}
+
+const leftBoot = createRollerblade();
+scene.add(leftBoot);
+
+camera.position.z = 3;
+
+// --- Animation Loop ---
+function animate(time) {
+    requestAnimationFrame(animate);
+    
+    // Update Shader Time for RGB motion
+    leftBoot.children[0].material.uniforms.uTime.value = time * 0.001;
+    
+    // Spin wheels
+    leftBoot.children[1].rotation.z += 0.1;
+    leftBoot.children[2].rotation.z += 0.1;
+
+    renderer.render(scene, camera);
+}
+animate();
