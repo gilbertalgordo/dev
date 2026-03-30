@@ -1,0 +1,97 @@
+// Logan Weapon X Suit Material
+// Features: Carbon Fiber Weave + Iridescent RGB Shift
+
+precision highp float;
+varying vec2 vUv;
+uniform float uTime;
+
+void main() {
+    // 1. Create the Carbon Fiber Base Weave
+    vec2 weaveUV = vUv * 100.0; // Scale of the weave
+    float weave = step(0.5, fract(weaveUV.x)) * step(0.5, fract(weaveUV.y));
+    weave += step(fract(weaveUV.x), 0.5) * step(fract(weaveUV.y), 0.5);
+    
+    // 2. Define the Iridescent Palette (Indigo, Violet, Blue)
+    vec3 indigo = vec3(0.29, 0.0, 0.51);
+    vec3 violet = vec3(0.56, 0.0, 1.0);
+    vec3 deepBlue = vec3(0.0, 0.1, 0.4);
+    
+    // 3. Create the RGB Shift Effect (Simulating Light Interference)
+    float shift = sin(vUv.x * 5.0 + vUv.y * 3.0 + uTime * 2.0) * 0.5 + 0.5;
+    vec3 iridescence = mix(indigo, violet, shift);
+    iridescence = mix(iridescence, deepBlue, cos(uTime + vUv.y * 2.0));
+
+    // 4. Combine with Carbon Fiber Texture
+    // Darker base for the carbon fiber look with high-specular iridescence
+    vec3 baseBlack = vec3(0.02, 0.02, 0.03);
+    vec3 finalColor = mix(baseBlack, iridescence * 0.8, weave * 0.3);
+    
+    // Add a sharp "synthetic" highlight to mimic RGB glow
+    float glow = pow(1.0 - abs(shift - 0.5), 10.0);
+    finalColor += glow * vec3(0.4, 0.6, 1.0) * 0.5;
+
+    gl_FragColor = vec4(finalColor, 1.0);
+}
+
+
+
+/**
+ * Advanced Weapon X Suit Material
+ * Technique: Thin-Film Interference + Anisotropic Carbon Fiber Micro-Weave
+ * Colors: Iridescent Indigo, Violet, Blue, Deep RGB Black
+ */
+
+#extension GL_OES_standard_derivatives : enable
+
+precision highp float;
+varying vec3 vNormal;
+varying vec3 vViewDir;
+varying vec2 vUv;
+uniform float uTime;
+
+// Constants for Thin-Film Interference (Iridescence)
+const float FilmThickness = 450.0; // nanometers
+const float RefractiveIndex = 1.55;
+
+void main() {
+    // 1. DYNAMIC CARBON FIBER MICRO-GEOMETRY
+    // Generate two-directional weave pattern for anisotropic highlights
+    vec2 weaveUV = vUv * 120.0; 
+    vec2 f = fract(weaveUV);
+    float mask = step(f.x, 0.5) == step(f.y, 0.5) ? 1.0 : 0.0;
+    
+    // Normal mapping simulation for the weave
+    vec3 weaveNormal = normalize(vNormal + (mask - 0.5) * 0.15);
+    
+    // 2. THIN-FILM INTERFERENCE CALCULATION
+    // Calculate the optical path difference based on the view angle
+    float cosTheta = abs(dot(normalize(vViewDir), weaveNormal));
+    float opd = 2.0 * RefractiveIndex * FilmThickness * cosTheta;
+    
+    // Spectral shift (Indigo -> Violet -> Blue)
+    // We use a cosine-based palette to simulate RGB interference patterns
+    vec3 iridColor;
+    iridColor.r = cos(opd * 0.01 + 0.0) * 0.5 + 0.5;   // Indigo/Violet shift
+    iridColor.g = cos(opd * 0.01 + 2.0) * 0.2 + 0.1;   // Low green for deep tones
+    iridColor.b = cos(opd * 0.01 + 4.0) * 0.8 + 0.4;   // High Blue/Indigo peak
+    
+    // 3. CARBON FIBER ANISOTROPY & REFLECTION
+    float fresnel = pow(1.0 - cosTheta, 5.0);
+    float spec = pow(cosTheta, 32.0) * mask; // Sharper spec on one direction of weave
+    
+    // 4. COMPOSITE FINAL MATERIAL
+    // Base: Iridescent Black (Near-black with a hint of deep indigo)
+    vec3 baseCarbon = vec3(0.01, 0.01, 0.02);
+    
+    // Apply the Iridescent effect to the highlights and fresnel rim
+    vec3 finalColor = mix(baseCarbon, iridColor * 0.4, fresnel);
+    finalColor += iridColor * spec * 0.6; // Iridescent specular highlights
+    
+    // Add "RGB Glow" Pulse (Weapon X Power State)
+    float pulse = sin(uTime * 1.5) * 0.5 + 0.5;
+    vec3 glow = vec3(0.4, 0.0, 1.0) * pulse * 0.05; // Subtle violet pulse
+    finalColor += glow;
+
+    // Output with high-tech "Synthetic" gamma correction
+    gl_FragColor = vec4(pow(finalColor, vec3(0.85)), 1.0);
+}
