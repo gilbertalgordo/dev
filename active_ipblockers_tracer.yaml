@@ -1,0 +1,103 @@
+import os
+from scapy.all import sniff, IP
+from collections import Counter
+import time
+
+# Configuration
+THRESHOLD = 50          # Max packets allowed per window
+WINDOW_SIZE = 10        # Time window in seconds
+blocked_ips = set()
+packet_counts = Counter()
+start_time = time.time()
+
+def block_ip(ip):
+    """Executes system command to block the IP."""
+    if ip not in blocked_ips:
+        print(f"[!] Blocking IP: {ip}")
+        os.system(f"iptables -A INPUT -s {ip} -j DROP")
+        blocked_ips.add(ip)
+
+def analyze_packet(packet):
+    global start_time, packet_counts
+    
+    if packet.haslayer(IP):
+        src_ip = packet[IP].src
+        packet_counts[src_ip] += 1
+        
+        # Check if threshold is exceeded
+        if packet_counts[src_ip] > THRESHOLD:
+            block_ip(src_ip)
+            
+        # Reset window
+        if time.time() - start_time > WINDOW_SIZE:
+            packet_counts.clear()
+            start_time = time.time()
+
+print("Archangel-Class Active Tracer Initialized...")
+sniff(filter="ip", prn=analyze_packet, store=0)
+
+
+
+import os
+import time
+import pandas as pd
+import joblib
+from scapy.all import sniff, IP, TCP, UDP
+from collections import deque
+
+# --- Configuration ---
+MODEL_PATH = "network_threat_model.pkl" # Pre-trained ML model
+IFACE = "eth0"
+BLOCK_DURATION = 3600  # Block for 1 hour
+HISTORY_LIMIT = 100    # Feature window size
+
+# Load your trained AI model
+# Model should be trained on datasets like CIC-IDS2017 or KDD Cup
+clf = joblib.load(MODEL_PATH)
+
+# Active State Tracking
+traffic_history = {} # IP -> Deque of recent packet metadata
+blocked_ips = {}     # IP -> Unblock Timestamp
+
+def extract_features(ip_addr):
+    """Converts raw packet history into a feature vector for the AI."""
+    packets = list(traffic_history[ip_addr])
+    avg_size = sum(p['size'] for p in packets) / len(packets)
+    unique_ports = len(set(p['port'] for p in packets))
+    # Simple feature vector: [avg_size, unique_ports, packet_frequency]
+    return [[avg_size, unique_ports, len(packets)]]
+
+def execute_block(ip_addr):
+    """Kernel-level blocking via iptables."""
+    if ip_addr not in blocked_ips:
+        print(f"[!] THREAT DETECTED: {ip_addr}. Initiating Protocol Alpha.")
+        os.system(f"iptables -I INPUT -s {ip_addr} -j DROP")
+        blocked_ips[ip_addr] = time.time() + BLOCK_DURATION
+
+def process_packet(pkt):
+    if IP in pkt:
+        src_ip = pkt[IP].src
+        
+        # Skip if already blocked
+        if src_ip in blocked_ips:
+            return
+
+        # Feature Logging
+        if src_ip not in traffic_history:
+            traffic_history[src_ip] = deque(maxlen=HISTORY_LIMIT)
+        
+        payload_size = len(pkt)
+        dst_port = pkt[TCP].dport if TCP in pkt else (pkt[UDP].dport if UDP in pkt else 0)
+        
+        traffic_history[src_ip].append({'size': payload_size, 'port': dst_port})
+
+        # Run AI Inference every 20 packets to save CPU
+        if len(traffic_history[src_ip]) >= 20:
+            features = extract_features(src_ip)
+            prediction = clf.predict(features) # 0 = Normal, 1 = Attack
+            
+            if prediction[0] == 1:
+                execute_block(src_ip)
+
+print(f"[*] AI Active Tracer deployed on {IFACE}. Monitoring for anomalies...")
+sniff(iface=IFACE, prn=process_packet, store=0)
