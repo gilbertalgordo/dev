@@ -1,0 +1,103 @@
+import time
+import random
+
+class FloodControlAI:
+    def __init__(self, safety_threshold=5.0):
+        self.safety_threshold = safety_threshold  # Meters
+        self.pump_status = False
+        self.flow_rate = 0  # Liters per second
+
+    def get_sensor_data(self):
+        # Simulating IoT sensor input from river/sewer levels
+        return round(random.uniform(2.0, 7.0), 2)
+
+    def predict_trend(self, current_level, weather_forecast_score):
+        # AI Logic: Combines current levels with external weather data
+        # Forecast score 0 (Dry) to 1 (Extreme Storm)
+        prediction = current_level + (weather_forecast_score * 1.5)
+        return prediction
+
+    def activate_countermeasures(self, predicted_level):
+        if predicted_level > self.safety_threshold:
+            self.pump_status = True
+            # Calculate required pump intensity based on severity
+            severity = predicted_level - self.safety_threshold
+            self.flow_rate = min(100, severity * 20) 
+            print(f"⚠️ ALERT: Predicted level {predicted_level}m exceeds threshold!")
+            print(f"ACTION: Pumps active at {self.flow_rate}% capacity.")
+        else:
+            self.pump_status = False
+            self.flow_rate = 0
+            print(f"✅ Status: Water levels stable at {predicted_level}m.")
+
+# Simulation Loop
+ai_system = FloodControlAI(safety_threshold=4.5)
+
+for hour in range(5):
+    print(f"\n--- Hour {hour} ---")
+    current_water = ai_system.get_sensor_data()
+    weather_risk = 0.8  # Simulated incoming heavy rain
+    
+    future_level = ai_system.predict_trend(current_water, weather_risk)
+    ai_system.activate_countermeasures(future_level)
+    time.sleep(1)
+
+
+
+import torch
+import torch.nn as nn
+
+class FloodForecaster(nn.Module):
+    def __init__(self, input_dim, model_dim=64, n_heads=4, n_layers=2):
+        super(FloodForecaster, self).__init__()
+        # 1. Transformer Encoder for Multivariate Feature Extraction
+        self.encoder_layer = nn.TransformerEncoderLayer(d_model=model_dim, nhead=n_heads)
+        self.transformer_encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=n_layers)
+        
+        # 2. LSTM for Temporal Continuity
+        self.lstm = nn.LSTM(model_dim, 32, batch_first=True)
+        
+        # 3. Output layer for Water Level Prediction (meters)
+        self.fc_out = nn.Linear(32, 1)
+
+    def forward(self, x):
+        # x shape: [batch, sequence_length, input_dim]
+        out = self.transformer_encoder(x)
+        out, (hn, cn) = self.lstm(out)
+        # We take the last time step for the prediction
+        prediction = self.fc_out(out[:, -1, :])
+        return prediction
+
+
+
+class ActiveCityControl:
+    def __init__(self, gate_id, safety_max=4.2):
+        self.gate_id = gate_id
+        self.safety_max = safety_max
+        self.current_gate_pos = 0.0  # 0.0 (Closed) to 1.0 (Open)
+
+    def compute_action(self, predicted_level, rain_intensity):
+        """
+        Prescriptive Logic: Opens gates early if a massive surge is predicted.
+        """
+        risk_score = predicted_level + (rain_intensity * 0.5)
+        
+        if risk_score > self.safety_max:
+            # Active bypass: Open gates proportional to the surge
+            target_pos = min(1.0, (risk_score - self.safety_max) / 2.0)
+            action = "OPENING"
+        elif risk_score < (self.safety_max * 0.7):
+            target_pos = 0.0
+            action = "CLOSING/IDLE"
+        else:
+            target_pos = self.current_gate_pos # Maintain
+            action = "STABLE"
+
+        self.current_gate_pos = target_pos
+        return action, round(target_pos * 100, 2)
+
+# --- SYSTEM INTEGRATION ---
+control_sys = ActiveCityControl(gate_id="ZONE_A_01")
+# Mock data: [Predicted level, Rainfall intensity]
+status, opening = control_sys.compute_action(4.8, 0.9)
+print(f"System State: {status} | Gate Position: {opening}%")
