@@ -1,0 +1,188 @@
+import * as THREE from 'three';
+
+// 1. Scene Setup
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// 2. Materials
+// Clear Rubber EVA Material
+const clearRubberMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0x222222,          // Dark tint for Akatsuki aesthetic
+    metalness: 0,
+    roughness: 0.2,           // Slight grip texture
+    transmission: 0.8,        // Transparency
+    thickness: 0.5,           // Depth for the "heavy duty" look
+    transparent: true,
+    opacity: 0.9
+});
+
+// Akatsuki Red Accents
+const akatsukiRed = new THREE.MeshStandardMaterial({ color: 0x8b0000 });
+
+// 3. Sandal Geometry (Conceptual Structure)
+const group = new THREE.Group();
+
+// Sole - Heavy Duty Lugged Base
+const soleGeometry = new THREE.BoxGeometry(2, 0.4, 4); 
+const sole = new THREE.Mesh(soleGeometry, akatsukiRed);
+sole.position.y = -0.2;
+group.add(sole);
+
+// Upper Strap - Clear Rubber
+const strapGeometry = new THREE.TorusGeometry(1, 0.5, 16, 100, Math.PI);
+const strap = new THREE.Mesh(strapGeometry, clearRubberMaterial);
+strap.rotation.x = Math.PI / 2;
+strap.position.z = 0.5;
+group.add(strap);
+
+// 4. Branding & HUD Elements
+function createLabel(text, position) {
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    context.fillStyle = 'white';
+    context.font = 'Bold 40px Arial';
+    context.fillText(text, 10, 50);
+    
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(1, 0.5), material);
+    plane.position.copy(position);
+    return plane;
+}
+
+const italyLogo = createLabel("MADE IN ITALY", new THREE.Vector3(1.1, -0.1, 1));
+italyLogo.rotation.y = Math.PI / 2;
+group.add(italyLogo);
+
+scene.add(group);
+
+// 5. Lighting
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+scene.add(ambientLight);
+const pointLight = new THREE.PointLight(0xffffff, 1);
+pointLight.position.set(5, 5, 5);
+scene.add(pointLight);
+
+camera.position.z = 7;
+
+// 6. Animation Loop
+function animate() {
+    requestAnimationFrame(animate);
+    group.rotation.y += 0.01; // Slow rotation to show all 4 views
+    renderer.render(scene, camera);
+}
+
+animate();
+
+
+
+import React, { useRef, useMemo } from 'react';
+import { Canvas, useFrame } from '@react-three/fiber';
+import { MeshTransmissionMaterial, Text, Float, Environment, ContactShadows } from '@react-three/drei';
+import * as THREE from 'three';
+
+const AkatsukiSandal = () => {
+  const mesh = useRef();
+
+  // Custom Shader for the "Heavy Duty" Lugged Texture on the sole
+  const luggedShader = useMemo(() => ({
+    uniforms: {
+      time: { value: 0 },
+      color: { value: new THREE.Color("#1a1a1a") },
+      accent: { value: new THREE.Color("#9b0000") } // Akatsuki Red
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        // Simulating heavy duty tread depth via vertex displacement
+        float displacement = step(0.8, mod(uv.x * 10.0, 1.0)) * 0.05;
+        vec3 newPosition = position + normal * displacement;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(newPosition, 1.0);
+      }
+    `,
+    fragmentShader: `
+      varying vec2 vUv;
+      uniform vec3 color;
+      uniform vec3 accent;
+      void main() {
+        // Red Akatsuki stripe on the midsole
+        float stripe = step(0.4, vUv.y) * step(vUv.y, 0.45);
+        vec3 finalColor = mix(color, accent, stripe);
+        gl_FragColor = vec4(finalColor, 1.0);
+      }
+    `
+  }), []);
+
+  useFrame((state) => {
+    mesh.current.rotation.y = Math.sin(state.clock.elapsedTime * 0.5) * 0.2;
+  });
+
+  return (
+    <group ref={mesh}>
+      {/* 1. THE SOLE: Heavy Duty Lugged EVA */}
+      <mesh position={[0, -0.5, 0]}>
+        <boxGeometry args={[2.5, 0.6, 5]} />
+        <shaderMaterial attach="material" {...luggedShader} />
+      </mesh>
+
+      {/* 2. THE STRAP: Clear Rubber with Akatsuki Cloud Pattern */}
+      <mesh position={[0, 0.3, 0.8]} rotation={[-Math.PI / 6, 0, 0]}>
+        <torusGeometry args={[1.1, 0.35, 32, 100, Math.PI]} />
+        <MeshTransmissionMaterial 
+          backside 
+          samples={16} 
+          resolution={512} 
+          transmission={0.95} 
+          roughness={0.1} 
+          thickness={0.8} 
+          ior={1.45} // Refractive index of rubber/plastic
+          chromaticAberration={0.04}
+          anisotropy={0.1}
+          color="#222"
+        />
+        
+        {/* Decorative Akatsuki Clouds (Simplified as 3D Ornaments) */}
+        {[[-0.5, 0.2, 0.1], [0.5, 0.2, 0.1], [0, 0.5, 0.1]].map((pos, i) => (
+          <Float key={i} speed={2} rotationIntensity={0.5} floatIntensity={0.5}>
+            <mesh position={pos}>
+              <sphereGeometry args={[0.15, 16, 16]} scale={[1.5, 1, 0.2]} />
+              <meshStandardMaterial color="#9b0000" emissive="#300000" />
+            </mesh>
+          </Float>
+        ))}
+      </mesh>
+
+      {/* 3. BRANDING: Made in Italy Logo */}
+      <Text
+        position={[1.26, -0.4, 1]}
+        rotation={[0, Math.PI / 2, 0]}
+        fontSize={0.12}
+        color="white"
+        font="https://fonts.gstatic.com/s/inter/v12/UcCO3FwrK3iLTeHuS_fvQtMwCp50KnMw2boKoduKmMEVuLyfMZhrib2Bg-4.ttf"
+      >
+        MADE IN ITALY 🇮🇹
+      </Text>
+    </group>
+  );
+};
+
+export default function SandalScene() {
+  return (
+    <div style={{ width: '100vw', height: '100vh', background: '#050505' }}>
+      <Canvas camera={{ position: [5, 2, 5], fov: 35 }}>
+        <ambientLight intensity={0.4} />
+        <spotLight position={[10, 10, 10]} angle={0.15} penumbra={1} intensity={2} />
+        <pointLight position={[-10, -10, -10]} color="red" intensity={0.5} />
+        
+        <AkatsukiSandal />
+        
+        <Environment preset="city" />
+        <ContactShadows position={[0, -0.8, 0]} opacity={0.4} scale={10} blur={2.5} far={0.8} />
+      </Canvas>
+    </div>
+  );
+}
