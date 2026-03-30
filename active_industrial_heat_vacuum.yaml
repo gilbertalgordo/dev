@@ -1,0 +1,149 @@
+import time
+import numpy as np
+from datetime import datetime
+
+class HeatVacuumAI:
+    def __init__(self):
+        # Operational Thresholds
+        self.CRITICAL_TEMP = 180  # °C
+        self.TARGET_PRESSURE = -30.0  # kPa
+        self.thermal_efficiency = 1.0
+        self.vfd_frequency = 0.0  # 0 to 60 Hz
+        
+    def poll_thermal_sensors(self):
+        """
+        Simulates data from:
+        1. Intake Gas Temperature
+        2. Motor Winding Thermistor
+        3. Heat Exchanger Efficiency
+        """
+        intake_temp = 120 + np.random.normal(0, 5)
+        motor_temp = 85 + np.random.normal(0, 2)
+        ambient_pressure = self.TARGET_PRESSURE + np.random.uniform(-2, 2)
+        
+        return {
+            "intake_t": round(intake_temp, 1),
+            "motor_t": round(motor_temp, 1),
+            "pressure": round(ambient_pressure, 2)
+        }
+
+    def thermal_inference_engine(self, data):
+        """
+        AI Logic: Determines if the system can sustain high suction 
+        based on the heat saturation of the motor and intake air.
+        """
+        # Predictive Cooling Logic
+        if data['motor_t'] > (self.CRITICAL_TEMP * 0.85):
+            mode = "THERMAL_THROTTLE"
+            target_hz = 30.0  # Reduce speed to cool down
+        elif data['intake_t'] > 150:
+            mode = "HEAT_EXTRACTION"
+            target_hz = 60.0  # Maximize flow to move hot air out
+        else:
+            mode = "OPTIMAL_KAIZEN"
+            target_hz = 45.0
+            
+        return mode, target_hz
+
+    def render_hud(self, data, mode, hz):
+        """Industrial HUD Output"""
+        ts = datetime.now().strftime("%H:%M:%S")
+        print(f"[{ts}] --- HEAT VACUUM AI HUD ---")
+        print(f"| MODE: {mode:<18} | VFD FREQ: {hz} Hz")
+        print(f"| INTAKE: {data['intake_t']}°C | MOTOR: {data['motor_t']}°C")
+        print(f"| VACUUM: {data['pressure']} kPa | STATUS: OPERATIONAL")
+        print("-" * 45)
+
+    def execute_loop(self):
+        print("System Booting: Engaging Thermal AI Protection...")
+        try:
+            while True:
+                telemetry = self.poll_thermal_sensors()
+                mode, hz = self.thermal_inference_engine(telemetry)
+                
+                # Active VFD Modulation
+                self.vfd_frequency = hz
+                
+                self.render_hud(telemetry, mode, hz)
+                time.sleep(1.2) # High-speed sampling
+        except KeyboardInterrupt:
+            print("\nEMERGENCY SHUTDOWN: Purging Heat...")
+
+if __name__ == "__main__":
+    ai_vac = HeatVacuumAI()
+    ai_vac.execute_loop()
+
+
+
+import time
+import math
+from datetime import datetime
+
+class ActiveHeatVacuumPro:
+    def __init__(self):
+        # Industrial Safety Thresholds
+        self.SAFE_TEMP_LIMIT = 200.0  # Celsius
+        self.TARGET_VACUUM = -40.0    # kPa
+        self.vfd_output_hz = 0.0
+        self.coolant_flow_rate = 0.0  # Liters/min
+        
+    def get_industrial_telemetry(self):
+        """
+        Sensor Fusion:
+        Combines Thermocouple (Heat), Piezoelectric (Vacuum),
+        and Hall Effect (RPM) data.
+        """
+        return {
+            "exhaust_temp": 145.2 + (math.sin(time.time() * 0.1) * 15),
+            "chamber_pressure": -38.5 + (math.cos(time.time() * 0.05) * 2),
+            "motor_winding_temp": 92.4,
+            "airflow_cfm": 450
+        }
+
+    def compute_thermal_gradient(self, telemetry):
+        """
+        AI Inference: Calculates the 'Thermal Runway' risk.
+        If the gradient is steep, it prioritizes cooling over suction.
+        """
+        temp_delta = telemetry['exhaust_temp'] - self.SAFE_TEMP_LIMIT
+        
+        # Risk assessment: 0 (Safe) to 1.0 (Critical)
+        risk_factor = max(0, min(1, (telemetry['exhaust_temp'] / self.SAFE_TEMP_LIMIT)))
+        
+        if risk_factor > 0.9:
+            return "EMERGENCY_COOL", 15.0  # Minimum RPM for cooling flow
+        elif risk_factor > 0.75:
+            return "THERMAL_BALANCING", 40.0
+        else:
+            return "HIGH_PERFORMANCE", 60.0
+
+    def active_hud_monitor(self, data, state, hz):
+        """High-Definition HUD Output for Control Rooms."""
+        print(f"\n[ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ]")
+        print(f"| SYSTEM STATE: {state:<20} | VFD FREQ: {hz:.1f} Hz |")
+        print(f"| HEAT: {data['exhaust_temp']:.1f}°C / {self.SAFE_TEMP_LIMIT}°C | VAC: {data['chamber_pressure']:.1f} kPa |")
+        print(f"| MOTOR: {data['motor_winding_temp']:.1f}°C | AIRFLOW: {data['airflow_cfm']} CFM |")
+        
+        # Visual Bar HUD
+        load_bar = "█" * int(hz / 3)
+        print(f"| LOAD: [{load_bar:<20}] {int(hz/60*100)}% |")
+        print("-" * 55)
+
+    def run_engine(self):
+        print("BOOTING ACTIVE THERMAL AI CORE...")
+        try:
+            while True:
+                telemetry = self.get_industrial_telemetry()
+                state, target_hz = self.compute_thermal_gradient(telemetry)
+                
+                # Smooth frequency transition (Kaizen ramp-up)
+                self.vfd_output_hz += (target_hz - self.vfd_output_hz) * 0.2
+                
+                self.active_hud_monitor(telemetry, state, self.vfd_output_hz)
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            print("\n[ALERT] MANUAL INTERRUPT: Initiating Controlled Cool-down.")
+
+if __name__ == "__main__":
+    ai_system = ActiveHeatVacuumPro()
+    ai_system.run_engine()
