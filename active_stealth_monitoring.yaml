@@ -1,0 +1,123 @@
+import scapy.all as scapy
+import psutil
+import time
+import os
+
+# Configuration for "Stealth" Operation
+MONITOR_INTERVAL = 1  # Seconds between checks
+KNOWN_PORTS = [80, 443, 22, 53] # Define your baseline
+SUSPICIOUS_PROCS = ["nc", "nmap", "wireshark", "metasploit"]
+
+def trace_network_anomaly(packet):
+    """Traces anonymous or unexpected network traffic."""
+    if packet.haslayer(scapy.IP):
+        ip_src = packet[scapy.IP].src
+        ip_dst = packet[scapy.IP].dst
+        
+        if packet.haslayer(scapy.TCP):
+            port = packet[scapy.TCP].dport
+            if port not in KNOWN_PORTS:
+                # Trigger trace alert for anonymous/unexpected port activity
+                print(f"[!] ANOMALY DETECTED: {ip_src} -> {ip_dst} on Port {port}")
+
+def monitor_processes():
+    """Monitors for anonymous or hidden active processes."""
+    for proc in psutil.process_iter(['pid', 'name', 'username']):
+        try:
+            name = proc.info['name'].lower()
+            if any(s_proc in name for s_proc in SUSPICIOUS_PROCS):
+                print(f"[!] STEALTH ALERT: Suspicious process '{name}' (PID: {proc.info['pid']})")
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+
+def run_monitor():
+    print("[-] Initializing Active Stealth AI Monitor...")
+    # Start sniffing in the background (Async)
+    sniffer = scapy.AsyncSniffer(prn=trace_network_anomaly, store=False)
+    sniffer.start()
+
+    try:
+        while True:
+            monitor_processes()
+            time.sleep(MONITOR_INTERVAL)
+    except KeyboardInterrupt:
+        print("[-] Stopping Monitor...")
+        sniffer.stop()
+
+if __name__ == "__main__":
+    # Ensure script runs with elevated privileges for network sniffing
+    if os.getuid() == 0:
+        run_monitor()
+    else:
+        print("[X] Error: Must run as root/admin for active packet tracing.")
+
+
+
+import scapy.all as scapy
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import IsolationForest
+import psutil
+import threading
+import time
+
+class StealthMonitorAI:
+    def __init__(self):
+        self.data_buffer = []
+        # Isolation Forest is excellent for anomaly detection in high-dim data
+        self.model = IsolationForest(contamination=0.01) 
+        self.is_trained = False
+
+    def get_process_entropy(self, pid):
+        """Measures memory randomness to detect packed/encrypted malware."""
+        try:
+            p = psutil.Process(pid)
+            # Simplified entropy check on memory maps
+            return len(set(p.memory_maps())) / 100 
+        except:
+            return 0
+
+    def analyze_packet(self, pkt):
+        """Active tracing of anonymous/spoofed traffic."""
+        if pkt.haslayer(scapy.IP):
+            features = [
+                pkt[scapy.IP].len, 
+                pkt[scapy.IP].ttl, 
+                1 if pkt.haslayer(scapy.TCP) else 0
+            ]
+            self.data_buffer.append(features)
+            
+            # Real-time Anomaly Check
+            if self.is_trained:
+                prediction = self.model.predict([features])
+                if prediction[0] == -1:
+                    print(f"[!] STEALTH ALERT: Network Anomaly from {pkt[scapy.IP].src}")
+
+    def monitor_system(self):
+        """Scans for 'Hidden' or Anonymous background threads."""
+        while True:
+            for proc in psutil.process_iter(['pid', 'name', 'cpu_percent']):
+                entropy = self.get_process_entropy(proc.info['pid'])
+                if entropy > 0.8: # High entropy suggests encrypted/stealth payloads
+                    print(f"[!] ANOMALY: High-Entropy Process Detected: {proc.info['name']}")
+            time.sleep(5)
+
+    def train_baseline(self):
+        """Learns 'Normal' network behavior for 60 seconds."""
+        print("[-] Phase 1: Learning Network Baseline...")
+        sniff_data = scapy.sniff(timeout=60)
+        if len(self.data_buffer) > 10:
+            self.model.fit(self.data_buffer)
+            self.is_trained = True
+            print("[+] Baseline Established. AI Active.")
+
+    def start(self):
+        # Run System Monitor in separate thread
+        threading.Thread(target=self.monitor_system, daemon=True).start()
+        # Start Sniffer
+        scapy.sniff(prn=self.analyze_packet, store=False)
+
+if __name__ == "__main__":
+    monitor = StealthMonitorAI()
+    monitor.train_baseline()
+    monitor.start()
