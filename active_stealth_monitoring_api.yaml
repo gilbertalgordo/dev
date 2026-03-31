@@ -1,0 +1,169 @@
+import time
+import logging
+from fastapi import FastAPI, Request, BackgroundTasks
+from sklearn.neighbors import LocalOutlierFactor
+import numpy as np
+
+app = FastAPI(title="SuperStealth Monitor")
+
+# Configure silent logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - [TRACE] - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Simulated historical data for anomaly detection: [request_size, processing_time]
+# In a production environment, this would be pulled from a database.
+traffic_history = np.array([
+    [100, 0.01], [105, 0.02], [98, 0.015], [110, 0.01], [102, 0.02],
+    [500, 0.5],  # Example anomaly
+    [101, 0.012]
+])
+
+def run_anomaly_check(current_metrics):
+    """
+    Uses Local Outlier Factor to determine if the current request 
+    is a statistical anomaly.
+    """
+    detector = LocalOutlierFactor(n_neighbors=5, novelty=True)
+    detector.fit(traffic_history)
+    
+    prediction = detector.predict([current_metrics])
+    if prediction[0] == -1:
+        logger.warning(f"ANOMALY DETECTED: Unusual request pattern {current_metrics}")
+        # Trigger extended tracing/blocking logic here
+    else:
+        logger.info("Pattern normal.")
+
+def trace_entity(request: Request, start_time: float):
+    """
+    Extracts fingerprints from headers and behavior to trace anonymous users.
+    """
+    end_time = time.time()
+    duration = end_time - start_time
+    
+    # Capture metadata for tracing
+    trace_data = {
+        "ip": request.client.host,
+        "user_agent": request.headers.get("user-agent"),
+        "x_forwarded_for": request.headers.get("x-forwarded-for"),
+        "payload_size": len(str(request.scope.get("body", ""))),
+        "latency": duration
+    }
+    
+    logger.info(f"Trace completed for {trace_data['ip']} | Latency: {duration:.4f}s")
+    
+    # Pass metrics to the anomaly engine
+    metrics = [trace_data["payload_size"], trace_data["latency"]]
+    run_anomaly_check(metrics)
+
+@app.get("/api/v1/secure-gateway")
+async def secure_gateway(request: Request, background_tasks: BackgroundTasks):
+    start_time = time.time()
+    
+    # The 'Stealth' aspect: The response is sent immediately, 
+    # while monitoring runs in the background.
+    background_tasks.add_task(trace_entity, request, start_time)
+    
+    return {"status": "authenticated", "access": "granted"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+
+import uuid
+import time
+import json
+import logging
+from typing import Dict, Any
+from fastapi import FastAPI, Request, BackgroundTasks
+from sklearn.ensemble import IsolationForest
+import numpy as np
+
+# Initialize the Stealth API
+app = FastAPI()
+
+# Stealth Logger - Structured for SIEM (Security Information and Event Management)
+logging.basicConfig(level=logging.INFO)
+trace_logger = logging.getLogger("StealthMonitor")
+
+class ActiveTraceEngine:
+    def __init__(self):
+        # Contamination defines the expected % of anomalies (0.01 = 1%)
+        self.detector = IsolationForest(contamination=0.01, random_state=42)
+        # Mock baseline: [payload_size, header_count, request_duration]
+        self.baseline_data = np.random.rand(100, 3) 
+        self.detector.fit(self.baseline_data)
+
+    def analyze_behavior(self, features: list):
+        """Perform real-time anomaly detection."""
+        prediction = self.detector.predict([features])
+        return "ANOMALY" if prediction[0] == -1 else "NORMAL"
+
+trace_engine = ActiveTraceEngine()
+
+async def stealth_processor(data: Dict[str, Any]):
+    """
+    Background worker: Processes traces without blocking the main thread.
+    This is where the 'Active Stealth' happens.
+    """
+    # Extract features for the ML model
+    features = [
+        data['content_length'],
+        data['header_count'],
+        data['latency']
+    ]
+    
+    status = trace_engine.analyze_behavior(features)
+    
+    if status == "ANOMALY":
+        trace_logger.warning(f"!!! TRACE ALERT !!! | ID: {data['trace_id']} | Status: {status} | IP: {data['ip']}")
+        # Integration point for automated defensive actions (e.g., rate limiting)
+    else:
+        trace_logger.info(f"Trace Logged: {data['trace_id']} | Status: {status}")
+
+@app.middleware("http")
+async def monitor_interceptor(request: Request, call_next):
+    """
+    Invisible Middleware: Captures metadata without altering the response.
+    """
+    start_time = time.perf_counter()
+    trace_id = str(uuid.uuid4())
+    
+    # Capture request body size safely
+    content_length = request.headers.get("content-length", 0)
+    
+    # Process the actual request
+    response = await call_next(request)
+    
+    # Calculate Latency
+    process_time = time.perf_counter() - start_time
+    
+    # Stealth Metadata Bundle
+    trace_payload = {
+        "trace_id": trace_id,
+        "ip": request.client.host,
+        "method": request.method,
+        "path": request.url.path,
+        "header_count": len(request.headers),
+        "content_length": int(content_length),
+        "latency": process_time,
+        "user_agent": request.headers.get("user-agent"),
+        "timestamp": time.time()
+    }
+
+    # Offload to background task to keep the API "superfast"
+    response.background = BackgroundTasks()
+    response.background.add_task(stealth_processor, trace_payload)
+    
+    # Return response with a custom HUD header (optional)
+    response.headers["X-Trace-ID"] = trace_id
+    return response
+
+@app.get("/v1/data")
+async def get_secure_data():
+    return {"message": "Accessing secure instances...", "status": "active"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_config=None)
