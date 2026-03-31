@@ -1,0 +1,141 @@
+import psutil
+import time
+import logging
+
+class ActiveDeviceManagerAI:
+    def __init__(self, cpu_threshold=80.0, mem_threshold=85.0):
+        self.cpu_threshold = cpu_threshold
+        self.mem_threshold = mem_threshold
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - AI_LOG: %(message)s')
+
+    def scan_active_processes(self):
+        """Monitors system-wide process performance."""
+        processes = []
+        for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent']):
+            try:
+                processes.append(proc.info)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        return processes
+
+    def analyze_system_health(self):
+        """Evaluates if the device is hitting performance bottlenecks."""
+        cpu_usage = psutil.cpu_percent(interval=1)
+        mem_usage = psutil.virtual_memory().percent
+        
+        status = "OPTIMAL"
+        if cpu_usage > self.cpu_threshold or mem_usage > self.mem_threshold:
+            status = "CRITICAL"
+            
+        return {"cpu": cpu_usage, "memory": mem_usage, "status": status}
+
+    def execute_optimization(self):
+        """Identifies and logs high-impact processes for intervention."""
+        health = self.analyze_system_health()
+        logging.info(f"System Health: {health['cpu']}% CPU, {health['memory']}% RAM | Status: {health['status']}")
+
+        if health['status'] == "CRITICAL":
+            procs = self.scan_active_processes()
+            # Sort by highest CPU usage
+            top_hogs = sorted(procs, key=lambda x: x['cpu_percent'], reverse=True)[:3]
+            
+            for p in top_hogs:
+                logging.warning(f"Optimization Required: Process '{p['name']}' (PID: {p['pid']}) is consuming {p['cpu_percent']}% CPU.")
+                # Implementation for throttling or notifying could go here
+
+    def run_kaizen_loop(self, interval=5):
+        """Continuous monitoring loop."""
+        logging.info("Active Device AI Initialized. Monitoring started...")
+        try:
+            while True:
+                self.execute_optimization()
+                time.sleep(interval)
+        except KeyboardInterrupt:
+            logging.info("AI shutdown gracefully.")
+
+# Initialize and run
+if __name__ == "__main__":
+    ai_manager = ActiveDeviceManagerAI(cpu_threshold=75.0, mem_threshold=80.0)
+    ai_manager.run_kaizen_loop()
+
+
+
+import psutil
+import threading
+import time
+from datetime import datetime
+from collections import deque
+
+class SentinelTaskAI(threading.Thread):
+    def __init__(self):
+        super().__init__()
+        self.daemon = True
+        self.running = True
+        self.process_history = {} # Stores historical usage for anomaly detection
+        self.anomaly_threshold = 2.5 # Standard deviations from mean
+        
+    def get_process_score(self, proc_info):
+        """Calculates a weighted impact score."""
+        cpu = proc_info.get('cpu_percent', 0)
+        mem = proc_info.get('memory_percent', 0)
+        threads = proc_info.get('num_threads', 1)
+        # Weighted Score: CPU is prioritized over RAM for 'active' management
+        return (cpu * 1.5) + (mem * 1.0) + (threads * 0.5)
+
+    def detect_anomalies(self, pid, current_usage):
+        """Heuristic check: Is the process behaving unusually?"""
+        if pid not in self.process_history:
+            self.process_history[pid] = deque(maxlen=20)
+            return False
+        
+        hist = self.process_history[pid]
+        if len(hist) > 5:
+            avg = sum(hist) / len(hist)
+            if current_usage > avg * self.anomaly_threshold:
+                return True
+        
+        self.process_history[pid].append(current_usage)
+        return False
+
+    def run(self):
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Sentinel AI Core: ACTIVE")
+        while self.running:
+            high_impact_detected = False
+            
+            for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'num_threads']):
+                try:
+                    p_info = proc.info
+                    score = self.get_process_score(p_info)
+                    
+                    # Log high-impact processes
+                    if score > 50: # Threshold for 'Heavy' tasks
+                        is_anomaly = self.detect_anomalies(p_info['pid'], score)
+                        status = "ANOMALY" if is_anomaly else "STABLE"
+                        
+                        print(f"HUD > ALERT: {p_info['name']} (PID: {p_info['pid']}) | Score: {score:.1f} | {status}")
+                        high_impact_detected = True
+
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+
+            if not high_impact_detected:
+                # Idle state optimization
+                time.sleep(2)
+            else:
+                # Active state polling
+                time.sleep(0.5)
+
+    def stop(self):
+        self.running = False
+
+# Execution
+if __name__ == "__main__":
+    ai_core = SentinelTaskAI()
+    ai_core.start()
+    
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        ai_core.stop()
+        print("Sentinel AI Offline.")
