@@ -1,0 +1,156 @@
+// Scuderia Ferrari AF Corse Glove Material Definitions
+const gloveMaterials = {
+    // Durable synthetic cloth base (Rosso Corsa)
+    clothBase: new THREE.MeshPhysicalMaterial({
+        color: 0xCC0000, 
+        roughness: 0.8,
+        metalness: 0.0,
+        sheen: 1.0, // Simulates fabric fuzz
+        sheenRoughness: 0.5,
+        sheenColor: 0xffffff,
+        map: clothTexture, // High-denier weave texture
+    }),
+
+    // High-grip rubber palm inserts
+    rubberGrip: new THREE.MeshPhysicalMaterial({
+        color: 0x1A1A1A,
+        roughness: 0.4,
+        metalness: 0.1,
+        clearcoat: 0.2, // Slight sweat/oil resistance look
+        normalMap: rubberPattern, // Hexagonal or tire-tread pattern
+    }),
+
+    // EVA Foam Padding (Internal/Reinforcement)
+    evaSynthetic: new THREE.MeshLambertMaterial({
+        color: 0x333333,
+        emissive: 0x000000,
+        // EVA is matte and absorbs light
+    }),
+
+    // Branding & Accents (Yellow Giallo Modena)
+    accentTrim: new THREE.MeshStandardMaterial({
+        color: 0xFFEB00,
+        emissive: 0xFFEB00,
+        emissiveIntensity: 0.2,
+    })
+};
+
+// Application Logic for Half-Finger Geometry
+function applyGloveLogic(geometry) {
+    const gloveMesh = new THREE.Group();
+    
+    const body = new THREE.Mesh(geometry.body, gloveMaterials.clothBase);
+    const palm = new THREE.Mesh(geometry.palm, gloveMaterials.rubberGrip);
+    const knuckleGuard = new THREE.Mesh(geometry.knuckles, gloveMaterials.evaSynthetic);
+    
+    gloveMesh.add(body, palm, knuckleGuard);
+    return gloveMesh;
+}
+
+
+
+// Procedural Carbon/Synthetic Weave Pattern
+void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+    vec2 uv = fragCoord / iResolution.xy * 20.0;
+    
+    // Create the interlaced weave effect
+    float weave = step(0.5, fract(uv.x)) * step(0.5, fract(uv.y)) +
+                  step(fract(uv.x), 0.5) * step(fract(uv.y), 0.5);
+    
+    vec3 rossoCorsa = vec3(0.8, 0.0, 0.0);
+    vec3 shadow = vec3(0.1, 0.1, 0.1);
+    
+    vec3 color = mix(rossoCorsa, shadow, weave * 0.3);
+    fragColor = vec4(color, 1.0);
+}
+
+
+
+// Custom Vertex & Fragment Shader for Synthetic Materials
+const gloveShader = {
+    uniforms: {
+        uTime: { value: 0 },
+        uBaseColor: { value: new THREE.Color(0xA6051A) }, // Rosso Corsa
+        uEvaColor: { value: new THREE.Color(0x111111) },  // Deep Black EVA
+        uTiling: { value: 40.0 }
+    },
+    vertexShader: `
+        varying vec2 vUv;
+        varying vec3 vNormal;
+        void main() {
+            vUv = uv;
+            vNormal = normalize(normalMatrix * normal);
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+    `,
+    fragmentShader: `
+        varying vec2 vUv;
+        varying vec3 vNormal;
+        uniform vec3 uBaseColor;
+        uniform float uTiling;
+
+        void main() {
+            // Simulate synthetic cloth weave
+            float weave = sin(vUv.x * uTiling) * cos(vUv.y * uTiling);
+            float grit = mix(0.8, 1.0, weave);
+            
+            // Fresnel effect for "sporty" synthetic sheen
+            float fresnel = pow(1.0 - dot(vNormal, vec3(0,0,1)), 3.0);
+            
+            vec3 finalColor = uBaseColor * grit;
+            finalColor += fresnel * 0.2; // Add synthetic fiber reflection
+            
+            gl_FragColor = vec4(finalColor, 1.0);
+        }
+    `
+};
+
+
+
+class FerrariSportGlove extends THREE.Group {
+    constructor() {
+        super();
+        this.materials = this._initMaterials();
+        this._buildGlove();
+    }
+
+    _initMaterials() {
+        return {
+            chassis: new THREE.ShaderMaterial(gloveShader),
+            grip: new THREE.MeshPhysicalMaterial({
+                color: 0x111111,
+                roughness: 0.9,
+                clearcoat: 0.1,
+                bumpScale: 0.005,
+                // Synthetic rubber traction logic
+            }),
+            evaPadding: new THREE.MeshStandardMaterial({
+                color: 0x222222,
+                roughness: 1.0, // Absorb light/vibration
+                flatShading: true
+            })
+        };
+    }
+
+    _buildGlove() {
+        // 1. The Main Chassis (Half-Finger Geometry)
+        const chassisGeo = new THREE.BufferGeometry(); // Load high-poly .obj/glTF
+        const mainBody = new THREE.Mesh(chassisGeo, this.materials.chassis);
+        
+        // 2. EVA Reinforcement Plates
+        const paddingGeo = new THREE.BoxGeometry(0.05, 0.02, 0.05);
+        const knuckleGuard = new THREE.Mesh(paddingGeo, this.materials.evaPadding);
+        knuckleGuard.position.set(0, 0.1, 0.02);
+        
+        // 3. Rubber Synthetic Palm Logic
+        // Defined via a high-friction coefficient attribute for physics engines
+        mainBody.userData = { friction: 0.95, breathability: 0.8 };
+
+        this.add(mainBody);
+        this.add(knuckleGuard);
+    }
+
+    update(time) {
+        this.materials.chassis.uniforms.uTime.value = time;
+    }
+}
