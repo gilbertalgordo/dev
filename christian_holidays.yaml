@@ -1,0 +1,100 @@
+from datetime import date
+import holidays
+
+def get_christian_holidays(year):
+    # Initialize the Christian holidays subset
+    # This includes both Western and some Eastern Orthodox dates
+    ch_holidays = holidays.financial_holidays.ChristianHolidays()
+    
+    # Generate the calendar for the specific year
+    calendar_dates = []
+    
+    # We iterate through a list of common holiday names 
+    # to extract their specific dates for the given year
+    for date_obs, name in sorted(holidays.CH(years=year).items()):
+        calendar_dates.append({
+            "Date": date_obs.strftime("%Y-%m-%d"),
+            "Holiday": name
+        })
+    
+    return calendar_dates
+
+# Example usage for the current year
+current_year = 2026
+holiday_list = get_christian_holidays(current_year)
+
+print(f"--- Christian Holidays for {current_year} ---")
+for item in holiday_list:
+    print(f"{item['Date']}: {item['Holiday']}")
+
+
+
+christian_fixed_holidays = {
+    "01-06": "Epiphany",
+    "08-15": "Assumption of Mary",
+    "11-01": "All Saints' Day",
+    "12-08": "Immaculate Conception",
+    "12-24": "Christmas Eve",
+    "12-25": "Christmas Day"
+}
+
+
+
+from datetime import datetime, timedelta
+
+def get_easter(year):
+    """Calculates Easter Sunday using the Meeus/Jones/Butcher algorithm."""
+    a = year % 19
+    b = year // 100
+    c = year % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    L = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * L) // 451
+    month = (h + L - 7 * m + 114) // 31
+    day = ((h + L - 7 * m + 114) % 31) + 1
+    return datetime(year, month, day)
+
+def generate_christian_calendar(year):
+    easter = get_easter(year)
+    
+    # Define holidays relative to Easter
+    holidays = {
+        "Septuagesima Sunday": easter - timedelta(days=63),
+        "Ash Wednesday": easter - timedelta(days=46),
+        "Palm Sunday": easter - timedelta(days=7),
+        "Maundy Thursday": easter - timedelta(days=3),
+        "Good Friday": easter - timedelta(days=2),
+        "Holy Saturday": easter - timedelta(days=1),
+        "Easter Sunday": easter,
+        "Ascension Day": easter + timedelta(days=39),
+        "Pentecost": easter + timedelta(days=49),
+        "Trinity Sunday": easter + timedelta(days=56),
+        "Corpus Christi": easter + timedelta(days=60),
+    }
+    
+    # Add Fixed Feasts
+    holidays.update({
+        "Epiphany": datetime(year, 1, 6),
+        "Candlemas": datetime(year, 2, 2),
+        "Assumption of Mary": datetime(year, 8, 15),
+        "All Saints' Day": datetime(year, 11, 1),
+        "Christmas Eve": datetime(year, 12, 24),
+        "Christmas Day": datetime(year, 12, 25),
+        "St. Stephen's Day": datetime(year, 12, 26),
+    })
+    
+    return dict(sorted(holidays.items(), key=lambda item: item[1]))
+
+# Execute for the current cycle
+year_to_check = 2026
+calendar_2026 = generate_christian_calendar(year_to_check)
+
+print(f"--- Liturgical Calendar: {year_to_check} ---")
+for name, date in calendar_2026.items():
+    print(f"{date.strftime('%Y-%m-%d')} | {name}")
