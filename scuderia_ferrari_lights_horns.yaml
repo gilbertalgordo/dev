@@ -1,0 +1,182 @@
+class FerrariActiveLED:
+    def __init__(self):
+        self.modes = ["IDLE", "RACE", "BRAKE", "TURNING"]
+        self.intensity = 100 # Percentage
+        self.color_hex = "#FF0000" # Rosso Corsa
+
+    def update_lighting(self, telemetry):
+        """
+        Adjusts LEDs based on car telemetry.
+        """
+        # Dynamic Intensity based on Speed
+        if telemetry['speed'] > 200:
+            self.intensity = 120  # High-visibility pulse
+        
+        # Action Logic
+        if telemetry['is_braking']:
+            return self.trigger_pattern("STROBE_RED")
+        elif telemetry['steering_angle'] > 15:
+            return self.trigger_pattern("SEQUENTIAL_AMBER")
+        else:
+            return self.trigger_pattern("SOLID_ROSSO")
+
+    def trigger_pattern(self, pattern_type):
+        return f"Executing {pattern_type} at {self.intensity}% intensity."
+
+
+
+class FerrariAIHorn:
+    def __init__(self):
+        self.base_frequency = 420  # Hz (High tone)
+        self.low_frequency = 335   # Hz (Low tone)
+
+    def compute_horn_signature(self, proximity, velocity):
+        """
+        AI determines if the horn should be a 'polite chirp' or 'urgent blast'.
+        """
+        if proximity < 5:  # Meters
+            # Urgent: Maximum volume, dual-tone dissonance
+            return {"decibels": 110, "tone": "DUAL_DISSONANT", "duration": "CONTINUOUS"}
+        
+        if velocity < 30:
+            # Low speed/City: Soft pulse
+            return {"decibels": 85, "tone": "SINGLE_SOFT", "duration": "0.2s"}
+            
+        return {"decibels": 100, "tone": "STANDARD_FERRARI_DUAL", "duration": "0.5s"}
+
+
+
+def scuderia_ai_system_loop(vehicle_data):
+    led_system = FerrariActiveLED()
+    horn_system = FerrariAIHorn()
+
+    # Process Visuals
+    light_status = led_system.update_lighting(vehicle_data)
+    
+    # Process Audio (Safety check)
+    horn_action = horn_system.compute_horn_signature(
+        vehicle_data['proximity_to_obj'], 
+        vehicle_data['speed']
+    )
+
+    return {
+        "LED_Output": light_status,
+        "Horn_Output": horn_action
+    }
+
+# Example Telemetry Input
+telemetry_sample = {
+    "speed": 210,
+    "is_braking": True,
+    "steering_angle": 0,
+    "proximity_to_obj": 3
+}
+
+print(scuderia_ai_system_loop(telemetry_sample))
+
+
+
+import math
+import time
+
+class ScuderiaActiveVisuals:
+    def __init__(self):
+        self.base_color = (255, 0, 0)  # Rosso Corsa RGB
+        self.current_duty_cycle = 0.0
+        self.hz = 60  # Refresh rate for smoothness
+
+    def calculate_dynamic_lumen(self, speed, g_force, ambient_light):
+        """
+        Calculates the necessary brightness based on aerodynamic load 
+        and external visibility conditions.
+        """
+        # Increase visibility as speed increases (Auto-scaling)
+        speed_factor = min(speed / 350, 1.0) 
+        
+        # Flash or pulse during high G-force events (Hard cornering/Braking)
+        g_factor = abs(g_force) * 0.2
+        
+        # Target Brightness (0.0 to 1.0)
+        target = (0.5 * speed_factor) + g_factor + (1.0 - (ambient_light / 1000))
+        return max(0.2, min(target, 1.0))
+
+    def get_signal_array(self, state):
+        patterns = {
+            "LAUNCH_CONTROL": [1, 0, 1, 0, 1], # Rapid strobe
+            "PIT_LIMITER": [0.5, 0.5, 0.5],    # Steady pulse
+            "E_BRAKE": [1, 1, 1, 1, 1]         # Solid Max
+        }
+        return patterns.get(state, [0.1, 0.1, 0.1])
+
+
+
+class ScuderiaAcousticAI:
+    def __init__(self):
+        self.high_tone = 425  # Hz
+        self.low_tone = 345   # Hz
+
+    def synthesize_horn_output(self, dist_to_target, relative_velocity):
+        """
+        Adjusts the 'Aggression' of the horn.
+        High Relative Velocity = Sharper Attack/Higher Decibels.
+        """
+        # Time to Collision (TTC)
+        ttc = dist_to_target / max(relative_velocity, 0.1)
+
+        if ttc < 1.5:
+            # Urgent: Maximum Piercing Dissonance
+            return {
+                "frequencies": [self.high_tone, self.low_tone + 15], 
+                "gain": "+12dB",
+                "oscillation": "Square Wave" # Harsher sound
+            }
+        elif ttc < 4.0:
+            # Advisory: Standard Ferrari Dual-Tone
+            return {
+                "frequencies": [self.high_tone, self.low_tone],
+                "gain": "0dB",
+                "oscillation": "Sine Wave" # Smoother sound
+            }
+        else:
+            # Presence: Soft Chirp
+            return {"frequencies": [self.high_tone], "gain": "-10dB", "oscillation": "Sine"}
+
+
+
+class ScuderiaCentralAI:
+    def __init__(self):
+        self.visuals = ScuderiaActiveVisuals()
+        self.acoustics = ScuderiaAcousticAI()
+
+    def process_frame(self, telemetry):
+        # 1. Update LEDs
+        brightness = self.visuals.calculate_dynamic_lumen(
+            telemetry['speed_kmh'], 
+            telemetry['lateral_g'], 
+            telemetry['lux_sensor']
+        )
+
+        # 2. Update Horn AI Logic
+        audio_profile = self.acoustics.synthesize_horn_output(
+            telemetry['radar_dist'], 
+            telemetry['closing_speed']
+        )
+
+        return {
+            "LED_PWM_LEVEL": round(brightness * 255),
+            "AUDIO_DSP_PROFILE": audio_profile,
+            "TIMESTAMP": time.time_ns()
+        }
+
+# Execution Instance
+ferrari_ai = ScuderiaCentralAI()
+current_data = {
+    "speed_kmh": 320,
+    "lateral_g": 3.5,
+    "lux_sensor": 400, # Afternoon light
+    "radar_dist": 50,
+    "closing_speed": 40
+}
+
+output = ferrari_ai.process_frame(current_data)
+print(f"System Output: {output}")
