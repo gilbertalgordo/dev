@@ -1,0 +1,120 @@
+{
+  "character": "Goku",
+  "variant": "Black Primal",
+  "transformations": {
+    "form": "Primal / SSJ4 Influence",
+    "aura_color": "Dark Purple / Crimson",
+    "fur_color": "Obsidian Black"
+  },
+  "equipment": [
+    {
+      "item": "Potara Earrings",
+      "position": "Both Ears",
+      "function": "Fusion / Divine Status"
+    }
+  ],
+  "stats": {
+    "attack": 9500,
+    "defense": 8800,
+    "ki_type": "Divine Dark Energy"
+  }
+}
+
+
+
+class PrimalGoku:
+    def __init__(self):
+        self.name = "Goku Black"
+        self.state = "Primal"
+        self.has_potara = True
+        self.appearance = {
+            "hair": "Long, Wild, Black",
+            "fur": "Dark Grey/Black",
+            "eyes": "Silver with Red outline"
+        }
+        self.abilities = ["Black Kamehameha", "Divine Retribution"]
+
+    def display_status(self):
+        status = "Equipped" if self.has_potara else "None"
+        print(f"Name: {self.name} ({self.state})")
+        print(f"Potara Earrings: {status}")
+        print(f"Current Form: {self.appearance['fur']} fur with {self.appearance['hair']} hair.")
+
+# Initialize Character
+goku_instance = PrimalGoku()
+goku_instance.display_status()
+
+
+
+// Advanced Aura Shader - Dark Primal Energy
+varying vec2 vUv;
+uniform float uTime;
+uniform vec3 uColorInner; // e.g., Dark Crimson
+uniform vec3 uColorOuter; // e.g., Deep Purple
+
+float noise(vec2 p) {
+    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+void main() {
+    // Upward flowing energy coordinate
+    vec2 flowUv = vUv + vec2(0.0, uTime * -0.8);
+    
+    // Multi-layered noise for "flicker" effect
+    float n = noise(flowUv * 10.0 + uTime);
+    n += noise(flowUv * 20.0 - uTime * 0.5) * 0.5;
+    
+    // Create the "Flame" shape using a gradient
+    float mask = smoothstep(0.1, 0.5, vUv.y) * (1.0 - vUv.y);
+    float edge = sin(vUv.x * 3.14159) * mask;
+    
+    // Combine colors with a "void" center
+    vec3 finalColor = mix(uColorInner, uColorOuter, n);
+    float alpha = edge * n * 1.5;
+
+    gl_FragColor = vec4(finalColor * 2.0, alpha); // Overdrive for Bloom/HDR
+}
+
+
+
+using UnityEngine;
+
+public class BlackPrimalGoku : MonoBehaviour 
+{
+    [Header("Divine Attributes")]
+    public float divineKiLevel = 9001f;
+    public bool isPotaraEquipped = true;
+    
+    [Header("Visual References")]
+    [SerializeField] private Material auraMaterial;
+    [SerializeField] private GameObject potaraL;
+    [SerializeField] private GameObject potaraR;
+
+    void Start() {
+        InitializePrimalState();
+    }
+
+    private void InitializePrimalState() {
+        // Toggle Potara visibility based on state
+        potaraL.SetActive(isPotaraEquipped);
+        potaraR.SetActive(isPotaraEquipped);
+
+        if (isPotaraEquipped) {
+            ApplyDivineMultiplier();
+        }
+    }
+
+    private void ApplyDivineMultiplier() {
+        // Advanced logic: Potara fusion boosts Ki by 2.5x in Primal form
+        divineKiLevel *= 2.5f;
+        // Update shader to pulse faster based on power
+        auraMaterial.SetFloat("_PulseSpeed", 2.0f);
+        Debug.Log("Potara Resonance Active: Ki Overload detected.");
+    }
+
+    void Update() {
+        // Dynamic Aura Scaling
+        float pulse = Mathf.PingPong(Time.time, 1.0f);
+        auraMaterial.SetColor("_ColorInner", Color.Lerp(Color.black, Color.red, pulse));
+    }
+}
