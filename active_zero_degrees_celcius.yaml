@@ -1,0 +1,267 @@
+<div class="weather-container">
+  <div class="sky">
+    <div class="cloud cloud-1"></div>
+    <div class="cloud cloud-2"></div>
+    <div class="cloud cloud-3"></div>
+  </div>
+  <div class="frost-overlay"></div>
+  <div class="hud-display">0°C | OVERCAST</div>
+</div>
+
+
+
+:root {
+  --frost-blue: rgba(220, 245, 255, 0.2);
+  --cloud-white: rgba(255, 255, 255, 0.8);
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background: linear-gradient(to bottom, #7da2a9, #3f585e);
+}
+
+/* Frosty screen effect */
+.frost-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: radial-gradient(circle, transparent 50%, var(--frost-blue) 100%);
+  pointer-events: none;
+}
+
+/* Cloud base properties */
+.cloud {
+  position: absolute;
+  width: 200px;
+  height: 60px;
+  background: var(--cloud-white);
+  border-radius: 50px;
+  filter: blur(20px);
+  opacity: 0.6;
+}
+
+/* Individual Cloud Animations */
+.cloud-1 {
+  top: 20%;
+  animation: drift 25s linear infinite;
+}
+
+.cloud-2 {
+  top: 45%;
+  width: 300px;
+  animation: drift 40s linear infinite reverse;
+}
+
+.cloud-3 {
+  top: 70%;
+  animation: drift 30s linear infinite;
+}
+
+@keyframes drift {
+  from { transform: translateX(-100vw); }
+  to { transform: translateX(100vw); }
+}
+
+/* HUD Element */
+.hud-display {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  font-family: 'Courier New', Courier, monospace;
+  color: #00ffff;
+  text-shadow: 0 0 10px #00ffff;
+  font-weight: bold;
+}
+
+
+
+
+<div id="canvas-container">
+    <div class="hud">
+        <div class="stat">TEMP: 0.00°C</div>
+        <div class="stat">HUMIDITY: 88%</div>
+        <div class="stat">SYSTEM: ACTIVE</div>
+    </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+
+
+// Fragment Shader Fragment
+varying vec2 vUv;
+uniform float uTime;
+
+void main() {
+    // Generate noise-based clouds
+    float noise = smoothstep(0.4, 0.7, sin(vUv.x * 5.0 + uTime * 0.2) * cos(vUv.y * 5.0));
+    
+    // Cold color palette: Deep Slate to Frost White
+    vec3 skyColor = mix(vec3(0.2, 0.3, 0.4), vec3(0.7, 0.8, 0.9), vUv.y);
+    vec3 cloudColor = vec3(0.95, 0.98, 1.0);
+    
+    vec3 finalRGB = mix(skyColor, cloudColor, noise * 0.4);
+    
+    // Add a "frost" vignette
+    float dist = distance(vUv, vec2(0.5));
+    finalRGB -= dist * 0.15; 
+    
+    gl_FragColor = vec4(finalRGB, 1.0);
+}
+
+
+
+const scene = new THREE.Scene();
+const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+const geometry = new THREE.PlaneGeometry(2, 2);
+const uniforms = {
+    uTime: { value: 0.0 }
+};
+
+const material = new THREE.ShaderMaterial({
+    uniforms: uniforms,
+    vertexShader: `
+        varying vec2 vUv;
+        void main() {
+            vUv = uv;
+            gl_Position = vec4(position, 1.0);
+        }
+    `,
+    fragmentShader: document.querySelector('script[type="x-shader/x-fragment"]').textContent
+});
+
+const mesh = new THREE.Mesh(geometry, material);
+scene.add(mesh);
+
+function animate(time) {
+    uniforms.uTime.value = time * 0.001;
+    renderer.render(scene, camera);
+    requestAnimationFrame(animate);
+}
+
+window.onresize = () => {
+    renderer.setSize(window.innerWidth, window.innerHeight);
+};
+
+animate();
+
+
+
+body, html { margin: 0; padding: 0; overflow: hidden; background: #000; }
+
+.hud {
+    position: absolute;
+    top: 30px;
+    left: 30px;
+    z-index: 10;
+    font-family: 'Share Tech Mono', monospace;
+    color: #a0eaff;
+    letter-spacing: 2px;
+    text-shadow: 0 0 8px rgba(160, 234, 255, 0.7);
+}
+
+.stat {
+    background: rgba(0, 20, 30, 0.5);
+    padding: 5px 15px;
+    margin-bottom: 5px;
+    border-left: 3px solid #00ffff;
+}
+
+
+
+<svg width="200" height="200" viewBox="0 0 100 100" class="weather-logo">
+  <defs>
+    <linearGradient id="coolGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#e0f7fa;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#80deea;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <path class="cloud-ring" d="M25,50 a25,25 0 1,1 50,0 a25,25 0 1,1 -50,0" 
+        fill="none" stroke="url(#coolGrad)" stroke-width="2" stroke-dasharray="10 5" />
+  
+  <text x="50" y="58" text-anchor="middle" font-family="Arial" font-size="22" fill="#ffffff" font-weight="bold">0°</text>
+  
+  <circle class="float-cloud" cx="30" cy="35" r="8" fill="rgba(255,255,255,0.6)" />
+  <circle class="float-cloud" cx="70" cy="40" r="10" fill="rgba(255,255,255,0.4)" />
+</svg>
+
+
+
+<div class="icon-grid">
+  <div class="weather-icon">
+    <svg width="64" height="64" viewBox="0 0 24 24" fill="#ffffff">
+      <path class="cloud-path" d="M17.5,19c-3.037,0-5.5-2.463-5.5-5.5c0-0.101,0.004-0.201,0.011-0.3C10.87,13.091,9.5,11.705,9.5,10c0-1.657,1.343-3,3-3c0.126,0,0.249,0.01,0.369,0.027C13.635,5.291,15.419,4,17.5,4c2.485,0,4.5,2.015,4.5,4.5c0,0.231-0.018,0.457-0.052,0.678C22.658,9.754,23,10.584,23,11.5c0,2.485-2.015,4.5-4.5,4.5C18.231,16,18.004,15.982,17.784,15.948C17.218,17.737,15.511,19,13.5,19"/>
+    </svg>
+    <span class="label">ACTIVE OVERCAST</span>
+  </div>
+
+  <div class="weather-icon">
+    <svg width="64" height="64" viewBox="0 0 24 24" stroke="#00d4ff" stroke-width="1.5" fill="none">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 3v3m0 12v3M3 12h3m12 0h3m-15.5-6.5l2 2m9 9l2 2m-13 0l2-2m9-9l2-2" />
+    </svg>
+    <span class="label">0°C FREEZE</span>
+  </div>
+</div>
+
+
+
+.weather-logo {
+  filter: drop-shadow(0 0 10px rgba(0, 212, 255, 0.5));
+}
+
+/* Rotation for the logo ring */
+.cloud-ring {
+  transform-origin: center;
+  animation: rotateLogo 20s linear infinite;
+}
+
+/* Drifting effect for cloud icons */
+.cloud-path {
+  animation: driftCloud 4s ease-in-out infinite;
+}
+
+/* Pulsing frost effect */
+.weather-icon svg {
+  animation: frostPulse 3s infinite alternate;
+}
+
+@keyframes rotateLogo {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes driftCloud {
+  0% { transform: translateX(0); opacity: 0.8; }
+  50% { transform: translateX(3px); opacity: 1; }
+  100% { transform: translateX(0); opacity: 0.8; }
+}
+
+@keyframes frostPulse {
+  from { filter: drop-shadow(0 0 2px #00d4ff); }
+  to { filter: drop-shadow(0 0 8px #ffffff); }
+}
+
+.icon-grid {
+  display: flex;
+  gap: 40px;
+  background: #1a1a1a;
+  padding: 40px;
+  border-radius: 15px;
+}
+
+.weather-icon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: #fff;
+  font-family: 'Segoe UI', sans-serif;
+  font-size: 10px;
+}
