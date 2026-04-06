@@ -1,0 +1,148 @@
+{
+  "character": "Minato Namikaze",
+  "title": "Fourth Hokage",
+  "outfit_components": {
+    "haori": {
+      "item": "Hokage Cloak",
+      "color": "White",
+      "details": "Short-sleeved, high collar",
+      "patterns": "Red flame motifs at the hem",
+      "text": "四代目火影 (Yondaime Hokage) in vertical red kanji"
+    },
+    "standard_uniform": {
+      "vest": "Konoha Flak Jacket (Jonin Green)",
+      "shirt": "Dark blue long-sleeved jumpsuit",
+      "pants": "Matching dark blue shinobi trousers"
+    },
+    "accessories": {
+      "headband": "Blue fabric with Leaf Village metal plate",
+      "footwear": "Standard blue shinobi sandals",
+      "leg_wraps": "White bandages around right thigh and shins"
+    },
+    "signature_weapon": "Flying Thunder God Kunai (Three-pronged)"
+  }
+}
+
+
+
+/* Minato Namikaze Color Palette */
+:root {
+  --hokage-white: #FFFFFF;
+  --hokage-red: #D32F2F;        /* Flame and Kanji color */
+  --konoha-blue: #1A237E;       /* Jumpsuit/Sandals */
+  --konoha-green: #2E7D32;      /* Flak Jacket */
+  --yellow-flash: #FDD835;      /* Hair/Signature color */
+}
+
+.hokage-cloak {
+  background-color: var(--hokage-white);
+  border-bottom: 10px solid var(--hokage-red); /* Representing the flames */
+  color: var(--hokage-red);
+  font-family: "Kochi Mincho", serif;
+  text-orientation: upright;
+  writing-mode: vertical-rl;
+}
+
+.jumpsuit {
+  background-color: var(--konoha-blue);
+}
+
+.flak-jacket {
+  background-color: var(--konoha-green);
+  border-radius: 8px;
+}
+
+
+
+
+class MinatoSuit(Outfit):
+    def __init__(self):
+        self.name = "Haori of the Fourth"
+        self.base_def = 50
+        self.speed_multiplier = 1.5  # The Yellow Flash effect
+        self.special_ability = "Hiraishin_Ready"
+
+    def apply_visuals(self):
+        render_mesh("hokage_cloak_physics")
+        render_texture("flame_pattern_v4")
+
+
+
+using UnityEngine;
+using System.Collections.Generic;
+
+public class HokageSuitController : MonoBehaviour 
+{
+    [Header("Visual Telemetry (HUD)")]
+    public bool enableHUD = true;
+    public Color iridescentIndigo = new Color(0.29f, 0.0f, 0.51f, 1.0f); // Signature shift
+
+    [Header("Material Specs")]
+    [SerializeField] private Material cloakMaterial;
+    private static readonly int FlameIntensity = Shader.PropertyToID("_FlameIntensity");
+
+    [Header("Hiraishin Logic")]
+    private List<Vector3> activeNodes = new List<Vector3>();
+    public float speedMultiplier = 2.5f; // "Superfast Kaizen" speed
+
+    void Update() 
+    {
+        if (Input.GetKeyDown(KeyCode.Space)) 
+        {
+            ExecuteSpaceTimeJump();
+        }
+        UpdateCloakPhysics();
+    }
+
+    private void UpdateCloakPhysics() 
+    {
+        // Dynamic flame glow based on movement velocity
+        float velocity = GetComponent<Rigidbody>().velocity.magnitude;
+        cloakMaterial.SetFloat(FlameIntensity, Mathf.Clamp(velocity * 0.5f, 1.0f, 5.0f));
+    }
+
+    private void ExecuteSpaceTimeJump() 
+    {
+        // Logic for instantaneous nodal movement
+        Debug.Log("Teleporting to nearest Hiraishin Kunai...");
+    }
+}
+
+
+
+
+// Advanced Suit Surface Shader
+Shader "Custom/HokageSuit_Advanced" {
+    Properties {
+        _MainTex ("Base Fabric", 2D) = "white" {}
+        _CarbonFiberTex ("Reinforcement Texture", 2D) = "gray" {}
+        _IridescentShift ("Indigo-Violet Shift", Range(0,1)) = 0.5
+    }
+    
+    SubShader {
+        Tags { "RenderType"="Opaque" "Performance"="High" }
+        
+        CGPROGRAM
+        #pragma surface surf Standard fullforwardshadows
+        
+        struct Input {
+            float2 uv_MainTex;
+            float3 viewDir;
+        };
+
+        void surf (Input IN, inout SurfaceOutputStandard o) {
+            // Apply Carbon Fiber Vertud patterns for durability
+            fixed4 c = tex2D(_MainTex, IN.uv_MainTex);
+            fixed4 carbon = tex2D(_CarbonFiberTex, IN.uv_MainTex);
+            
+            // Fresnel effect for the iridescent indigo/violet shimmer
+            float fresnel = dot(normalize(IN.viewDir), o.Normal);
+            fresnel = saturate(1.0 - fresnel);
+            
+            o.Albedo = lerp(c.rgb, carbon.rgb * 0.5, 0.2);
+            o.Emission = _IridescentShift * fresnel * fixed3(0.3, 0.0, 0.8);
+            o.Alpha = c.a;
+        }
+        ENDCG
+    }
+}
