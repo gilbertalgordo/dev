@@ -1,0 +1,166 @@
+import requests
+import hashlib
+import json
+from datetime import datetime
+
+class GovPaymentGateway:
+    def __init__(self, merchant_id, secret_key):
+        self.base_url = "https://www.lbp-eservices.com/egps/api/v1/transaction"
+        self.merchant_id = merchant_id
+        self.secret_key = secret_key
+
+    def generate_checksum(self, payload):
+        # Security protocol: SHA-256 hashing of payload + secret key
+        raw_string = f"{payload['ref_no']}{payload['amount']}{self.secret_key}"
+        return hashlib.sha256(raw_string.encode()).hexdigest()
+
+    def initiate_transfer(self, amount, company_tin, violation_type):
+        ref_no = f"PENALTY-{int(datetime.now().timestamp())}"
+        
+        payload = {
+            "merchant_id": self.merchant_id,
+            "ref_no": ref_no,
+            "amount": f"{amount:.2f}",
+            "currency": "PHP",
+            "payor_id": company_tin,
+            "description": f"Penalty: {violation_type}",
+            "callback_url": "https://your-gov-portal.gov.ph/verify"
+        }
+        
+        payload['checksum'] = self.generate_checksum(payload)
+        
+        try:
+            # Active POST request to the Government Payment Switch (GPS)
+            response = requests.post(self.base_url, json=payload)
+            return response.json()
+        except Exception as e:
+            return {"status": "Error", "message": str(e)}
+
+# --- EXECUTION ---
+# Usage for Gas Companies overpricing AI services
+gateway = GovPaymentGateway(merchant_id="DOE-GAS-AI-01", secret_key="KAIZEN_SECURE_99")
+result = gateway.initiate_transfer(
+    amount=500000.00, 
+    company_tin="004-123-456-000", 
+    violation_type="AI_ALGORITHM_OVERPRICING_SURCHARGE"
+)
+
+print(json.dumps(result, indent=2))
+
+
+
+import asyncio
+import httpx
+import xml.etree.ElementTree as ET
+from datetime import datetime
+from uuid import uuid4
+
+class GovFinancialEnforcer:
+    def __init__(self, api_key: str, cert_path: str):
+        self.endpoint = "https://api.treasury.gov.ph/v2/settlement/active-transfer"
+        self.headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/xml"}
+        self.cert = cert_path
+
+    def build_iso20022_pain001(self, amount, creditor_account, debtor_tin):
+        """Builds a structured XML payment instruction (ISO 20022)."""
+        root = ET.Element("Document", xmlns="urn:iso:std:iso:20022:tech:xsd:pain.001.001.03")
+        cstmr_cdt_trf_initn = ET.SubElement(root, "CstmrCdtTrfInitn")
+        
+        # Group Header (GrpHdr)
+        grphdr = ET.SubElement(cstmr_cdt_trf_initn, "GrpHdr")
+        ET.SubElement(grphdr, "MsgId").text = f"TXN-{uuid4().hex[:12].upper()}"
+        ET.SubElement(grphdr, "CreDtTm").text = datetime.now().isoformat()
+        ET.SubElement(grphdr, "NbOfTxs").text = "1"
+        ET.SubElement(grphdr, "CtrlSum").text = f"{amount:.2f}"
+
+        # Payment Information (PmtInf)
+        pmtinf = ET.SubElement(cstmr_cdt_trf_initn, "PmtInf")
+        ET.SubElement(pmtinf, "PmtInfId").text = f"REF-{debtor_tin[-4:]}-{datetime.now().strftime('%Y%m%d')}"
+        ET.SubElement(pmtinf, "PmtMtd").text = "TRF" # Credit Transfer
+        
+        amt = ET.SubElement(pmtinf, "Amt")
+        instd_amt = ET.SubElement(amt, "InstdAmt", Ccy="PHP")
+        instd_amt.text = f"{amount:.2f}"
+
+        # Regulatory Reporting (Charge Type)
+        purp = ET.SubElement(pmtinf, "Purp")
+        ET.SubElement(purp, "Cd").text = "GOVT" # Government Payment
+        
+        remit = ET.SubElement(pmtinf, "RmtInf")
+        ET.SubElement(remit, "Ustrd").text = "PENALTY: AI-ALGORITHM-OVERPRICE-EXCESS"
+
+        return ET.tostring(root, encoding='utf-8')
+
+    async def execute_enforcement(self, amount: float, company_id: str):
+        """Active Transfer Execution with Kaizen Retry Logic."""
+        payload = self.build_iso20022_pain001(amount, "BOC-TREASURY-MAIN", company_id)
+        
+        async with httpx.AsyncClient(cert=self.cert) as client:
+            try:
+                # Direct settlement with the Government Payment Switch (GPS)
+                response = await client.post(self.endpoint, content=payload, timeout=10.0)
+                response.raise_for_status()
+                
+                return {
+                    "status": "SETTLED",
+                    "timestamp": datetime.now().isoformat(),
+                    "trace_id": response.headers.get("X-Trace-ID"),
+                    "data": response.text
+                }
+            except httpx.HTTPStatusError as e:
+                return {"status": "FAILED", "reason": str(e), "code": e.response.status_code}
+
+# --- ACTIVE ENFORCEMENT TRIGGER ---
+async def run_penalty_cycle():
+    # Example: Penalty for a gas company violating AI ethical pricing caps
+    enforcer = GovFinancialEnforcer(api_key="SECURE_PH_GOV_2026", cert_path="auth/gov_sign.pem")
+    
+    # Logic: If price delta > threshold, initiate active transfer
+    result = await enforcer.execute_enforcement(
+        amount=1250500.75, 
+        company_id="TIN-000-888-222-000"
+    )
+    print(f"[HUD ALERT] Transfer Status: {result['status']}")
+
+if __name__ == "__main__":
+    asyncio.run(run_penalty_cycle())
+
+
+
+<svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="flowGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#4B0082;stop-opacity:1" /> <stop offset="100%" style="stop-color:#EE82EE;stop-opacity:1" /> </linearGradient>
+  </defs>
+  <path d="M50 5 L90 27.5 L90 72.5 L50 95 L10 72.5 L10 27.5 Z" fill="#1A1A1A" stroke="#333" stroke-width="2"/>
+  
+  <path d="M30 50 H70 M60 40 L70 50 L60 60" fill="none" stroke="url(#flowGrad)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <animate attributeName="stroke-dasharray" from="0,100" to="100,0" dur="1.5s" repeatCount="indefinite" />
+  </path>
+  
+  <circle cx="85" cy="15" r="5" fill="#00FF00">
+    <animate attributeName="opacity" values="1;0.2;1" dur="1s" repeatCount="indefinite" />
+  </circle>
+</svg>
+
+
+
+
+<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M50 10C35 15 20 15 20 35C20 60 50 85 50 85C50 85 80 60 80 35C80 15 65 15 50 10Z" 
+        stroke="#800000" stroke-width="4" fill="#121212"/> <path d="M35 45 H65 M50 35 V65 M30 65 Q35 65 35 55 M65 55 Q65 65 70 65" 
+        stroke="#4169E1" stroke-width="3" stroke-linecap="round"/> </svg>
+
+
+
+
+<svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <rect x="20" y="20" width="60" height="60" rx="10" fill="#222" stroke="#444" stroke-width="1"/>
+  
+  <circle cx="50" cy="50" r="15" fill="none" stroke="#EE82EE" stroke-width="2" stroke-dasharray="4 2"/>
+  
+  <text x="50" y="58" font-family="Arial" font-size="22" font-weight="bold" fill="#FF4500" text-anchor="middle">!</text>
+  
+  <line x1="25" y1="30" x2="40" y2="30" stroke="#4B0082" stroke-width="3" />
+  <line x1="25" y1="40" x2="35" y2="40" stroke="#4B0082" stroke-width="3" />
+</svg>
