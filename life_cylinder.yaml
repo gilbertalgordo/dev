@@ -1,0 +1,113 @@
+import time
+import random
+
+class ImmersionMachine:
+    def __init__(self):
+        # Initial states
+        self.water_level = 0.0  # Percentage
+        self.medicine_ratio = 0.0 # Percentage of total volume
+        self.temperature = 22.0  # Celsius
+        self.oxygen_sat = 95.0   # Percentage
+        self.is_running = False
+
+    def engage_safety_locks(self):
+        print("[SYSTEM] Fiberglass seal integrity: SECURED")
+        print("[SYSTEM] Pressure sensors: CALIBRATED")
+
+    def fill_chamber(self, target_h2o, target_med):
+        print(f"\n[ACTION] Initiating fill: {target_h2o}% Special H2O, {target_med}% Medicinal Liquid")
+        while self.water_level < (target_h2o + target_med):
+            self.water_level += 5.0
+            time.sleep(0.1)
+            print(f"Current Level: {self.water_level}%", end="\r")
+        print("\n[SYSTEM] Fill sequence complete.")
+
+    def monitor_vitals(self):
+        # Simulated HUD Data
+        self.temperature += random.uniform(-0.1, 0.5)
+        print(f"\n--- HUD MONITORING ---")
+        print(f"TEMP: {self.temperature:.1f}°C")
+        print(f"O2 SAT: {self.oxygen_sat}%")
+        print(f"MIX RATIO: {self.water_level}% Total Volume")
+        print("----------------------")
+
+# --- Execution ---
+machine = ImmersionMachine()
+machine.engage_safety_locks()
+machine.fill_chamber(target_h2o=80, target_med=20)
+machine.monitor_vitals()
+
+
+
+import threading
+import time
+import logging
+from dataclasses import dataclass
+
+# Setup logging for medical audit trails
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - [HUD] - %(message)s')
+
+@dataclass
+class ChamberStatus:
+    temp: float = 20.0
+    pressure: float = 1.0  # ATM
+    h2o_level: float = 0.0
+    med_level: float = 0.0
+    is_sealed: bool = False
+
+class AdvancedImmersionSystem:
+    def __init__(self):
+        self.status = ChamberStatus()
+        self.lock = threading.Lock()
+        self.emergency_stop = False
+
+    def fluid_manifold_controller(self, target_h2o, target_med):
+        """Manages the volumetric mixing of Special H2O and Medicinal fluids."""
+        logging.info("Initializing Fluid Integration Manifold...")
+        
+        while (self.status.h2o_level < target_h2o or self.status.med_level < target_med) and not self.emergency_stop:
+            with self.lock:
+                if self.status.h2o_level < target_h2o:
+                    self.status.h2o_level += 1.2  # Flow rate simulation
+                if self.status.med_level < target_med:
+                    self.status.med_level += 0.5
+            time.sleep(0.1)
+        
+        logging.info("Chamber stabilization reached.")
+
+    def thermal_regulation_loop(self, setpoint=37.0):
+        """Simulates a PID loop for maintaining body temperature."""
+        while not self.emergency_stop:
+            with self.lock:
+                # Simple proportional adjustment
+                error = setpoint - self.status.temp
+                self.status.temp += error * 0.1
+            time.sleep(0.5)
+
+    def run_session(self):
+        self.status.is_sealed = True
+        logging.info("Fiberglass Cylinder Pressure Seal: ACTIVE")
+        
+        # Start background systems
+        threads = [
+            threading.Thread(target=self.fluid_manifold_controller, args=(75, 25)),
+            threading.Thread(target=self.thermal_regulation_loop, args=(37.0,))
+        ]
+        
+        for t in threads:
+            t.daemon = True
+            t.start()
+
+        # Main Monitor Loop
+        try:
+            for _ in range(10):
+                with self.lock:
+                    print(f"| TEMP: {self.status.temp:.2f}°C | H2O: {self.status.h2o_level:.1f}% | MED: {self.status.med_level:.1f}% |")
+                time.sleep(1)
+        except KeyboardInterrupt:
+            self.emergency_stop = True
+            logging.warning("Manual Override Initiated: Draining Chamber...")
+
+# --- Initialization ---
+system = AdvancedImmersionSystem()
+system.run_session()
