@@ -1,0 +1,136 @@
+import time
+import random
+
+class PropellerAI:
+    def __init__(self):
+        # Target efficiency parameters
+        self.target_flow_velocity = 25.0  # knots
+        self.max_cavitation_threshold = 0.15
+        
+        # Actuator states
+        self.blade_pitch = 15.0  # degrees
+        self.shroud_geometry = 1.0  # 1.0 = neutral aerodynamic position
+        
+    def get_sensor_data(self):
+        """Simulates real-time telemetry from propeller safeguards."""
+        return {
+            "flow_velocity": random.uniform(20.0, 30.0),
+            "cavitation_index": random.uniform(0.05, 0.25),
+            "vibration_level": random.uniform(0.1, 0.5)
+        }
+
+    def optimize_aerodynamics(self, telemetry):
+        """AI Logic to adjust safeguards and pitch."""
+        print(f"--- Telemetry: Flow {telemetry['flow_velocity']:.2f} | Cavitation {telemetry['cavitation_index']:.2f} ---")
+        
+        # Condition 1: High Cavitation detected
+        if telemetry['cavitation_index'] > self.max_cavitation_threshold:
+            print("[SAFEGUARD] Reducing blade pitch to stabilize boundary layer.")
+            self.blade_pitch -= 0.5
+            self.shroud_geometry += 0.05  # Tighten duct for cleaner flow
+            
+        # Condition 2: Low Flow Efficiency
+        elif telemetry['flow_velocity'] < self.target_flow_velocity:
+            print("[OPTIMIZE] Increasing pitch for maximum thrust efficiency.")
+            self.blade_pitch += 0.3
+            
+        # Hard Safeguard: Vibration override
+        if telemetry['vibration_level'] > 0.4:
+            print("[CRITICAL] Structural safeguard active: Recalibrating shroud.")
+            self.shroud_geometry = 0.9
+
+    def run_loop(self):
+        try:
+            while True:
+                data = self.get_sensor_data()
+                self.optimize_aerodynamics(data)
+                print(f"Current Config: Pitch {self.blade_pitch:.1f}° | Shroud Factor {self.shroud_geometry:.2f}")
+                print("-" * 30)
+                time.sleep(2)
+        except KeyboardInterrupt:
+            print("System Disengaged.")
+
+# Initialize the AI
+ai_system = PropellerAI()
+ai_system.run_loop()
+
+
+
+import numpy as np
+import torch
+import torch.nn as nn
+
+class AerodynamicSafeguard(nn.Module):
+    """
+    Neural Network predicting the 'Safety Envelope' of the propeller.
+    Input: RPM, Flow Velocity, Blade Pitch
+    Output: Probability of Cavitation & Structural Fatigue Risk
+    """
+    def __init__(self):
+        super(AerodynamicSafeguard, self).__init__()
+        self.network = nn.Sequential(
+            nn.Linear(3, 64),
+            nn.ReLU(),
+            nn.Linear(64, 2),
+            nn.Sigmoid() # Returns 0-1 risk factors
+        )
+
+    def forward(self, x):
+        return self.network(x)
+
+class PropulsionAI:
+    def __init__(self):
+        self.safeguard_model = AerodynamicSafeguard()
+        self.learning_rate = 0.001
+        
+        # Operational Constants
+        self.CRITICAL_CAVITATION_LIMIT = 0.75
+        self.OPTIMAL_ADVANCE_RATIO = 0.85 # J = V / (n * D)
+
+    def calculate_efficiency(self, flow_v, rpm, pitch):
+        """Calculates real-time hydrodynamic efficiency η."""
+        # Simplified η = (Thrust * Velocity) / (Torque * Angular Velocity)
+        advance_ratio = flow_v / (rpm * 0.1) # D=0.1 simulated
+        efficiency = 1 - abs(self.OPTIMAL_ADVANCE_RATIO - advance_ratio)
+        return max(0, efficiency)
+
+    def active_inference_step(self, sensors):
+        """
+        Main AI Loop: Prevents 'Vortex Shedding' and 'Blade Stall'
+        """
+        state = torch.tensor([sensors['velocity'], sensors['rpm'], sensors['pitch']], dtype=torch.float32)
+        
+        # 1. Prediction: Safeguard Check
+        risk_factors = self.safeguard_model(state)
+        cavitation_risk, fatigue_risk = risk_factors[0], risk_factors[1]
+
+        # 2. Decision Logic: Superfast Kaizen Adjustment
+        action_log = []
+        target_pitch = sensors['pitch']
+
+        if cavitation_risk > self.CRITICAL_CAVITATION_LIMIT:
+            # Immediate Aerodynamic Safeguard: Reduce angle of attack
+            target_pitch -= 2.5 
+            action_log.append("CRITICAL: Boundary Layer Collapse Risk. Feathering blades.")
+        
+        elif fatigue_risk > 0.5:
+            # Adjust Duct/Shroud for vibration dampening
+            action_log.append("SAFEGUARD: Harmonic resonance detected. Adjusting shroud geometry.")
+
+        else:
+            # Efficiency Optimization
+            efficiency = self.calculate_efficiency(sensors['velocity'], sensors['rpm'], sensors['pitch'])
+            if efficiency < 0.8:
+                target_pitch += 0.5 # Iterative Kaizen improvement
+                action_log.append("OPTIMIZE: Adjusting pitch for Laminar Flow.")
+
+        return target_pitch, action_log
+
+# --- Simulation Run ---
+ai = PropulsionAI()
+current_sensors = {'velocity': 22.5, 'rpm': 1200, 'pitch': 18.0}
+
+new_pitch, logs = ai.active_inference_step(current_sensors)
+print(f"Propeller Status: {' | '.join(logs)}")
+print(f"New Command: Set Pitch to {new_pitch:.2f}°")
+
