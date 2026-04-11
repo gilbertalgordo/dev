@@ -1,0 +1,275 @@
+class MediaProcessor:
+    def __init__(self):
+        # Default state is OFF
+        self.watermark_enabled = False
+
+    def toggle_watermark(self):
+        """Switches the watermark state."""
+        self.watermark_enabled = not self.watermark_enabled
+        status = "ENABLED" if self.watermark_enabled else "DISABLED"
+        print(f"System: Watermark is now {status}")
+
+    def generate_output(self, content_name):
+        """Simulates generating media with or without a watermark."""
+        if self.watermark_enabled:
+            return f"Processed {content_name} [WATERMARK APPLIED]"
+        else:
+            return f"Processed {content_name} [CLEAN OUTPUT]"
+
+# --- Execution ---
+app = MediaProcessor()
+
+# 1. Generate clean content
+print(app.generate_output("Project_Alpha_Video"))
+
+# 2. Switch the feature ON
+app.toggle_watermark()
+
+# 3. Generate watermarked content
+print(app.generate_output("Project_Alpha_Video"))
+
+
+
+
+import cv2
+import numpy as np
+
+class GeminiMediaController:
+    def __init__(self):
+        self.watermark_active = True  # The "Switch"
+
+    def toggle_watermark(self, state: bool):
+        """Standard switch to enable or disable watermark handling."""
+        self.watermark_active = state
+        print(f"Watermark handling is now: {'ON' if state else 'OFF'}")
+
+    def process_output(self, image_path):
+        """
+        Advanced 'Remover' logic using OpenCV Inpainting.
+        This identifies a mask area and reconstructs pixels.
+        """
+        img = cv2.imread(image_path)
+        
+        if not self.watermark_active:
+            # 1. Create a mask of the watermark location (e.g., bottom right)
+            # You can also use a pre-made .png mask for the specific Gemini icon
+            mask = np.zeros(img.shape[:2], np.uint8)
+            
+            # Example: Masking the bottom-right corner where sparkles usually appear
+            h, w = img.shape[:2]
+            cv2.rectangle(mask, (w-100, h-100), (w, h), 255, -1)
+            
+            # 2. Use Telea Inpainting to 'remove' the watermark seamlessly
+            dst = cv2.inpaint(img, mask, 3, cv2.INPAINT_TELEA)
+            return dst
+        
+        return img
+
+# Usage
+controller = GeminiMediaController()
+controller.toggle_watermark(False) # Turn 'OFF' the watermark in the final output
+clean_image = controller.process_output("gemini_gen.png")
+
+
+
+<div class="switch-container" onclick="this.classList.toggle('active')">
+  <svg width="60" height="34" viewBox="0 0 60 34" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect class="track" width="60" height="34" rx="17" fill="#E0E0E0"/>
+    <circle class="knob" cx="17" cy="17" r="13" fill="white" />
+  </svg>
+  <span class="label">Remove Watermark</span>
+</div>
+
+<style>
+  .switch-container { display: flex; align-items: center; cursor: pointer; font-family: sans-serif; }
+  .label { margin-left: 10px; color: #5f6368; }
+  
+  /* Transition Logic */
+  .track, .knob { transition: all 0.3s ease; }
+  
+  /* Active State (ON) */
+  .active .track { fill: #4285F4; } /* Gemini Blue */
+  .active .knob { transform: translateX(26px); }
+</style>
+
+
+
+
+<svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" 
+        stroke="#4285F4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <line x1="4" y1="4" x2="20" y2="20" stroke="#EA4335" stroke-width="2" stroke-linecap="round"/>
+</svg>
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini Watermark Switcher</title>
+    <style>
+        /* Modern CSS Reset */
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f0f2f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        /* Container for the whole component */
+        .controls-container {
+            background: white;
+            padding: 25px;
+            border-radius: 20px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+            text-align: center;
+        }
+
+        .label-text {
+            display: block;
+            margin-bottom: 15px;
+            font-weight: 600;
+            color: #1f1f1f;
+            font-size: 1.1rem;
+        }
+
+        /* The Switch - Outer Container */
+        .gemini-switch {
+            position: relative;
+            display: inline-block;
+            width: 100px;
+            height: 50px;
+        }
+
+        /* Hide default HTML checkbox */
+        .gemini-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        /* The Slider Track */
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #e0e0e0; /* Off state background */
+            transition: .4s;
+            border-radius: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 10px;
+            border: 1px solid #dcdcdc;
+        }
+
+        /* The Sliding Knob */
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 42px;
+            width: 42px;
+            left: 4px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            z-index: 2;
+        }
+
+        /* --- Icon Styling --- */
+        .icon {
+            width: 24px;
+            height: 24px;
+            transition: .4s;
+            z-index: 1; /* Sit below the knob */
+        }
+
+        /* "ON" Icon (Right side, Sparkles) */
+        .icon-on {
+            fill: #757575; /* Default grey */
+            opacity: 0.5;
+        }
+
+        /* "OFF" Icon (Left side, Watermark) */
+        .icon-off {
+            fill: #757575; /* Default grey */
+            opacity: 1;
+        }
+
+        /* --- Checked (ON) States --- */
+
+        /* Change track background on checked */
+        input:checked + .slider {
+            /* Gemini Gradient */
+            background: linear-gradient(90deg, #4285F4 0%, #9B72F3 100%);
+            border-color: transparent;
+        }
+
+        /* Move knob to the right */
+        input:checked + .slider:before {
+            transform: translateX(50px);
+        }
+
+        /* Animate icons on checked */
+        input:checked + .slider .icon-on {
+            fill: white;
+            opacity: 1;
+            transform: scale(1.1);
+        }
+
+        input:checked + .slider .icon-off {
+            fill: white;
+            opacity: 0.3;
+            transform: scale(0.9);
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="controls-container">
+        <span class="label-text">Gemini Output Mode</span>
+        
+        <label class="gemini-switch">
+            <input type="checkbox" id="modeToggle">
+            <span class="slider">
+                
+                <svg class="icon icon-off" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.31 0-7.87-3.41-7.99-7.68l2.5 1.25c.18.09.39.11.58.04.19-.07.34-.22.41-.41l1-2.5 2.5-1c.19-.07.34-.22.41-.41.07-.19.05-.4-.04-.58l-1.25-2.5C10.59 4.13 11.29 4 12 4c4.41 0 8 3.59 8 8s-3.59 8-8 8zm-2.5-8.5l.72-1.78 1.78-.72-1.78-.72-.72-1.78-.72 1.78-1.78.72 1.78.72.72 1.78z"/>
+                </svg>
+
+                <svg class="icon icon-on" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/>
+                </svg>
+            </span>
+        </label>
+        <div style="margin-top: 10px; font-size: 0.8rem; color: #757575;">
+            Left: Protected | Right: Clean
+        </div>
+    </div>
+
+    <script>
+        // Simple script to log the state change
+        const toggle = document.getElementById('modeToggle');
+        toggle.addEventListener('change', function() {
+            if(this.checked) {
+                console.log("Watermark Remover: ON (Clean Mode)");
+            } else {
+                console.log("Watermark Remover: OFF (Protected Mode)");
+            }
+        });
+    </script>
+</body>
+</html>
