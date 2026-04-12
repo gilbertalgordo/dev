@@ -1,0 +1,139 @@
+import time
+import random
+from abc import ABC, abstractmethod
+
+class ActiveSentinel(ABC):
+    """Base class for autonomous monitoring agents."""
+    @abstractmethod
+    def scan(self, telemetry):
+        pass
+
+class EmissionMonitor(ActiveSentinel):
+    """Agent specifically for tracking NOx and Particulate Matter (PM) levels."""
+    def __init__(self, nox_threshold=0.05):
+        self.nox_threshold = nox_threshold
+
+    def scan(self, telemetry):
+        nox_level = telemetry.get('nox_emissions', 0)
+        if nox_level > self.nox_threshold:
+            return {"status": "CRITICAL", "reason": f"NOx level {nox_level} exceeds safety limits."}
+        return {"status": "OPTIMAL"}
+
+class FleetTransitionManager:
+    """Orchestrates the phase-out of diesel units based on agent feedback."""
+    def __init__(self):
+        self.active_fleet = ["Diesel_Unit_01", "Diesel_Unit_02", "Diesel_Unit_03"]
+        self.phase_out_queue = []
+        self.sentinel = EmissionMonitor()
+
+    def run_cycle(self):
+        print("--- Active AI Monitoring Cycle Started ---")
+        for unit in self.active_fleet[:]:
+            # Simulated real-time sensor data
+            telemetry = {
+                "nox_emissions": round(random.uniform(0.01, 0.10), 3),
+                "engine_temp": random.randint(85, 110),
+                "fuel_type": "Diesel"
+            }
+            
+            report = self.sentinel.scan(telemetry)
+            
+            if report["status"] == "CRITICAL":
+                print(f"[!] {unit}: {report['reason']} -> Initiating Phase-Out.")
+                self.decommission(unit)
+            else:
+                print(f"[+] {unit}: Operating within standard parameters.")
+
+    def decommission(self, unit_id):
+        self.active_fleet.remove(unit_id)
+        self.phase_out_queue.append(unit_id)
+        print(f"[SYSTEM] {unit_id} moved to Decommissioning Queue. Assigning EV replacement...")
+
+# Execution
+if __name__ == "__main__":
+    manager = FleetTransitionManager()
+    for cycle in range(3):
+        manager.run_cycle()
+        time.sleep(1)
+
+
+
+import numpy as np
+import datetime
+from typing import Dict, List, Optional
+from dataclasses import dataclass
+
+@dataclass
+class DieselUnit:
+    id: str
+    vin: str
+    mileage: int
+    avg_nox_emission: float  # mg/km
+    maintenance_history: List[float]  # Cost of last 5 repairs
+    deployment_date: datetime.date
+
+class ActiveSentinelAgent:
+    """Agentic monitor utilizing Meta-Learning for failure prediction."""
+    def __init__(self, thresholds: Dict[str, float]):
+        self.thresholds = thresholds
+
+    def analyze_telemetry(self, unit: DieselUnit, current_emissions: float) -> float:
+        """
+        Calculates a 'Decommissioning Probability' (DP) using a simplified 
+        heuristic model for high-nox and maintenance fatigue.
+        """
+        # Risk factor based on emission degradation
+        emission_risk = min(1.0, current_emissions / self.thresholds['nox_max'])
+        
+        # Risk factor based on maintenance cost velocity
+        m_cost_trend = np.polyfit(range(len(unit.maintenance_history)), unit.maintenance_history, 1)[0]
+        maintenance_risk = 1.0 if m_cost_trend > self.thresholds['cost_velocity'] else 0.5
+        
+        return (0.7 * emission_risk) + (0.3 * maintenance_risk)
+
+class TransitionStrategist:
+    """Agent responsible for the 'Phase Out' logic and ROI of EV/Hydrogen conversion."""
+    def __init__(self, sentinel: ActiveSentinelAgent):
+        self.sentinel = sentinel
+        self.active_fleet: Dict[str, DieselUnit] = {}
+        self.decommissioned_registry: List[str] = []
+
+    def evaluate_fleet(self, sensor_data: Dict[str, float]):
+        print(f"[{datetime.datetime.now()}] Initiating Active AI Fleet Scan...")
+        
+        for unit_id, unit in self.active_fleet.items():
+            current_nox = sensor_data.get(unit_id, 0.0)
+            dp_score = self.sentinel.analyze_telemetry(unit, current_nox)
+            
+            if dp_score > 0.85:
+                self._trigger_phase_out(unit, dp_score)
+            elif dp_score > 0.60:
+                print(f"[*] WARNING: {unit_id} entering High-Risk zone (DP: {dp_score:.2f}).")
+
+    def _trigger_phase_out(self, unit: DieselUnit, score: float):
+        print(f"\n[!] CRITICAL ACTION: Phasing out {unit.id}")
+        print(f"    - Decommissioning Probability: {score:.2f}")
+        print(f"    - Reason: Emission non-compliance and repair cost trajectory.")
+        
+        # In a real-world scenario, this would trigger an API call to a procurement system
+        self.decommissioned_registry.append(unit.id)
+        # Remove from active monitoring to finalize 'Phase Out'
+        print(f"    - Status: Unit {unit.id} queued for EV/H2 Replacement.\n")
+
+# --- Implementation Example ---
+
+# Define thresholds: Max NOx (Euro 6 is ~80mg/km) and Maintenance Cost Growth
+sentinel_config = {'nox_max': 80.0, 'cost_velocity': 150.0}
+monitor = ActiveSentinelAgent(sentinel_config)
+strategist = TransitionStrategist(monitor)
+
+# Mock Data: Unit_A is failing, Unit_B is stable
+strategist.active_fleet["DX-2026-A"] = DieselUnit(
+    id="DX-2026-A", vin="12345", mileage=120000, 
+    avg_nox_emission=75.0, maintenance_history=[200, 450, 800, 1200], # Rapidly rising costs
+    deployment_date=datetime.date(2020, 1, 1)
+)
+
+# Simulated real-time sensor snapshot
+real_time_emissions = {"DX-2026-A": 92.5} # Exceeds 80mg/km threshold
+strategist.evaluate_fleet(real_time_emissions)
