@@ -1,0 +1,160 @@
+from sentence_transformers import SentenceTransformer, util
+import torch
+
+def detect_plagiarism(original_text, suspected_text):
+    # Load a pre-trained model optimized for semantic similarity
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+
+    # Encode both texts into high-dimensional vectors
+    embeddings1 = model.encode(original_text, convert_to_tensor=True)
+    embeddings2 = model.encode(suspected_text, convert_to_tensor=True)
+
+    # Compute cosine similarity (score between 0 and 1)
+    cosine_score = util.cos_sim(embeddings1, embeddings2)
+    
+    return cosine_score.item()
+
+# Example Usage
+source = "The rapid expansion of artificial intelligence is transforming the global economy."
+submission = "The world's financial systems are being reshaped by the quick growth of AI."
+
+similarity = detect_plagiarism(source, submission)
+print(f"Similarity Score: {similarity:.4f}")
+
+
+
+
+import nltk
+from nltk.tokenize import word_tokenize, sent_tokenize
+
+def get_stylometric_fingerprint(text):
+    tokens = word_tokenize(text.lower())
+    sentences = sent_tokenize(text)
+    
+    # Feature 1: Average Sentence Length
+    avg_sent_len = len(tokens) / len(sentences)
+    
+    # Feature 2: Lexical Diversity (Unique words / Total words)
+    lex_diversity = len(set(tokens)) / len(tokens)
+    
+    return {
+        "avg_sentence_length": avg_sent_len,
+        "lexical_diversity": lex_diversity
+    }
+
+
+
+import torch
+from sentence_transformers import SentenceTransformer, util
+import numpy as np
+
+class AdvancedPlagiarismAI:
+    def __init__(self, model_name='all-mpnet-base-v2'):
+        # Load a high-accuracy transformer model
+        self.model = SentenceTransformer(model_name)
+        self.corpus_embeddings = None
+        self.corpus_metadata = []
+
+    def index_documents(self, documents):
+        """Builds an indexed database of original works."""
+        print("Indexing reference corpus...")
+        self.corpus_metadata = documents
+        # Generate dense vectors for the entire corpus
+        self.corpus_embeddings = self.model.encode([doc['text'] for doc in documents], 
+                                                  convert_to_tensor=True, 
+                                                  show_progress_bar=True)
+
+    def scan_submission(self, submission_text, threshold=0.75):
+        """Detects paraphrased or direct plagiarism."""
+        submission_embedding = self.model.encode(submission_text, convert_to_tensor=True)
+        
+        # Calculate Cosine Similarity across the entire database
+        cosine_scores = util.cos_sim(submission_embedding, self.corpus_embeddings)[0]
+        
+        # Find matches above the threshold
+        results = []
+        for i, score in enumerate(cosine_scores):
+            if score > threshold:
+                results.append({
+                    "source_id": self.corpus_metadata[i]['id'],
+                    "similarity_score": round(float(score), 4),
+                    "match_preview": self.corpus_metadata[i]['text'][:100] + "..."
+                })
+        
+        return sorted(results, key=lambda x: x['similarity_score'], reverse=True)
+
+# Example Usage
+docs = [
+    {"id": "DOC001", "text": "Photosynthesis is the process used by plants to convert light energy into chemical energy."},
+    {"id": "DOC002", "text": "The industrial revolution marked a major turning point in history, affecting almost every aspect of daily life."}
+]
+
+ai = AdvancedPlagiarismAI()
+ai.index_documents(docs)
+
+# Test with a paraphrased sentence
+test_text = "Plants transform sunlight into chemical fuel through a mechanism called photosynthesis."
+matches = ai.scan_submission(test_text)
+print(f"Potential Matches: {matches}")
+
+
+
+
+import spacy
+from collections import Counter
+
+nlp = spacy.load("en_core_web_sm")
+
+def extract_stylometric_fingerprint(text):
+    doc = nlp(text)
+    
+    # 1. Lexical Diversity (Unique words / Total words)
+    words = [token.text.lower() for token in doc if token.is_alpha]
+    diversity = len(set(words)) / len(words) if words else 0
+    
+    # 2. Part-of-Speech (POS) Distribution
+    pos_counts = Counter([token.pos_ for token in doc])
+    total_pos = sum(pos_counts.values())
+    pos_dist = {k: v / total_pos for k, v in pos_counts.items()}
+    
+    # 3. Average Sentence Complexity (Dependency parsing)
+    avg_deps = sum(len(list(token.children)) for token in doc) / len(doc)
+    
+    return {
+        "lexical_diversity": round(diversity, 4),
+        "pos_distribution": pos_dist,
+        "avg_complexity": round(avg_deps, 4)
+    }
+
+# This can be used to compare a student's history vs. current submission
+print(extract_stylometric_fingerprint(test_text))
+
+
+
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M12 8H40L52 20V56H12V8Z" stroke="#4A90E2" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M40 8V20H52" stroke="#4A90E2" stroke-width="2" stroke-linejoin="round"/>
+  <circle cx="28" cy="36" r="3" fill="#00C853"/>
+  <circle cx="40" cy="44" r="2" fill="#00C853"/>
+  <line x1="28" y1="36" x2="40" y2="44" stroke="#00C853" stroke-width="1.5"/>
+  <circle cx="44" cy="44" r="8" stroke="#FFD600" stroke-width="3"/>
+  <line x1="50" y1="50" x2="58" y2="58" stroke="#FFD600" stroke-width="4" stroke-linecap="round"/>
+</svg>
+
+
+
+
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M32 4L52 12V30C52 42.15 43.48 53.42 32 56C20.52 53.42 12 42.15 12 30V12L32 4Z" fill="#E8F5E9" stroke="#2E7D32" stroke-width="2"/>
+  <path d="M22 32L28 38L42 24" stroke="#2E7D32" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M48 10L50 14L54 16L50 18L48 22L46 18L42 16L46 14L48 10Z" fill="#FFD600"/>
+</svg>
+
+
+
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M32 8L56 52H8L32 8Z" stroke="#D32F2F" stroke-width="3" stroke-linejoin="round"/>
+  <rect x="30" y="24" width="4" height="16" rx="2" fill="#D32F2F"/>
+  <circle cx="32" cy="46" r="3" fill="#D32F2F"/>
+  <path d="M38 18L44 18M38 22L44 22" stroke="#D32F2F" stroke-width="2" stroke-linecap="round"/>
+</svg>
