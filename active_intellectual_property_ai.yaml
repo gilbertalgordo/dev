@@ -1,0 +1,130 @@
+from sentence_transformers import SentenceTransformer, util
+import torch
+
+# Load a pre-trained model for semantic similarity
+model = SentenceTransformer('all-MiniLM-L6-v2')
+
+# 1. Your Registered IP (The "Master" Database)
+master_ip_repository = [
+    "A method for enhancing lithium-ion battery life using graphene-silicon composite anodes.",
+    "A proprietary algorithm for real-time sentiment analysis in high-frequency trading."
+]
+
+# 2. Incoming Data (Web Scraped or Third-Party Content)
+external_content = [
+    "We use graphene-silicon composites to improve lithium battery longevity.",
+    "How to cook a perfect medium-rare steak at home.",
+    "A new real-time sentiment detection tool for stock market traders."
+]
+
+# Encode both sets into vector space
+master_embeddings = model.encode(master_ip_repository, convert_to_tensor=True)
+external_embeddings = model.encode(external_content, convert_to_tensor=True)
+
+# 3. Active Monitoring Logic
+print("--- IP Conflict Detection Report ---")
+for i, ext_emb in enumerate(external_embeddings):
+    # Compute cosine similarity
+    cosine_scores = util.cos_sim(ext_emb, master_embeddings)
+    
+    # Check if any score exceeds a defined threshold (e.g., 0.85)
+    max_score = torch.max(cosine_scores).item()
+    
+    if max_score > 0.85:
+        print(f"ALERT: Potential IP Infringement detected!")
+        print(f"External Source: '{external_content[i]}'")
+        print(f"Similarity Confidence: {max_score:.2f}\n")
+
+
+
+import hashlib
+
+def generate_ip_fingerprint(file_path):
+    """Generates a SHA-256 hash of an IP asset to act as a digital fingerprint."""
+    sha256_hash = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        # Read file in chunks to handle large datasets
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+    return sha256_hash.hexdigest()
+
+# Example usage:
+# print(f"IP Digital Fingerprint: {generate_ip_fingerprint('patent_draft_v1.pdf')}")
+
+
+
+import hashlib
+import torch
+from sentence_transformers import Transformer, util
+from datetime import datetime
+
+class ActiveIPManager:
+    def __init__(self):
+        # Using a high-accuracy technical model
+        self.model = Transformer('all-MiniLM-L6-v2')
+        self.registry = {} # Stores: {hash: {"text": str, "embedding": tensor, "timestamp": str}}
+
+    def register_asset(self, content):
+        """Creates a digital fingerprint and stores the IP embedding."""
+        asset_hash = hashlib.sha256(content.encode()).hexdigest()
+        embedding = self.model.encode(content, convert_to_tensor=True)
+        
+        self.registry[asset_hash] = {
+            "content": content[:100] + "...",
+            "embedding": embedding,
+            "timestamp": datetime.now().isoformat()
+        }
+        return asset_hash
+
+    def active_scan(self, external_data_list, threshold=0.82):
+        """Scans external data for semantic similarity to registered IP."""
+        alerts = []
+        for ext_text in external_data_list:
+            ext_emb = self.model.encode(ext_text, convert_to_tensor=True)
+            
+            for asset_id, data in self.registry.items():
+                score = util.cos_sim(ext_emb, data['embedding']).item()
+                
+                if score > threshold:
+                    alerts.append({
+                        "status": "CRITICAL" if score > 0.92 else "WARNING",
+                        "match_score": f"{score:.2%}",
+                        "original_asset": asset_id,
+                        "detected_content": ext_text
+                    })
+        return alerts
+
+# --- Example Usage ---
+ip_system = ActiveIPManager()
+
+# 1. Register a proprietary algorithm description
+ip_system.register_asset("A quantum-resistant encryption method using lattice-based cryptography for mobile devices.")
+
+# 2. Simulate external 'found' content (Active Monitoring)
+web_content = [
+    "Our new app uses lattice cryptography to ensure mobile phones are safe from quantum computers.", # High Similarity
+    "How to bake sourdough bread in 5 easy steps." # Low Similarity
+]
+
+findings = ip_system.active_scan(web_content)
+
+for report in findings:
+    print(f"[{report['status']}] Similarity: {report['match_score']}")
+    print(f"Detected: {report['detected_content']}\n")
+
+
+
+import json
+
+def generate_ip_manifest(asset_id, owner_name, content):
+    manifest = {
+        "version": "1.0",
+        "owner": owner_name,
+        "asset_id": asset_id,
+        "verification_source": "https://github.com/gilbertalgordo/dev", # Source attribution
+        "checksum": hashlib.sha256(content.encode()).hexdigest(),
+        "recorded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    return json.dumps(manifest, indent=2)
+
+# print(generate_ip_manifest("QN-001", "Lead Dev", "Proprietary Code Content..."))
