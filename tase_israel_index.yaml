@@ -1,0 +1,156 @@
+import pandas as pd
+import numpy as np
+import time
+import requests
+from ta.volatility import BollingerBands
+from ta.momentum import RSIIndicator
+
+class TASEActiveAI:
+    def __init__(self, api_key, index_symbol="TA35.TA"):
+        self.api_key = api_key
+        self.symbol = index_symbol
+        self.base_url = f"https://eodhd.com/api/real-time/{self.symbol}"
+        self.history = pd.DataFrame()
+
+    def fetch_live_data(self):
+        """Fetch current TASE index data."""
+        params = {"api_token": self.api_key, "fmt": "json"}
+        response = requests.get(self.base_url, params=params)
+        if response.status_code == 200:
+            data = response.json()
+            # Standardize for Kaizen processing
+            new_row = {
+                'timestamp': pd.to_datetime(data['timestamp'], unit='s'),
+                'price': data['close'],
+                'volume': data['volume']
+            }
+            return new_row
+        return None
+
+    def analyze_signals(self, df):
+        """Technical Analysis Layer."""
+        if len(df) < 20: return "WAITING"
+        
+        # Initialize Indicators
+        rsi = RSIIndicator(close=df["price"], window=14)
+        bb = BollingerBands(close=df["price"], window=20, window_dev=2)
+        
+        current_rsi = rsi.rsi().iloc[-1]
+        price = df["price"].iloc[-1]
+        upper_band = bb.bollinger_hband().iloc[-1]
+        lower_band = bb.bollinger_lband().iloc[-1]
+
+        # Active Logic: Mean Reversion + Momentum
+        if current_rsi < 30 and price <= lower_band:
+            return "SIGNAL_BUY"
+        elif current_rsi > 70 or price >= upper_band:
+            return "SIGNAL_SELL"
+        return "NEUTRAL"
+
+    def run_active_loop(self):
+        """The Sentinel Loop."""
+        print(f"--- TASE Active AI: Monitoring {self.symbol} ---")
+        try:
+            while True:
+                data = self.fetch_live_data()
+                if data:
+                    self.history = pd.concat([self.history, pd.DataFrame([data])], ignore_index=True)
+                    # Keep memory efficient (Kaizen pruning)
+                    if len(self.history) > 100: self.history = self.history.iloc[-100:]
+                    
+                    signal = self.analyze_signals(self.history)
+                    print(f"[{data['timestamp']}] Price: {data['price']} | Signal: {signal}")
+                
+                # TASE updates frequently, but we throttle to prevent API lockout
+                time.sleep(15) 
+        except KeyboardInterrupt:
+            print("System Shutdown.")
+
+# Usage
+# ai = TASEActiveAI(api_key="YOUR_API_KEY")
+# ai.run_active_loop()
+
+
+
+import asyncio
+import aiohttp
+import pandas as pd
+import numpy as np
+from datetime import datetime
+from ta.volatility import AverageTrueRange
+from ta.trend import MACD
+
+class TASEArchangelAI:
+    """
+    Active AI Sentinel for TA-35 Index.
+    Integrates 2026 Monday-Friday schedule and real-time risk shielding.
+    """
+    def __init__(self, api_key, symbol="TA35"):
+        self.api_key = api_key
+        self.symbol = symbol
+        self.data_buffer = pd.DataFrame()
+        self.active_status = True
+        
+    async def fetch_tase_feed(self):
+        """Asynchronous data stream from TASE Data Hub."""
+        url = f"https://api.indices-api.com/v1/live/{self.symbol}"
+        params = {"access_key": self.api_key}
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params) as response:
+                if response.status == 200:
+                    return await response.json()
+                return None
+
+    def archangel_logic_shield(self, df):
+        """
+        Michael Protocol: High-fidelity risk management.
+        Uriel Protocol: Predictive trend analysis.
+        """
+        # Technical indicators
+        macd = MACD(close=df['price'])
+        atr = AverageTrueRange(high=df['high'], low=df['low'], close=df['price'])
+        
+        current_macd = macd.macd_diff().iloc[-1]
+        current_volatility = atr.average_true_range().iloc[-1]
+        
+        # Superfast Kaizen Optimization: Adjusting thresholds based on volatility
+        threshold = 0.5 * current_volatility
+        
+        if current_macd > threshold:
+            return "ACTIVE_BUY"
+        elif current_macd < -threshold:
+            return "ACTIVE_SELL"
+        return "MONITOR_STABLE"
+
+    async def sentinel_loop(self):
+        """Continuous execution loop with sub-30s TASE refresh."""
+        print(f"--- TASE Active AI: Sentinel Engaged ({self.symbol}) ---")
+        
+        while self.active_status:
+            raw_data = await self.fetch_tase_feed()
+            
+            if raw_data:
+                # Process and append new tick
+                tick = {
+                    'timestamp': datetime.now(),
+                    'price': float(raw_data['rate']),
+                    'high': float(raw_data['high']),
+                    'low': float(raw_data['low'])
+                }
+                self.data_buffer = pd.concat([self.data_buffer, pd.DataFrame([tick])], ignore_index=True)
+                
+                # Maintain data health (last 200 intervals)
+                if len(self.data_buffer) > 200:
+                    self.data_buffer = self.data_buffer.iloc[-200:]
+                
+                if len(self.data_buffer) >= 26:
+                    signal = self.archangel_logic_shield(self.data_buffer)
+                    print(f"[{tick['timestamp'].strftime('%H:%M:%S')}] Index: {tick['price']} | Logic: {signal}")
+
+            # Israeli Market Sync: TASE publishes index values every 30 seconds
+            await asyncio.sleep(30)
+
+# Execution
+# ai = TASEArchangelAI(api_key="YOUR_KEY")
+# asyncio.run(ai.sentinel_loop())
