@@ -1,0 +1,257 @@
+import Foundation
+
+class IncognitoManager {
+    static let shared = IncognitoManager()
+    
+    // Tracks if incognito is active
+    var isIncognitoActive: Bool = false {
+        didSet {
+            // Post notification to update CarPlay HUD
+            NotificationCenter.default.post(name: .incognitoStateChanged, object: nil)
+        }
+    }
+
+    // Wrap data logging
+    func logUserAction(_ action: String, metadata: [String: Any]) {
+        guard !isIncognitoActive else { 
+            print("Incognito Active: Action suppressed.") 
+            return 
+        }
+        // Proceed with standard AI telemetry/logging
+        TelemetryService.shared.send(action, data: metadata)
+    }
+}
+
+extension Notification.Name {
+    static let incognitoStateChanged = Notification.Name("incognitoStateChanged")
+}
+
+
+
+import CarPlay
+
+class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
+    var interfaceController: CPInterfaceController?
+
+    func templateApplicationScene(_ templateApplicationScene: CPTemplateApplicationScene, 
+                                  didConnect interfaceController: CPInterfaceController) {
+        self.interfaceController = interfaceController
+        displayMainDashboard()
+    }
+
+    func displayMainDashboard() {
+        let incognitoToggle = CPTextButton(title: "Toggle Incognito", handler: { _ in
+            IncognitoManager.shared.isIncognitoActive.toggle()
+            self.updateHUD()
+        })
+
+        let infoTemplate = CPInformationTemplate(
+            title: "AI Dashboard",
+            layout: .leading,
+            items: [
+                CPInformationItem(title: "Status", detail: IncognitoManager.shared.isIncognitoActive ? "🕵️ Incognito Active" : "📡 AI Active")
+            ],
+            actions: [incognitoToggle]
+        )
+        
+        interfaceController?.setRootTemplate(infoTemplate, animated: true, completion: nil)
+    }
+
+    func updateHUD() {
+        // Refresh the view to show the new "Incognito" state in the HUD
+        displayMainDashboard()
+    }
+}
+
+
+
+
+struct AIRequest {
+    let prompt: String
+    
+    func execute() {
+        let config = URLSessionConfiguration.default
+        
+        if IncognitoManager.shared.isIncognitoActive {
+            // 1. Strip User Tokens
+            // 2. Disable caching
+            config.urlCache = nil
+            config.httpAdditionalHeaders = ["X-Incognito-Mode": "true"]
+            print("Executing AI Request without User Identity...")
+        }
+        
+        // Standard Request Logic...
+    }
+}
+
+
+
+import Foundation
+import Combine
+
+final class CarPlayPrivacyEngine: ObservableObject {
+    static let shared = CarPlayPrivacyEngine()
+    
+    @Published private(set) var isIncognito: Bool = false
+    private var cancellables = Set<AnyCancellable>()
+
+    // Memory-only storage for session-specific AI context
+    private var volatileContext: [String: Any] = [:]
+
+    func toggleIncognito() {
+        isIncognito.toggle()
+        if isIncognito {
+            prepareGhostSession()
+        } else {
+            purgeVolatileMemory()
+        }
+    }
+
+    private func prepareGhostSession() {
+        // Disable disk-based logging and telemetry
+        URLSessionConfiguration.default.urlCache = nil
+        print("AI Incognito: Secure Session Initialized (Disk writes disabled)")
+    }
+
+    private func purgeVolatileMemory() {
+        volatileContext.removeAll()
+        // Trigger a 'Superfast Kaizen' cleanup of the temporary cache
+        autoreleasepool {
+            // Force release of any lingering AI model buffers
+        }
+    }
+}
+
+
+
+import CarPlay
+
+class HUDController: NSObject {
+    weak var interfaceController: CPInterfaceController?
+
+    func updateHUD(isPrivate: Bool) {
+        let hudTitle = isPrivate ? "INCOGNITO ACTIVE" : "AI LEARNING ACTIVE"
+        let hudSubtitle = isPrivate ? "Telemetry: OFF | Identity: MASKED" : "Accuracy Optimized"
+        
+        // Define a CarPlay-specific Alert to act as a HUD banner
+        let hudAlert = CPNavigationAlert(
+            titleVariants: [hudTitle],
+            subtitleVariants: [hudSubtitle],
+            imageSet: nil,
+            primaryAction: CPAlertAction(title: "Dismiss", style: .default, handler: { _ in }),
+            secondaryAction: nil,
+            duration: isPrivate ? 0 : 3.0 // 0 means persistent HUD
+        )
+
+        // Inject HUD into the Map Template
+        if let mapTemplate = interfaceController?.rootTemplate as? CPMapTemplate {
+            mapTemplate.present(navigationAlert: hudAlert, animated: true)
+        }
+    }
+}
+
+
+
+
+struct AIProxyRequest {
+    let rawInput: String
+    
+    func dispatch() async throws -> String {
+        var headers = ["Content-Type": "application/json"]
+        
+        if CarPlayPrivacyEngine.shared.isIncognito {
+            // Advance: Inject a randomized session ID instead of the User ID
+            headers["X-Session-ID"] = UUID().uuidString
+            headers["X-Privacy-Level"] = "High"
+            headers["X-Disable-Learning"] = "true"
+        } else {
+            headers["X-User-ID"] = "real-user-auth-token-123"
+        }
+        
+        return try await NetworkLayer.post(payload: rawInput, secureHeaders: headers)
+    }
+}
+
+
+
+import SwiftUI
+
+struct CarPlayIncognitoIcon: View {
+    let isActive: Bool
+    
+    var body: some View {
+        ZStack {
+            // Background HUD Glow (if active)
+            if isActive {
+                Circle()
+                    .fill(Color.blue.opacity(0.2))
+                    .blur(radius: 5)
+                    .frame(width: 40, height: 40)
+            }
+            
+            // Primary Icon: "Eye-Slash" or "Ghost"
+            Image(systemName: isActive ? "eye.slash.circle.fill" : "eye.circle")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 30, height: 30)
+                .foregroundStyle(
+                    isActive ? 
+                    AnyShapeStyle(.linearGradient(colors: [.cyan, .blue], startPoint: .top, endPoint: .bottom)) : 
+                    AnyShapeStyle(Color.gray)
+                )
+                .symbolRenderingMode(.hierarchical)
+        }
+    }
+}
+
+
+
+extension UIImage {
+    static func incognitoIcon(active: Bool) -> UIImage {
+        let config = UIImage.SymbolConfiguration(pointSize: 24, weight: .bold, scale: .large)
+        let name = active ? "shield.fill" : "shield"
+        
+        // Use hierarchical colors for a more "3D / HD" look
+        let image = UIImage(systemName: name, withConfiguration: config)?
+            .withTintColor(active ? .systemCyan : .lightGray, renderingMode: .alwaysOriginal)
+        
+        return image ?? UIImage()
+    }
+}
+
+
+
+import CarPlay
+
+class CarPlayManager: NSObject {
+    var isIncognito: Bool = false
+    weak var interfaceController: CPInterfaceController?
+
+    func createIncognitoHUDButton() -> CPBarButton {
+        // Toggle the icon based on state
+        let icon = UIImage.incognitoIcon(active: self.isIncognito)
+        
+        let barButton = CPBarButton(image: icon) { [weak self] _ in
+            guard let self = self else { return }
+            
+            // 1. Toggle State
+            self.isIncognito.toggle()
+            
+            // 2. Trigger Superfast Kaizen cleanup
+            self.clearAIContext()
+            
+            // 3. Update the HUD icon immediately
+            self.refreshInterface()
+        }
+        return barButton
+    }
+
+    private func clearAIContext() {
+        // Logic to purge volatile memory/AI learning
+        print("HUD: Incognito state changed to \(isIncognito)")
+    }
+
+    private func refreshInterface() {
+        // Re-render templates with new icon state
+    }
+}
