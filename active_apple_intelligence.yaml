@@ -154,3 +154,200 @@ struct SentinelHUDView: View {
         .background(Color.black)
     }
 }
+
+
+
+import SwiftUI
+import MetalKit
+
+// The view that renders the active fluid animation
+struct ActiveIntelligenceMeshView: View {
+    let startDate = Date()
+
+    var body: some View {
+        TimelineView(.animation) { context in
+            // Utilizing a custom Metal shader for fluid dynamics
+            // The shader calculates pixel color based on time and position
+            IntelligenceShaderView(
+                entryTime: startDate.timeIntervalSinceNow,
+                amplitude: 1.5, // Controls the 'energy' level
+                frequency: 2.0
+            )
+            .blendMode(.screen) // Allows the 'light' to merge with the UI below
+        }
+    }
+}
+
+// Internal implementation of the Metal view
+private struct IntelligenceShaderView: UIViewRepresentable {
+    var entryTime: TimeInterval
+    var amplitude: Float
+    var frequency: Float
+
+    func makeUIView(context: Context) -> MTKView {
+        let mtkView = MTKView()
+        // Initialize the Metal device, pipeline state, and command queue here.
+        // For brevity, this setup is assumed in the underlying 'IntelligenceRenderer' class.
+        // The renderer must implement the 'draw(in:)' method, processing 
+        // a fragment shader that calculates colors using dynamic sin/cos functions.
+        // setupMetalSystem(for: mtkView) 
+        return mtkView
+    }
+
+    func updateUIView(_ uiView: MTKView, context: Context) {
+        // Pass updated time and amplitude parameters to the Metal renderer
+        // uiView.renderer?.updateParameters(time: entryTime, amp: amplitude)
+    }
+}
+
+
+
+import SwiftUI
+
+struct IntelligenceEdgeglow: View {
+    @Binding var isActive: Bool
+    
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                // Main application content
+                Color.black.edgesIgnoringSafeArea(.all)
+                
+                // The Intelligence Glow, anchored to the screen edge
+                if isActive {
+                    ActiveIntelligenceMeshView()
+                        .frame(width: geometry.size.width * 1.2, height: 150)
+                        .scaleEffect(x: 1.0, y: isActive ? 1.0 : 0.0, anchor: .bottom)
+                        .position(x: geometry.size.width / 2, y: geometry.size.height + 30)
+                        .blur(radius: 15) // Adds necessary softness to the energy field
+                        .transition(.asymmetric(insertion: .opacity.combined(with: .scale), removal: .opacity))
+                        .animation(.interpolatingSpring(stiffness: 50, damping: 10).delay(0.1), value: isActive)
+                }
+            }
+        }
+    }
+}
+
+
+
+import SwiftUI
+import MetalKit
+
+// The view that renders the animated internal energy of the logo
+struct IntelligenceEnergyMesh: View {
+    let startDate = Date()
+    @Binding var activityLevel: Float // 0.0 to 1.0, drives the animation intensity
+
+    var body: some View {
+        TimelineView(.animation) { context in
+            // Utilizing a custom Metal shader for fluid dynamics
+            // The renderer handles the heavy lifting on the GPU.
+            IntelligenceShaderView(
+                entryTime: Date().timeIntervalSince(startDate),
+                amplitude: activityLevel, // Controls the 'energy' height
+                frequency: 1.0 + (activityLevel * 2.0) // Speeds up when active
+            )
+            .blendMode(.plusLighter) // Critical for luminous glow effects
+        }
+    }
+}
+
+// Internal implementation of the Metal view
+private struct IntelligenceShaderView: UIViewRepresentable {
+    var entryTime: TimeInterval
+    var amplitude: Float
+    var frequency: Float
+
+    func makeUIView(context: Context) -> MTKView {
+        let mtkView = MTKView()
+        // Initialize the Metal device, pipeline state, and command queue here.
+        // A dedicated renderer (e.g., 'CoreIntelligenceRenderer') would be needed
+        // to process the fragment shader. Setup is assumed in that underlying class.
+        // setupMetalSystem(for: mtkView) 
+        return mtkView
+    }
+
+    func updateUIView(_ uiView: MTKView, context: Context) {
+        // Pass updated time, amplitude, and frequency parameters to the Metal renderer
+        // uiView.renderer?.updateParameters(time: entryTime, amp: amplitude, freq: frequency)
+    }
+}
+
+
+
+import SwiftUI
+
+struct ActiveIntelligenceShieldLogo: View {
+    @State private var pulseIntensity: Float = 0.5
+    
+    // Core colors: Cyan, Magenta, and Violet for the 'Intelligence' gradient
+    let intelGradient = Gradient(colors: [
+        Color(red: 0.0, green: 1.0, blue: 1.0), // Cyan
+        Color(red: 1.0, green: 0.0, blue: 1.0), // Magenta
+        Color(red: 0.5, green: 0.0, blue: 1.0)  // Violet
+    ])
+    
+    var body: some View {
+        ZStack {
+            // 1. Brushed Dark Metallic Shield Background
+            Circle()
+                .fill(Color(white: 0.1))
+                .overlay(Circle().stroke(Color(white: 0.2), lineWidth: 1))
+                .shadow(color: .black.opacity(0.5), radius: 10, x: 0, y: 5)
+            
+            // 2. The Integrated Active Intelligence Mesh
+            IntelligenceEnergyMesh(activityLevel: $pulseIntensity)
+                .mask(
+                    // Masking the energy field to fit within the shield structure
+                    Image(systemName: "shield.fill")
+                        .font(.system(size: 140))
+                )
+                .blur(radius: 5)
+            
+            // 3. The Arched Text Path
+            TextCircleView(text: "APPLE INTELLIGENCE • ACTIVE AI", radius: 95)
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .foregroundColor(.white.opacity(0.8))
+        }
+        .frame(width: 250, height: 250)
+        .onAppear {
+            // Simulate changing activity levels
+            withAnimation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true)) {
+                pulseIntensity = 1.0
+            }
+        }
+    }
+}
+
+// Helper View for rendering text along a circular path
+struct TextCircleView: View {
+    let text: String
+    let radius: Double
+    
+    var body: some View {
+        ZStack {
+            ForEach(0..<text.count, id: \.self) { index in
+                Text(String(text[text.index(text.startIndex, offsetBy: index)]))
+                    .kerning(5)
+                    .modifier(TextRotationModifier(index: index, count: text.count, radius: radius))
+            }
+        }
+    }
+}
+
+// Modifier to handle rotation and positioning for circular text
+struct TextRotationModifier: ViewModifier {
+    let index: Int
+    let count: Int
+    let radius: Double
+    
+    func body(content: Content) -> some View {
+        // Calculate the angle for each character, centering the text arc at the bottom
+        let angle = Double(index) / Double(count) * .pi - (.pi / 2.0)
+        
+        return content
+            .rotationEffect(.radians(angle))
+            .offset(x: 0, y: -radius)
+            .rotationEffect(.radians(.pi / 2.0)) // Rotate the entire structure so it arches at the bottom
+    }
+}
