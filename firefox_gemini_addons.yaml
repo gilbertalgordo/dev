@@ -1,0 +1,234 @@
+{
+  "manifest_version": 3,
+  "name": "Gemini Quick Access",
+  "version": "1.0",
+  "description": "Access Gemini AI quickly from your Firefox browser.",
+  "permissions": ["sidepanel", "storage"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icons/icon-48.png"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "gemini-extension@yourdomain.com",
+      "strict_min_version": "109.0"
+    }
+  }
+}
+
+
+
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {
+            width: 350px;
+            height: 500px;
+            margin: 0;
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+        }
+        iframe {
+            flex-grow: 1;
+            border: none;
+        }
+        .header {
+            background: #1a73e8;
+            color: white;
+            padding: 10px;
+            text-align: center;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">Gemini AI</div>
+    <iframe src="https://gemini.google.com/app"></iframe>
+</body>
+</html>
+
+
+
+// Opens Gemini in a new tab if the user clicks the icon (alternative to popup)
+browser.action.onClicked.addListener(() => {
+  browser.tabs.create({
+    url: "https://gemini.google.com/app"
+  });
+});
+
+
+
+{
+  "manifest_version": 3,
+  "name": "Gemini Omni-Assistant",
+  "version": "2.0.0",
+  "permissions": ["storage", "activeTab", "identity", "scripting"],
+  "host_permissions": ["https://*.googleapis.com/*"],
+  "action": {
+    "default_popup": "ui/popup.html",
+    "default_title": "Gemini Omni"
+  },
+  "background": {
+    "scripts": ["background/service-worker.js"],
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/inject_hud.js"],
+      "css": ["content/hud_styles.css"]
+    }
+  ]
+}
+
+
+
+import { GoogleGenerativeAI } from '../lib/google-genai.js';
+
+// Securely fetch API Key from storage
+async function getApiKey() {
+  const data = await browser.storage.local.get("gemini_key");
+  return data.gemini_key;
+}
+
+// Advanced Reasoning Call
+async function generateResponse(prompt) {
+  const apiKey = await getApiKey();
+  const genAI = new GoogleGenerativeAI(apiKey);
+  
+  // Using the latest 'gemini-1.5-pro' for scientific accuracy
+  const model = genAI.getGenerativeModel({ 
+    model: "gemini-1.5-pro",
+    generationConfig: { temperature: 0.4, topP: 0.9 }
+  });
+
+  const result = await model.generateContent(prompt);
+  return result.response.text();
+}
+
+// Listen for messages from Mobile or Web UI
+browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.type === "GENERATE") {
+    generateResponse(request.payload)
+      .then(text => sendResponse({ status: "success", data: text }))
+      .catch(err => sendResponse({ status: "error", message: err.message }));
+    return true; // Keep channel open for async
+  }
+});
+
+
+
+const hudContainer = document.createElement('div');
+hudContainer.id = 'gemini-hud-overlay';
+hudContainer.innerHTML = `
+  <div class="hud-header">Gemini Scientific HUD</div>
+  <div id="hud-output" class="hud-body">Ready for analysis...</div>
+`;
+document.body.appendChild(hudContainer);
+
+// Style for 3D-like depth and HD clarity
+// (Controlled via hud_styles.css)
+
+
+
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="glassGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4285F4;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#9b72cb;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="4" stdDeviation="10" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+  
+  <circle cx="256" cy="256" r="240" fill="url(#glassGradient)" filter="url(#shadow)"/>
+  
+  <path d="M256 80L285 227H432L313 318L359 465L256 374L153 465L199 318L80 227H227L256 80Z" fill="white">
+    <animate attributeName="opacity" values="0.8;1;0.8" dur="3s" repeatCount="indefinite" />
+  </path>
+  
+  <ellipse cx="256" cy="150" rx="180" ry="80" fill="white" fill-opacity="0.2"/>
+</svg>
+
+
+
+{
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "96": "icons/icon-96.png",
+    "128": "icons/icon-128.png",
+    "256": "icons/icon-256.png",
+    "512": "icons/icon-512.png"
+  },
+  "action": {
+    "default_icon": {
+      "19": "icons/icon-19.png",
+      "38": "icons/icon-38.png"
+    },
+    "default_popup": "ui/popup.html"
+  }
+}
+
+
+
+const sharp = require('sharp');
+const fs = require('fs');
+
+const sizes = [16, 19, 32, 38, 48, 96, 128, 256, 512];
+const inputSvg = 'assets/icon.svg';
+const outputDir = 'icons/';
+
+if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir);
+
+sizes.forEach(size => {
+  sharp(inputSvg)
+    .resize(size, size)
+    .png()
+    .toFile(`${outputDir}icon-${size}.png`)
+    .then(() => console.log(`✓ Generated ${size}x${size}`))
+    .catch(err => console.error(`Error generating ${size}:`, err));
+});
+
+
+
+
+<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+  <path d="M... Firefox shape data ..." fill="#FF7D29"/> 
+  <path d="M... Gemini shape data ..." fill="#4285F4" filter="url(#glow)"/>
+  
+  <defs>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="1.5" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+</svg>
+
+
+
+{
+  "manifest_version": 3,
+  "name": "Gemini Omni-Assistant",
+  "version": "2.0.0",
+  "icons": {
+    "48": "icons/logo-48.png",
+    "64": "icons/logo-64.png",
+    "128": "icons/logo-128.png",
+    "512": "icons/logo-512.png"
+  },
+  "action": {
+    "default_popup": "ui/popup.html",
+    "default_icon": {
+      "32": "icons/toolbar-icon-32.svg",
+      "48": "icons/logo-48.png"
+    }
+  }
+}
