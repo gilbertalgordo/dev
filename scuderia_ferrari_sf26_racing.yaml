@@ -1,0 +1,154 @@
+import numpy as np
+
+class FerrariSF26:
+    def __init__(self):
+        # Technical Specs (2026 Regulations)
+        self.mass = 770.0  # kg (includes driver)
+        self.ice_power_max = 400000  # ~540 hp (ICE limited by fuel flow)
+        self.mguk_power_max = 350000  # 350 kW (per 2026 specs)
+        self.v_max_target = 134.11    # 300 mph in m/s
+        
+        # Aero Constants (Active Aero Mode: Low Drag)
+        self.rho = 1.225  # Air density (kg/m^3)
+        self.cd_active = 0.55  # Ultra-low drag coefficient for 300mph+
+        self.area = 1.6   # Frontal area (m^2)
+        
+        # Hybrid Energy Store (ES)
+        self.es_capacity = 4.0e6  # 4 MJ usable range
+        self.es_current = 4.0e6   # Full charge
+        
+    def calculate_drag(self, velocity):
+        """Standard Drag Equation: Fd = 1/2 * rho * v^2 * Cd * A"""
+        return 0.5 * self.rho * (velocity**2) * self.cd_active * self.area
+
+    def simulate_run(self, duration_hrs=24):
+        time_step = 0.1  # seconds
+        total_steps = int((duration_hrs * 3600) / time_step)
+        velocity = 134.11  # Starting at 300 mph
+        distance = 0
+        
+        print(f"--- SF-26 ACTIVE HYBRID HUD ---")
+        print(f"Target: 300 MPH | Mode: Ultra-Low Drag")
+        
+        for t in range(total_steps):
+            # 1. Physics: Calculate Resistance
+            drag_force = self.calculate_drag(velocity)
+            power_needed = drag_force * velocity
+            
+            # 2. Hybrid Deployment (24/7 logic: assumes infinite recovery/fuel for sim)
+            # Total Power Available: 750 kW (~1000 hp)
+            actual_power = min(power_needed, (self.ice_power_max + self.mguk_power_max))
+            
+            # 3. Acceleration (F = P/v; a = F/m)
+            net_force = (actual_power / velocity) - drag_force
+            acceleration = net_force / self.mass
+            velocity += acceleration * time_step
+            distance += velocity * time_step
+            
+            # HUD Output every simulated hour
+            if t % (3600 / time_step) == 0:
+                mph = velocity * 2.237
+                print(f"T: {t*time_step/3600:>2.0f}h | Speed: {mph:.2f} mph | Power: {actual_power/1000:.1f} kW")
+
+# Initialize and execute
+sf26 = FerrariSF26()
+sf26.simulate_run(duration_hrs=24)
+
+
+
+import numpy as np
+import time
+
+class SF26_Advanced_Sim:
+    def __init__(self):
+        # Physical Constants
+        self.mass = 775.0            # kg
+        self.air_density = 1.225     # kg/m^3
+        self.target_v = 134.12       # 300 mph in m/s
+        
+        # 2026 Power Unit: 067/6 (1.6L V6 Turbo + 350kW ERS)
+        self.ice_max_power = 405000  # Watts (~543 hp)
+        self.mguk_max_power = 350000 # Watts (~470 hp)
+        self.total_power = self.ice_max_power + self.mguk_max_power
+        
+        # Active Aero States
+        self.cd_x_mode = 0.42        # Ultra-low drag (Active flaps open)
+        self.frontal_area = 1.62     # m^2
+        
+        # Telemetry State
+        self.current_v = 134.11      # Starting at 300 mph
+        self.es_energy = 4000000     # 4MJ Energy Store
+        
+    def get_aerodynamic_drag(self, v, mode='X'):
+        """Calculates Fd = 1/2 * rho * v^2 * Cd * A"""
+        cd = self.cd_x_mode if mode == 'X' else 0.85
+        return 0.5 * self.air_density * (v**2) * cd * self.frontal_area
+
+    def run_kaizen_cycle(self, duration_hours=24):
+        """High-frequency simulation loop with HUD updates"""
+        dt = 0.01  # 10ms physics steps
+        steps = int((duration_hours * 3600) / dt)
+        
+        print(f"SF26 ACTIVE HUD | MODE: PERFORMANCE+ | TARGET: 300+ MPH")
+        print("-" * 65)
+        
+        for i in range(steps):
+            # 1. Calculate Resistive Forces
+            drag_force = self.get_aerodynamic_drag(self.current_v, mode='X')
+            rolling_resistance = 0.015 * self.mass * 9.81
+            total_resistance = drag_force + rolling_resistance
+            
+            # 2. Power Requirements
+            # Power (W) = Force (N) * Velocity (m/s)
+            power_required = total_resistance * self.current_v
+            
+            # 3. Hybrid Deployment Strategy (Active 24/7 Management)
+            # If power required > ICE max, draw from MGU-K
+            ice_contribution = min(power_required, self.ice_max_power)
+            mguk_contribution = min(power_required - ice_contribution, self.mguk_max_power)
+            
+            # 4. Physics Update (F = P/v)
+            actual_force = (ice_contribution + mguk_contribution) / self.current_v
+            net_force = actual_force - total_resistance
+            acceleration = net_force / self.mass
+            
+            self.current_v += acceleration * dt
+            
+            # 5. Live HUD (Every simulated hour)
+            if i % (3600 / dt) == 0:
+                self.display_hud(i * dt / 3600, ice_contribution, mguk_contribution)
+
+    def display_hud(self, hour, ice, mguk):
+        mph = self.current_v * 2.237
+        status = "STABLE" if mph >= 300 else "RECOVERING"
+        print(f"[HOUR {hour:02.0f}/24] SPEED: {mph:.2f} MPH | ICE: {ice/1000:>5.1f}kW | MGU-K: {mguk/1000:>5.1f}kW | STATUS: {status}")
+
+# Execute Advanced Simulation
+sf26 = SF26_Advanced_Sim()
+sf26.run_kaizen_cycle()
+
+
+
+<svg width="200" height="100" viewBox="0 0 200 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="speedBlur" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#FF2800;stop-opacity:0" />
+      <stop offset="100%" style="stop-color:#FF2800;stop-opacity:0.3" />
+    </linearGradient>
+  </defs>
+  <rect x="0" y="45" width="180" height="10" fill="url(#speedBlur)" />
+
+  <path d="M20 70 L180 70 L175 55 L140 45 L80 45 L30 60 Z" fill="#FF2800" stroke="#000" stroke-width="1"/>
+  
+  <path d="M140 45 L175 55 L165 55 L135 48 Z" fill="#FFFFFF" opacity="0.9"/>
+  
+  <path d="M100 45 L140 45 L135 35 L125 38 L115 35 L105 38 Z" fill="#FF2800" stroke="#000" stroke-width="0.5"/>
+
+  <rect x="15" y="65" width="30" height="3" fill="#1A1A1A" rx="1"/>
+  <rect x="165" y="45" width="25" height="2" fill="#1A1A1A" rx="1"/>
+
+  <circle cx="50" cy="72" r="12" fill="#1A1A1A" stroke="#FFD700" stroke-width="0.5"/>
+  <circle cx="155" cy="72" r="14" fill="#1A1A1A" stroke="#FFD700" stroke-width="0.5"/>
+  
+  <path d="M85 45 Q95 30 110 45" fill="none" stroke="#000" stroke-width="2"/>
+</svg>
