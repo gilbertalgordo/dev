@@ -1,0 +1,188 @@
+class AccessControl:
+    def __init__(self):
+        # In a production environment, this would be a database or auth service
+        self.developer_registry = {"admin_dev", "lead_dev_01", "dev_user_77"}
+
+    def is_developer(self, user_id):
+        """Check if the user ID exists in the developer registry."""
+        return user_id in self.developer_registry
+
+def restrict_to_developers(func):
+    """Decorator to block non-developer proposals."""
+    def wrapper(user_id, proposal_content, *args, **kwargs):
+        access = AccessControl()
+        
+        if not access.is_developer(user_id):
+            # Log the attempt and block the action
+            print(f"BLOCK: Access denied for User '{user_id}'. Unauthorized proposal attempt.")
+            return {"status": "error", "message": "Access Restricted: Proposals only accepted from verified developers."}
+        
+        # Proceed if the user is a developer
+        return func(user_id, proposal_content, *args, **kwargs)
+    return wrapper
+
+# --- Active AI Service ---
+
+@restrict_to_developers
+def process_ai_proposal(user_id, proposal_content):
+    """Core logic for processing suggestions."""
+    print(f"SUCCESS: Processing developer proposal from {user_id}...")
+    # Your AI generation or processing logic goes here
+    return {"status": "success", "data": "Proposal queued for review."}
+
+# --- Usage Examples ---
+
+# 1. Attempt from a non-developer
+result_1 = process_ai_proposal("guest_user", "Change the UI color to pink.")
+
+# 2. Attempt from a verified developer
+result_2 = process_ai_proposal("admin_dev", "Refactor the authentication middleware for O(1) complexity.")
+
+
+
+
+import functools
+import logging
+from datetime import datetime
+
+# Configure logging for "HUD-style" visibility
+logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+logger = logging.getLogger("AI_Gatekeeper")
+
+class SecurityProtocol:
+    """Active AI Security Layer to manage developer-only access."""
+    
+    # Mock source for verified developer IDs or GitHub handles
+    VERIFIED_SOURCES = ["gilbertalgordo", "lead_architect_01", "dev_ops_core"]
+
+    @staticmethod
+    def verify_developer_status(user_metadata):
+        """
+        Validates if the user meets the 'Developer' criteria.
+        Can be extended to check specific GitHub repositories or API keys.
+        """
+        username = user_metadata.get("username")
+        has_repo_access = user_metadata.get("repo_access", False)
+        
+        # Superfast check: Immediate shutdown if criteria not met
+        if username in SecurityProtocol.VERIFIED_SOURCES and has_repo_access:
+            return True
+        return False
+
+def developer_only_proposal(func):
+    """Decorator to block or shutdown non-developer logic paths."""
+    @functools.wraps(func)
+    def wrapper(user_metadata, proposal, *args, **kwargs):
+        is_valid = SecurityProtocol.verify_developer_status(user_metadata)
+        
+        if not is_valid:
+            logger.warning(f"UNAUTHORIZED PROPOSAL SHUTDOWN: User {user_metadata.get('username')} blocked.")
+            return {
+                "status": "TERMINATED",
+                "code": 403,
+                "reason": "Source integrity check failed. Non-developer input discarded."
+            }
+        
+        logger.info(f"ACCESS GRANTED: Developer {user_metadata.get('username')} verified.")
+        return func(user_metadata, proposal, *args, **kwargs)
+    return wrapper
+
+# --- Active AI Service Interface ---
+
+class ProposalProcessor:
+    @developer_only_proposal
+    def submit_logic_change(self, user_metadata, proposal):
+        """Processes high-level architectural or code changes."""
+        # Active AI logic for processing the suggestion
+        return {
+            "status": "PROCESSED",
+            "timestamp": datetime.now().isoformat(),
+            "payload": proposal
+        }
+
+# --- HUD Simulation / Testing ---
+
+processor = ProposalProcessor()
+
+# Example 1: Unauthorized Proposal
+unauthorized_user = {"username": "marketing_lead", "repo_access": False}
+print(processor.submit_logic_change(unauthorized_user, "Change the API rate limits."))
+
+# Example 2: Verified Developer (Active AI Path)
+authorized_user = {"username": "gilbertalgordo", "repo_access": True}
+print(processor.submit_logic_change(authorized_user, "Implement Kaizen-based resource management."))
+
+
+
+// ActiveGuardIcon.js
+const ActiveGuardIcon = ({ isDeveloper, status }) => {
+  // SVG Icons for different states
+  const Icons = {
+    AUTHORIZED: (
+      <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" strokeWidth="2">
+        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+      </svg>
+    ),
+    BLOCKED: (
+      <svg viewBox="0 0 24 24" width="24" height="24" stroke="#ff4444" fill="none" strokeWidth="2">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+      </svg>
+    )
+  };
+
+  return (
+    <div className={`hud-icon ${isDeveloper ? 'active' : 'restricted'}`}>
+      {isDeveloper ? Icons.AUTHORIZED : Icons.BLOCKED}
+      <span className="status-text">{status}</span>
+    </div>
+  );
+};
+
+
+
+
+/* HUD Styling for Active AI */
+.proposal-module {
+  position: relative;
+  border: 1px solid #00ff41; /* Developer Green */
+  transition: all 0.3s ease;
+}
+
+.proposal-module.restricted {
+  filter: grayscale(1) brightness(0.5);
+  pointer-events: none; /* Physical block of user interaction */
+  border-color: #ff4444; /* Alert Red */
+}
+
+.restricted-overlay {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.7);
+  color: #ff4444;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+
+
+
+def active_ai_shutter(user_role):
+    """
+    Active shutdown mechanism. 
+    If 'developer' flag is false, the function terminates 
+    before the proposal engine can initialize.
+    """
+    if user_role != "verified_developer":
+        # Shutdown sequence
+        broadcast_status("AI_PROPOSAL_ENGINE: SHUTDOWN_SEQUENCE_ACTIVE")
+        return {
+            "icon": "BLOCKED_SVG",
+            "message": "Access Denied: Non-developer source detected.",
+            "active": False
+        }
+    
+    return {"icon": "ACTIVE_SVG", "active": True}
