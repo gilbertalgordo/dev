@@ -1,0 +1,201 @@
+import math
+
+class ScuderiaHypercar:
+    def __init__(self):
+        # Physical Constants
+        self.mass = 1250  # kg (Lightweight carbon composite)
+        self.drag_coefficient = 0.24  # Ultra-low drag aero
+        self.frontal_area = 1.8  # m^2
+        self.air_density = 1.225  # kg/m^3
+        
+        # Power Systems
+        self.ice_power_watts = 735499  # ~1000 HP
+        self.ers_power_watts = 220650  # ~300 HP Hybrid Boost
+        self.total_power = self.ice_power_watts + self.ers_power_watts
+        
+        # State
+        self.velocity = 0.0  # m/s
+        self.distance_traveled = 0.0 # meters
+
+    def calculate_drag(self, v):
+        """Calculates aerodynamic resistance: Fd = 1/2 * rho * v^2 * Cd * A"""
+        return 0.5 * self.air_density * (v**2) * self.drag_coefficient * self.frontal_area
+
+    def simulate_step(self, dt):
+        """Standard physics integration step."""
+        force_drag = self.calculate_drag(self.velocity)
+        
+        # Power = Force * Velocity -> Force = Power / Velocity
+        # Avoid division by zero at start
+        force_engine = self.total_power / max(self.velocity, 1.0)
+        
+        net_force = force_engine - force_drag
+        acceleration = net_force / self.mass
+        
+        self.velocity += acceleration * dt
+        self.distance_traveled += self.velocity * dt
+        
+        return self.velocity
+
+# --- Execution ---
+car = ScuderiaHypercar()
+time_elapsed = 0
+dt = 0.1  # 100ms intervals
+target_speed_mph = 300
+target_speed_ms = target_speed_mph * 0.44704
+
+print(f"{'Time (s)':<10} | {'Speed (mph)':<15} | {'Status'}")
+print("-" * 40)
+
+for second in range(600):  # Simulate 60 seconds
+    current_v = car.simulate_step(dt)
+    current_mph = current_v * 2.23694
+    
+    if second % 5 == 0:
+        status = "Accelerating" if current_mph < target_speed_mph else "MAINTAINING TOP SPEED"
+        print(f"{second:<10} | {current_mph:<15.2f} | {status}")
+
+    if current_mph > 315: # Safety cap for tires/physics
+        break
+
+
+
+
+import numpy as np
+
+class ScuderiaTelemetry:
+    def __init__(self):
+        # Vehicle Constants
+        self.mass = 1280.0  # kg
+        self.frontal_area = 1.75  # m^2
+        self.max_ice_power = 800000.0  # 1072 HP
+        self.max_ers_power = 300000.0  # 402 HP
+        
+        # Physics & Aero
+        self.rho = 1.225  # Air density at sea level
+        self.base_cd = 0.22  # Drag coefficient (Low drag mode)
+        self.cl_target = 1.5  # Required Downforce coefficient for stability
+        
+        # State Variables
+        self.velocity = 130.0  # Starting at 290 mph
+        self.battery_soc = 1.0  # 100% State of Charge
+        self.dt = 0.05  # 20Hz Simulation frequency
+
+    def active_aero_adjustment(self):
+        """Dynamically adjusts the wing angle (Cd) based on velocity."""
+        # At 300+ mph, we minimize Cd. Below that, we increase for cornering.
+        if self.velocity > 134.1:  # 300 mph threshold
+            return self.base_cd * 0.95  # DRS Active
+        return self.base_cd
+
+    def get_ers_deployment(self, target_v):
+        """PID logic to decide how much hybrid boost to use."""
+        error = target_v - self.velocity
+        # Simple proportional deployment to maintain speed
+        deployment = np.clip(error * 50000, 0, self.max_ers_power)
+        
+        if self.battery_soc < 0.1: # Battery protection
+            return 0.0
+        return deployment
+
+    def update_physics(self, target_v):
+        cd = self.active_aero_adjustment()
+        ers_out = self.get_ers_deployment(target_v)
+        
+        # Total Power Output
+        total_power = self.max_ice_power + ers_out
+        
+        # Forces: F = P/v - 1/2 * rho * v^2 * Cd * A
+        drag_force = 0.5 * self.rho * (self.velocity**2) * cd * self.frontal_area
+        propulsion_force = total_power / self.velocity
+        
+        acceleration = (propulsion_force - drag_force) / self.mass
+        self.velocity += acceleration * self.dt
+        
+        # Battery depletion (Simplified: 1:1 power drain)
+        self.battery_soc -= (ers_out * self.dt) / 5.0e6 # 5MJ Battery capacity
+        
+        return self.velocity, self.battery_soc
+
+# --- Deployment ---
+ferrari = ScuderiaTelemetry()
+target_mph = 310
+target_ms = target_mph * 0.44704
+
+print(f"{'Time':<10} | {'MPH':<10} | {'Battery %':<10} | {'Aero State'}")
+for t in range(200):
+    v, soc = ferrari.update_physics(target_ms)
+    if t % 20 == 0:
+        aero = "DRS OPEN" if v > 134.1 else "HIGH DOWNFORCE"
+        print(f"{t*0.05:<10.2f} | {v*2.237:<10.2f} | {soc*100:<10.2f} | {aero}")
+
+
+
+<svg width="100" height="60" viewBox="0 0 100 60" xmlns="http://www.w3.org/2000/svg">
+  <path d="M10 45 L25 42 Q50 35 75 42 L90 45" stroke="#CC0000" stroke-width="3" fill="none" />
+  
+  <g class="speed-lines">
+    <line x1="95" y1="35" x2="110" y2="35" stroke="#FFD700" stroke-width="1">
+      <animate attributeName="x1" from="100" to="0" dur="0.2s" repeatCount="indefinite" />
+      <animate attributeName="x2" from="115" to="15" dur="0.2s" repeatCount="indefinite" />
+    </line>
+    <line x1="95" y1="50" x2="110" y2="50" stroke="#FFD700" stroke-width="1">
+      <animate attributeName="x1" from="100" to="0" dur="0.3s" repeatCount="indefinite" />
+      <animate attributeName="x2" from="115" to="15" dur="0.3s" repeatCount="indefinite" />
+    </line>
+  </g>
+
+  <rect x="12" y="38" width="12" height="2" fill="#333">
+    <animateTransform attributeName="transform" type="rotate" 
+      values="0 15 40; -10 15 40; 0 15 40" dur="2s" repeatCount="indefinite" />
+  </rect>
+</svg>
+
+
+
+
+/* Racing HUD Icon Styling */
+.hud-icon {
+  width: 120px;
+  height: 120px;
+  background: #1a1a1a;
+  border: 2px solid #CC0000;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-family: 'Orbitron', sans-serif; /* Racing style font */
+  position: relative;
+  overflow: hidden;
+}
+
+.speed-value {
+  font-size: 24px;
+  font-weight: bold;
+  color: #fff;
+  animation: jitter 0.1s infinite;
+}
+
+.unit { font-size: 10px; color: #CC0000; }
+
+.hybrid-glow {
+  position: absolute;
+  width: 100%;
+  height: 5px;
+  bottom: 20%;
+  background: linear-gradient(90deg, transparent, #00FF00, transparent);
+  animation: flow 1s linear infinite;
+}
+
+@keyframes jitter {
+  0% { transform: translate(0,0); }
+  50% { transform: translate(1px, -1px); }
+  100% { transform: translate(0,0); }
+}
+
+@keyframes flow {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
