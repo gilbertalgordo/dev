@@ -150,3 +150,60 @@ function updateRacingIcons(currentSpeed, raceTimeHours, tireTemp) {
     triggerHUDVibration();
   }
 }
+
+
+
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" id="speed-vmax">
+  <path d="M10 50C10 50 15 20 32 20C49 20 54 50 54 50" stroke="#FFEB00" stroke-width="4" class="vmax-arc" />
+  <text x="32" y="45" text-anchor="middle" fill="#FFEB00" font-family="Arial, bold" font-size="14">300+</text>
+  <path d="M32 10L32 25M32 10L28 14M32 10L36 14" stroke="#FFEB00" stroke-width="3"/>
+</svg>
+
+
+
+/**
+ * Scuderia Ferrari GT - Active Icon Controller
+ * Scenario: 24/7 Endurance, Sustained 300+ mph
+ */
+
+const FerrariTelemetry = {
+  speed: 0,         // MPH
+  activeAero: 0.18,  // Cd (Drag Coefficient)
+  coreTemp: 95,     // Celcius
+  raceHour: 0       // 0 - 24
+};
+
+// Icon DOM Elements
+const speedIcon = document.getElementById('speed-vmax');
+const aeroIcon = document.getElementById('aero-balance');
+const tempIcon = document.getElementById('temp-core');
+
+function updateActiveIcons(telemetry) {
+  const { speed, activeAero, coreTemp, raceHour } = telemetry;
+
+  // 1. VMAX SPEED LOGIC (Yellow Glow > 300 MPH)
+  if (speed >= 300) {
+    speedIcon.classList.add('icon-state-vmax'); 
+  } else {
+    speedIcon.classList.remove('icon-state-vmax');
+  }
+
+  // 2. ACTIVE AERO LOGIC (Minimal Drag Map)
+  // At 300 mph, we need drag coefficient Cd < 0.20
+  if (activeAero < 0.20) {
+    aeroIcon.setAttribute('fill', '#00FF00'); // Green = Optimum Low Drag
+    aeroIcon.classList.add('icon-state-low-drag');
+  }
+
+  // 3. THERMAL CRITICAL LOGIC
+  if (coreTemp > 115) {
+    tempIcon.classList.add('icon-state-critical'); // Red Strobe
+  }
+
+  // 4. 24/7 ENDURANCE FADE LOGIC (Night Mode Optimization)
+  if (raceHour >= 18 || raceHour <= 6) {
+    document.body.classList.add('hud-night-stint');
+  } else {
+    document.body.classList.remove('hud-night-stint');
+  }
+}
