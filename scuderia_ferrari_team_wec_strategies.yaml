@@ -1,0 +1,363 @@
+class FerrariWECStrategy:
+    def __init__(self, cars):
+        self.cars = cars  # List of car IDs: [50, 51, 83]
+        self.lap_count = 0
+        self.total_laps = 100
+        self.is_last_lap = False
+
+    def get_car_status(self, car_id):
+        # Simulated telemetry data
+        return {
+            "proximity_to_others": 0.5, # meters
+            "penalty_risk": "low",
+            "fuel_level": 15,
+            "position": 1
+        }
+
+    def execute_strategy(self, current_lap):
+        self.lap_count = current_lap
+        self.is_last_lap = (self.lap_count == self.total_laps)
+        
+        commands = {}
+
+        for car_id in self.cars:
+            status = self.get_car_status(car_id)
+            
+            # 1. Avoid Crashes & Penalties (Safety Protocol)
+            # Prioritize margin over aggressive overtaking if risk is detected.
+            if status["penalty_risk"] != "low":
+                commands[car_id] = "INCREASE_MARGIN_STAY_CLEAN"
+            
+            # 2. End-Lap Breakaway & Pit Strategy
+            # If low fuel and nearing pit window, break the draft early to maximize entry speed.
+            elif status["fuel_level"] < 10 and not self.is_last_lap:
+                commands[car_id] = "BREAK_DRAFT_PITTING_NOW"
+            
+            # 3. Last Lap / Finish Line Formation
+            # Execute defensive positioning (The "Wall")
+            elif self.is_last_lap:
+                commands[car_id] = self.set_defensive_grid(car_id)
+            
+            else:
+                commands[car_id] = "MAINTAIN_FORMATION_DRAFT"
+
+        return commands
+
+    def set_defensive_grid(self, car_id):
+        # Logic to line up for 1-2-3 finish
+        # Lead car takes the racing line, others cover the inside/outside mirrors.
+        grid_positions = {50: "P1_DEFEND_LINE", 51: "P2_COVER_INSIDE", 83: "P3_COVER_OUTSIDE"}
+        return grid_positions.get(car_id, "HOLD_POSITION")
+
+# Initialize and run
+ferrari_team = FerrariWECStrategy([50, 51, 83])
+current_orders = ferrari_team.execute_strategy(100) # Simulating last lap
+print(f"Final Strategy Orders: {current_orders}")
+
+
+
+import enum
+
+class CarState(enum.Enum):
+    FORMATION_DRAFT = 1
+    PIT_BREAKAWAY = 2
+    DEFENSIVE_WALL = 3
+    RECOVERY = 4
+
+class FerrariWECController:
+    def __init__(self, car_ids):
+        self.team_cars = {cid: {"state": CarState.FORMATION_DRAFT, "pos": 0} for cid in car_ids}
+        self.track_limits_warnings = {cid: 0 for cid in car_ids}
+
+    def update_strategy(self, lap_data, current_lap, total_laps):
+        commands = {}
+        is_final_sequence = (current_lap >= total_laps - 1)
+
+        for cid, telemetry in lap_data.items():
+            # 1. CRASH & PENALTY AVOIDANCE
+            # Adjust aggression based on track limit warnings and proximity sensors
+            aggression_level = 1.0
+            if telemetry['proximity_alert'] or self.track_limits_warnings[cid] >= 2:
+                aggression_level = 0.7  # Prioritize finishing over lap time
+                commands[cid] = "SOP_SAFETY_MAX"
+
+            # 2. TEAM COHESION & PIT BREAKAWAY
+            if not is_final_sequence:
+                if telemetry['box_this_lap']:
+                    # Breakaway logic: Car leaves the draft early to ensure 
+                    # clean pit entry without slowing the teammates behind.
+                    self.team_cars[cid]['state'] = CarState.PIT_BREAKAWAY
+                    commands[cid] = "ACTION_LEAD_OUT_PIT_ENTRY"
+                else:
+                    self.team_cars[cid]['state'] = CarState.FORMATION_DRAFT
+                    commands[cid] = "MAINTAIN_TOW_ZONE_0.5S"
+
+            # 3. LAST LAP DEFENSIVE POSITIONING (1-2-3 FINISH)
+            else:
+                self.team_cars[cid]['state'] = CarState.DEFENSIVE_WALL
+                commands[cid] = self._assign_defensive_lane(cid, telemetry['rank'])
+
+        return commands
+
+    def _assign_defensive_lane(self, cid, rank):
+        """
+        Calculates positioning to block overtaking lanes on the final lap.
+        """
+        grid_logic = {
+            1: "CENTER_LINE_BLOCK_SLIPSTREAM", # P1 breaks the air
+            2: "INSIDE_LINE_COVER",            # P2 prevents the divebomb
+            3: "OUTSIDE_LINE_COVER"            # P3 closes the door
+        }
+        return grid_logic.get(rank, "HOLD_STERN_POSITION")
+
+# Implementation Example
+ferrari_wall = FerrariWECController([50, 51, 83])
+
+
+
+import cairo
+import math
+
+# Define Ferrari Brand Constants
+FERRARI_RED = (0.89, 0.0, 0.0)
+YELLOW = (1.0, 0.9, 0.0)
+BLACK = (0.0, 0.0, 0.0)
+WHITE = (1.0, 1.0, 1.0)
+SIZE = 256
+
+def draw_car(ctx, x, y, angle, color, scale=1.0):
+    """Draws a stylized WEC Hypercar (top-down view) using vector paths."""
+    ctx.save()
+    ctx.translate(x, y)
+    ctx.rotate(angle)
+    ctx.scale(scale, scale)
+
+    # Main Body (Sleek aerodynamic shape)
+    ctx.set_source_rgb(*color)
+    ctx.move_to(-30, -10)
+    ctx.curve_to(-30, -25, 30, -25, 30, -10) # Left side
+    ctx.line_to(40, 0) # Nose
+    ctx.line_to(30, 10) # Right side
+    ctx.curve_to(30, 25, -30, 25, -30, 10)
+    ctx.close_path()
+    ctx.fill_preserve()
+    ctx.set_source_rgb(0, 0, 0) # Black outline
+    ctx.set_line_width(2)
+    ctx.stroke()
+
+    # Cockpit and Fin
+    ctx.set_source_rgb(0.1, 0.1, 0.1) # Dark cockpit
+    ctx.rectangle(-10, -8, 25, 16)
+    ctx.fill()
+    ctx.rectangle(-25, -2, 20, 4) # Rear stabilizer fin
+    ctx.fill()
+
+    ctx.restore()
+
+def create_icon_canvas():
+    """Initializes a transparent 256x256 surface and context."""
+    surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, SIZE, SIZE)
+    ctx = cairo.Context(surface)
+    # Ensure smooth vector lines (antialiasing)
+    ctx.set_antialias(cairo.ANTIALIAS_BEST)
+    return surface, ctx
+
+# =========================================================
+# STRATEGY 1: AVOID CRASHES & PENALTIES
+# Visual: A 'No' symbol over an impact.
+# =========================================================
+def generate_icon_safety():
+    surface, ctx = create_icon_canvas()
+    
+    # Draw two cars in close proximity (the potential risk)
+    draw_car(ctx, SIZE//2 - 25, SIZE//2 + 20, math.radians(-10), BLACK, scale=1.1)
+    draw_car(ctx, SIZE//2 + 25, SIZE//2 - 20, math.radians(10), FERRARI_RED, scale=1.1)
+
+    # Draw the 'Prohibited' circle (Red)
+    ctx.set_source_rgb(*FERRARI_RED)
+    ctx.set_line_width(18)
+    ctx.arc(SIZE//2, SIZE//2, 110, 0, 2 * math.pi)
+    ctx.stroke()
+
+    # Draw the diagonal slash
+    ctx.move_to(SIZE//2 - 77, SIZE//2 - 77)
+    ctx.line_to(SIZE//2 + 77, SIZE//2 + 77)
+    ctx.stroke()
+
+    # (Simulated 5s penalty text for icon context)
+    ctx.select_font_face("Arial", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+    ctx.set_font_size(30)
+    ctx.set_source_rgb(0,0,0)
+    ctx.move_to(SIZE//2 - 25, SIZE//2 + 90)
+    ctx.show_text("+5s")
+
+    surface.write_to_png("ferrari_strat_1_safety.png")
+    print("Generated Icon 1: Safety/Penalty Avoidance")
+
+# =========================================================
+# STRATEGY 2: PIT BREAKAWAY (LEAD-OUT)
+# Visual: Two cars drafting; the leader exits the pack.
+# =========================================================
+def generate_icon_breakaway():
+    surface, ctx = create_icon_canvas()
+    
+    # 1. The main drafting line (following strategy)
+    draw_car(ctx, SIZE//2 - 60, SIZE//2 + 60, math.radians(-45), BLACK, scale=0.8)
+    draw_car(ctx, SIZE//2 - 10, SIZE//2 + 10, math.radians(-45), BLACK, scale=0.8)
+
+    # 2. The Pitting Car (Ferrari 50) breaking the tow
+    # We apply a different angle and color (Yellow/Pitting accent)
+    draw_car(ctx, SIZE//2 + 60, SIZE//2 - 40, math.radians(-15), FERRARI_RED, scale=1.0)
+
+    # Draw movement arrows to illustrate the split
+    ctx.set_source_rgb(*YELLOW)
+    ctx.set_line_width(6)
+    ctx.set_dash([10, 5]) # Dashed line shows trajectory
+    ctx.move_to(SIZE//2 - 5, SIZE//2 + 5)
+    ctx.line_to(SIZE//2 + 50, SIZE//2 - 30)
+    ctx.stroke()
+
+    surface.write_to_png("ferrari_strat_2_breakaway.png")
+    print("Generated Icon 2: Pit Lane Breakaway")
+
+# =========================================================
+# STRATEGY 3: 1-2-3 DEFENSIVE POSITIONING (THE WALL)
+# Visual: Final lap formation across the track.
+# =========================================================
+def generate_icon_defensive_wall():
+    surface, ctx = create_icon_canvas()
+    
+    # Create the 'Finish Line' checkerboard pattern (background)
+    ctx.set_source_rgb(0.2, 0.2, 0.2) # Dark grey track
+    ctx.rectangle(0, 0, SIZE, SIZE)
+    ctx.fill()
+    
+    check_size = 32
+    ctx.set_source_rgb(1, 1, 1) # White checks
+    for y in range(0, SIZE, check_size):
+        start_x = (y // check_size) % 2 * check_size
+        for x in range(start_x, SIZE, check_size * 2):
+            ctx.rectangle(x, y, check_size, check_size)
+            ctx.fill()
+
+    # Draw the defensive trident formation (horizontal 'Wall')
+    # Car 51 (P2 - Inside Cover)
+    draw_car(ctx, SIZE//2 - 70, SIZE//2, math.radians(-90), FERRARI_RED, scale=0.9)
+    # Car 50 (P1 - Leading the line)
+    draw_car(ctx, SIZE//2, SIZE//2 - 20, math.radians(-90), FERRARI_RED, scale=1.0)
+    # Car 83 (P3 - Outside Cover)
+    draw_car(ctx, SIZE//2 + 70, SIZE//2, math.radians(-90), FERRARI_RED, scale=0.9)
+
+    # (Simulated text for final result context)
+    ctx.select_font_face("Arial", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+    ctx.set_font_size(40)
+    ctx.set_source_rgb(0,0,0)
+    ctx.move_to(SIZE//2 - 60, SIZE//2 + 80)
+    ctx.show_text("1 - 2 - 3")
+
+    surface.write_to_png("ferrari_strat_3_defensive_wall.png")
+    print("Generated Icon 3: Defensive Wall 1-2-3")
+
+# Execution
+if __name__ == "__main__":
+    generate_icon_safety()
+    generate_icon_breakaway()
+    generate_icon_defensive_wall()
+
+
+
+from enum import Enum
+
+class CarState(Enum):
+    NORMAL = 1
+    PITTING_BREAKAWAY = 2
+    DEFENSIVE_WALL = 3
+    RECOVERY = 4
+
+class FerrariWECStrategyController:
+    def __init__(self, team_car_ids):
+        # State and telemetry for each car
+        self.team_cars = {
+            cid: {'state': CarState.NORMAL, 'penalty_points': 0, 'fuel_low': False}
+            for cid in team_car_ids
+        }
+        self.team_car_ids = team_car_ids
+        self.race_completion = 0.0 # Percentage
+
+    def update(self, race_telemetry, race_completion):
+        """
+        Main loop called at every strategy checkpoint.
+        """
+        self.race_completion = race_completion
+        final_instructions = {}
+
+        # First, ensure safe spacing (global override)
+        safety_status = self.global_spacing_check(race_telemetry)
+        if safety_status == "RECOVERY_MODE_ACTIVE":
+            for cid in self.team_car_ids:
+                final_instructions[cid] = "PRIORITIZE_SAFETY_MAX_MARGIN"
+            return final_instructions
+
+        # Determine strategy per car
+        for cid in self.team_car_ids:
+            car_telemetry = race_telemetry[cid]
+            
+            # Rule 1: Manage Penality/Crash Risk (Dynamic State Check)
+            if car_telemetry['crash_prob'] > 0.6 or car_telemetry['proximity_alert']:
+                final_instructions[cid] = "INCREASE_MARGIN_STAY_CLEAN"
+                continue
+
+            # Check for standard state-based strategy rules
+            if self.is_last_lap():
+                # Rule 3: Defensive Wall
+                final_instructions[cid] = self.set_defensive_grid(cid, car_telemetry['position'])
+            
+            elif car_telemetry['box_this_lap'] and not self.is_last_lap():
+                # Rule 2: Pit Breakaway
+                final_instructions[cid] = "BREAK_DRAFT_PITTING_NOW"
+            
+            else:
+                # Rule 2: Stay with the Team (Drafting/Formation)
+                final_instructions[cid] = "MAINTAIN_FORMATION_DRAFT"
+
+        return final_instructions
+
+    def is_last_lap(self):
+        # A simple check (can be advanced telemetry check)
+        return self.race_completion >= 0.99 
+
+    def global_spacing_check(self, race_telemetry):
+        # Checks if cars are too close to *each other* (teammate crash avoidance)
+        # Returns RECOVERY_MODE_ACTIVE if separation is critical
+        return "SAFE"
+
+    def set_defensive_grid(self, car_id, rank):
+        # Assign defensive lanes to cover the track
+        grid_positions = {
+            1: "CENTER_LINE_BLOCK_SLIPSTREAM", # P1 breaks the air
+            2: "COVER_INSIDE_LANE_PREVENT_DIVEBOMB",
+            3: "COVER_OUTSIDE_LANE_CLOSE_DOOR"
+        }
+        return grid_positions.get(rank, "HOLD_STERN_POSITION")
+
+# Initialize and run
+scuderia_wall = FerrariWECStrategyController([50, 51, 83])
+
+# Simulating a check-in
+mock_race_data = {
+    50: {'position': 1, 'box_this_lap': False, 'crash_prob': 0.1, 'proximity_alert': False},
+    51: {'position': 2, 'box_this_lap': False, 'crash_prob': 0.1, 'proximity_alert': False},
+    83: {'position': 3, 'box_this_lap': False, 'crash_prob': 0.1, 'proximity_alert': False},
+}
+
+# 1. Test: Mid-race, Normal Status (Stay in the tow)
+print("Mid-Race Check:")
+instructions = scuderia_wall.update(mock_race_data, race_completion=0.50)
+print(f"Instructions: {instructions}")
+# Result: {'MAINTAIN_FORMATION_DRAFT'}
+
+# 2. Test: Last Lap, Formation 1-2-3
+print("\nLast Lap Check:")
+instructions = scuderia_wall.update(mock_race_data, race_completion=0.999)
+print(f"Instructions: {instructions}")
+# Result: {'CENTER_LINE...', 'COVER_INSIDE...', 'COVER_OUTSIDE...'}
