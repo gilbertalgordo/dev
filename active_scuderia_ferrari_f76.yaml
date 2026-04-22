@@ -1,0 +1,187 @@
+import numpy as np
+
+class FerrariF76Aero:
+    def __init__(self):
+        self.velocity = 0  # m/s
+        self.wing_angle = 0  # degrees
+        self.drag_coefficient = 0.28
+        
+    def update_aero(self, speed, steering_angle, g_force):
+        """
+        Calculates active flap adjustment for the F76's central air channel.
+        """
+        # Increase wing angle during high-speed cornering for downforce
+        if speed > 55 and abs(steering_angle) > 15:
+            self.wing_angle = np.clip(g_force * 12, 0, 45)
+        # DRS Mode: Flatten wing on straights above 250 km/h
+        elif speed > 69:  
+            self.wing_angle = 2
+            
+        return f"F76 Aero State: {self.wing_angle} deg"
+
+# Instance for simulation
+f76_active_ai = FerrariF76Aero()
+
+
+
+#include <iostream>
+#include <algorithm>
+
+struct VehicleState {
+    float throttle_input;
+    float brake_pressure;
+    bool ai_intervention;
+};
+
+class F76ControlUnit {
+public:
+    void processDriveByWire(VehicleState& state) {
+        // Active AI Safety: Overrides throttle if wheel slip is detected
+        if (state.ai_intervention) {
+            state.throttle_input = std::min(state.throttle_input, 0.45f);
+            std::cout << "[ACTIVE AI] Traction Optimized" << std::endl;
+        }
+        
+        applyTorqueToMotors(state.throttle_input);
+    }
+
+private:
+    void applyTorqueToMotors(float torque) {
+        // Logic to send CAN-bus signals to the quad-motor array
+    }
+};
+
+
+// Fragment Shader for F76 HUD Overlay
+precision mediump float;
+varying vec2 vUv;
+uniform float uTime;
+
+void main() {
+    // Create a scanning 'data' grid effect
+    float scanline = sin(vUv.y * 100.0 + uTime * 5.0);
+    vec3 color = vec3(0.0, 0.8, 1.0); // Ferrari Digital Blue
+    
+    float alpha = step(0.9, scanline);
+    gl_FragColor = vec4(color, alpha * 0.5);
+}
+
+
+
+#include <iostream>
+#include <vector>
+#include <cmath>
+
+// Simulation of the F76's Central Channel Ground Effect
+class F76AeroController {
+private:
+    float current_downforce; // Newtons
+    float target_downforce;
+    const float AIR_DENSITY = 1.225f; // kg/m^3
+    
+public:
+    struct AeroSurfaces {
+        float front_splitter_angle; // Floating splitter logic
+        float rear_portal_wing;     // Dual-tail integration
+        bool drs_active;
+    };
+
+    AeroSurfaces calculatePredictiveLoad(float velocity_ms, float pitch_rate) {
+        AeroSurfaces state;
+        
+        // F76 specific: ground effect increases exponentially with velocity
+        float base_load = 0.5f * AIR_DENSITY * pow(velocity_ms, 2) * 1.8f;
+        
+        // Active AI intervention for high-speed stability (Le Mans inspired)
+        if (velocity_ms > 83.0f) { // ~300 km/h
+            state.drs_active = true;
+            state.rear_portal_wing = std::lerp(15.0f, 2.0f, (velocity_ms - 83.0f) / 20.0f);
+        } else {
+            state.drs_active = false;
+            // Adjust front splitter to counter pitch under braking
+            state.front_splitter_angle = (pitch_rate > 0) ? 12.0f : 5.0f;
+        }
+
+        return state;
+    }
+};
+
+
+
+import time
+
+class F76SharedDriveLogic:
+    def __init__(self):
+        self.primary_steer = 0.0
+        self.secondary_steer = 0.0
+        self.sync_coefficient = 0.95 # Haptic fidelity
+
+    def synchronize_cockpits(self, driver_input, passenger_input, ai_assist=False):
+        """
+        Merges inputs from the F76 double-fuselage setup.
+        """
+        # Calculate weighted steering input
+        if ai_assist:
+            # Active AI filters erratic movements for high-speed 'Purity'
+            final_steering = (driver_input * 0.7) + (passenger_input * 0.1) + (self.get_ai_trajectory() * 0.2)
+        else:
+            final_steering = (driver_input + passenger_input) / 2
+            
+        return round(final_steering, 4)
+
+    def get_ai_trajectory(self):
+        # Placeholder for Ferrari's generative trajectory algorithm
+        return 0.02 
+
+# Execute real-time sync loop
+f76_sync = F76SharedDriveLogic()
+print(f"Active Steering Output: {f76_sync.synchronize_cockpits(15.5, 14.2, True)} degrees")
+
+
+
+// Ferrari F76 Airflow Visualization Shader
+varying vec2 vUv;
+uniform float uTime;
+uniform float uVelocity;
+
+void main() {
+    // Simulate the 'Double Fuselage' flow separation
+    float flowSpeed = uTime * (uVelocity * 0.1);
+    float noise = sin(vUv.x * 20.0 - flowSpeed) * cos(vUv.y * 10.0);
+    
+    // Gradient representing downforce intensity (Red to Blue)
+    vec3 colorLow = vec3(0.8, 0.0, 0.0); // Classic Rosso
+    vec3 colorHigh = vec3(0.0, 0.5, 1.0); // Aero Blue
+    
+    vec3 finalFlow = mix(colorLow, colorHigh, clamp(uVelocity / 100.0, 0.0, 1.0));
+    
+    gl_FragColor = vec4(finalFlow, noise * 0.5 + 0.5);
+}
+
+
+
+<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M10 60 L25 55 L75 55 L90 60 L85 80 L15 80 Z" fill="#EF3340"/>
+  <rect x="40" y="55" width="20" height="25" fill="#1A1A1A"/>
+  <path d="M20 65 Q50 60 80 65" stroke="#00F2FF" stroke-width="1.5" stroke-linecap="round" opacity="0.8"/>
+  <path d="M15 78 H85" stroke="white" stroke-width="2"/>
+</svg>
+
+
+
+<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="20" y="20" width="25" height="60" rx="12" fill="#EF3340"/>
+  <rect x="55" y="20" width="25" height="60" rx="12" fill="#EF3340"/>
+  <path d="M45 30 L55 30 L55 70 L45 70 Z" fill="#00F2FF" opacity="0.3"/>
+  <circle cx="50" cy="50" r="5" fill="#00F2FF">
+    <animate attributeName="opacity" values="1;0.3;1" dur="2s" repeatCount="indefinite" />
+  </circle>
+</svg>
+
+
+<svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <rect width="100" height="100" rx="15" fill="#121212"/>
+  <text x="50" y="45" font-family="Arial, sans-serif" font-weight="bold" font-size="22" fill="white" text-anchor="middle">F76</text>
+  <text x="50" y="70" font-family="monospace" font-size="10" fill="#00F2FF" text-anchor="middle">ACTIVE AI</text>
+  <rect x="10" y="10" width="80" height="80" rx="5" stroke="#00F2FF" stroke-width="1" stroke-dasharray="4 2"/>
+</svg>
