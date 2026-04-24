@@ -1,0 +1,128 @@
+{
+  "vehicle_identity": {
+    "model": "Scuderia Ferrari Vision Gran Turismo",
+    "configuration": "Single-Seater / Hyper-Extreme V6 Hybrid",
+    "chassis_material": "Carbon-Fiber / Aluminum Space Frame"
+  },
+  "powertrain_specs": {
+    "ice_unit": {
+      "type": "V6 - 120°, Twin-Turbo (F1-derived)",
+      "displacement": 3000,
+      "max_power": "1,030 cv @ 9,000 rpm",
+      "max_torque": "900 Nm @ 5,500 rpm"
+    },
+    "hybrid_system": {
+      "motors": 3,
+      "layout": "1 Rear (MGU-K), 2 Front (Independent)",
+      "additional_power": "240 kW (326 cv)",
+      "combined_rear_torque": "1,100 Nm"
+    }
+  },
+  "active_systems_logic": {
+    "aerodynamics": {
+      "front_s_duct": "Variable_Bypass",
+      "rear_diffuser": "High-Efficiency_Extracted",
+      "active_biplane_wing": "Dynamic_Downforce_Leveling",
+      "cooling_ducts": "Automated_Thermal_Regulation"
+    },
+    "transmission": {
+      "type": "F1 Dual-Clutch",
+      "gears": 8,
+      "drive": "AWD (Electronic Torque Vectoring)"
+    }
+  },
+  "performance_metrics": {
+    "top_speed": "> 350 km/h",
+    "acceleration": {
+      "0-100_kmh": "< 2.0 s",
+      "0-200_kmh": "< 5.0 s"
+    },
+    "weight_dry": 1250,
+    "weight_distribution": "43.5% Front / 56.5% Rear"
+  }
+}
+
+
+
+import math
+
+class FerrariVisionGT:
+    def __init__(self):
+        # Hardware Constants
+        self.mass = 1250  # kg
+        self.ice_max_power = 1030  # CV
+        self.electric_max_power = 326  # CV
+        self.total_torque_max = 1100  # Nm
+        
+        # State Variables
+        self.current_speed = 0.0  # km/h
+        self.steering_angle = 0.0 # degrees
+        self.braking_pressure = 0.0 # 0.0 to 1.0
+        
+    def update_active_aero(self):
+        """Logic for Variable Rear Wing & Front Diffuser Flaps"""
+        if self.current_speed > 250 and self.braking_pressure > 0.5:
+            # Airbrake Mode: Maximize drag
+            self.rear_wing_angle = 45.0  
+            self.front_diffuser = "Closed"
+        elif self.current_speed > 300 and self.steering_angle < 5:
+            # DRS / Low Drag Mode: Minimize resistance
+            self.rear_wing_angle = 2.0
+            self.front_diffuser = "Optimized"
+        else:
+            # High Downforce Mode: Cornering stability
+            self.rear_wing_angle = 15.0
+            self.front_diffuser = "Deployed"
+
+    def drive_logic(self, throttle, steering):
+        """Torque Vectoring for the Tri-Motor AWD System"""
+        self.steering_angle = steering
+        
+        # Rear Axle: ICE + MGU-K
+        rear_torque = throttle * (self.total_torque_max * 0.6)
+        
+        # Front Axle: Independent dual motors for Torque Vectoring
+        # Inner wheel brakes slightly, outer wheel accelerates to 'pivot' the car
+        torque_bias = steering * 0.15 
+        front_left_torque = (throttle * 0.2) - torque_bias
+        front_right_torque = (throttle * 0.2) + torque_bias
+        
+        return {
+            "FL_Motor": front_left_torque,
+            "FR_Motor": front_right_torque,
+            "Rear_Unit": rear_torque,
+            "Aero_State": self.update_active_aero()
+        }
+
+# Initialize Instance
+vgt_instance = FerrariVisionGT()
+
+
+
+# UI State Logic for Vision GT Cockpit Display (Python example)
+
+def update_icon_display(telemetry):
+    """
+    Update icon states on the UI based on vehicle telemetry.
+    """
+    
+    # 1. Active Aerodynamics Icon [Variable Rear Wing]
+    if telemetry['speed'] > 250 and telemetry['drs_active']:
+        set_icon_state('rear_wing', state='ACTIVE_BOOST', color='#FF2800', animation='DRS_GLOW')
+    elif telemetry['braking_force'] > 0.8:
+        set_icon_state('rear_wing', state='ACTIVE_BRAKE', color='#FF2800', animation='AIRBRAKE_DEPLOY')
+    else:
+        set_icon_state('rear_wing', state='AVAILABLE', color='#FFFFFF', animation='IDLE')
+
+    # 2. Hybrid Boost Status Icon [MGU-K / Battery]
+    if telemetry['boost_requested'] and telemetry['soc'] > 15:
+        set_icon_state('hybrid_boost', state='BOOSTING', color='#FF2800', animation='PULSATE_1HZ')
+    else:
+        set_icon_state('hybrid_boost', state='REGENERATING', color='#00FFFF', animation='STATIC')
+
+    # 3. Matrix LED Headlight Status
+    if telemetry['ambient_light'] < 20 or telemetry['rain_sensor']:
+        set_icon_state('matrix_lights', state='ON', color='#00FFFF', animation='STATIC')
+    else:
+        set_icon_state('matrix_lights', state='OFF', color='#FFFFFF', animation='STATIC')
+
