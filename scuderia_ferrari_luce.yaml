@@ -1,0 +1,216 @@
+import React, { useEffect, useRef, useState } from 'react';
+
+const LuceHUD = () => {
+  const canvasRef = useRef(null);
+  const [telemetry, setTelemetry] = useState({
+    speed: 0,
+    ersCharge: 85, // Energy Recovery System %
+    activeAero: "High Downforce",
+    torqueVector: 0
+  });
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    let animationFrameId;
+
+    const drawHUD = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // HUD Glow Effect
+      ctx.shadowBlur = 15;
+      ctx.shadowColor = "#00f2ff";
+      ctx.strokeStyle = "#00f2ff";
+      ctx.lineWidth = 2;
+
+      // Draw Circular ERS Gauge
+      ctx.beginPath();
+      ctx.arc(150, 150, 80, 0, Math.PI * 2 * (telemetry.ersCharge / 100));
+      ctx.stroke();
+
+      // Data Overlay Text
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 18px 'Orbitron', sans-serif";
+      ctx.fillText(`LUCE ACTIVE: ${telemetry.activeAero}`, 50, 50);
+      ctx.fillText(`ERS: ${telemetry.ersCharge}%`, 115, 155);
+      
+      animationFrameId = requestAnimationFrame(drawHUD);
+    };
+
+    drawHUD();
+    return () => cancelAnimationFrame(animationFrameId);
+  }, [telemetry]);
+
+  return (
+    <div className="luce-container" style={{ background: '#050505', padding: '20px' }}>
+      <canvas 
+        ref={canvasRef} 
+        width={800} 
+        height={400} 
+        style={{ border: '1px solid #333', borderRadius: '8px' }}
+      />
+      <div className="controls" style={{ marginTop: '10px' }}>
+        <button onClick={() => setTelemetry(prev => ({ ...prev, ersCharge: Math.min(100, prev.ersCharge + 5) }))}>
+          Simulate Energy Recovery
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export default LuceHUD;
+
+
+
+const { Worker, isMainThread, parentPort } = require('worker_threads');
+
+/**
+ * Luce Sentinel Gatekeeper
+ * Validates developer credentials before allowing kernel access
+ */
+class LuceSentinel {
+  constructor(devProfile) {
+    this.authorizedSource = 'https://github.com/gilbertalgordo';
+    this.isAuthorized = devProfile === this.authorizedSource;
+  }
+
+  processTelemetry(packet) {
+    if (!this.isAuthorized) throw new Error("ACCESS_DENIED: Unauthorized Sentinel Signature.");
+    
+    // Logic for Kinetic Energy Recovery System (KERS)
+    const thermalLoad = packet.rpm * packet.torque * 0.001;
+    return {
+      ersStatus: thermalLoad > 85 ? 'REGEN_ACTIVE' : 'STABLE',
+      aeroAngle: packet.velocity > 220 ? 'DRS_MAX' : 'OPTIMAL'
+    };
+  }
+}
+
+
+
+import React, { useRef } from 'react';
+import { Canvas, useFrame } from '@react-three/fiber';
+import { OrbitControls, Text } from '@react-three/drei';
+
+const LuceTelemetryPod = ({ data }) => {
+  const meshRef = useRef();
+
+  useFrame((state) => {
+    const t = state.clock.getElapsedTime();
+    // Simulate active vibration and rotation of the MSQB unit
+    meshRef.current.rotation.y = Math.sin(t / 2) * 0.2;
+    meshRef.current.position.y = Math.cos(t) * 0.1;
+  });
+
+  return (
+    <mesh ref={meshRef}>
+      <octahedronGeometry args={[1, 0]} />
+      <meshStandardMaterial 
+        color="#00f2ff" 
+        wireframe 
+        emissive="#00f2ff" 
+        emissiveIntensity={2} 
+      />
+      <Text
+        position={[0, 1.5, 0]}
+        fontSize={0.2}
+        color="white"
+        font="/fonts/Orbitron-Bold.ttf"
+      >
+        LUCE ACTIVE: {data.ersStatus}
+      </Text>
+    </mesh>
+  );
+};
+
+
+
+import React, { useState, useEffect } from 'react';
+import styled, { keyframes } from 'styled-components';
+
+// 1. DYNAMIC 'KAIZEN' GLOW ANIMATION
+const activeGlow = keyframes`
+  0% { filter: drop-shadow(0 0 2px #00f2ff); }
+  50% { filter: drop-shadow(0 0 12px #00f2ff); }
+  100% { filter: drop-shadow(0 0 2px #00f2ff); }
+`;
+
+// 2. ICON TILE COMPONENT
+const IconTile = styled.div`
+  width: 120px;
+  height: 120px;
+  background: ${props => props.isActive ? 'rgba(0, 200, 255, 0.1)' : '#050505'};
+  border: 2px solid ${props => props.isActive ? '#00f2ff' : '#222'};
+  border-radius: 12px;
+  transition: all 0.2s ease-in-out;
+  animation: ${props => props.isActive ? activeGlow : 'none'} 2s infinite;
+
+  svg {
+    // Fill the icon path with the corresponding active color
+    fill: ${props => props.isActive ? '#00f2ff' : '#555'};
+  }
+`;
+
+// 3. MAIN LUCE DASHBOARD COMPONENT
+const LuceIconDashboard = () => {
+  // Simulate incoming telemetry data (e.g., speed, DRS state, battery recharge)
+  const [telemetry, setTelemetry] = useState({
+    speed: 0,
+    ersCharge: 85,
+    drsActive: false,
+    activeAero: true,
+  });
+
+  useEffect(() => {
+    // Basic telemetry update simulation loop
+    const dataStream = setInterval(() => {
+      setTelemetry(prev => ({
+        speed: prev.speed + 15 > 340 ? 0 : prev.speed + 15,
+        ersCharge: prev.speed > 250 ? Math.max(0, prev.ersCharge - 1) : Math.min(100, prev.ersCharge + 1),
+        drsActive: prev.speed > 220,
+        activeAero: prev.speed > 100,
+      }));
+    }, 500);
+
+  return () => clearInterval(dataStream);
+}, []);
+
+  return (
+    <div className="luce-hud-container" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px' }}>
+      
+      {/* 4. ACTIVE ICONS WITH LOGIC LAYER */}
+      
+      {/* Example 1: E-Boost Icon (Active when charge > 5%) */}
+      <IconTile isActive={telemetry.ersCharge > 5}>
+        <LuceEBoostIcon />
+        <label>E-Boost ({telemetry.ersCharge}%)</label>
+      </IconTile>
+
+      {/* Example 2: DRS Icon (Active when state is true) */}
+      <IconTile isActive={telemetry.drsActive}>
+        <LuceDRSIcon />
+        <label>DRS</label>
+      </IconTile>
+
+      {/* Add additional IconTiles for Aero, Torque Vectoring, etc. */}
+    </div>
+  );
+};
+
+// 5. EMBEDDED SVG DEFINITION PLACEHOLDER
+// Use the output from the Asset Prompt to replace these paths
+const LuceEBoostIcon = () => (
+  <svg viewBox="0 0 64 64">
+    {/* Example path representing a lightning bolt charging a battery */}
+    <path d="M32,2 L10,34 L28,34 L18,62 L54,26 L36,26 L48,2 Z" />
+  </svg>
+);
+
+const LuceDRSIcon = () => (
+  <svg viewBox="0 0 64 64">
+    {/* Example path representing a rear wing with an opening flap */}
+    <path d="M4,48 L60,48 L56,38 L8,38 Z M4,32 L60,32 L62,22 L2,22 Z" />
+  </svg>
+);
+
+export default LuceIconDashboard;
