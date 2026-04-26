@@ -1,0 +1,289 @@
+// Check if the AI model is ready on the user's device
+async function initActiveAI() {
+  const canCreate = await window.ai.canCreateTextSession();
+
+  if (canCreate !== "no") {
+    const session = await window.ai.createTextSession();
+    
+    // Active prompt execution
+    const response = await session.prompt("Explain the concept of 'Active Web' in 2 sentences.");
+    console.log("AI Response:", response);
+    
+    // Always destroy session when done to free up local resources
+    session.destroy();
+  } else {
+    console.error("AI model not available on this browser/device.");
+  }
+}
+
+initActiveAI();
+
+
+
+import { GoogleGenerativeAI } from "@google/generative-ai";
+
+// Access your API key (ensure this is secured in a backend environment)
+const genAI = new GoogleGenerativeAI("YOUR_API_KEY");
+
+async function runActiveTask() {
+  // Use 'gemini-1.5-flash' for fast, active web responses
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+  const prompt = "Generate a responsive CSS grid layout for a dashboard.";
+
+  const result = await model.generateContent(prompt);
+  const response = await result.response;
+  const text = response.text();
+  
+  document.getElementById('output').innerText = text;
+}
+
+
+
+
+/** * Advanced Local AI Controller 
+ * Targets Gemini Nano (Chrome 2026 Built-in AI)
+ */
+class ActiveAI {
+  constructor() {
+    this.session = null;
+    this.capabilities = null;
+  }
+
+  async initialize(systemPrompt = "You are a helpful web coding assistant.") {
+    this.capabilities = await window.ai.canCreateTextSession();
+    
+    if (this.capabilities !== 'no') {
+      this.session = await window.ai.createTextSession({
+        systemPrompt,
+        temperature: 0.7,
+        topK: 3
+      });
+      console.log("Active AI Initialized Locally.");
+    }
+  }
+
+  // Streaming implementation for "Active" UI feel
+  async streamResponse(userPrompt, onChunk) {
+    if (!this.session) await this.initialize();
+    
+    try {
+      const stream = this.session.promptStreaming(userPrompt);
+      for await (const chunk of stream) {
+        onChunk(chunk);
+      }
+    } catch (err) {
+      console.error("Local AI stream failed:", err);
+    }
+  }
+
+  destroy() {
+    this.session?.destroy();
+  }
+}
+
+
+
+import { GoogleGenerativeAI } from "@google/generative-ai";
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+// Define tools the AI can "actively" call
+const searchTool = {
+  functionDeclarations: [{
+    name: "fetchDocumentation",
+    description: "Retrieves the latest web.dev docs for a specific technology.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "The tech keyword (e.g., 'WebGPU')" }
+      },
+      required: ["query"]
+    }
+  }]
+};
+
+async function runAgenticTask(userInput) {
+  const model = genAI.getGenerativeModel({ 
+    model: "gemini-3.1-pro-preview", // Latest 2026 Model
+    tools: [searchTool] 
+  });
+
+  const chat = model.startChat();
+  
+  // The model will decide if it needs to call 'fetchDocumentation'
+  const result = await chat.sendMessage(userInput);
+  const response = result.response;
+  
+  // Handle potential function calls (Agentic behavior)
+  const call = response.functionCalls()?.[0];
+  if (call) {
+    // Execute your local code logic here and send results back to model
+    console.log(`AI is actively requesting docs for: ${call.args.query}`);
+  }
+
+  return response.text();
+}
+
+
+
+/* AI-Active-Icon.css */
+
+:root {
+  /* Default/Idle State Colors */
+  --ai-icon-core-primary: hsl(210, 100%, 60%);   /* calm blue */
+  --ai-icon-core-secondary: hsl(210, 100%, 85%);
+  --ai-icon-border: hsl(210, 20%, 80%);
+  --ai-icon-rotation-speed: 6s;
+  --ai-icon-pulse-speed: 2.5s;
+}
+
+/* Base Icon Container styling */
+.ai-status-icon {
+  width: 48px;
+  height: 48px;
+  display: inline-block;
+}
+
+.ai-status-icon svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible; /* Allows glows to render */
+}
+
+/* Kinetic Core Styling */
+.ai-kinetic-core {
+  fill: url(#ai-core-gradient);
+  transform-origin: center;
+  stroke: var(--ai-icon-core-secondary);
+  stroke-width: 0.5;
+  
+  /* Always pulse when active, but change speed */
+  animation: ai-pulse var(--ai-icon-pulse-speed) ease-in-out infinite;
+}
+
+.ai-kinetic-core text {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-weight: 800;
+  fill: #fff;
+  font-size: 10px;
+  text-anchor: middle;
+}
+
+
+/* --- THE "ACTIVE" STATES --- */
+
+/* 1. STATE: THINKING (Rapid Rotation) */
+body.ai-thinking {
+  --ai-icon-core-primary: hsl(35, 100%, 60%);   /* amber */
+  --ai-icon-core-secondary: hsl(35, 100%, 85%);
+  --ai-icon-rotation-speed: 0.8s;
+  --ai-icon-pulse-speed: 0.5s;
+}
+
+body.ai-thinking .ai-kinetic-core {
+  animation: ai-rotate var(--ai-icon-rotation-speed) linear infinite,
+             ai-pulse var(--ai-icon-pulse-speed) ease-in-out infinite;
+}
+
+/* 2. STATE: COMPLETE/SUCCESS (Stable Green) */
+body.ai-complete {
+  --ai-icon-core-primary: hsl(150, 80%, 50%);    /* green */
+  --ai-icon-core-secondary: hsl(150, 100%, 85%);
+  --ai-icon-border: var(--ai-icon-core-primary);
+}
+
+/* 3. STATE: ERROR (Pulsing Red) */
+body.ai-error {
+  --ai-icon-core-primary: hsl(0, 100%, 65%);    /* red */
+  --ai-icon-core-secondary: hsl(0, 100%, 85%);
+  --ai-icon-border: var(--ai-icon-core-primary);
+  --ai-icon-pulse-speed: 1s;
+}
+
+body.ai-error .ai-kinetic-core {
+  animation: ai-pulse var(--ai-icon-pulse-speed) ease-in-out infinite;
+}
+
+
+/* --- ANIMATIONS --- */
+
+@keyframes ai-rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes ai-pulse {
+  0%, 100% { opacity: 0.95; transform: scale(1); filter: blur(0px); }
+  50% { opacity: 1; transform: scale(1.05); filter: blur(1px); }
+}
+
+
+
+
+<div class="ai-status-icon" role="img" aria-label="AI System Status Indicator">
+  <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="ai-core-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="var(--ai-icon-core-secondary)" />
+        <stop offset="100%" stop-color="var(--ai-icon-core-primary)" />
+      </linearGradient>
+      
+      <filter id="ai-glow" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="blur" />
+          <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+          </feMerge>
+      </filter>
+    </defs>
+    
+    <circle class="ai-outer-border" cx="32" cy="32" r="30" fill="none" stroke="var(--ai-icon-border)" stroke-width="2" />
+    
+    <g class="ai-kinetic-core" filter="url(#ai-glow)">
+      <circle cx="32" cy="32" r="18" />
+      <ellipse cx="32" cy="32" rx="22" ry="8" fill="none" transform="rotate(45 32 32)"/>
+      <ellipse cx="32" cy="32" rx="22" ry="8" fill="none" transform="rotate(-45 32 32)"/>
+      
+      <text x="32" y="36">AI</text>
+    </g>
+  </svg>
+</div>
+
+
+
+// --- JAVASCRIPT STATE CONTROLLER ---
+const body = document.body;
+
+// 1. SET TO IDLE (Default)
+function setAI_Idle() {
+  body.classList.remove('ai-thinking', 'ai-complete', 'ai-error');
+}
+
+// 2. SET TO THINKING (User just sent a prompt)
+function setAI_Thinking() {
+  body.classList.add('ai-thinking');
+}
+
+// 3. SET TO COMPLETE (AI finished generating)
+function setAI_Complete() {
+  body.classList.remove('ai-thinking');
+  body.classList.add('ai-complete');
+}
+
+// 4. SET TO ERROR (Network fail, etc.)
+function setAI_Error() {
+  body.classList.remove('ai-thinking');
+  body.classList.add('ai-error');
+}
+
+// -- EXAMPLE WORKFLOW TRIGGER --
+document.querySelector('#submit-prompt').addEventListener('click', () => {
+  setAI_Thinking(); // Icon instantly goes amber and spins rapidly
+
+  // Simulate API Call
+  setTimeout(() => {
+    // If successful:
+    setAI_Complete(); // Icon goes green and stable
+  }, 3000);
+});
