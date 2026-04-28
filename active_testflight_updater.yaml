@@ -1,0 +1,235 @@
+pip install appstoreconnect-sdk
+
+
+import time
+from appstoreconnect import Api
+
+# Configuration
+KEY_ID = "YOUR_KEY_ID"
+ISSUER_ID = "YOUR_ISSUER_ID"
+PATH_TO_KEY = "./AuthKey_XXXXXX.p8"
+APP_ID = "1234567890"  # Your App's Apple ID
+
+def update_testflight_status():
+    # Initialize API
+    api = Api(KEY_ID, PATH_TO_KEY, ISSUER_ID)
+
+    try:
+        # 1. Fetch the most recent builds for the app
+        # Filtering by the specific App ID
+        builds = api.list_builds(
+            filter={'app': APP_ID},
+            sort='-uploadedDate',
+            limit=1
+        )
+
+        if not builds:
+            print("No builds found for this App ID.")
+            return
+
+        latest_build = builds[0]
+        version = latest_build.version
+        status = latest_build.externalBuildState
+
+        print(f"Latest Build: {version} | Status: {status}")
+
+        # 2. Logic: If the build is ready, ensure it's pushed to a group
+        if status == "READY_FOR_TESTING":
+            print("Build is ready! Distributing to Beta Groups...")
+            # Here you would call api.add_test_flight_readers_to_group() 
+            # or trigger a notification via Webhook/Slack.
+        
+        elif status == "PROCESSING":
+            print("Build is still in Apple's processing phase. Retrying later...")
+
+    except Exception as e:
+        print(f"Error communicating with App Store Connect: {e}")
+
+if __name__ == "__main__":
+    update_testflight_status()
+
+
+
+name: Active TestFlight Monitor
+on:
+  schedule:
+    - cron: '0 * * * *' # Runs every hour
+  workflow_dispatch: # Allows manual trigger
+
+jobs:
+  check-builds:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install dependencies
+        run: pip install appstoreconnect-sdk
+      - name: Run Monitor
+        env:
+          KEY_ID: ${{ secrets.AC_KEY_ID }}
+          ISSUER_ID: ${{ secrets.AC_ISSUER_ID }}
+          KEY_CONTENT: ${{ secrets.AC_P8_KEY }}
+        run: python your_script_name.py
+
+
+import hmac, hashlib, os
+from fastapi import FastAPI, Request, HTTPException
+from appstoreconnect import Api
+
+app = FastAPI()
+
+# Credentials from environment
+API_KEY = os.getenv("ASC_KEY_ID")
+ISSUER_ID = os.getenv("ASC_ISSUER_ID")
+KEY_PATH = "./auth.p8"
+
+def distribute_to_testers(build_id):
+    """Logic to push build to specific External Groups"""
+    api = Api(API_KEY, KEY_PATH, ISSUER_ID)
+    # Fetch specific beta groups (e.g., 'Core-QA-Team')
+    groups = api.list_beta_groups(filter={'name': 'Public-Beta'})
+    
+    for group in groups:
+        # Programmatically link the build to the group
+        api.add_build_to_beta_group(build_id, group.id)
+        print(f"✅ Build {build_id} promoted to {group.name}")
+
+@app.post("/testflight-webhook")
+async def apple_webhook(request: Request):
+    # Verification: Ensure the request is actually from Apple (using your secret)
+    signature = request.headers.get("X-Apple-Signature")
+    body = await request.body()
+    
+    # Process the notification payload
+    data = await request.json()
+    event_type = data.get("notificationType") # e.g., 'BUILD_READY_FOR_TESTING'
+    
+    if event_type == "BUILD_READY_FOR_TESTING":
+        build_info = data.get("data", {}).get("build", {})
+        build_id = build_info.get("id")
+        
+        print(f"🚀 New Build Detected: {build_info.get('version')}")
+        distribute_to_testers(build_id)
+        
+        return {"status": "success", "action": "distributed"}
+
+    return {"status": "ignored"}
+
+
+
+name: AI TestFlight Deployment
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: macos-15 # Use the latest macOS runners for Xcode 17+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate AI Release Notes
+        run: |
+          # Simple logic to grab the last 5 commits and format them
+          git log -n 5 --pretty=format:"- %s" > beta_notes.txt
+          echo "BETA_NOTES<<EOF" >> $GITHUB_ENV
+          cat beta_notes.txt >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Build & Upload to TestFlight
+        uses: apple-actions/upload-testflight-build@v1
+        with:
+          app-path: 'path/to/YourApp.ipa'
+          issuer-id: ${{ secrets.ASC_ISSUER_ID }}
+          api-key-id: ${{ secrets.ASC_KEY_ID }}
+          api-private-key: ${{ secrets.ASC_PRIVATE_KEY }}
+          # Advanced: Automatically handle Export Compliance 
+          # (Removes the "Missing Compliance" warning in TestFlight)
+          app-info: |
+            {
+              "usesEncryption": false,
+              "whatsNew": "${{ env.BETA_NOTES }}"
+            }
+
+
+
+def check_expiry_and_rebuild():
+    api = Api(API_KEY, KEY_PATH, ISSUER_ID)
+    builds = api.list_builds(filter={'app': APP_ID}, sort='-uploadedDate', limit=1)
+    
+    if builds:
+        latest = builds[0]
+        # Calculate days until expiry
+        days_left = (latest.expirationDate - datetime.now()).days
+        
+        if days_left < 7:
+            print("⚠️ Build expiring in 7 days! Triggering automated rebuild...")
+            # Trigger GitHub Action via Repository Dispatch
+            trigger_github_action()
+
+
+
+pip install Pillow
+
+
+from PIL import Image, ImageDraw, ImageFont
+import os
+
+def generate_hud_icon(base_icon_path, build_number, env_name="BETA"):
+    """
+    Overlays a HUD-style info bar on the app icon for easy identification.
+    """
+    # 1. Load the 1024x1024 base icon
+    img = Image.open(base_icon_path).convert("RGBA")
+    canvas = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    canvas.paste(img, (0, 0))
+    
+    draw = ImageDraw.Draw(canvas)
+    width, height = img.size
+
+    # 2. Define HUD Overlay (Bottom Banner)
+    banner_height = int(height * 0.20)
+    banner_color = (0, 0, 0, 180)  # Semi-transparent black
+    draw.rectangle([0, height - banner_height, width, height], fill=banner_color)
+
+    # 3. Add AI/Version Text
+    # Note: Ensure you have a .ttf font file in your repo (e.g., Roboto or SF)
+    try:
+        font_main = ImageFont.truetype("Arial.ttf", 80)
+        font_sub = ImageFont.truetype("Arial.ttf", 40)
+    except:
+        font_main = ImageFont.load_default()
+        font_sub = ImageFont.load_default()
+
+    # Draw Build Number
+    draw.text((50, height - banner_height + 20), f"BUILD: {build_number}", fill="white", font=font_main)
+    # Draw Environment Tag
+    draw.text((50, height - 60), f"ENV: {env_name.upper()} | AI UPDATER ACTIVE", fill="#00FF00", font=font_sub)
+
+    # 4. Save the decorated icon
+    output_path = "AppIcon_Decorated.png"
+    canvas.save(output_path)
+    print(f"✅ Active HUD Icon generated: {output_path}")
+
+# Example usage for your CI/CD pipeline
+if __name__ == "__main__":
+    # In a real scenario, BUILD_NUMBER comes from GitHub Actions env
+    generate_hud_icon("AppIcon.png", os.getenv("GITHUB_RUN_NUMBER", "1.0.42"), "Staging")
+
+
+
+    steps:
+      - name: Generate Decorated Icon
+        run: |
+          python scripts/generate_icon.py
+          # Replace original Assets.xcassets icon with the decorated one
+          cp AppIcon_Decorated.png ./ios/App/Assets.xcassets/AppIcon.appiconset/Icon-1024.png
+          
+      - name: Build and Upload
+        run: xcodebuild ... # Your usual build command
