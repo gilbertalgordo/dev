@@ -1,0 +1,182 @@
+using UnityEngine;
+using System.Collections;
+
+public class MPX_HybridController : MonoBehaviour
+{
+    [Header("Engine Settings")]
+    public float gasEngineTorque = 400f;
+    public float electricMotorTorque = 600f;
+    public float maxSteerAngle = 35f;
+    public float brakingForce = 2000f;
+
+    [Header("AWD System")]
+    [Range(0, 1)] public float torqueSplitFront = 0.5f; // AWD bias
+
+    [Header("Wheel Colliders")]
+    public WheelCollider frontLeft;
+    public WheelCollider frontRight;
+    public WheelCollider rearLeft;
+    public WheelCollider rearRight;
+
+    private float currentSteerAngle;
+    private float currentAcceleration;
+
+    private void FixedUpdate()
+    {
+        GetInput();
+        ApplyDrive();
+        ApplySteering();
+    }
+
+    private void GetInput()
+    {
+        currentAcceleration = Input.GetAxis("Vertical");
+        currentSteerAngle = maxSteerAngle * Input.GetAxis("Horizontal");
+    }
+
+    private void ApplyDrive()
+    {
+        // Front Axle: Pure Electric Drive
+        float frontTorque = currentAcceleration * electricMotorTorque * torqueSplitFront;
+        frontLeft.motorTorque = frontTorque;
+        frontRight.motorTorque = frontTorque;
+
+        // Rear Axle: Hybrid (Gas + Electric Assist)
+        float rearTorque = currentAcceleration * (gasEngineTorque + (electricMotorTorque * (1 - torqueSplitFront)));
+        rearLeft.motorTorque = rearTorque;
+        rearRight.motorTorque = rearTorque;
+
+        // Braking Logic
+        if (Input.GetKey(KeyCode.Space))
+        {
+            ApplyBrakes(brakingForce);
+        }
+        else
+        {
+            ApplyBrakes(0f);
+        }
+    }
+
+    private void ApplySteering()
+    {
+        frontLeft.steerAngle = currentSteerAngle;
+        frontRight.steerAngle = currentSteerAngle;
+    }
+
+    private void ApplyBrakes(float force)
+    {
+        frontLeft.brakeTorque = force;
+        frontRight.brakeTorque = force;
+        rearLeft.brakeTorque = force;
+        rearRight.brakeTorque = force;
+    }
+}
+
+
+
+using UnityEngine;
+using System.Collections.Generic;
+
+[System.Serializable]
+public class WheelAxle {
+    public WheelCollider leftWheel;
+    public WheelCollider rightWheel;
+    public bool isMotorized;
+    public bool isSteering;
+}
+
+public class RaceCorp_MPX_AdvancedController : MonoBehaviour {
+    [Header("Hybrid Powertrain")]
+    public float iceMaxTorque = 450f;      // Internal Combustion Engine (Rear)
+    public float electricMaxTorque = 700f; // Electric Motors (Front/Rear Assist)
+    public float batteryLevel = 100f;      // Percentage
+    public float regenEfficiency = 0.25f;  // Energy recovered during braking
+
+    [Header("Dynamic AWD & Stability")]
+    [Range(0, 1)] public float frontBias = 0.4f; 
+    public float slipThreshold = 0.15f;    // TCS Sensitivity
+
+    [Header("Axle Configuration")]
+    public List<WheelAxle> axles;
+
+    private float _throttleInput;
+    private float _steerInput;
+    private float _brakeInput;
+    private Rigidbody _rb;
+
+    void Start() {
+        _rb = GetComponent<Rigidbody>();
+        _rb.centerOfMass = new Vector3(0, -0.5f, 0.1f); // Lower COG for ATV stability
+    }
+
+    void FixedUpdate() {
+        ProcessInputs();
+        HandleHybridPower();
+        ApplySteering();
+        ApplyDownforce();
+    }
+
+    private void ProcessInputs() {
+        _throttleInput = Input.GetAxis("Vertical");
+        _steerInput = Input.GetAxis("Horizontal");
+        _brakeInput = Input.GetKey(KeyCode.Space) ? 1.0f : 0.0f;
+    }
+
+    private void HandleHybridPower() {
+        foreach (var axle in axles) {
+            if (!axle.isMotorized) continue;
+
+            float wheelSlip = CalculateAxleSlip(axle);
+            float tractionControl = (wheelSlip > slipThreshold) ? (1.0f - wheelSlip) : 1.0f;
+
+            // Torque Vectoring Logic
+            float motorTorque = 0f;
+            if (axle == axles[0]) { // Front Axle (Pure Electric)
+                motorTorque = _throttleInput * electricMaxTorque * frontBias * tractionControl;
+            } else { // Rear Axle (Hybrid)
+                float iceOutput = _throttleInput * iceMaxTorque;
+                float eAssist = _throttleInput * (electricMaxTorque * (1 - frontBias));
+                motorTorque = (iceOutput + eAssist) * tractionControl;
+            }
+
+            // Apply to wheels
+            axle.leftWheel.motorTorque = motorTorque;
+            axle.rightWheel.motorTorque = motorTorque;
+
+            // Brake & Regen System
+            ApplyAxleBrakes(axle);
+        }
+    }
+
+    private float CalculateAxleSlip(WheelAxle axle) {
+        WheelHit hit;
+        axle.leftWheel.GetGroundHit(out hit);
+        return Mathf.Abs(hit.forwardSlip);
+    }
+
+    private void ApplyAxleBrakes(WheelAxle axle) {
+        float brakeForce = _brakeInput * 3000f;
+        axle.leftWheel.brakeTorque = brakeForce;
+        axle.rightWheel.brakeTorque = brakeForce;
+
+        // Kinetic Energy Recovery System (KERS)
+        if (_brakeInput > 0.1f && batteryLevel < 100f) {
+            batteryLevel += _brakeInput * regenEfficiency * Time.fixedDeltaTime;
+        }
+    }
+
+    private void ApplySteering() {
+        float steerAngle = _steerInput * 35f;
+        foreach (var axle in axles) {
+            if (axle.isSteering) {
+                axle.leftWheel.steerAngle = steerAngle;
+                axle.rightWheel.steerAngle = steerAngle;
+            }
+        }
+    }
+
+    private void ApplyDownforce() {
+        // Simulates aerodynamic stability at high speeds
+        _rb.AddForce(-transform.up * 50f * _rb.velocity.magnitude);
+    }
+}
