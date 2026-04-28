@@ -1,0 +1,194 @@
+pip install zeroconf
+
+
+
+import socket
+import time
+from zeroconf import ServiceBrowser, Zeroconf, ServiceListener
+
+class GoogleHomeScanner(ServiceListener):
+    def __init__(self):
+        self.found_devices = {}
+
+    def update_service(self, zc: Zeroconf, type_: str, name: str) -> None:
+        # Called when a device's information is updated
+        pass
+
+    def remove_service(self, zc: Zeroconf, type_: str, name: str) -> None:
+        device_id = name.split(".")[0]
+        if device_id in self.found_devices:
+            print(f"[-] Device Lost: {self.found_devices[device_id]['friendly_name']}")
+            del self.found_devices[device_id]
+
+    def add_service(self, zc: Zeroconf, type_: str, name: str) -> None:
+        info = zc.get_service_info(type_, name)
+        if info:
+            # Parse IP Address
+            addresses = [socket.inet_ntoa(addr) for addr in info.addresses]
+            address = addresses[0] if addresses else "Unknown"
+            
+            # Extract Metadata (Model, Friendly Name)
+            properties = {k.decode('utf-8'): v.decode('utf-8') for k, v in info.properties.items()}
+            friendly_name = properties.get('fn', 'Unknown Google Device')
+            model = properties.get('md', 'Generic Chromecast/Home')
+            
+            device_id = name.split(".")[0]
+            self.found_devices[device_id] = {
+                "friendly_name": friendly_name,
+                "model": model,
+                "ip": address,
+                "port": info.port
+            }
+            
+            self._display_hud()
+
+    def _display_hud(self):
+        """Generates a HUD-style output for active devices."""
+        print("\033[H\033[J", end="")  # Clear screen
+        print("=== ACTIVE GOOGLE HOME SCANNER HUD ===")
+        print(f"{'FRIENDLY NAME':<25} | {'MODEL':<20} | {'IP ADDRESS':<15}")
+        print("-" * 65)
+        for dev in self.found_devices.values():
+            print(f"{dev['friendly_name']:<25} | {dev['model']:<20} | {dev['ip']:<15}")
+        print("\n[Listening for active broadcasts... Press Ctrl+C to exit]")
+
+def start_discovery():
+    zeroconf = Zeroconf()
+    listener = GoogleHomeScanner()
+    # Google Cast devices use this specific service type
+    browser = ServiceBrowser(zeroconf, "_googlecast._tcp.local.", listener)
+    
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n[!] Scanning Terminated.")
+    finally:
+        zeroconf.close()
+
+if __name__ == "__main__":
+    start_discovery()
+
+
+
+import pychromecast
+import time
+import os
+from datetime import datetime
+
+class AdvancedHomeScanner:
+    def __init__(self):
+        self.devices = {}
+        self.last_update = ""
+
+    def scan_network(self):
+        """Discovers all Google Home/Cast devices and initializes their status."""
+        # Start discovery - returns a list of UUIDs
+        services, browser = pychromecast.discovery.discover_chromecasts()
+        
+        # Stop the browser to free up resources once initial scan is done
+        pychromecast.discovery.stop_discovery(browser)
+        
+        # Map found services to detailed status
+        chromecasts, _ = pychromecast.get_chromecasts()
+        
+        for cc in chromecasts:
+            cc.wait() # Ensure the connection is established
+            status = cc.status
+            mc = cc.media_controller
+            
+            self.devices[cc.uuid] = {
+                "name": cc.name,
+                "model": cc.model_name,
+                "ip": cc.host,
+                "volume": f"{int(status.volume_level * 100)}%",
+                "status": "Playing" if mc.status.player_state == "PLAYING" else "Idle",
+                "app": status.display_name if status.display_name else "Home Screen"
+            }
+        
+        self.last_update = datetime.now().strftime("%H:%M:%S")
+
+    def display_hud(self):
+        """Renders a High-Density dashboard of the network state."""
+        os.system('cls' if os.name == 'nt' else 'clear')
+        print("="*85)
+        print(f" GOOGLE AI COMMAND CENTER | SCAN ACTIVE | LAST SYNC: {self.last_update} ")
+        print("="*85)
+        print(f"{'DEVICE NAME':<25} | {'MODEL':<20} | {'IP ADDRESS':<15} | {'VOL':<5} | {'STATUS'}")
+        print("-" * 85)
+        
+        for uid, info in self.devices.items():
+            print(f"{info['name']:<25} | {info['model']:<20} | {info['ip']:<15} | {info['volume']:<5} | {info['app']} ({info['status']})")
+        
+        print("\n" + "="*85)
+        print(" [Action] Re-scanning every 10 seconds... (Ctrl+C to stop)")
+
+def run_ai_scanner():
+    scanner = AdvancedHomeScanner()
+    try:
+        while True:
+            scanner.scan_network()
+            scanner.display_hud()
+            time.sleep(10)
+    except KeyboardInterrupt:
+        print("\n[!] Scanner Offline.")
+
+if __name__ == "__main__":
+    # Ensure pychromecast is installed: pip install pychromecast
+    run_ai_scanner()
+
+
+
+<svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2.5" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <path d="M35 70 L40 40 Q50 30 60 40 L65 70 Z" fill="#4285F4" filter="url(#glow)" />
+  
+  <circle cx="50" cy="50" r="10" fill="none" stroke="#34A853" stroke-width="2">
+    <animate attributeName="r" from="10" to="45" dur="1.5s" repeatCount="indefinite" />
+    <animate attributeName="opacity" from="1" to="0" dur="1.5s" repeatCount="indefinite" />
+  </circle>
+  <circle cx="50" cy="50" r="10" fill="none" stroke="#EA4335" stroke-width="2">
+    <animate attributeName="r" from="10" to="45" dur="1.5s" begin="0.75s" repeatCount="indefinite" />
+    <animate attributeName="opacity" from="1" to="0" dur="1.5s" begin="0.75s" repeatCount="indefinite" />
+  </circle>
+</svg>
+
+
+
+
+<svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <polygon points="50,10 90,30 90,70 50,90 10,70 10,30" fill="none" stroke="#FBBC05" stroke-width="3" />
+  
+  <circle cx="50" cy="50" r="15" fill="#4285F4">
+    <animate attributeName="fill" values="#4285F4;#34A853;#4285F4" dur="3s" repeatCount="indefinite" />
+  </circle>
+  
+  <line x1="50" y1="10" x2="50" y2="35" stroke="#FBBC05" stroke-width="2" />
+  <line x1="10" y1="70" x2="35" y2="58" stroke="#FBBC05" stroke-width="2" />
+  <line x1="90" y1="70" x2="65" y2="58" stroke="#FBBC05" stroke-width="2" />
+</svg>
+
+
+
+
+import base64
+
+# Example: Base64 encoded 'Active' Green LED icon
+ACTIVE_ICON = """
+PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAw
+L3N2ZyI+PGNpcmNsZSBjeD0iMTAiIGN5PSIxMCIgcj0iOCIgZmlsbD0iIzM0QTg1MyIgLz48L3N2
+Zz4=
+"""
+
+def get_status_icon(is_active):
+    if is_active:
+        return base64.b64decode(ACTIVE_ICON)
+    return None # Add logic for inactive icon
