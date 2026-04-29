@@ -1,0 +1,240 @@
+import requests
+import pandas as pd
+
+def get_cell_towers(lat, lon, radius=5000, api_key="YOUR_API_KEY"):
+    """
+    Scans for cellular towers within a specified radius (meters).
+    """
+    url = f"https://opencellid.org/cell/getInArea?key={api_key}&lat={lat}&lon={lon}&radius={radius}&format=json"
+    
+    response = requests.get(url)
+    if response.status_code == 200:
+        data = response.json()
+        df = pd.DataFrame(data['cells'])
+        return df
+    else:
+        print("Error fetching data.")
+        return None
+
+# Example Usage
+# towers = get_cell_towers(14.3508, 121.0583) # San Pedro Coordinates
+# print(towers[['lat', 'lon', 'range', 'samples']])
+
+
+
+from skyfield.api import load, wgs84
+from datetime import datetime
+
+def track_satellite(sat_name, tle_line1, tle_line2):
+    """
+    Calculates the current GPS coordinates and altitude of a satellite.
+    """
+    ts = load.timescale()
+    t = ts.now()
+    
+    planets = load('de421.bsp')
+    earth = planets['earth']
+    
+    from skyfield.sgp4lib import EarthSatellite
+    satellite = EarthSatellite(tle_line1, tle_line2, sat_name, ts)
+    
+    geocentric = satellite.at(t)
+    subpoint = wgs84.subpoint(geocentric)
+    
+    return {
+        "name": sat_name,
+        "lat": subpoint.latitude.degrees,
+        "lon": subpoint.longitude.degrees,
+        "alt_km": subpoint.elevation.km
+    }
+
+# Example: ISS (International Space Station) TLE
+name = "ISS (ZARYA)"
+l1 = "1 25544U 98067A   26119.52153935  .00016717  00000-0  30143-3 0  9990"
+l2 = "2 25544  51.6416  12.3456 0005234  45.1234  21.9876 15.49876543123456"
+
+# print(track_satellite(name, l1, l2))
+
+
+
+import folium
+
+def generate_scanner_map(center_lat, center_lon, towers_df, satellites_list):
+    """
+    Creates an interactive HTML map with HUD-style overlays.
+    """
+    m = folium.Map(location=[center_lat, center_lon], zoom_start=12, tiles='CartoDB dark_matter')
+    
+    # Add Cell Towers
+    for _, tower in towers_df.iterrows():
+        folium.CircleMarker(
+            location=[tower['lat'], tower['lon']],
+            radius=5,
+            color='#00ff00',
+            fill=True,
+            tooltip=f"Cell ID: {tower['cellId']}"
+        ).add_to(m)
+        
+    # Add Satellites
+    for sat in satellites_list:
+        folium.Marker(
+            location=[sat['lat'], sat['lon']],
+            icon=folium.Icon(color='blue', icon='info-sign'),
+            popup=f"{sat['name']} - Alt: {sat['alt_km']:.2f}km"
+        ).add_to(m)
+        
+    m.save("scanner_map.html")
+    print("Scanner Map Generated: Open scanner_map.html to view.")
+
+
+
+import requests
+import pandas as pd
+from skyfield.api import load, wgs84
+from skyfield.sgp4lib import EarthSatellite
+
+class AIScanner:
+    def __init__(self, cell_api_key):
+        self.ts = load.timescale()
+        self.cell_api_key = cell_api_key
+        # Load Earth data for coordinate projection
+        self.planets = load('de421.bsp')
+        self.earth = self.planets['earth']
+
+    def auto_scan_satellites(self, tle_url='https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=tle'):
+        """Automated TLE fetching and orbital propagation."""
+        response = requests.get(tle_url)
+        lines = response.text.strip().splitlines()
+        satellites = []
+        
+        # Parse TLE triplets (Name, Line 1, Line 2)
+        for i in range(0, len(lines), 3):
+            name = lines[i].strip()
+            l1, l2 = lines[i+1], lines[i+2]
+            sat = EarthSatellite(l1, l2, name, self.ts)
+            
+            # Calculate current position
+            geocentric = sat.at(self.ts.now())
+            subpoint = wgs84.subpoint(geocentric)
+            satellites.append({
+                "id": name,
+                "lat": subpoint.latitude.degrees,
+                "lon": subpoint.longitude.degrees,
+                "alt": subpoint.elevation.km
+            })
+        return pd.DataFrame(satellites)
+
+    def auto_scan_cells(self, lat, lon, radius=10000):
+        """Fetches active cell towers in a radius via OpenCellID."""
+        url = f"https://opencellid.org/cell/getInArea?key={self.cell_api_key}&lat={lat}&lon={lon}&radius={radius}&format=json"
+        data = requests.get(url).json()
+        return pd.DataFrame(data.get('cells', []))
+
+
+
+import numpy as np
+import cv2
+
+def detect_tower_signature(image_path):
+    """
+    AI/Computer Vision placeholder for detecting tower structures 
+    in high-res satellite imagery using edge detection and shape heuristics.
+    """
+    img = cv2.imread(image_path)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    
+    # Use Canny to find structural edges (often towers have sharp vertical profiles)
+    edges = cv2.Canny(gray, 50, 150, apertureSize=3)
+    lines = cv2.HoughLinesP(edges, 1, np.pi/180, 100, minLineLength=50, maxLineGap=10)
+    
+    detections = len(lines) if lines is not None else 0
+    return {"status": "Active Scan Complete", "potential_structures": detections}
+
+
+
+import folium
+from folium.plugins import Realtime
+
+def generate_hud(center_lat, center_lon, sat_df, cell_df):
+    m = folium.Map(location=[center_lat, center_lon], zoom_start=11, tiles='CartoDB dark_matter')
+
+    # HUD Overlay: Satellites (Blue Pulse)
+    for _, sat in sat_df.head(20).iterrows(): # Sample top 20 for performance
+        folium.CircleMarker(
+            location=[sat['lat'], sat['lon']],
+            radius=4, color='#00f2ff', fill=True,
+            popup=f"SAT: {sat['id']}\nAlt: {sat['alt']:.2f}km"
+        ).add_to(m)
+
+    # HUD Overlay: Cell Towers (Red Pulse)
+    for _, cell in cell_df.iterrows():
+        folium.Marker(
+            location=[cell['lat'], cell['lon']],
+            icon=folium.DivIcon(html=f"""<div style="font-family: monospace; color: #ff3300; font-size: 10pt;">[CELL_{cell['cellId']}]</div>"""),
+        ).add_to(m)
+
+    m.save("ai_scanner_hud.html")
+    print("Mapping environment online. View 'ai_scanner_hud.html'.")
+
+
+
+<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M40 30H60V50H40V30Z" fill="#00D9FF" stroke="#00A3BF" stroke-width="2"/>
+  <circle cx="50" cy="40" r="5" fill="#FFFFFF"/>
+  
+  <path d="M15 35L35 30V50L15 45V35Z" fill="#007791" stroke="#00A3BF" stroke-width="1.5"/>
+  <path d="M85 35L65 30V50L85 45V35Z" fill="#007791" stroke="#00A3BF" stroke-width="1.5"/>
+  
+  <path d="M45 55L35 85H65L55 55H45Z" fill="#00D9FF" fill-opacity="0.3">
+    <animate attributeName="fill-opacity" values="0.1;0.5;0.1" dur="2s" repeatCount="indefinite" />
+  </path>
+  <path d="M40 50L30 90" stroke="#00D9FF" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <path d="M60 50L70 90" stroke="#00D9FF" stroke-width="1.5" stroke-dasharray="4 4"/>
+  
+  <path d="M20 60C20 80 80 80 80 60" stroke="#00A3BF" stroke-width="1" stroke-dasharray="2 2"/>
+</svg>
+
+
+
+<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M50 20L35 90H65L50 20Z" stroke="#FF3333" stroke-width="2.5" fill="none"/>
+  <path d="M42 55H58" stroke="#FF3333" stroke-width="1.5"/>
+  <path d="M38 75H62" stroke="#FF3333" stroke-width="1.5"/>
+  
+  <rect x="47" y="15" width="6" height="10" rx="1" fill="#FF3333"/>
+  <path d="M50 15V10" stroke="#FF3333" stroke-width="2"/>
+  
+  <circle cx="50" cy="15" r="10" stroke="#FF3333" stroke-width="1.5" stroke-opacity="0.8">
+    <animate attributeName="r" values="10;35" dur="2.5s" repeatCount="indefinite" />
+    <animate attributeName="stroke-opacity" values="0.8;0" dur="2.5s" repeatCount="indefinite" />
+  </circle>
+  <circle cx="50" cy="15" r="10" stroke="#FF3333" stroke-width="1" stroke-opacity="0.5">
+    <animate attributeName="r" values="10;50" dur="2.5s" begin="0.8s" repeatCount="indefinite" />
+    <animate attributeName="stroke-opacity" values="0.5;0" dur="2.5s" begin="0.8s" repeatCount="indefinite" />
+  </circle>
+</svg>
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AI Scanner HUD Icons</title>
+    <style>
+        body { background-color: #050a10; color: white; font-family: sans-serif; display: flex; gap: 40px; padding: 50px; }
+        .icon-container { text-align: center; }
+        img { width: 100px; height: 100px; }
+    </style>
+</head>
+<body>
+    <div class="icon-container">
+        <img src="ai-satellite.svg" alt="Active AI Satellite">
+        <p>AI SAT: ACTIVE</p>
+    </div>
+    <div class="icon-container">
+        <img src="cell-tower.svg" alt="Cell Tower Detected">
+        <p>CELL NODE: ONLINE</p>
+    </div>
+</body>
+</html>
