@@ -180,3 +180,166 @@ public class RaceCorp_MPX_AdvancedController : MonoBehaviour {
         _rb.AddForce(-transform.up * 50f * _rb.velocity.magnitude);
     }
 }
+
+
+
+using UnityEngine;
+using UnityEngine.UI;
+using System.Collections.Generic;
+
+[System.Serializable]
+public struct UIIconMapping {
+    public string iconName; // e.g., "Vehicle Status"
+    public Image iconComponent; // Reference to the UI Image on Canvas
+    public Sprite iconSprite; // The asset (imported from image_8.png)
+}
+
+public class RaceCorp_UIManager : MonoBehaviour {
+    [Header("Icon Grid Configuration")]
+    public List<UIIconMapping> atvIcons;
+    
+    // Customization Colors
+    public Color activeColor = new Color(1.0f, 0.5f, 0.0f); // Orange from image_8.png
+    public Color inactiveColor = Color.gray;
+
+    private void Start() {
+        InitializeIcons();
+    }
+
+    private void InitializeIcons() {
+        // Set all sprites correctly
+        foreach (var mapping in atvIcons) {
+            if (mapping.iconComponent != null && mapping.iconSprite != null) {
+                mapping.iconComponent.sprite = mapping.iconSprite;
+                SetIconState(mapping.iconName, false); // Initialize as inactive
+            }
+        }
+    }
+
+    /// <summary>
+    /// Update the highlight state of an icon based on game logic.
+    /// Example: SetIconState("Race Mode", true) when driver activates sport mode.
+    /// </summary>
+    public void SetIconState(string name, bool isActive) {
+        foreach (var mapping in atvIcons) {
+            if (mapping.iconName == name) {
+                mapping.iconComponent.color = isActive ? activeColor : inactiveColor;
+                
+                // Optional: Add glow or scale effect if active
+                if (isActive) {
+                    mapping.iconComponent.transform.localScale = Vector3.one * 1.1f;
+                } else {
+                    mapping.iconComponent.transform.localScale = Vector3.one;
+                }
+            }
+        }
+    }
+}
+
+
+
+import 'package:flutter/material.dart';
+
+// 1. Create a custom widget for the icon cards
+class AtvStatusCard extends StatelessWidget {
+  final String iconAssetPath; // Path to your imported icon
+  final String title;
+  final bool isActive;
+
+  // Race Corp color palette from image_8.png
+  static const Color orangeActive = Color(0xFFFF8000);
+  static const Color darkBackground = Color(0xFF1A1D21); // Dark blue/grey background
+
+  const AtvStatusCard({
+    Key? key,
+    required this.iconAssetPath,
+    required this.title,
+    this.isActive = false,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12.0),
+      decoration: BoxDecoration(
+        color: darkBackground,
+        border: isActive ? Border.all(color: orangeActive, width: 2) : null,
+        borderRadius: BorderRadius.circular(15.0),
+        boxShadow: isActive
+            ? [BoxShadow(color: orangeActive.withOpacity(0.5), blurRadius: 10)]
+            : [],
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          // Use Image.asset or SvgPicture.asset if using SVG
+          Expanded(
+            child: Image.asset(
+              iconAssetPath,
+              fit: BoxFit.contain,
+              // Apply active color tint if active
+              color: isActive ? orangeActive : Colors.grey,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            title.toUpperCase(),
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: isActive ? orangeActive : Colors.grey,
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+              letterSpacing: 1.0,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// 2. Build the Grid Layout
+class RaceCorp_DashGrid extends StatelessWidget {
+  const RaceCorp_DashGrid({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    // List of data mirroring image_8.png
+    final List<Map<String, dynamic>> atvStatusItems = [
+      {'title': 'Vehicle Status', 'asset': 'assets/rc_atv_vehicle.png', 'active': false},
+      {'title': 'Hybrid System', 'asset': 'assets/rc_atv_hybrid.png', 'active': true}, // Active State example
+      {'title': 'AWD NAV', 'asset': 'assets/rc_atv_awd.png', 'active': false},
+      {'title': 'Race Mode', 'asset': 'assets/rc_atv_race.png', 'active': false},
+      {'title': 'Utility Mode', 'asset': 'assets/rc_atv_utility.png', 'active': false},
+      {'title': 'Performance Data', 'asset': 'assets/rc_atv_data.png', 'active': false},
+      {'title': 'Suspension Adj', 'asset': 'assets/rc_atv_suspension.png', 'active': false},
+      {'title': 'Differentials', 'asset': 'assets/rc_atv_diffs.png', 'active': false},
+      {'title': 'Tire Monitor', 'asset': 'assets/rc_atv_tires.png', 'active': true}, // Active State example
+    ];
+
+    return Scaffold(
+      backgroundColor: Colors.grey[200], // Match grid background from image_8.png
+      appBar: AppBar(title: const Text("RACE CORP. - MP-X ATV ICON SET")),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: GridView.builder(
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3, // 3 columns
+            crossAxisSpacing: 16.0,
+            mainAxisSpacing: 16.0,
+            childAspectRatio: 1.0, // Square cards
+          ),
+          itemCount: atvStatusItems.length,
+          itemBuilder: (context, index) {
+            final item = atvStatusItems[index];
+            return AtvStatusCard(
+              title: item['title'],
+              iconAssetPath: item['asset'],
+              isActive: item['active'],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
