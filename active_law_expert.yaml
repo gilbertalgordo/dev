@@ -1,0 +1,197 @@
+import os
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_community.vectorstores import Chroma
+from langchain.chains import RetrievalQA
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+# 1. Configuration & API Setup
+os.environ["OPENAI_API_KEY"] = "your_api_key_here"
+
+class LegalAIExpert:
+    def __init__(self, corpus_path):
+        self.corpus_path = corpus_path
+        self.llm = ChatOpenAI(model_name="gpt-4-turbo", temperature=0)
+        self.vector_db = None
+
+    def ingest_legal_documents(self):
+        """Loads and indexes legal texts (PDFs)."""
+        loader = PyPDFLoader(self.corpus_path)
+        documents = loader.load()
+        
+        # Split text into manageable chunks for high-precision retrieval
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000, 
+            chunk_overlap=100
+        )
+        texts = text_splitter.split_documents(documents)
+        
+        # Create a vector database using OpenAI Embeddings
+        self.vector_db = Chroma.from_documents(
+            documents=texts, 
+            embedding=OpenAIEmbeddings(),
+            persist_directory="./legal_db"
+        )
+        print("Legal corpus indexed successfully.")
+
+    def get_legal_opinion(self, query):
+        """Queries the AI using RAG to ensure accuracy."""
+        if not self.vector_db:
+            return "Error: Legal database not initialized."
+
+        # Define the system prompt to enforce expert behavior
+        prompt_template = """
+        You are a highly specialized Legal AI Expert. 
+        Use the following pieces of retrieved context to answer the question. 
+        If you don't know the answer based on the context, state that you don't know. 
+        Always cite the section or article number from the text.
+        
+        Context: {context}
+        Question: {question}
+        
+        Expert Legal Analysis:"""
+
+        qa_chain = RetrievalQA.from_chain_type(
+            llm=self.llm,
+            chain_type="stuff",
+            retriever=self.vector_db.as_retriever(search_kwargs={"k": 3}),
+            chain_type_kwargs={"prompt": ChatOpenAI.from_template(prompt_template)}
+        )
+        
+        return qa_chain.run(query)
+
+# --- Execution ---
+# Initialize with a path to your legal statutes or case files
+# legal_ai = LegalAIExpert("civil_code_2024.pdf")
+# legal_ai.ingest_legal_documents()
+# response = legal_ai.get_legal_opinion("What are the requirements for a valid commercial contract?")
+# print(response)
+
+
+
+import os
+from typing import List, Dict
+from pydantic import BaseModel, Field
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_community.vectorstores import Chroma
+from langchain.agents import tool
+from langchain.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import JsonOutputParser
+
+# 1. Advanced Schema for Structured Legal Analysis
+class LegalAnalysis(BaseModel):
+    conclusion: str = Field(description="The final legal answer")
+    statutes: List[str] = Field(description="List of specific laws cited (e.g., Art. 1156)")
+    confidence_score: float = Field(description="0.0 to 1.0 score of fact-grounding")
+    risks: List[str] = Field(description="Potential counter-arguments or legal risks")
+
+class LegalAIAdvanced:
+    def __init__(self):
+        # Using 2026-era reasoning models (GPT-4o or Claude 3.5 Sonnet)
+        self.llm = ChatOpenAI(model="gpt-4o", temperature=0)
+        self.embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
+        self.db = Chroma(persist_directory="./legal_vector_store", embedding_function=self.embeddings)
+
+    @tool
+    def verify_statute(self, citation: str, context: str) -> str:
+        """Verifies if a specific statute supports the claim. Returns 'Supported' or 'Unsupported'."""
+        # Internally simulates a SemanticCite check (as seen in late 2025/2026 tech)
+        verification_prompt = f"Verify if {citation} explicitly supports: {context}. Be pedantic."
+        return self.llm.invoke(verification_prompt).content
+
+    def generate_expert_opinion(self, user_query: str):
+        # STAGE 1: Hierarchical Retrieval
+        # Fetches law + relevant case precedents
+        docs = self.db.similarity_search(user_query, k=5)
+        context_text = "\n\n".join([d.page_content for d in docs])
+
+        # STAGE 2: Agentic Chain-of-Thought (CoT)
+        system_prompt = """
+        You are a Senior Legal Analyst. Follow this workflow:
+        1. DECONSTRUCT: Identify the specific legal elements of the user's query.
+        2. RETRIEVE: Use the provided context to find matching statutes.
+        3. VALIDATE: Ensure no 'hallucinated' laws are mentioned. If a law isn't in context, say 'Statute not found'.
+        4. STRUCTURE: Output valid JSON with 'conclusion', 'statutes', 'confidence_score', and 'risks'.
+        """
+        
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            ("human", "Legal Context: {context}\n\nUser Issue: {query}")
+        ])
+
+        # STAGE 3: Structured Output Parsing
+        parser = JsonOutputParser(pydantic_object=LegalAnalysis)
+        chain = prompt | self.llm | parser
+
+        try:
+            analysis = chain.invoke({"context": context_text, "query": user_query})
+            
+            # STAGE 4: Final Verification Loop (The 'Active' Guardrail)
+            for statute in analysis['statutes']:
+                v_check = self.verify_statute.invoke({"citation": statute, "context": analysis['conclusion']})
+                if "Unsupported" in v_check:
+                    analysis['confidence_score'] -= 0.2
+                    analysis['risks'].append(f"Statute {statute} may be misapplied here.")
+            
+            return analysis
+        except Exception as e:
+            return {"error": f"Analysis failed: {str(e)}"}
+
+# --- Implementation Example ---
+# ai = LegalAIAdvanced()
+# opinion = ai.generate_expert_opinion("Does a digital signature count as a valid consent for a land deed?")
+# print(f"Conclusion: {opinion['conclusion']}")
+
+
+
+<svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="blueGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e3a8a;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0f172a;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <rect x="5" y="5" width="90" height="90" rx="15" fill="url(#blueGrad)" stroke="#1e40af" stroke-width="2"/>
+  
+  <path d="M40 30 L60 30 L60 45 L40 45 Z" fill="#94a3b8" stroke="#f1f5f9" stroke-width="2"/>
+  <path d="M35 32 L65 32 L65 43 L35 43 Z" fill="#64748b"/>
+  <path d="M50 45 L50 75" stroke="#f1f5f9" stroke-width="3" stroke-linecap="round"/>
+  
+  <circle cx="50" cy="37.5" r="3" fill="#fbbf24"/>
+  <path d="M50 30 v-8" stroke="#fbbf24" stroke-width="1.5"/>
+  <path d="M56 32 l6 -6" stroke="#fbbf24" stroke-width="1.5"/>
+  <path d="M44 32 l-6 -6" stroke="#fbbf24" stroke-width="1.5"/>
+</svg>
+
+
+
+<svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="blueGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e3a8a;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0f172a;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <rect x="5" y="5" width="90" height="90" rx="15" fill="url(#blueGrad)" stroke="#1e40af" stroke-width="2"/>
+  
+  <path d="M50 80 V30 M30 35 H70 M30 35 L30 65 M70 35 L70 65" stroke="#f1f5f9" stroke-width="2.5" fill="none"/>
+  
+  <rect x="22" y="60" width="16" height="6" rx="1" fill="#94a3b8"/>
+  <rect x="22" y="55" width="16" height="4" rx="1" fill="#cbd5e1"/>
+  
+  <circle cx="70" cy="60" r="8" fill="#fbbf24" filter="blur(1px)"/>
+  <text x="70" y="62.5" font-family="Arial" font-size="6" font-weight="bold" text-anchor="middle" fill="#0f172a">AI</text>
+</svg>
+
+
+
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+
+# Assuming the provided image is saved as 'legal_ai_icons.png' 
+# in the same directory as this script.
+image_path = 'legal_ai_icons.png'
+
+def display_legal_icons(path):
+    try:
+        img = mpimg.imread(
