@@ -1,0 +1,269 @@
+import numpy as np
+
+def calculate_storm_stability(angle_deg, hybrid_mode=False):
+    """
+    Calculates the Righting Lever (GZ) for a super cruiser.
+    In 'hybrid_mode', active ballast and outriggers increase stability.
+    """
+    angle_rad = np.radians(angle_deg)
+    
+    # Base Metacentric Height (GM) in meters
+    gm_base = 1.72 
+    
+    # If hybrid mode is active, outriggers and ballast 
+    # lower the Center of Gravity (KG) and increase GM.
+    if hybrid_mode:
+        gm_active = gm_base * 1.45  # 45% increase in stability
+    else:
+        gm_active = gm_base
+        
+    # Simplified GZ formula: GZ = GM * sin(theta)
+    # In extreme storms, we add a correction for the 'Form Stability' of a wide hull
+    gz = gm_active * np.sin(angle_rad) + (0.5 * np.tan(angle_rad)**2) * np.sin(angle_rad)
+    
+    return gz
+
+# Simulation: Ship tilted to 30 degrees in a sea storm
+tilt_angle = 30
+standard_gz = calculate_storm_stability(tilt_angle, hybrid_mode=False)
+hybrid_gz = calculate_storm_stability(tilt_angle, hybrid_mode=True)
+
+print(f"--- Sea Storm Survival Analysis ---")
+print(f"Heel Angle: {tilt_angle}°")
+print(f"Standard Righting Lever (GZ): {standard_gz:.2f} meters")
+print(f"Hybrid Mode Righting Lever (GZ): {hybrid_gz:.2f} meters")
+print(f"Stability Improvement: {((hybrid_gz/standard_gz)-1)*100:.1f}%")
+
+
+
+import time
+import math
+
+class StormSentinelAI:
+    def __init__(self):
+        # PID Constants for Fin Stabilization
+        self.Kp = 0.85  # Proportional: Instant reaction to wave tilt
+        self.Ki = 0.15  # Integral: Correction for sustained list/wind
+        self.Kd = 0.45  # Derivative: Damping for rapid wave oscillations
+        
+        self.previous_error = 0
+        self.integral = 0
+        self.target_heel = 0.0  # Goal: Keep ship at 0 degrees
+        
+    def process_telemetry(self, current_heel, dt):
+        """
+        Calculates the required stabilizer fin angle.
+        current_heel: current tilt in degrees
+        dt: time step in seconds
+        """
+        error = self.target_heel - current_heel
+        self.integral += error * dt
+        derivative = (error - self.previous_error) / dt
+        
+        # PID Output: Desired Fin Angle
+        fin_adjustment = (self.Kp * error) + (self.Ki * self.integral) + (self.Kd * derivative)
+        
+        # Physical constraints: Fins cannot exceed 35 degrees
+        fin_adjustment = max(min(fin_adjustment, 35), -35)
+        
+        self.previous_error = error
+        return fin_adjustment
+
+def simulate_sea_state_9():
+    ship_ai = StormSentinelAI()
+    dt = 0.1 # 100ms processing loop
+    
+    print(f"{'TIME(s)':<10} | {'WAVE TILT':<12} | {'FIN ANGLE':<12} | {'STATUS'}")
+    print("-" * 55)
+
+    # Simulation for a 10-second rogue wave event
+    for t in range(0, 100):
+        timestamp = t * dt
+        # Simulate a oscillating sea wave (Sine wave with 25-degree peaks)
+        wave_impact = 25 * math.sin(timestamp * 1.5) 
+        
+        # AI calculates counter-force
+        correction = ship_ai.process_telemetry(wave_impact, dt)
+        
+        status = "RECOVERING" if abs(wave_impact) > 15 else "STABLE"
+        
+        if t % 10 == 0: # Print every second
+            print(f"{timestamp:<10.1f} | {wave_impact:<12.2f} | {correction:<12.2f} | {status}")
+
+if __name__ == "__main__":
+    simulate_sea_state_9()
+
+
+
+import cairo
+import math
+
+class StormCruiserIcons:
+    def __init__(self, output_prefix="storm_cruiser_icon"):
+        self.output_prefix = output_prefix
+        # Basic dimensions (canonical coordinates 0.0 to 1.0)
+        self.size = 256  # Base resolution
+        self.line_weight = self.size * 0.04
+        self.surface = None
+        self.ctx = None
+        self.setup_context()
+
+    def setup_context(self):
+        """Initializes the Cairo surface and common context settings."""
+        self.surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, self.size, self.size)
+        self.ctx = cairo.Context(self.surface)
+        self.ctx.scale(self.size, self.size)  # Normalize to 0.0 - 1.0 range
+        self.ctx.set_line_cap(cairo.LINE_CAP_ROUND)
+        self.ctx.set_line_join(cairo.LINE_JOIN_ROUND)
+
+    def set_color(self, hex_color, alpha=1.0):
+        """Helper to set color from hex string."""
+        hex_color = hex_color.lstrip('#')
+        r, g, b = tuple(int(hex_color[i:i+2], 16) / 255.0 for i in (0, 2, 4))
+        self.ctx.set_source_rgba(r, g, b, alpha)
+
+    def draw_background(self, bg_color="#001F3F"): # Deep Storm Navy
+        self.ctx.rectangle(0, 0, 1, 1)
+        self.set_color(bg_color)
+        self.ctx.fill()
+
+    def generate_side_profile_icon(self):
+        """Generates the main side profile 'Cruiser Mode' icon."""
+        self.draw_background()
+        self.ctx.set_line_width(0.03)
+        self.set_color("#FFFFFF") # White lines for contrast
+
+        # Draw the main hybrid hull
+        self.ctx.move_to(0.1, 0.6)  # Bow (Pointed)
+        self.ctx.line_to(0.85, 0.6) # Main hull line
+        self.ctx.line_to(0.9, 0.7)  # Stern angle
+        self.ctx.line_to(0.15, 0.7) # Bottom hull
+        self.ctx.close_path()
+        self.ctx.stroke()
+
+        # Draw the Superstructure
+        self.ctx.move_to(0.3, 0.6)
+        self.ctx.line_to(0.35, 0.45)
+        self.ctx.line_to(0.65, 0.45)
+        self.ctx.line_to(0.7, 0.6)
+        self.ctx.stroke()
+
+        # Add 'Super Cruiser' visual elements (e.g., stylized radar)
+        self.ctx.move_to(0.5, 0.45)
+        self.ctx.line_to(0.5, 0.35)
+        self.ctx.arc(0.5, 0.35, 0.05, 0, 2 * math.pi)
+        self.ctx.stroke()
+
+        # Add the 'Hybrid/Storm' indicator (Submersible capability hint)
+        self.ctx.set_line_width(0.015)
+        self.set_color("#00FFFF", 0.7) # Cyan aura
+        self.ctx.move_to(0.2, 0.75)
+        self.ctx.line_to(0.8, 0.75) # Subsurface keel line
+        self.ctx.stroke()
+
+        self.surface.write_to_png(f"{self.output_prefix}_profile.png")
+        print(f"Generated: {self.output_prefix}_profile.png")
+
+    def generate_top_down_hybrid_icon(self):
+        """Generates the top-down 'Hybrid Deployment' icon."""
+        self.draw_background()
+        self.ctx.set_line_width(0.025)
+        self.set_color("#FFFFFF")
+
+        # Central Cruiser Hull
+        self.ctx.move_to(0.5, 0.1)  # Bow
+        self.ctx.line_to(0.65, 0.3)
+        self.ctx.line_to(0.65, 0.8)
+        self.ctx.line_to(0.5, 0.9)  # Stern
+        self.ctx.line_to(0.35, 0.8)
+        self.ctx.line_to(0.35, 0.3)
+        self.ctx.close_path()
+        self.ctx.stroke()
+
+        # Draw the 'Storm Survival Outriggers' (Semi-submerged mode)
+        self.ctx.set_line_width(0.02)
+        self.set_color("#00FFFF") # Distinct Hybrid color
+
+        # Port Outrigger
+        self.ctx.move_to(0.2, 0.4)
+        self.ctx.line_to(0.3, 0.4)
+        self.ctx.line_to(0.3, 0.7)
+        self.ctx.line_to(0.2, 0.7)
+        self.ctx.close_path()
+        self.ctx.stroke()
+
+        # Starboard Outrigger
+        self.ctx.move_to(0.8, 0.4)
+        self.ctx.line_to(0.7, 0.4)
+        self.ctx.line_to(0.7, 0.7)
+        self.ctx.line_to(0.8, 0.7)
+        self.ctx.close_path()
+        self.ctx.stroke()
+
+        # Connecting 'Hybrid Braces'
+        self.ctx.set_line_width(0.01)
+        self.ctx.move_to(0.35, 0.55)
+        self.ctx.line_to(0.3, 0.55)
+        self.ctx.move_to(0.65, 0.55)
+        self.ctx.line_to(0.7, 0.55)
+        self.ctx.stroke()
+
+        self.surface.write_to_png(f"{self.output_prefix}_hybrid_top.png")
+        print(f"Generated: {self.output_prefix}_hybrid_top.png")
+
+    def generate_storm_survival_mode_icon(self):
+        """Generates an icon emphasizing 'Storm Survival'."""
+        self.draw_background(bg_color="#000814") # Darker, maximum danger context
+        self.ctx.set_line_width(0.03)
+        
+        # Draw the Ship (Simplified side profile, heavily angled/stressed)
+        self.set_color("#FFFFFF")
+        self.ctx.save()
+        self.ctx.translate(0.5, 0.6)
+        self.ctx.rotate(math.radians(-15)) # Angled against storm
+        self.ctx.move_to(-0.35, 0)
+        self.ctx.line_to(0.35, 0) # Hull line
+        self.ctx.line_to(0.3, -0.15) # Stern
+        self.ctx.line_to(-0.3, -0.15) # Superstructure
+        self.ctx.close_path()
+        self.ctx.stroke()
+        self.ctx.restore()
+
+        # Add the 'Sea Storm' (Stylized huge wave/force vector)
+        self.ctx.set_line_width(0.04)
+        self.set_color("#FFD700") # Gold/Warning color for the storm force
+        
+        # Massive wave arc approaching the ship
+        self.ctx.arc(0.2, 1.2, 0.8, math.radians(200), math.radians(300))
+        self.ctx.stroke()
+        
+        # Subsurface stabilization indicator (Active counter-measure)
+        self.ctx.set_line_width(0.02)
+        self.set_color("#00FFFF")
+        self.ctx.move_to(0.4, 0.8)
+        self.ctx.line_to(0.6, 0.8)
+        self.ctx.move_to(0.5, 0.8)
+        self.ctx.line_to(0.5, 0.95) # Vertical anchor/thruster
+        self.ctx.stroke()
+
+        self.surface.write_to_png(f"{self.output_prefix}_storm_active.png")
+        print(f"Generated: {self.output_prefix}_storm_active.png")
+
+# --- Execute the Generator ---
+if __name__ == "__main__":
+    # Ensure PyCairo is installed: `pip install pycairo`
+    try:
+        icon_gen = StormCruiserIcons()
+        icon_gen.generate_side_profile_icon()
+        
+        # Reset context for the next icon
+        icon_gen.setup_context() 
+        icon_gen.generate_top_down_hybrid_icon()
+        
+        icon_gen.setup_context() 
+        icon_gen.generate_storm_survival_mode_icon()
+        
+        print("\nStorm Cruiser Icon Suite generated successfully.")
+    except ImportError:
+        print("Error: PyCairo is required to run this script.")
+        print("Please install it using: pip install pycairo")
