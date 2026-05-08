@@ -1,0 +1,290 @@
+import re
+import datetime
+
+class InvisibleModerator:
+    def __init__(self):
+        # Configurable sensitivity levels
+        self.shadow_log = []
+        self.restricted_patterns = [
+            r"(\bscript\b.*?\b/script\b)", # Basic XSS
+            r"(\bdrop\b\s+\btable\b)",      # Basic SQLi
+        ]
+
+    def scan_content(self, user_id, message):
+        """
+        Runs multiple silent checks on the content.
+        """
+        is_flagged = False
+        reason = None
+
+        # Layer 1: Pattern Matching (Regex)
+        for pattern in self.restricted_patterns:
+            if re.search(pattern, message, re.IGNORECASE):
+                is_flagged = True
+                reason = "Heuristic Pattern Match"
+                break
+
+        # Layer 2: Metadata Analysis (Invisible to user)
+        # Check for rapid-fire posting or "burst" behavior
+        if len(message) > 2000:
+            is_flagged = True
+            reason = "Buffer Overflow Risk/Spam"
+
+        # Silently log the event for admin review
+        self._log_event(user_id, message, is_flagged, reason)
+
+        return {
+            "is_flagged": is_flagged,
+            "action": "STRIP" if is_flagged else "PASS",
+            "internal_reason": reason
+        }
+
+    def _log_event(self, user_id, message, flagged, reason):
+        entry = {
+            "timestamp": datetime.datetime.now().isoformat(),
+            "user": user_id,
+            "status": "FLAGGED" if flagged else "CLEAN",
+            "reason": reason
+        }
+        self.shadow_log.append(entry)
+
+# --- Implementation Example ---
+mod = InvisibleModerator()
+user_input = "<script>alert('hacked')</script>"
+result = mod.scan_content(user_101, user_input)
+
+if result["is_flagged"]:
+    # The moderator acts invisibly by returning a neutral state 
+    # or dropping the packet rather than showing an error message.
+    print("System: Message discarded silently.") 
+
+
+
+import asyncio
+import hashlib
+import time
+from typing import Dict, Optional
+from dataclasses import dataclass
+
+@dataclass
+class ModerationVerdict:
+    is_safe: bool
+    confidence: float
+    action: str  # GHOST, THROTTLE, SINKHOLE, PASS
+    metadata: Dict
+
+class ActiveInvisibleModerator:
+    def __init__(self):
+        self.user_reputation_matrix = {}  # In-memory store for behavior
+        self.signature_blacklist = set()  # Known malicious payloads
+        self.toxicity_threshold = 0.82
+
+    async def intercept_input(self, user_id: str, payload: str) -> ModerationVerdict:
+        """
+        The entry point for all user interactions. 
+        Runs invisible checks without blocking the UI.
+        """
+        # Generate a content fingerprint to detect repetitive spam
+        fingerprint = hashlib.sha256(payload.encode()).hexdigest()
+        
+        # Parallel Processing: Behavior vs. Content
+        results = await asyncio.gather(
+            self._analyze_behavior(user_id, fingerprint),
+            self._analyze_content_nuance(payload)
+        )
+        
+        behavior_score, content_score = results
+
+        # Logic for "Invisible" Actions
+        if behavior_score < 0.3 or content_score > self.toxicity_threshold:
+            # Ghosting: The user thinks it's posted, but it's isolated.
+            return ModerationVerdict(False, 0.98, "GHOST", {"reason": "Low Rep/High Toxicity"})
+        
+        if 0.5 < content_score < self.toxicity_threshold:
+            # Throttle: Introduce artificial latency to slow down "heat"
+            return ModerationVerdict(True, 0.60, "THROTTLE", {"delay": 2.5})
+
+        return ModerationVerdict(True, 1.0, "PASS", {})
+
+    async def _analyze_behavior(self, user_id: str, fingerprint: str) -> float:
+        """
+        Heuristic: Monitors velocity and repetition (Entropy Check).
+        """
+        now = time.time()
+        user_data = self.user_reputation_matrix.get(user_id, {"last_seen": now, "score": 1.0, "history": []})
+        
+        # Check for rapid repetition
+        if fingerprint in user_data["history"]:
+            user_data["score"] -= 0.2
+        
+        # Check for burst velocity
+        if now - user_data["last_seen"] < 0.5:
+            user_data["score"] -= 0.1
+            
+        user_data["history"] = (user_data["history"] + [fingerprint])[-10:]
+        user_data["last_seen"] = now
+        self.user_reputation_matrix[user_id] = user_data
+        
+        return max(0.0, user_data["score"])
+
+    async def _analyze_content_nuance(self, text: str) -> float:
+        """
+        In a production environment, this would call a transformer-based 
+        LLM or a specialized Toxicity API.
+        """
+        # Mocking an AI confidence score (0.0 = Safe, 1.0 = Toxic)
+        # Real-world: return model.predict(text)
+        return 0.15 
+
+# --- Invisible Execution Engine ---
+async def handle_request(user_id, message):
+    aim = ActiveInvisibleModerator()
+    verdict = await aim.intercept_input(user_id, message)
+
+    if verdict.action == "GHOST":
+        # Return a success code to the user, but don't commit to the global DB
+        return {"status": 200, "internal_status": "ISOLATED"}
+    
+    if verdict.action == "THROTTLE":
+        await asyncio.sleep(verdict.metadata["delay"])
+        
+    return {"status": 200, "internal_status": "COMMITTED"}
+
+
+
+<svg id="aim-icon-interceptor" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <defs>
+    <linearGradient id="shield_grad" x1="50" y1="10" x2="50" y2="90" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#212529" stop-opacity="0.6"/> <!-- Stealth Gray -->
+      <stop offset="1" stop-color="#343a40" stop-opacity="0.3"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2.5" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <!-- Translucent Shield Structure -->
+  <path d="M50 10 L15 25 V55 C15 75 35 85 50 90 C65 85 85 75 85 55 V25 L50 10 Z" fill="url(#shield_grad)" stroke="#6c757d" stroke-width="1" stroke-opacity="0.5"/>
+  
+  <!-- Active Watching Eye -->
+  <g class="aim-eye" filter="url(#glow)">
+    <ellipse cx="50" cy="50" rx="18" ry="10" stroke="#007bff" stroke-width="2"/>
+    <circle cx="50" cy="50" r="6" fill="#17a2b8"/> <!-- Cyan Pupil -->
+  </g>
+</svg>
+
+
+
+<svg id="aim-icon-ghost" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <!-- Fading Figure Head and Hood -->
+  <path class="aim-hood" d="M50 15 C40 15 32 22 32 32 V45 L50 40 L68 45 V32 C68 22 60 15 50 15 Z" fill="#495057" fill-opacity="0.7"/>
+  
+  <!-- Dissolving Nodes (Particle System) -->
+  <g class="aim-nodes" fill="#17a2b8">
+    <circle class="node-1" cx="35" cy="55" r="2.5"/>
+    <circle class="node-2" cx="50" cy="65" r="2"/>
+    <circle class="node-3" cx="65" cy="58" r="3"/>
+    <circle class="node-4" cx="42" cy="75" r="1.5"/>
+    <circle class="node-5" cx="58" cy="80" r="2"/>
+  </g>
+</svg>
+
+
+
+/* Base Container for the Icons */
+.aim-icon-container {
+  width: 64px;
+  height: 64px;
+  background-color: #1a1a1d; /* Matches the dark gray grid background */
+  border-radius: 8px;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* --- Animation for Icon A: The Interceptor --- */
+#aim-icon-interceptor .aim-eye {
+  animation: interceptor-pulse 4s ease-in-out infinite;
+  opacity: 0.8;
+}
+
+@keyframes interceptor-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.6;
+    stroke-width: 1.5;
+  }
+  50% {
+    transform: scale(1.05); /* Slight expansion *
+    opacity: 1; /* Brightens when 'active' */
+    stroke-width: 2.5;
+  }
+}
+
+/* --- Animation for Icon B: The Ghost Protocol --- */
+#aim-icon-ghost .aim-hood {
+  animation: ghost-fade 6s infinite;
+}
+
+#aim-icon-ghost .aim-nodes circle {
+  animation: node-flurry 3s infinite ease-out;
+  opacity: 0;
+}
+
+/* Staggered particle animation */
+#aim-icon-ghost .node-1 { animation-delay: 0s; }
+#aim-icon-ghost .node-2 { animation-delay: 0.5s; }
+#aim-icon-ghost .node-3 { animation-delay: 1.2s; }
+#aim-icon-ghost .node-4 { animation-delay: 1.9s; }
+#aim-icon-ghost .node-5 { animation-delay: 2.5s; }
+
+@keyframes ghost-fade {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 0.3; } /* Hood dissolves further */
+}
+
+@keyframes node-flurry {
+  0% {
+    transform: translateY(0) scale(1);
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 0.8;
+  }
+  100% {
+    transform: translateY(-20px) scale(0.5); /* Nodes float up and dissolve */
+    opacity: 0;
+  }
+}
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Invisible Moderator AI Icons</title>
+    <!-- Link the CSS file above -->
+    <link rel="stylesheet" href="aim-icons.css">
+</head>
+<body style="background-color: #1a1a1d; display: flex; gap: 20px; padding: 50px;">
+
+    <!-- Icon 1 Container -->
+    <div class="aim-icon-container">
+        <!-- Embed Icon A SVG Here -->
+    </div>
+
+    <!-- Icon 2 Container -->
+    <div class="aim-icon-container">
+        <!-- Embed Icon B SVG Here -->
+    </div>
+
+</body>
+</html>
