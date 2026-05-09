@@ -1,0 +1,163 @@
+import subprocess
+import json
+import logging
+
+class ActiveCodeRunner:
+    """
+    A modular execution runner for handling development workflows.
+    """
+    def __init__(self, environment_config=None):
+        self.config = environment_config or {}
+        logging.basicConfig(level=logging.INFO)
+
+    def execute_snippet(self, code, language="python"):
+        """
+        Executes a code snippet within a isolated subprocess.
+        """
+        try:
+            if language == "python":
+                process = subprocess.Popen(
+                    ['python3', '-c', code],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                stdout, stderr = process.communicate()
+                return {"status": "success", "output": stdout, "error": stderr}
+            else:
+                return {"status": "error", "message": "Language not supported"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+# Implementation Example
+if __name__ == "__main__":
+    runner = ActiveCodeRunner()
+    sample_code = "print('Execution active: System initialized.')"
+    result = runner.execute_snippet(sample_code)
+    
+    if result["status"] == "success":
+        print(f"Runner Output: {result['output']}")
+    else:
+        print(f"Runner Error: {result['error']}")
+
+
+
+
+import asyncio
+import uuid
+import time
+import json
+import logging
+from dataclasses import dataclass, field
+from datetime import datetime
+
+@dataclass
+class ExecutionResult:
+    task_id: str
+    output: str
+    error: str
+    execution_time: float
+    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+
+class AdvancedCodeRunner:
+    """
+    Asynchronous runner designed for high-performance automation 
+    and integration with monitoring HUD systems.
+    """
+    def __init__(self):
+        self.active_tasks = {}
+        self.logger = logging.getLogger("ActiveCodeRunner")
+
+    async def run_in_sandbox(self, code: str):
+        task_id = str(uuid.uuid4())
+        start_time = time.perf_counter()
+        
+        # In a production environment, implement a secure container 
+        # (e.g., Docker or WASM sandbox) here.
+        process = await asyncio.create_subprocess_exec(
+            'python3', '-c', code,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        stdout, stderr = await process.communicate()
+        end_time = time.perf_counter()
+        
+        result = ExecutionResult(
+            task_id=task_id,
+            output=stdout.decode().strip(),
+            error=stderr.decode().strip(),
+            execution_time=end_time - start_time
+        )
+        
+        self.active_tasks[task_id] = result
+        return result
+
+# Example Usage
+async def main():
+    runner = AdvancedCodeRunner()
+    
+    # Advanced code to execute
+    code_task = "import math; print(f'Calculated Complexity: {math.pi * 42}')"
+    
+    result = await runner.run_in_sandbox(code_task)
+    
+    # Formatted output for HUD integration
+    hud_output = {
+        "event": "EXECUTION_COMPLETE",
+        "data": {
+            "id": result.task_id,
+            "latency_ms": round(result.execution_time * 1000, 2),
+            "payload": result.output
+        }
+    }
+    print(json.dumps(hud_output, indent=2))
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+
+
+<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Outer HUD Ring -->
+  <circle cx="50" cy="50" r="45" stroke="#00F2FF" stroke-width="2" stroke-dasharray="10 5" opacity="0.6"/>
+  <!-- Inner Rotating Element -->
+  <path d="M50 15V25M50 75V85M15 50H25M75 50H85" stroke="#00F2FF" stroke-width="3" stroke-linecap="round"/>
+  <!-- Central Execution Arrow -->
+  <path d="M42 35L65 50L42 65V35Z" fill="#00F2FF">
+    <animate attributeName="opacity" values="1;0.4;1" dur="2s" repeatCount="indefinite" />
+  </path>
+</svg>
+
+
+
+<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="100" height="100" rx="15" fill="#1A1A1A"/>
+  <!-- Pulse Wave -->
+  <path d="M20 50H35L42 30L55 70L62 50H80" stroke="#39FF14" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <animate attributeName="stroke-dasharray" from="0, 150" to="150, 0" dur="1.5s" repeatCount="indefinite" />
+  </path>
+  <circle cx="80" cy="50" r="4" fill="#39FF14"/>
+</svg>
+
+
+
+
+<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Hexagon Frame -->
+  <path d="M50 10L85 30V70L50 90L15 70V30L50 10Z" stroke="#FFFFFF" stroke-width="2" opacity="0.8"/>
+  <!-- Internal Connections -->
+  <circle cx="50" cy="50" r="8" fill="#FFFFFF"/>
+  <line x1="50" y1="50" x2="50" y1="10" stroke="#FFFFFF" stroke-width="1.5"/>
+  <line x1="50" y1="50" x2="85" y2="70" stroke="#FFFFFF" stroke-width="1.5"/>
+  <line x1="50" y1="50" x2="15" y2="70" stroke="#FFFFFF" stroke-width="1.5"/>
+</svg>
+
+
+
+.hud-icon {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+}
