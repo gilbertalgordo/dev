@@ -1,0 +1,175 @@
+import numpy as np
+
+class ERS_ControlUnit:
+    def __init__(self):
+        # Constants for a high-performance hybrid powertrain
+        self.max_battery_capacity = 4.0  # MJ (Megajoules)
+        self.current_soc = 2.5           # Current State of Charge
+        self.mgu_k_limit = 120           # kW limit (per FIA or Hypercar regs)
+        self.mgu_h_limit = 90            # kW limit
+        
+    def harvest_energy(self, braking_force, exhaust_velocity):
+        """
+        Calculates energy recovery from Kinetic and Heat sources.
+        """
+        # MGU-K: Recovery during deceleration (Regenerative Braking)
+        k_recovery = np.clip(braking_force * 0.85, 0, self.mgu_k_limit)
+        
+        # MGU-H: Recovery from turbocharger waste heat
+        h_recovery = np.clip(exhaust_velocity * 0.60, 0, self.mgu_h_limit)
+        
+        total_harvested = (k_recovery + h_recovery) / 3600  # Convert kW to MJ/s
+        
+        # Prevent overcharging
+        if self.current_soc + total_harvested < self.max_battery_capacity:
+            self.current_soc += total_harvested
+        else:
+            self.current_soc = self.max_battery_capacity
+            
+        return k_recovery, h_recovery
+
+    def deploy_boost(self, throttle_position, mode='qualifying'):
+        """
+        Manages deployment of stored energy for acceleration.
+        """
+        deployment_map = {'qualifying': 1.0, 'race': 0.85, 'eco': 0.4}
+        requested_power = throttle_position * self.mgu_k_limit * deployment_map.get(mode, 0.8)
+        
+        if self.current_soc > 0.5:  # Reserve buffer
+            actual_deployment = requested_power
+            self.current_soc -= (actual_deployment / 3600)
+        else:
+            actual_deployment = 0.0 # Derate to protect battery
+            
+        return actual_deployment
+
+# Example Execution
+ecu = ERS_ControlUnit()
+k_rec, h_rec = ecu.harvest_energy(braking_force=150, exhaust_velocity=100)
+print(f"MGU-K Recovery: {k_rec}kW | MGU-H Recovery: {h_rec}kW")
+
+
+
+import numpy as np
+
+class ScuderiaActiveAI:
+    def __init__(self):
+        # System Constants
+        self.battery_capacity_mj = 4.0 
+        self.soc = 2.0  # Current state of charge
+        self.thermal_threshold = 0.85 # 85% of max temp
+        
+    def calculate_recovery_priority(self, telemetry):
+        """
+        Determines whether to prioritize MGU-H or MGU-K recovery 
+        based on current track phase and thermal health.
+        """
+        temp_factor = np.exp(telemetry['core_temp'] / 100)
+        
+        # MGU-H (Heat) Priority: High during full-throttle (high exhaust velocity)
+        h_priority = telemetry['throttle'] * (1 - self.thermal_threshold)
+        
+        # MGU-K (Kinetic) Priority: High during deceleration
+        k_priority = telemetry['braking_force'] * 1.5
+        
+        return h_priority, k_priority
+
+    def execute_fast_recovery(self, h_pri, k_pri):
+        """
+        Active 'Sling-Shot' logic: instantly recovers system equilibrium 
+        after a high-discharge event (e.g., Overtake Mode).
+        """
+        recovery_rate = 0.0
+        
+        if k_pri > h_pri:
+            # Maximum harvesting via regenerative braking
+            recovery_rate = min(120.0, k_pri * 10) # kW
+        else:
+            # Recovering via Turbo-compounding (MGU-H)
+            recovery_rate = min(90.0, h_pri * 12) # kW
+            
+        # Update SOC with high-frequency delta
+        delta_mj = (recovery_rate / 1000) * 0.001 # 1ms step
+        self.soc = min(self.battery_capacity_mj, self.soc + delta_mj)
+        
+        return self.soc
+
+# Initialize Active AI System
+ferrari_ai = ScuderiaActiveAI()
+current_telemetry = {'throttle': 0.1, 'braking_force': 0.9, 'core_temp': 78}
+h, k = ferrari_ai.calculate_recovery_priority(current_telemetry)
+new_soc = ferrari_ai.execute_fast_recovery(h, k)
+
+
+
+
+<div class="hud-container">
+  <!-- MGU-K: Kinetic Energy Recovery Icon -->
+  <div class="icon-box" id="mgu-k">
+    <svg viewBox="0 0 100 100" class="icon-svg">
+      <circle cx="50" cy="50" r="45" class="outer-ring" />
+      <path d="M30 50 L50 30 L70 50 L50 70 Z" class="core-diamond" />
+      <path d="M50 20 V35 M50 65 V80 M20 50 H35 M65 50 H80" class="accents" />
+      <!-- Energy Flow Animation -->
+      <circle cx="50" cy="50" r="45" class="flow-line k-flow" />
+    </svg>
+    <span>MGU-K ACTIVE</span>
+  </div>
+
+  <!-- MGU-H: Thermal Heat Recovery Icon -->
+  <div class="icon-box" id="mgu-h">
+    <svg viewBox="0 0 100 100" class="icon-svg">
+      <path d="M50 15 Q70 35 50 55 Q30 35 50 15" class="flame-core" />
+      <circle cx="50" cy="50" r="40" class="static-ring" />
+      <path d="M50 10 L50 25 M85 50 L70 50 M50 90 L50 75 M15 50 L30 50" class="accents" />
+      <circle cx="50" cy="50" r="40" class="flow-line h-flow" />
+    </svg>
+    <span>MGU-H RECOVERY</span>
+  </div>
+
+  <!-- Machine AI: System Intelligence Icon -->
+  <div class="icon-box" id="ai-core">
+    <svg viewBox="0 0 100 100" class="icon-svg">
+      <rect x="35" y="35" width="30" height="30" class="ai-square" />
+      <g class="data-nodes">
+        <circle cx="50" cy="20" r="3" />
+        <circle cx="80" cy="50" r="3" />
+        <circle cx="50" cy="80" r="3" />
+        <circle cx="20" cy="50" r="3" />
+      </g>
+      <path d="M50 23 V35 M77 50 H65 M50 77 V65 M23 50 H35" class="connector-lines" />
+    </svg>
+    <span>ACTIVE AI CORE</span>
+  </div>
+</div>
+
+<style>
+  body { background: #050505; color: #ff2800; font-family: 'Orbitron', sans-serif; }
+  .hud-container { display: flex; gap: 40px; justify-content: center; padding: 50px; }
+  .icon-box { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 120px; }
+  .icon-svg { width: 100%; height: auto; filter: drop-shadow(0 0 5px #ff2800); }
+  
+  /* Styling Elements */
+  svg { fill: none; stroke: #ff2800; stroke-width: 2; }
+  .outer-ring, .static-ring { stroke-opacity: 0.3; }
+  .core-diamond, .flame-core, .ai-square { fill: #ff2800; fill-opacity: 0.2; }
+
+  /* Animations */
+  .flow-line {
+    stroke: #ffec00; /* Ferrari Yellow for energy flow */
+    stroke-dasharray: 280;
+    stroke-dashoffset: 280;
+    animation: flow-anim 1.5s linear infinite;
+  }
+  
+  .ai-square { animation: pulse 2s ease-in-out infinite; }
+  
+  @keyframes flow-anim {
+    to { stroke-dashoffset: 0; }
+  }
+  
+  @keyframes pulse {
+    0%, 100% { fill-opacity: 0.2; transform: scale(1); transform-origin: center; }
+    50% { fill-opacity: 0.6; transform: scale(1.1); transform-origin: center; }
+  }
+</style>
