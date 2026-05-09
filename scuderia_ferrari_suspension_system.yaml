@@ -1,0 +1,169 @@
+import time
+import math
+
+class ActiveSuspensionSystem:
+    def __init__(self):
+        # Target ride height in mm
+        self.target_height = 25.0 
+        # Hydraulic pressure limits (Bar)
+        self.max_pressure = 250.0
+        # G-Force Threshold for Gravitational Auto-Leveling
+        self.g_threshold = 0.5 
+
+    def get_sensor_data(self):
+        """
+        Simulated input from IMU and Laser Ride Height sensors.
+        Returns: (lat_g, long_g, [fr_height, fl_height, rr_height, rl_height])
+        """
+        # In a real F1/Hypercar environment, this pulls from the CAN bus
+        return 1.2, -0.8, [22.5, 27.1, 24.8, 25.2]
+
+    def calculate_gravitational_compensation(self, lat_g, long_g):
+        """
+        Calculates the required pressure offset based on gravitational forces.
+        """
+        # Compensation factor for lateral and longitudinal load transfer
+        lat_adjustment = lat_g * 15.2  
+        long_adjustment = long_g * 12.5
+        return lat_adjustment, long_adjustment
+
+    def update_hydraulics(self):
+        lat_g, long_g, heights = self.get_sensor_data()
+        lat_comp, long_comp = self.calculate_gravitational_compensation(lat_g, long_g)
+
+        # corner_pressures = [FrontRight, FrontLeft, RearRight, RearLeft]
+        new_pressures = []
+        
+        for i, height in enumerate(heights):
+            # Calculate error from target ride height
+            error = self.target_height - height
+            
+            # Basic Proportional Control + Gravitational Logic
+            # Example: If lat_g is positive (right turn), increase pressure on left side
+            base_p = (error * 5.0) + 100.0 # Base pressure + height correction
+            
+            # Apply gravitational offsets based on corner position
+            if i % 2 == 0: # Right Side
+                p_final = base_p - lat_comp + long_comp
+            else: # Left Side
+                p_final = base_p + lat_comp + long_comp
+                
+            new_pressures.append(min(p_final, self.max_pressure))
+
+        self.apply_hydraulic_actuation(new_pressures)
+
+    def apply_hydraulic_actuation(self, pressures):
+        # Interface with high-speed solenoid valves
+        print(f"Applying Pressures (Bar): FR:{pressures[0]:.1f} | FL:{pressures[1]:.1f} | RR:{pressures[2]:.1f} | RL:{pressures[3]:.1f}")
+
+# Execution Loop (Running at high frequency, e.g., 1000Hz)
+system = ActiveSuspensionSystem()
+while True:
+    system.update_hydraulics()
+    time.sleep(0.001)
+
+
+
+#include <Wire.h>
+#include <InternalIMU.h> // Specialized 6-Axis IMU Library
+
+struct SuspensionCorner {
+    int pin_actuator;
+    float current_height;
+    float target_pressure;
+    float damping_coefficient;
+};
+
+// Initialize corners: FR, FL, RR, RL
+SuspensionCorner corners[4] = {{10, 0, 0, 0.8}, {11, 0, 0, 0.8}, {12, 0, 0, 0.9}, {13, 0, 0, 0.9}};
+
+class ActiveHydraulicSystem {
+private:
+    const float RIDE_HEIGHT_TARGET = 15.5; // mm (F1 Spec)
+    const float MAX_HYDRAULIC_BAR = 280.0;
+    float roll_stiffness = 1.25;
+
+public:
+    void processGravitationalVector(float latG, float longG, float vertG) {
+        for (int i = 0; i < 4; i++) {
+            // 1. Calculate Load Transfer
+            float load_factor = (latG * getLatSign(i)) + (longG * getLongSign(i));
+            
+            // 2. Gravitational Automatic Adjustment
+            // Increase pressure on the outside/loaded corners
+            corners[i].target_pressure = (load_factor * roll_stiffness) * 100.0;
+            
+            // 3. Vertical G-Force Compensation (Downforce adjustment)
+            if (vertG > 1.5) { 
+                corners[i].target_pressure += (vertG * 15.0); // Stiffen for high downforce
+            }
+
+            applyHydraulicOutput(i, corners[i].target_pressure);
+        }
+    }
+
+    void applyHydraulicOutput(int corner, float pressure) {
+        pressure = constrain(pressure, 10.0, MAX_HYDRAULIC_BAR);
+        int signal = map(pressure, 0, MAX_HYDRAULIC_BAR, 0, 4095); // 12-bit DAC
+        analogWrite(corners[corner].pin_actuator, signal);
+    }
+
+    // Helper functions for corner orientation
+    int getLatSign(int i) { return (i % 2 == 0) ? -1 : 1; } // Right vs Left
+    int getLongSign(int i) { return (i < 2) ? 1 : -1; }    // Front vs Rear
+};
+
+ActiveHydraulicSystem raceSystem;
+
+void loop() {
+    float gx, gy, gz;
+    IMU.readGForces(&gx, &gy, &gz); // High-speed IMU read
+    
+    // Execute Kaizen Logic Loop at 2000Hz
+    raceSystem.processGravitationalVector(gx, gy, gz);
+    delayMicroseconds(500); 
+}
+
+
+
+<svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Piston Body -->
+  <rect x="40" y="30" width="20" height="40" rx="2" fill="none" stroke="#FF2800" stroke-width="3"/>
+  <rect x="44" y="35" width="12" height="30" fill="#FF2800" fill-opacity="0.3"/>
+  <!-- Piston Rod -->
+  <line x1="50" y1="10" x2="50" y2="30" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round"/>
+  <line x1="50" y1="70" x2="50" y2="90" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round"/>
+  <!-- Active Force Waves -->
+  <path d="M30 40 Q 20 50 30 60" fill="none" stroke="#00F2FF" stroke-width="2" opacity="0.6"/>
+  <path d="M70 40 Q 80 50 70 60" fill="none" stroke="#00F2FF" stroke-width="2" opacity="0.6"/>
+</svg>
+
+
+
+<svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Outer Horizon Circle -->
+  <circle cx="50" cy="50" r="45" fill="none" stroke="#444" stroke-width="1" stroke-dasharray="4 2"/>
+  <!-- Horizontal Level Line (The "Automatic" Level) -->
+  <line x1="10" y1="50" x2="90" y2="50" stroke="#FFFFFF" stroke-width="2" opacity="0.8"/>
+  <!-- Gravitational Vector -->
+  <line x1="50" y1="50" x2="70" y2="30" stroke="#FF2800" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="70" cy="30" r="4" fill="#FF2800"/>
+  <!-- Center Point (CoG) -->
+  <circle cx="50" cy="50" r="6" fill="none" stroke="#00F2FF" stroke-width="2"/>
+  <circle cx="50" cy="50" r="2" fill="#00F2FF"/>
+</svg>
+
+
+
+<svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Hydraulic Pipe Outline -->
+  <path d="M20 80 L20 40 Q20 20 40 20 L80 20" fill="none" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round"/>
+  <!-- Pressure Pulse -->
+  <circle cx="20" cy="60" r="5" fill="#FF2800">
+    <animate attributeName="cy" values="70;30;70" dur="2s" repeatCount="indefinite" />
+    <animate attributeName="opacity" values="0.2;1;0.2" dur="2s" repeatCount="indefinite" />
+  </circle>
+  <!-- Gauge Detail -->
+  <path d="M60 20 L60 10 M70 20 L70 10 M50 20 L50 10" stroke="#00F2FF" stroke-width="2"/>
+</svg>
+
