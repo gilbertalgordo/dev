@@ -1,0 +1,290 @@
+#include <iostream>
+#include <algorithm>
+
+struct VehicleTelemetry {
+    double velocity;       // m/s
+    double brakePressure;  // 0.0 to 1.0
+    double batteryLevel;   // %
+    bool   isErsActive;    // Energy Recovery System
+    double steeringAngle;  // degrees
+};
+
+class ScuderiaControlSystem {
+public:
+    // Aerodynamic Constants
+    const double AIRBRAKE_THRESHOLD_VELOCITY = 45.0; // ~160 km/h
+    const double DRAG_REDUCTION_ANGLE = 0.0;        // Flat for top speed
+    const double MAX_DOWNFORCE_ANGLE = 45.0;        // High angle for braking/cornering
+
+    struct ActuatorState {
+        double wingAngle;
+        double hybridDeployment; // kW
+        std::string mode;
+    };
+
+    ActuatorState processDynamics(const VehicleTelemetry& data) {
+        ActuatorState state;
+
+        // 1. ACTIVE AIRBRAKE LOGIC
+        // Deploy wing if braking hard at high speeds
+        if (data.velocity > AIRBRAKE_THRESHOLD_VELOCITY && data.brakePressure > 0.6) {
+            state.wingAngle = MAX_DOWNFORCE_ANGLE;
+            state.mode = "ACTIVE_AIRBRAKE_DEPLOYED";
+        } 
+        // DRS (Drag Reduction System) Logic
+        else if (data.velocity > 70.0 && data.brakePressure < 0.1) {
+            state.wingAngle = DRAG_REDUCTION_ANGLE;
+            state.mode = "DRS_ACTIVE";
+        } 
+        else {
+            state.wingAngle = 15.0; // Neutral downforce
+            state.mode = "BALANCED_AERO";
+        }
+
+        // 2. HYBRID POWER MANAGEMENT (ERS / KERS)
+        // If braking, harvest energy (MGU-K)
+        if (data.brakePressure > 0.2) {
+            state.hybridDeployment = -50.0; // Negative indicates charging
+        } 
+        // If full throttle (hypothetical), deploy maximum battery power
+        else if (data.velocity < 80.0 && data.batteryLevel > 10.0) {
+            state.hybridDeployment = 120.0; // Power boost in kW
+        } 
+        else {
+            state.hybridDeployment = 0.0;
+        }
+
+        return state;
+    }
+};
+
+int main() {
+    ScuderiaControlSystem f80_ECU;
+    
+    // Simulate high-speed heavy braking (Airbrake Scenario)
+    VehicleTelemetry currentDrive = {85.0, 0.9, 85.0, true, 0.0};
+    
+    auto result = f80_ECU.processDynamics(currentDrive);
+
+    std::cout << "--- SCUDERIA DYNAMICS REPORT ---" << std::endl;
+    std::cout << "Mode: " << result.mode << std::endl;
+    std::cout << "Wing Angle: " << result.wingAngle << " degrees" << std::endl;
+    std::cout << "Hybrid Flow: " << result.hybridDeployment << " kW" << std::endl;
+
+    return 0;
+}
+
+
+
+#include <iostream>
+#include <vector>
+#include <cmath>
+
+// Simulation Constants
+const double G = 9.81;
+const double SPEED_OF_SOUND = 343.0; // m/s for Mach considerations
+
+struct VehicleState {
+    double velocity;       // m/s
+    double longitudinalG;  // Acceleration/Deceleration
+    double brakePressure;  // 0.0 to 1.0 (Master Cylinder)
+    double batterySoC;     // State of Charge (0-100%)
+    double pitchAngle;     // Degrees (detects nose-dive)
+};
+
+class ScuderiaActiveController {
+private:
+    // Predictive Load Demand (PLD) Parameters
+    double targetDownforce; // Newtons
+    double dragCoefficient;
+
+public:
+    struct ActuatorCommands {
+        double wingAngle;      // 0 (LD) to 45 (HD)
+        double gurneyFlap;     // Extension %
+        double mguKRegen;      // kW (Negative for harvesting)
+        std::string aeroMode;
+    };
+
+    ActuatorCommands calculateOptimalState(const VehicleState& state) {
+        ActuatorCommands cmd;
+
+        // 1. PREDICTIVE AIRBRAKE & WING LOGIC (HD vs LD)
+        // Transitions from Low Drag (LD) to High Downforce (HD) 
+        // based on Deceleration Rate and Pitch.
+        if (state.brakePressure > 0.7 || state.longitudinalG < -1.5) {
+            cmd.wingAngle = 45.0; // Max Airbrake position
+            cmd.gurneyFlap = 100.0;
+            cmd.aeroMode = "HIGH_DOWNFORCE_BRAKING";
+        } 
+        else if (state.velocity > 75.0 && state.longitudinalG >= 0) {
+            // DRS logic: Minimal angle for straight-line speed
+            cmd.wingAngle = 0.0; 
+            cmd.gurneyFlap = 0.0;
+            cmd.aeroMode = "LOW_DRAG_DRS";
+        } 
+        else {
+            // Cornering balance: Map-based modulation
+            cmd.wingAngle = 18.5; 
+            cmd.aeroMode = "OPTIMAL_BALANCE";
+        }
+
+        // 2. HYBRID ENERGY RECOVERY (MGU-K)
+        // High-speed braking allows for aggressive "Regen" harvesting.
+        if (cmd.aeroMode == "HIGH_DOWNFORCE_BRAKING" && state.batterySoC < 95.0) {
+            // Maximize MGU-K resistance to assist mechanical CCM-R Plus brakes
+            cmd.mguKRegen = -150.0; // kW harvesting
+        } else {
+            cmd.mguKRegen = 0.0;
+        }
+
+        return cmd;
+    }
+};
+
+int main() {
+    ScuderiaActiveController ecu;
+    VehicleState telemetry = {83.3, -2.1, 0.85, 45.0, -1.2}; // Braking from 300km/h
+
+    auto output = ecu.calculateOptimalState(telemetry);
+
+    std::cout << "--- ACTIVE DYNAMICS SYSTEM ---" << std::endl;
+    std::cout << "Status: " << output.aeroMode << std::endl;
+    std::cout << "Rear Wing Deployment: " << output.wingAngle << " deg" << std::endl;
+    std::cout << "MGU-K Recovery: " << output.mguKRegen << " kW" << std::endl;
+
+    return 0;
+}
+
+
+
+<svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Cross-section of a Ferrari Rear Wing (Airbrake Mode) -->
+  
+  <!-- Main Wing Element (Actuated up 45 degrees) -->
+  <path d="M 20 50 L 70 20 L 85 25 L 35 55 Z" fill="#EE1C23" stroke="#FFFFFF" stroke-width="2"/>
+  
+  <!-- Gurney Flap (Active Reverse Gurney) -->
+  <path d="M 70 20 L 72 15 L 75 16 Z" fill="#FFFFFF"/>
+  
+  <!-- Actuator/Pylon -->
+  <rect x="40" y="52" width="6" height="25" fill="#333333" rx="2"/>
+  
+  <!-- Airflow Indicator Arrows (Simulating extreme drag/downforce) -->
+  <path d="M 15 35 Q 40 15 70 5" stroke="#FFFFFF" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+  <path d="M 15 45 Q 40 25 70 15" stroke="#FFFFFF" stroke-width="1.5" fill="none" opacity="0.6"/>
+  
+  <!-- Label: HD (High Downforce) -->
+  <text x="50" y="90" font-family="Arial, sans-serif" font-size="12" fill="#FFFFFF" text-anchor="middle" font-weight="bold">HD AERO</text>
+  
+  <!-- Arrowhead definition -->
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#FFFFFF"/>
+    </marker>
+  </defs>
+</svg>
+
+
+
+<svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Ferrari Hybrid ERS Status Icon -->
+  
+  <!-- Battery Silhouette -->
+  <rect x="25" y="20" width="50" height="60" rx="5" fill="#1A1A1A" stroke="#FFFFFF" stroke-width="2"/>
+  <rect x="40" y="12" width="20" height="8" rx="2" fill="#FFFFFF"/>
+  
+  <!-- Inside Fill: Representing Energy Flow -->
+  <!-- Change fill to #00E676 (Green) for Regen, or #FF3D00 (Red) for Boost -->
+  <rect x="30" y="25" width="40" height="50" rx="3" fill="#00E676" opacity="0.9">
+    <animate attributeName="opacity" values="0.9;0.4;0.9" dur="1.5s" repeatCount="indefinite" />
+  </rect>
+  
+  <!-- Central Lightning Bolt (ERS Active) -->
+  <path d="M 50 30 L 40 50 L 50 50 L 45 70 L 60 45 L 50 45 Z" fill="#FFFFFF"/>
+  
+  <!-- Rotation Ring (Kinetic/MGU-K) -->
+  <circle cx="50" cy="50" r="35" stroke="#FFFFFF" stroke-width="2" fill="none" stroke-dasharray="15 10"/>
+  
+  <!-- Text: ERS -->
+  <text x="50" y="94" font-family="Arial, sans-serif" font-size="14" fill="#FFFFFF" text-anchor="middle" font-weight="bold">ERS REGEN</text>
+</svg>
+
+
+
+#include <iostream>
+#include <string>
+
+// Simulating automotive CAN bus telemetry data
+struct TelemetryFrame {
+    float vehicleSpeed;      // km/h
+    float brakePressure;     // 0.0 to 1.0 (Master Cylinder)
+    float batterySOC;        // State of Charge %
+    float mguKOutput;        // kW (+ is deployment, - is harvesting)
+    bool  drsRequest;        // Driver input
+};
+
+class CockpitDisplayManager {
+public:
+    enum AeroIconState { AERO_OFF, AERO_LD_DRS, AERO_HD_AIRBRAKE };
+    enum HybridIconState { HYBRID_NEUTRAL, HYBRID_HARVEST, HYBRID_BOOST };
+
+    struct DisplayState {
+        AeroIconState   aeroIcon;
+        std::string     aeroColor; // HEX String for SVG injection
+        HybridIconState hybridIcon;
+        std::string     hybridColor;
+    };
+
+    DisplayState updateDisplay(const TelemetryFrame& data) {
+        DisplayState currentOutput;
+
+        // 1. Logic for Active Airbrake Icon
+        if (data.vehicleSpeed > 180.0 && data.brakePressure > 0.75) {
+            // High speed + heavy braking = Max Downforce (Airbrake)
+            currentOutput.aeroIcon = AERO_HD_AIRBRAKE;
+            currentOutput.aeroColor = "#EE1C23"; // Ferrari Red
+        } 
+        else if (data.drsRequest && data.brakePressure < 0.1) {
+            currentOutput.aeroIcon = AERO_LD_DRS;
+            currentOutput.aeroColor = "#FFFFFF"; // Active White
+        } 
+        else {
+            currentOutput.aeroIcon = AERO_OFF;
+            currentOutput.aeroColor = "#333333"; // Dimmed Gray
+        }
+
+        // 2. Logic for Hybrid ERS Icon
+        if (data.mguKOutput < -20.0) {
+            // Significant Energy Harvesting (MGU-K Regen)
+            currentOutput.hybridIcon = HYBRID_HARVEST;
+            currentOutput.hybridColor = "#00E676"; // Bright Green
+        } 
+        else if (data.mguKOutput > 50.0) {
+            // System is Deploying Max Hybrid Power
+            currentOutput.hybridIcon = HYBRID_BOOST;
+            currentOutput.hybridColor = "#FF3D00"; // Deep Orange/Red
+        } 
+        else {
+            currentOutput.hybridIcon = HYBRID_NEUTRAL;
+            currentOutput.hybridColor = "#FFFFFF"; // Idle White
+        }
+
+        return currentOutput;
+    }
+};
+
+int main() {
+    CockpitDisplayManager displayECU;
+    
+    // Test Case: High Speed Braking into Turn 1 (Airbrake & Regen Active)
+    TelemetryFrame heavyBraking = {315.5f, 0.92f, 65.0f, -110.0f, false};
+    
+    auto uiState = displayECU.updateDisplay(heavyBraking);
+
+    std::cout << "--- COCKPIT ICON DRIVER REPORT ---" << std::endl;
+    std::cout << "Airbrake Icon State: " << uiState.aeroIcon << " (Color: " << uiState.aeroColor << ")" << std::endl;
+    std::cout << "Hybrid Icon State: " << uiState.hybridIcon << " (Color: " << uiState.hybridColor << ")" << std::endl;
+
+    return 0;
+}
