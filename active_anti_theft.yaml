@@ -1,0 +1,213 @@
+import cv2
+import time
+
+def initiate_security_system():
+    # Load Pre-trained Model (MobileNet SSD)
+    prototxt = "deploy.prototxt"
+    model = "mobilenet_iter_73000.caffemodel"
+    net = cv2.dnn.readNetFromCaffe(prototxt, model)
+
+    # Initialize Camera
+    cap = cv2.VideoCapture(0)
+    
+    print("[SYSTEM] Anti-Theft AI Active...")
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        (h, w) = frame.shape[:2]
+        blob = cv2.dnn.blobFromImage(cv2.resize(frame, (300, 300)), 0.007843, (300, 300), 127.5)
+        net.setInput(blob)
+        detections = net.forward()
+
+        # --- HUD RENDERING ---
+        cv2.putText(frame, "SECURE MODE: ACTIVE", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.rectangle(frame, (50, 50), (w-50, h-50), (255, 255, 0), 1) # Detection Zone
+
+        for i in range(detections.shape[2]):
+            confidence = detections[0, 0, i, 2]
+
+            if confidence > 0.6:  # Threshold
+                idx = int(detections[0, 0, i, 1])
+                
+                # Filter for 'person' class (ID 15 in MobileNet SSD)
+                if idx == 15:
+                    box = detections[0, 0, i, 3:7] * [w, h, w, h]
+                    (startX, startY, endX, endY) = box.astype("int")
+
+                    # --- ACTIVE RESPONSE ---
+                    # Logic: If person is detected, trigger HUD Warning and Log
+                    cv2.rectangle(frame, (startX, startY), (endX, endY), (0, 0, 255), 3)
+                    cv2.putText(frame, "!!! INTRUDER DETECTED !!!", (startX, startY - 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                    
+                    # Simulated System Action (e.g., lock doors, sound alarm)
+                    execute_countermeasures()
+
+        cv2.imshow("Security Feed - AI HUD", frame)
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+def execute_countermeasures():
+    """Placeholder for active hardware triggers."""
+    # Example: Send notification to mobile or trigger GPIO pins on a Raspberry Pi
+    pass
+
+if __name__ == "__main__":
+    initiate_security_system()
+
+
+
+import cv2
+import numpy as np
+import threading
+import datetime
+
+class ActiveAntiTheftAI:
+    def __init__(self):
+        # Load YOLOv8 or high-speed equivalent (Conceptualized for OpenCV DNN)
+        self.net = cv2.dnn.readNet("yolov8n.weights", "yolov8n.cfg")
+        self.layer_names = self.net.getLayerNames()
+        self.output_layers = [self.layer_names[i - 1] for i in self.net.getUnconnectedOutLayers()]
+        
+        # System Constants
+        self.ALARM_THRESHOLD = 30  # Frames of dwell time before alert
+        self.restricted_zone = None 
+        self.intruder_log = {}
+
+    def render_hud(self, frame, status, color=(0, 255, 0)):
+        """Renders a high-performance glassmorphic HUD."""
+        h, w, _ = frame.shape
+        overlay = frame.copy()
+        
+        # HUD Header
+        cv2.rectangle(overlay, (0, 0), (w, 60), (20, 20, 20), -1)
+        cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
+        
+        cv2.putText(frame, f"SYSTEM STATUS: {status}", (20, 40), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+        cv2.putText(frame, datetime.datetime.now().strftime("%H:%M:%S"), (w-150, 40), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+
+    def trigger_countermeasures(self, frame):
+        """Asynchronous execution of security protocols."""
+        def run():
+            # Example: Integrate with cloud logging or IoT hardware
+            print("[CRITICAL] Threat neutralizer logic engaged.")
+            # cv2.imwrite(f"threats/intruder_{time.time()}.jpg", frame)
+            
+        threading.Thread(target=run).start()
+
+    def run_engine(self, source=0):
+        cap = cv2.VideoCapture(source)
+        
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret: break
+
+            height, width, _ = frame.shape
+            blob = cv2.dnn.blobFromImage(frame, 0.00392, (416, 416), (0, 0, 0), True, crop=False)
+            self.net.setInput(blob)
+            outs = self.net.forward(self.output_layers)
+
+            threat_detected = False
+            
+            for out in outs:
+                for detection in out:
+                    scores = detection[5:]
+                    class_id = np.argmax(scores)
+                    confidence = scores[class_id]
+                    
+                    if confidence > 0.8 and class_id == 0: # Person detection
+                        threat_detected = True
+                        center_x = int(detection[0] * width)
+                        center_y = int(detection[1] * height)
+                        w = int(detection[2] * width)
+                        h = int(detection[3] * height)
+
+                        # Draw HUD Tracking Box
+                        cv2.rectangle(frame, (center_x-w//2, center_y-h//2), 
+                                      (center_x+w//2, center_y+h//2), (0, 0, 255), 2)
+                        cv2.line(frame, (center_x, center_y), (center_x, center_y-20), (0, 255, 255), 2)
+
+            if threat_detected:
+                self.render_hud(frame, "ALARM - INTRUDER", (0, 0, 255))
+                self.trigger_countermeasures(frame)
+            else:
+                self.render_hud(frame, "ENCRYPTED - MONITORING")
+
+            cv2.imshow("Active AI Sentinel", frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'): break
+
+        cap.release()
+        cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    sentinel = ActiveAntiTheftAI()
+    sentinel.run_engine()
+
+
+
+import os
+from openai import OpenAI
+
+# Initialize the client (assumes OPENAI_API_KEY is in environment variables)
+client = OpenAI()
+
+def generate_anti_theft_icons():
+    """
+    Programmatically generates a suite of minimalist icon assets 
+    representing Active Anti-Theft AI.
+    """
+    
+    # Define a complex, cohesive visual prompt
+    icon_prompt = (
+        "A set of four distinct, minimalist web icons presented in a grid array. "
+        "The style must be clean, modern, and vector-based, using a glassmorphic palette: "
+        "deep charcoal gray background with glowing electric blue and subtle cyan accents. "
+        
+        "Icon 1 (Upper Left): 'Biometric Lock'. A stylized human fingerprint merging "
+        "integrally into a secure padlock shape. It emits a soft blue light. "
+        
+        "Icon 2 (Upper Right): 'The Active Sentinel'. A futuristic security camera head "
+        "integrated with a stylized cerebral cortex or neural network pattern. "
+        "A focused laser line projects downward. "
+        
+        "Icon 3 (Lower Left): 'The Encrypted Vector'. A 3D isometric shield shape. "
+        "Its surface is composed of flowing, illuminated data streams and binary code. "
+        
+        "Icon 4 (Lower Right): 'Zero-Trust Protocol'. A low-poly geometry diamond shape "
+        "that is actively deconstructing into smaller, connected data packets, "
+        "representing decentralized blockchain verification. "
+        
+        "The overall aesthetic must be high-tech, futuristic, and sterile, "
+        "suitable for a cybersecurity dashboard interface."
+    )
+
+    try:
+        print("[SYSTEM] Synthesizing icon assets...")
+        response = client.images.generate(
+            model="dall-e-3",
+            prompt=icon_prompt,
+            size="1024x1024",
+            quality="hd",  # Ensures sharp vector-like clarity
+            n=1,
+        )
+
+        image_url = response.data[0].url
+        print(f"\n[SUCCESS] Icon sheet generated. View and download here:\n{image_url}")
+        
+        # In a deployment environment, you would download and process this image
+        # into four separate transparent PNG assets.
+
+    except Exception as e:
+        print(f"[ERROR] Asset generation failed: {e}")
+
+if __name__ == "__main__":
+    generate_anti_theft_icons()
