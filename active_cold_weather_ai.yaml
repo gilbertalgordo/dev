@@ -1,0 +1,199 @@
+import requests
+import time
+import json
+from datetime import datetime
+
+# --- Configuration ---
+API_KEY = "YOUR_OPENWEATHER_API_KEY"
+CITY = "San Pedro,PH"  # Your current location
+UNITS = "metric"      # Metric for Celsius, Imperial for Fahrenheit
+INTERVAL = 600        # Refresh every 10 minutes (600 seconds)
+
+def fetch_weather():
+    """Fetches real-time weather data from the Equator/Global API."""
+    url = f"http://api.openweathermap.org/data/2.5/weather?q={CITY}&appid={API_KEY}&units={UNITS}"
+    
+    try:
+        response = requests.get(url)
+        data = response.json()
+        
+        if response.status_code == 200:
+            return data
+        else:
+            print(f"Error {response.status_code}: {data.get('message')}")
+            return None
+    except Exception as e:
+        print(f"Connection Error: {e}")
+        return None
+
+def display_hud(data):
+    """Renders the data in a HUD-style format for Equator AI."""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    temp = data['main']['temp']
+    desc = data['weather'][0]['description'].capitalize()
+    humidity = data['main']['humidity']
+    wind = data['wind']['speed']
+
+    print("-" * 30)
+    print(f"| SYSTEM HUD: ACTIVE WEATHER |")
+    print("-" * 30)
+    print(f"TIMESTAMP : {timestamp}")
+    print(f"LOCATION  : {CITY}")
+    print(f"CONDITION : {desc}")
+    print(f"TEMP      : {temp}°C")
+    print(f"HUMIDITY  : {humidity}%")
+    print(f"WIND SPEED: {wind} m/s")
+    print("-" * 30)
+
+def main():
+    """Main loop for 24/7 operation."""
+    print("Initializing Equator AI Weather Feed...")
+    while True:
+        weather_data = fetch_weather()
+        if weather_data:
+            display_hud(weather_data)
+        
+        # Kaizen: Continuous loop logic
+        time.sleep(INTERVAL)
+
+if __name__ == "__main__":
+    main()
+
+
+
+import asyncio
+import aiohttp
+import base64
+import json
+import logging
+from datetime import datetime
+
+# --- Equator AI Credentials ---
+# Replace with your actual credentials from Utilities > Setup Configuration
+API_URL = "https://api.equatorit.com/v1/weather-sync" # Example endpoint
+API_KEY = "YOUR_API_KEY"
+API_SECRET = "YOUR_API_SECRET"
+LOCATION = {"lat": 14.35, "lon": 121.05}  # Coordinates for San Pedro, PH
+
+# --- Kaizen Logic Configuration ---
+REFRESH_RATE = 300  # 5-minute sync for high precision
+RETRY_DELAY = 10    # Backoff logic if rate-limited
+
+# Generate Base64 Auth String
+auth_str = f"{API_KEY}:{API_SECRET}"
+encoded_auth = base64.b64encode(auth_str.encode()).decode()
+HEADERS = {
+    "Authorization": f"Basic {encoded_auth}",
+    "Content-Type": "application/json",
+    "X-System-Origin": "Race-Corp-Equator-AI-Node"
+}
+
+class EquatorWeatherSentry:
+    def __init__(self):
+        self.active = True
+        self.session = None
+
+    async def fetch_external_meteorology(self):
+        """Fetches high-accuracy data to feed into Equator AI."""
+        # Using a professional source like Meteomatics or OpenWeather
+        external_url = f"https://api.openweathermap.org/data/2.5/weather?lat={LOCATION['lat']}&lon={LOCATION['lon']}&appid=EXTERNAL_KEY&units=metric"
+        async with self.session.get(external_url) as resp:
+            return await resp.json()
+
+    async def sync_to_equator(self, payload):
+        """Active Sync to Equator AI Data Lake."""
+        try:
+            async with self.session.post(API_URL, json=payload, headers=HEADERS) as resp:
+                if resp.status == 200:
+                    logging.info(f"[{datetime.now()}] Kaizen Sync: Success.")
+                else:
+                    logging.warning(f"Sync Issue: {resp.status}")
+        except Exception as e:
+            logging.error(f"Critical Connection Error: {e}")
+
+    async def run_24_7(self):
+        """The core infinite loop for active monitoring."""
+        async with aiohttp.ClientSession() as session:
+            self.session = session
+            print(">>> EQUATOR AI WEATHER SENTRY: ACTIVE <<<")
+            
+            while self.active:
+                raw_data = await self.fetch_external_meteorology()
+                
+                # Advance Data Structuring for HUD/Analytics
+                processed_payload = {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "metrics": {
+                        "temp": raw_data['main']['temp'],
+                        "pressure": raw_data['main']['pressure'],
+                        "humidity": raw_data['main']['humidity'],
+                        "wind_vectors": raw_data['wind']
+                    },
+                    "metadata": {"source": "Active_Sentry_V1", "status": "Optimized"}
+                }
+                
+                await self.sync_to_equator(processed_payload)
+                await asyncio.sleep(REFRESH_RATE)
+
+# --- Execution ---
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    sentry = EquatorWeatherSentry()
+    try:
+        asyncio.run(sentry.run_24_7())
+    except KeyboardInterrupt:
+        print("Sentry deactivated.")
+
+
+
+
+<!-- Equator AI HUD Icon Component -->
+<div class="hud-container">
+    <div class="weather-icon-wrapper active">
+        <!-- Replace with your generated image -->
+        <img src="your_glass_icon.png" alt="Weather Active" class="glass-icon">
+        <div class="status-ring"></div>
+    </div>
+    <p class="status-label">SYSTEM ACTIVE 24/7</p>
+</div>
+
+<style>
+.hud-container {
+    background: rgba(0, 0, 0, 0.8);
+    padding: 20px;
+    border-radius: 15px;
+    text-align: center;
+    font-family: 'Courier New', monospace;
+}
+
+.weather-icon-wrapper {
+    position: relative;
+    display: inline-block;
+}
+
+.glass-icon {
+    width: 80px;
+    filter: drop-shadow(0 0 10px rgba(0, 255, 255, 0.5));
+}
+
+.status-ring {
+    position: absolute;
+    top: -5px; left: -5px; right: -5px; bottom: -5px;
+    border: 2px solid #00f2ff;
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { transform: scale(0.95); opacity: 0.8; }
+    50% { transform: scale(1.1); opacity: 0.3; }
+    100% { transform: scale(0.95); opacity: 0.8; }
+}
+
+.status-label {
+    color: #00f2ff;
+    font-size: 10px;
+    margin-top: 10px;
+    letter-spacing: 2px;
+}
+</style>
