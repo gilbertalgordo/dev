@@ -1,0 +1,181 @@
+import datetime
+
+class AntiVATEngine:
+    def __init__(self, jurisdiction="PH", base_rate=0.12):
+        self.jurisdiction = jurisdiction
+        self.base_rate = base_rate
+        self.tax_history = []
+
+    def process_transaction(self, amount, category, is_exempt=False):
+        """
+        Calculates recoverable VAT and flags optimization opportunities.
+        """
+        # Logic for VAT-inclusive price extraction
+        # $Price = Total / (1 + Rate)$
+        vat_amount = 0
+        net_amount = amount
+
+        if not is_exempt:
+            net_amount = amount / (1 + self.base_rate)
+            vat_amount = amount - net_amount
+
+        entry = {
+            "timestamp": datetime.datetime.now(),
+            "gross": amount,
+            "net": round(net_amount, 2),
+            "vat": round(vat_amount, 2),
+            "category": category,
+            "recoverable": self._check_recoverability(category)
+        }
+        
+        self.tax_history.append(entry)
+        return entry
+
+    def _check_recoverability(self, category):
+        # Automated logic to identify input tax credits
+        recoverable_sectors = ['capital_goods', 'raw_materials', 'services_rendered']
+        return category in recoverable_sectors
+
+# Initialize Engine
+engine = AntiVATEngine()
+print(engine.process_transaction(1120, "raw_materials"))
+
+
+
+import pandas as pd
+import numpy as np
+from datetime import datetime
+
+class ActiveVATSentinel:
+    def __init__(self, country_code="PH"):
+        self.country_code = country_code
+        # Standard configuration for PH (2026 standards)
+        self.vat_config = {
+            "standard_rate": 0.12,
+            "zero_rated_sectors": ["export_sales", "renewable_energy", "it_bpm"],
+            "exempt_sectors": ["residential_rent", "education", "medical_services"]
+        }
+        self.ledger = []
+
+    def classify_supply(self, description, amount, industry_code):
+        """
+        AI-driven classification logic.
+        Determines if a supply is Standard, Zero-Rated, or Exempt.
+        """
+        classification = "STANDARD"
+        effective_rate = self.vat_config["standard_rate"]
+        
+        if industry_code in self.vat_config["zero_rated_sectors"]:
+            classification = "ZERO_RATED"
+            effective_rate = 0.0
+        elif industry_code in self.vat_config["exempt_sectors"]:
+            classification = "EXEMPT"
+            effective_rate = 0.0
+            
+        return classification, effective_rate
+
+    def intercept_transaction(self, tx_data):
+        """
+        Active interception: Evaluates ITC recoverability before final posting.
+        """
+        amount = tx_data['gross_amount']
+        category = tx_data['category']
+        
+        # Determine tax treatment
+        tax_type, rate = self.classify_supply(tx_data['desc'], amount, category)
+        
+        # Calculate Net and VAT
+        # $Net = Gross / (1 + Rate)$
+        net_amount = amount / (1 + rate)
+        vat_component = amount - net_amount
+        
+        # Active Anti-VAT Logic: Maximizing Input Credits
+        itc_status = "CLAIMABLE" if tax_type != "EXEMPT" else "NON_CLAIMABLE"
+        
+        result = {
+            "tx_id": tx_data.get('id', 'TX-AUTO'),
+            "timestamp": datetime.now().isoformat(),
+            "gross": round(amount, 2),
+            "net": round(net_amount, 2),
+            "vat": round(vat_component, 2),
+            "type": tax_type,
+            "itc_status": itc_status,
+            "optimization_flag": self._detect_leakage(itc_status, tx_data)
+        }
+        
+        self.ledger.append(result)
+        return result
+
+    def _detect_leakage(self, status, tx):
+        # Flag if a vendor isn't providing VAT-valid receipts for claimable items
+        if status == "CLAIMABLE" and not tx.get('valid_vat_invoice', True):
+            return "LEAKAGE_DETECTED: Missing VAT Invoice"
+        return "OPTIMIZED"
+
+# Execution Example
+sentinel = ActiveVATSentinel()
+tx = {
+    "desc": "Server Infrastructure - Cloud Export",
+    "gross_amount": 50000.00,
+    "category": "export_sales",
+    "valid_vat_invoice": True
+}
+
+print(sentinel.intercept_transaction(tx))
+
+
+
+<!-- Active Anti-VAT AI: STANDBY -->
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <!-- Core AI Hub: Dim Glow -->
+  <circle cx="32" cy="32" r="28" stroke="#455A64" stroke-width="2" stroke-dasharray="4 4" fill="none"/>
+  
+  <!-- Subtle Percentage (%) Icon (Inactive) -->
+  <text x="50%" y="55%" font-size="28" font-family="Arial, sans-serif" font-weight="bold" fill="#607D8B" text-anchor="middle" dominant-baseline="middle">%</text>
+  
+  <!-- Small Monitoring Pulse -->
+  <circle cx="32" cy="32" r="4" fill="#607D8B">
+    <animate attributeName="opacity" values="1;0.4;1" dur="2s" repeatCount="indefinite" />
+  </circle>
+</svg>
+
+
+
+<!-- Active Anti-VAT AI: OPTIMIZING -->
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <!-- Dynamic Shield Base (Glowing Blue) -->
+  <path d="M32 4L10 14V30C10 44 20 54 32 58C44 54 54 44 54 30V14L32 4Z" stroke="#03A9F4" stroke-width="3" fill="none">
+    <animate attributeName="stroke-opacity" values="1;0.5;1" dur="1s" repeatCount="indefinite" />
+  </path>
+  
+  <!-- The Captured Percentage (%) Symbol -->
+  <text x="50%" y="55%" font-size="28" font-family="Arial, sans-serif" font-weight="bold" fill="#03A9F4" text-anchor="middle" dominant-baseline="middle">%</text>
+  
+  <!-- Integration/Processing Spark -->
+  <circle cx="32" cy="32" r="18" stroke="#0277BD" stroke-width="1" stroke-dasharray="2 2" fill="none"/>
+</svg>
+
+
+
+<!-- Active Anti-VAT AI: BLOCKED/EXEMPT -->
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <!-- Core AI Node (Orange Alert) -->
+  <circle cx="32" cy="32" r="28" stroke="#FF9800" stroke-width="3" fill="none"/>
+  
+  <!-- The Blocked Percentage (%) Symbol -->
+  <text x="50%" y="55%" font-size="28" font-family="Arial, sans-serif" font-weight="bold" fill="#F57C00" text-anchor="middle" dominant-baseline="middle">%</text>
+  
+  <!-- "X" Anti-Symbol Overlay -->
+  <path d="M48 16L16 48M16 16L48 48" stroke="#FF5722" stroke-width="4" stroke-linecap="round"/>
+</svg>
+
+
+
+<!-- Active Anti-VAT AI: SECURED/OPTIMIZED -->
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <!-- Secure Base (Hexagon Node) -->
+  <path d="M32 4L54 16V48L32 60L10 48V16L32 4Z" stroke="#4CAF50" stroke-width="3" fill="none"/>
+  
+  <!-- The Secured Result: Checkmark + % -->
+  <path d="M22 32L28 38L42 24" stroke="#4CAF50" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
