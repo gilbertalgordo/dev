@@ -1,0 +1,977 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ferrari 296 Custom Configurator</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+        }
+        #hud-overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #ffffff;
+            pointer-events: none;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-left: 4px solid #E30613; /* Ferrari Red */
+            border-radius: 0 8px 8px 0;
+        }
+        h1 { margin: 0 0 5px 0; font-size: 1.4rem; text-transform: uppercase; letter-spacing: 1px; }
+        p { margin: 0; font-size: 0.9rem; color: #aaa; }
+        .spec-tag {
+            display: inline-block;
+            background: #222;
+            color: #ff3333;
+            padding: 3px 8px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            margin-top: 8px;
+            border-radius: 3px;
+            text-transform: uppercase;
+        }
+    </style>
+    <!-- Include Three.js and OrbitControls via CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+    <div id="hud-overlay">
+        <h1>Ferrari 296 GTB</h1>
+        <p>Hybrid V6 Powertrain Configurator</p>
+        <div class="spec-tag">Rocket Bunny Widebody Kit</div>
+        <div class="spec-tag">Concave Profile Rims</div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <script>
+        // --- 1. Core Scene Setup ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0a0a0a);
+        scene.fog = new THREE.FogExp2(0x0a0a0a, 0.05);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(5, 2.5, 6);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.2;
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxPolarAngle = Math.PI / 2 - 0.02; // Don't clip through floor
+        controls.minDistance = 3;
+        controls.maxDistance = 15;
+
+        // --- 2. Lighting Infrastructure (Studio Setup) ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
+        scene.add(ambientLight);
+
+        const mainLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        mainLight.position.set(10, 15, 5);
+        mainLight.castShadow = true;
+        mainLight.shadow.mapSize.width = 2048;
+        mainLight.shadow.mapSize.height = 2048;
+        mainLight.shadow.bias = -0.0001;
+        scene.add(mainLight);
+
+        // Soft rim light to accentuate Rocket Bunny overfenders
+        const rimLight = new THREE.DirectionalLight(0xddf0ff, 1.0);
+        rimLight.position.set(-10, 5, -5);
+        scene.add(rimLight);
+
+        // --- 3. Material Definitions ---
+        const carPaintMat = new THREE.MeshStandardMaterial({
+            color: 0xD30613, // Scuderia Corsa Red
+            roughness: 0.1,
+            metalness: 0.9,
+            clearcoat: 1.0,
+            clearcoatRoughness: 0.05
+        });
+
+        const carbonFiberMat = new THREE.MeshStandardMaterial({
+            color: 0x1a1a1a,
+            roughness: 0.3,
+            metalness: 0.7
+        });
+
+        const wheelChromeMat = new THREE.MeshStandardMaterial({
+            color: 0x222222, // Matte dark tint concave look
+            roughness: 0.15,
+            metalness: 0.95
+        });
+
+        const tireRubberMat = new THREE.MeshStandardMaterial({
+            color: 0x151515,
+            roughness: 0.8,
+            metalness: 0.1
+        });
+
+        // --- 4. Procedural Vehicle Assembly Structure ---
+        // Creating structural placeholders targeting the user's specific styling request
+        const vehicleGroup = new THREE.Group();
+
+        // Main Chassis: Ferrari 296 Body Base
+        const bodyGeo = new THREE.BoxGeometry(4.2, 0.8, 1.8);
+        const bodyMesh = new THREE.Mesh(bodyGeo, carPaintMat);
+        bodyMesh.position.y = 0.5;
+        bodyMesh.castShadow = true;
+        bodyMesh.receiveShadow = true;
+        vehicleGroup.add(bodyMesh);
+
+        // Cabin / Greenhouse Glass Area
+        const cabinGeo = new THREE.ConeGeometry(0.8, 0.6, 4);
+        const cabinMesh = new THREE.Mesh(cabinGeo, new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 0.0, metalness: 1.0 }));
+        cabinMesh.position.set(0.2, 1.0, 0);
+        cabinMesh.rotation.y = Math.PI / 4;
+        vehicleGroup.add(cabinMesh);
+
+        // Rocket Bunny Modification: Bolted Overfenders / Widebody Arch Flares
+        const createOverfender = (x, z, rotationY) => {
+            const fenderGroup = new THREE.Group();
+            const flareGeo = new THREE.CylinderGeometry(0.55, 0.6, 0.35, 16, 1, true, 0, Math.PI);
+            const flare = new THREE.Mesh(flareGeo, carPaintMat);
+            flare.rotation.x = Math.PI / 2;
+            flare.rotation.z = rotationY;
+            flare.scale.set(1.3, 1, 0.7); // Aggressive wide stance stretching
+            fenderGroup.position.set(x, 0.45, z);
+            fenderGroup.add(flare);
+            
+            // Carbon fiber splitters/canards mimicking Pandem treatments
+            const lipGeo = new THREE.BoxGeometry(0.1, 0.02, 0.4);
+            const lip = new THREE.Mesh(lipGeo, carbonFiberMat);
+            lip.position.set(0, -0.4, 0.15 * Math.sign(z));
+            fenderGroup.add(lip);
+            
+            return fenderGroup;
+        };
+
+        // Inject the widebody components into the layout
+        vehicleGroup.add(createOverfender(1.3, 0.95, 0));       // Front Right
+        vehicleGroup.add(createOverfender(1.3, -0.95, Math.PI));  // Front Left
+        vehicleGroup.add(createOverfender(-1.2, 1.0, 0));        // Rear Right
+        vehicleGroup.add(createOverfender(-1.2, -1.0, Math.PI));   // Rear Left
+
+        // Concave Wheel Generation Function
+        const createConcaveWheel = () => {
+            const wheelGroup = new THREE.Group();
+            
+            // Outer Tire
+            const tireGeo = new THREE.TorusGeometry(0.4, 0.12, 12, 24);
+            const tire = new THREE.Mesh(tireGeo, tireRubberMat);
+            tire.castShadow = true;
+            wheelGroup.add(tire);
+
+            // Deep Dish Concave Rim Assembly
+            const rimFaceGroup = new THREE.Group();
+            
+            // Step lip
+            const lipGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.22, 24, 1, true);
+            const lip = new THREE.Mesh(lipGeo, wheelChromeMat);
+            lip.rotation.x = Math.PI / 2;
+            rimFaceGroup.add(lip);
+
+            // Center Drop Concave Spokes (Inward angled cone profile)
+            const spokeHubGeo = new THREE.ConeGeometry(0.35, 0.18, 5, 1, true);
+            const spokes = new THREE.Mesh(spokeHubGeo, wheelChromeMat);
+            spokes.rotation.x = -Math.PI / 2; // Pointing inward to generate deep concavity
+            spokes.position.z = 0.02; 
+            rimFaceGroup.add(spokes);
+
+            wheelGroup.add(rimFaceGroup);
+            return wheelGroup;
+        };
+
+        // Position wheels out further along the Z-axis to flush perfectly with the Rocket Bunny flares
+        const wheelFR = createConcaveWheel(); wheelFR.position.set(1.3, 0.4, 1.02); vehicleGroup.add(wheelFR);
+        const wheelFL = createConcaveWheel(); wheelFL.position.set(1.3, 0.4, -1.02); wheelFL.rotation.y = Math.PI; vehicleGroup.add(wheelFL);
+        const wheelRR = createConcaveWheel(); wheelRR.position.set(-1.2, 0.4, 1.05); vehicleGroup.add(wheelRR);
+        const wheelRL = createConcaveWheel(); wheelRL.position.set(-1.2, 0.4, -1.05); wheelRL.rotation.y = Math.PI; vehicleGroup.add(wheelRL);
+
+        // Aggressive GT Wing / Rear Spoiler setup
+        const wingStaysGeo = new THREE.BoxGeometry(0.04, 0.5, 0.1);
+        const wingStayL = new THREE.Mesh(wingStaysGeo, carbonFiberMat); wingStayL.position.set(-2.0, 0.9, 0.4); vehicleGroup.add(wingStayL);
+        const wingStayR = wingStayL.clone(); wingStayR.position.z = -0.4; vehicleGroup.add(wingStayR);
+
+        const wingBladeGeo = new THREE.BoxGeometry(0.3, 0.02, 2.1);
+        const wingBlade = new THREE.Mesh(wingBladeGeo, carbonFiberMat);
+        wingBlade.position.set(-2.0, 1.15, 0);
+        wingBlade.castShadow = true;
+        vehicleGroup.add(wingBlade);
+
+        scene.add(vehicleGroup);
+
+        // --- 5. Environment Floor with Mirror Reflections ---
+        const floorGeo = new THREE.PlaneGeometry(50, 50);
+        const floorMat = new THREE.MeshStandardMaterial({ 
+            color: 0x111111, 
+            roughness: 0.2,
+            metalness: 0.8
+        });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        // --- 6. Animation Loop ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            const elapsedTime = clock.getElapsedTime();
+            controls.update();
+
+            // Subtle presentation rotation when user isn't interacting aggressively
+            if(!controls.state == -1) {
+                vehicleGroup.rotation.y = elapsedTime * 0.05;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // --- 7. Window Resizing Handler ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Initialize Rendering Layout Execution
+        animate();
+    </script>
+</body>
+</html>
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scuderia Ferrari 296 Advanced Hybrid Telemetry Panel</title>
+    <style>
+        :root {
+            --ferrari-red: #E30613;
+            --neon-cyan: #00f3ff;
+            --glass-bg: rgba(10, 10, 12, 0.75);
+            --glass-border: rgba(255, 255, 255, 0.1);
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #020203;
+            font-family: 'Courier New', Courier, monospace;
+            color: #ffffff;
+        }
+
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* --- Glassmorphic HUD System --- */
+        .hud-panel {
+            position: absolute;
+            z-index: 10;
+            background: var(--glass-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border);
+            padding: 20px;
+            border-radius: 6px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+            pointer-events: auto;
+        }
+
+        #panel-left {
+            top: 20px;
+            left: 20px;
+            width: 320px;
+            border-left: 4px solid var(--ferrari-red);
+        }
+
+        #panel-right {
+            top: 20px;
+            right: 20px;
+            width: 340px;
+            border-right: 4px solid var(--neon-cyan);
+        }
+
+        #panel-bottom {
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 60%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 60px;
+            padding: 0 40px;
+        }
+
+        .panel-header {
+            font-size: 1.2rem;
+            font-weight: bold;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            padding-bottom: 5px;
+        }
+
+        .telemetry-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 8px 0;
+            font-size: 0.85rem;
+            letter-spacing: 1px;
+        }
+
+        .label { color: #8a8a93; text-transform: uppercase; }
+        .value { color: #ffffff; font-weight: bold; }
+        .accent-red { color: var(--ferrari-red); }
+        .accent-cyan { color: var(--neon-cyan); }
+
+        /* Progress/Bar Indicators */
+        .bar-container {
+            width: 100%;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            margin-top: 4px;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .bar-fill {
+            height: 100%;
+            width: 0%;
+            transition: width 0.1s linear;
+        }
+
+        .glitch-text {
+            animation: pulse 2s infinite alternate;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.8; text-shadow: 0 0 4px rgba(255,0,0,0.5); }
+            100% { opacity: 1; text-shadow: 0 0 12px rgba(0,243,255,0.8); }
+        }
+    </style>
+    <!-- Dependencies -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+    <!-- HUD Layout -->
+    <div id="panel-left" class="hud-panel">
+        <div class="panel-header">
+            <span>CORE SPEC</span>
+            <span class="accent-red" style="font-size: 0.75rem;">ACTIVE</span>
+        </div>
+        <div class="telemetry-row"><span class="label">PLATFORM</span><span class="value">FERRARI 296 HYBRID</span></div>
+        <div class="telemetry-row"><span class="label">CHASSIS</span><span class="value accent-red">ROCKET BUNNY (PANDEM)</span></div>
+        <div class="telemetry-row"><span class="label">WHEELS</span><span class="value">CONCAVE DEEP-DISH profile</span></div>
+        <div class="telemetry-row"><span class="label">AERO FLOW</span><span class="value">WIDEBODY EXTENSIONS</span></div>
+        
+        <div class="panel-header" style="margin-top: 25px;">AERO DOWNFORCE</div>
+        <div class="telemetry-row"><span class="label">FRONT SPLITTER</span><span class="value" id="val-df-f">412 kg</span></div>
+        <div class="telemetry-row"><span class="label">REAR GT WING</span><span class="value" id="val-df-r">685 kg</span></div>
+        <div class="telemetry-row"><span class="label">DRAG COEFF.</span><span class="value accent-red">0.384 Cx</span></div>
+    </div>
+
+    <div id="panel-right" class="hud-panel">
+        <div class="panel-header">
+            <span>HYBRID TELEMETRY</span>
+            <span class="accent-cyan" id="powertrain-state">E-MAX</span>
+        </div>
+        <div class="telemetry-row"><span class="label">ENGINE VELOCITY</span><span class="value" id="val-rpm">0 RPM</span></div>
+        <div class="bar-container"><div id="bar-rpm" class="bar-fill" style="background: var(--ferrari-red);"></div></div>
+
+        <div class="telemetry-row" style="margin-top: 15px;"><span class="label">QUANTUM SQB CORE</span><span class="value" id="val-battery">100%</span></div>
+        <div class="bar-container"><div id="bar-battery" class="bar-fill" style="background: var(--neon-cyan);"></div></div>
+
+        <div class="telemetry-row" style="margin-top: 15px;"><span class="label">V6 TWIN-TURBO TEMP</span><span class="value" id="val-temp">92°C</span></div>
+        <div class="telemetry-row"><span class="label">MGU-K KINETIC RECOVERY</span><span class="value accent-cyan" id="val-mguk">CHARGING</span></div>
+    </div>
+
+    <div id="panel-bottom" class="hud-panel">
+        <div><span class="label">SPEED:</span> <span class="value glitch-text" id="val-speed" style="font-size: 1.6rem; color: var(--neon-cyan);">0</span> <span class="label">KM/H</span></div>
+        <div><span class="label">DRIVE AXLE:</span> <span class="value" style="color: #ffffff;">AWD HYBRID LINKED</span></div>
+        <div><span class="label">SYS STATUS:</span> <span class="value" style="color: #00ff66;">OPTIMAL</span></div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <!-- WebGL Rendering Architecture -->
+    <script>
+        // --- Custom GLSL Shaders for Energy Floor Emulation ---
+        const VertexShader = `
+            varying vec2 vUv;
+            void main() {
+                vUv = uv;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `;
+
+        const FragmentShader = `
+            uniform float time;
+            varying vec2 vUv;
+            void main() {
+                vec2 uv = vUv * 2.0 - 1.0;
+                float gridX = step(0.98, fract(uv.x * 20.0 + time * 0.2));
+                float gridY = step(0.98, fract(uv.y * 20.0));
+                float alpha = max(gridX, gridY) * 0.3;
+                vec3 color = mix(vec3(0.89, 0.02, 0.07), vec3(0.0, 0.95, 1.0), vec3(sin(time + uv.x)*0.5 + 0.5));
+                gl_FragColor = vec4(color, alpha * (1.0 - length(uv)));
+            }
+        `;
+
+        // --- Context & Scene Setup ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x020203, 0.08);
+
+        const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(6, 3, 7);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.4;
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.04;
+        controls.maxPolarAngle = Math.PI / 2 - 0.03;
+
+        // --- Studio Array Lighting ---
+        const topLight = new THREE.DirectionalLight(0xffffff, 2.0);
+        topLight.position.set(0, 10, 2);
+        topLight.castShadow = true;
+        topLight.shadow.mapSize.width = 2048;
+        topLight.shadow.mapSize.height = 2048;
+        scene.add(topLight);
+
+        const redCyanFill = new THREE.PointLight(0x00f3ff, 1.5, 15);
+        redCyanFill.position.set(-4, 2, -4);
+        scene.add(redCyanFill);
+
+        // --- Material Profiles ---
+        const scuderiaRedPaint = new THREE.MeshStandardMaterial({
+            color: 0xD30613,
+            roughness: 0.08,
+            metalness: 0.92,
+            clearcoat: 1.0,
+            clearcoatRoughness: 0.03
+        });
+
+        const darkConcaveAlloy = new THREE.MeshStandardMaterial({
+            color: 0x111112,
+            roughness: 0.2,
+            metalness: 0.95
+        });
+
+        const weaveCarbon = new THREE.MeshStandardMaterial({
+            color: 0x1c1c1e,
+            roughness: 0.35,
+            metalness: 0.8
+        });
+
+        const tireCompound = new THREE.MeshStandardMaterial({
+            color: 0x121214,
+            roughness: 0.75
+        });
+
+        // --- Procedural Generation Logic ---
+        const carGroup = new THREE.Group();
+
+        // Central Monocoque (296 Base Architecture)
+        const coreChassis = new THREE.Mesh(new THREE.BoxGeometry(4.3, 0.75, 1.75), scuderiaRedPaint);
+        coreChassis.position.y = 0.48;
+        coreChassis.castShadow = true;
+        coreChassis.receiveShadow = true;
+        carGroup.add(coreChassis);
+
+        // Glass Aerodynamic Cabin
+        const cabinArea = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.5, 0.85, 1.8, 4), 
+            new THREE.MeshStandardMaterial({ color: 0x08080a, roughness: 0.05, metalness: 0.95 })
+        );
+        cabinArea.rotation.x = Math.PI / 2;
+        cabinArea.rotation.z = Math.PI / 4;
+        cabinArea.scale.set(1, 1.6, 0.6);
+        cabinArea.position.set(0.1, 0.95, 0);
+        carGroup.add(cabinArea);
+
+        // Rocket Bunny Bolt-On Overfenders Integration
+        const applyFenderExtension = (posX, posZ, flip) => {
+            const extensionGroup = new THREE.Group();
+            const flare = new THREE.Mesh(new THREE.CylinderGeometry(0.58, 0.64, 0.4, 16, 1, true, 0, Math.PI), scuderiaRedPaint);
+            flare.rotation.x = Math.PI / 2;
+            flare.rotation.z = flip ? Math.PI : 0;
+            flare.scale.set(1.25, 1.0, 0.75);
+            extensionGroup.add(flare);
+
+            // Exposed structural bolt points simulation via carbon trim pieces
+            const trim = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.04, 0.45), weaveCarbon);
+            trim.position.set(0, -0.42, 0.15 * (flip ? -1 : 1));
+            extensionGroup.add(trim);
+
+            extensionGroup.position.set(posX, 0.46, posZ);
+            carGroup.add(extensionGroup);
+        };
+
+        // Render widebody components
+        applyFenderExtension(1.35, 0.94, false);
+        applyFenderExtension(1.35, -0.94, true);
+        applyFenderExtension(-1.25, 0.98, false);
+        applyFenderExtension(-1.25, -0.98, true);
+
+        // Deep-Dish Concave Rims Assembly
+        const wheelMeshes = [];
+        const assembleConcaveWheel = (posX, posZ) => {
+            const pivotContainer = new THREE.Group();
+            
+            // Outer Track-Spec Tire
+            const tread = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.13, 16, 32), tireCompound);
+            tread.castShadow = true;
+            pivotContainer.add(tread);
+
+            // Extreme Drop Concave Barrel Face
+            const barrel = new THREE.Group();
+            const lip = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.26, 32, 1, true), darkConcaveAlloy);
+            lip.rotation.x = Math.PI / 2;
+            barrel.add(lip);
+
+            // Inward-sloping spoke center hub creating aggressive concavity
+            const centerSpokeCone = new THREE.Mesh(new THREE.ConeGeometry(0.38, 0.22, 6, 1, true), darkConcaveAlloy);
+            centerSpokeCone.rotation.x = -Math.PI / 2;
+            centerSpokeCone.position.z = 0.04;
+            barrel.add(centerSpokeCone);
+
+            pivotContainer.add(barrel);
+            pivotContainer.position.set(posX, 0.42, posZ);
+            
+            carGroup.add(pivotContainer);
+            wheelMeshes.push(pivotContainer); // Store pointer for rotation calculations
+        };
+
+        assembleConcaveWheel(1.35, 0.98);
+        assembleConcaveWheel(1.35, -0.98);
+        assembleConcaveWheel(-1.25, 1.02);
+        assembleConcaveWheel(-1.25, -1.02);
+
+        // Pandem-style High Downforce GT Wing Array
+        const wingStructure = new THREE.Group();
+        const strutLeft = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.6, 0.08), weaveCarbon);
+        strutLeft.position.set(-2.05, 0.85, 0.45);
+        wingStructure.add(strutLeft);
+
+        const strutRight = strutLeft.clone();
+        strutRight.position.z = -0.45;
+        wingStructure.add(strutRight);
+
+        const mainAirfoil = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.02, 2.25), weaveCarbon);
+        mainAirfoil.position.set(-2.05, 1.15, 0);
+        mainAirfoil.castShadow = true;
+        wingStructure.add(mainAirfoil);
+
+        carGroup.add(wingStructure);
+        scene.add(carGroup);
+
+        // --- Custom Shader Grid Installation ---
+        const gridShaderMat = new THREE.ShaderMaterial({
+            vertexShader: VertexShader,
+            fragmentShader: FragmentShader,
+            uniforms: { time: { value: 0.0 } },
+            transparent: true,
+            depthWrite: false
+        });
+
+        const dataFloor = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), gridShaderMat);
+        dataFloor.rotation.x = -Math.PI / 2;
+        scene.add(dataFloor);
+
+        // --- Real-time Simulation Engine & Telemetry Pipelines ---
+        const clock = new THREE.Clock();
+        
+        // Sim Elements HTML Bindings
+        const elementSpeed = document.getElementById('val-speed');
+        const elementRPM = document.getElementById('val-rpm');
+        const elementBattery = document.getElementById('val-battery');
+        const elementTemp = document.getElementById('val-temp');
+        const elementPowertrain = document.getElementById('powertrain-state');
+        const elementDFF = document.getElementById('val-df-f');
+        const elementDFR = document.getElementById('val-df-r');
+
+        const barRPM = document.getElementById('bar-rpm');
+        const barBattery = document.getElementById('bar-battery');
+
+        function executeLoop() {
+            requestAnimationFrame(executeLoop);
+            
+            const delta = clock.getDelta();
+            const elapsed = clock.getElapsedTime();
+
+            controls.update();
+
+            // Run Grid Shader Timeline
+            gridShaderMat.uniforms.time.value = elapsed;
+
+            // Generate Dynamic Vehicle Performance State Calculations
+            const simulatedVelocity = 140 + Math.sin(elapsed * 0.5) * 120 + Math.cos(elapsed * 2.0) * 15;
+            const engineRPMCalc = simulatedVelocity > 200 ? 5500 + Math.sin(elapsed * 4.0) * 2500 : 0;
+            const currentChargeState = 60 + Math.sin(elapsed * 0.2) * 40;
+            
+            // Dynamic Aero Math modeling Rocket Bunny geometric profile
+            const frontDownforce = Math.floor(200 + (simulatedVelocity * 1.4));
+            const rearDownforce = Math.floor(350 + (simulatedVelocity * 2.1));
+
+            // Sync WebGL Chassis Component Matrix to Telemetry Engine
+            const spinVelocity = (simulatedVelocity * 0.28) * delta;
+            wheelMeshes.forEach(w => w.rotation.z -= spinVelocity);
+
+            // Execute Presentation Rotation
+            carGroup.rotation.y = elapsed * 0.04;
+
+            // Stream Calculations out to Glassmorphic HUD Nodes
+            elementSpeed.innerText = Math.floor(simulatedVelocity);
+            elementRPM.innerText = Math.floor(engineRPMCalc) + " RPM";
+            elementBattery.innerText = Math.floor(currentChargeState) + "%";
+            elementTemp.innerText = Math.floor(88 + Math.sin(elapsed * 0.1) * 8) + "°C";
+            elementDFF.innerText = frontDownforce + " kg";
+            elementDFR.innerText = rearDownforce + " kg";
+
+            // State Machines
+            if (simulatedVelocity > 200) {
+                elementPowertrain.innerText = "QUALIFYING MAX";
+                elementPowertrain.style.color = 'var(--ferrari-red)';
+            } else {
+                elementPowertrain.innerText = "HYBRID PERFORMANCE";
+                elementPowertrain.style.color = 'var(--neon-cyan)';
+            }
+
+            // Interface Graphic Displays
+            barRPM.style.width = `${(engineRPMCalc / 9000) * 100}%`;
+            barBattery.style.width = `${currentChargeState}%`;
+
+            renderer.render(scene, camera);
+        }
+
+        // --- Viewport Scaling Manager ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Trigger Run
+        executeLoop();
+    </script>
+</body>
+</html>
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ferrari 296 Custom Widebody - Vector Icon Sheet</title>
+    <style>
+        :root {
+            --bg-main: #08080a;
+            --bg-card: #111115;
+            --border-color: #22222b;
+            --ferrari-red: #E30613;
+            --accent-glow: rgba(227, 6, 19, 0.15);
+            --text-main: #ffffff;
+            --text-muted: #666673;
+        }
+
+        body {
+            margin: 0;
+            padding: 40px 20px;
+            background-color: var(--bg-main);
+            color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin: 0 0 8px 0;
+        }
+
+        .header p {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            margin: 0;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        /* Icon Grid Layout */
+        .icon-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 180px);
+            gap: 24px;
+            justify-content: center;
+            max-width: 600px;
+        }
+
+        @media (max-width: 600px) {
+            .icon-grid {
+                grid-template-columns: repeat(2, 160px);
+            }
+        }
+
+        /* Individual Icon Card Component */
+        .icon-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+        }
+
+        .icon-card:hover {
+            border-color: var(--ferrari-red);
+            box-shadow: 0 10px 25px var(--accent-glow);
+            transform: translateY(-2px);
+        }
+
+        .icon-wrapper {
+            width: 90px;
+            height: 90px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 12px;
+        }
+
+        .icon-wrapper svg {
+            width: 100%;
+            height: 100%;
+            transition: stroke 0.25s ease;
+        }
+
+        .icon-card:hover .icon-wrapper svg {
+            stroke: var(--ferrari-red);
+        }
+
+        .icon-label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            transition: color 0.25s ease;
+        }
+
+        .icon-card:hover .icon-label {
+            color: var(--text-main);
+        }
+
+        /* Focus Active Indicator Dot */
+        .icon-card::after {
+            content: '';
+            position: absolute;
+            bottom: 8px;
+            width: 4px;
+            height: 4px;
+            border-radius: 50%;
+            background: var(--ferrari-red);
+            opacity: 0;
+            transition: opacity 0.25s ease;
+        }
+        .icon-card:hover::after {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>296 Hybrid Component Suite</h1>
+        <p>Rocket Bunny Chassis Spec // Concave Array Icons</p>
+    </div>
+
+    <div class="icon-grid">
+
+        <!-- 1. ISOMETRIC VIEW ICON -->
+        <div class="icon-card">
+            <div class="icon-wrapper">
+                <svg viewBox="0 0 100 100" fill="none" stroke="#888890" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <!-- Low slung chassis angle -->
+                    <path d="M20 65 L45 75 L85 55 L55 45 Z" />
+                    <!-- Windshield greenhouse line -->
+                    <path d="M42 55 L52 48 L68 53 L55 60 Z" fill="rgba(255,255,255,0.05)" />
+                    <!-- GT Wing line -->
+                    <path d="M22 52 L32 56 M24 50 L18 48" stroke-width="2.5" />
+                    <!-- Flared Widebody arches indications -->
+                    <path d="M38 72 A 6 6 0 0 1 48 71" stroke-width="3" />
+                    <path d="M72 58 A 6 6 0 0 1 78 54" stroke-width="3" />
+                </svg>
+            </div>
+            <div class="icon-label">Isometric</div>
+        </div>
+
+        <!-- 2. FRONT VIEW ICON -->
+        <div class="icon-card">
+            <div class="icon-wrapper">
+                <svg viewBox="0 0 100 100" fill="none" stroke="#888890" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <!-- Low Roofline -->
+                    <path d="M35 45 C42 42, 58 42, 65 45" />
+                    <!-- Windshield -->
+                    <path d="M35 45 L40 55 L60 55 L65 45 Z" />
+                    <!-- Widebody Rocket Bunny Bolted Overfenders -->
+                    <path d="M25 75 C20 70, 20 62, 28 60 L32 60" stroke-width="3" />
+                    <path d="M75 75 C80 70, 80 62, 72 60 L68 60" stroke-width="3" />
+                    <!-- Low Front splitter split line -->
+                    <path d="M18 76 L82 76 L74 70 L26 70 Z" fill="rgba(255,255,255,0.1)" />
+                    <!-- Slanted Matrix Headlights -->
+                    <path d="M32 63 L42 65 M68 63 L58 65" stroke-width="2.5" />
+                </svg>
+            </div>
+            <div class="icon-label">Front View</div>
+        </div>
+
+        <!-- 3. SIDE PROFILE ICON -->
+        <div class="icon-card">
+            <div class="icon-wrapper">
+                <svg viewBox="0 0 100 100" fill="none" stroke="#888890" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <!-- Ground FX Line -->
+                    <line x1="10" y1="72" x2="90" y2="72" stroke-width="1.5" />
+                    <!-- Low Silhouette curve 296 lines -->
+                    <path d="M15 70 C22 68, 28 55, 45 46 C55 46, 68 48, 75 62 C85 65, 88 70, 90 70" />
+                    <!-- Rocket Bunny Rear Spoiler Wing extension -->
+                    <path d="M14 62 L8 50 L22 50 Z" fill="rgba(255,255,255,0.1)" />
+                    <!-- Flared Arch Profiles -->
+                    <path d="M22 72 A 9 9 0 0 1 40 72" stroke-width="3" />
+                    <path d="M66 72 A 9 9 0 0 1 84 72" stroke-width="3" />
+                </svg>
+            </div>
+            <div class="icon-label">Side View</div>
+        </div>
+
+        <!-- 4. REAR VIEW ICON -->
+        <div class="icon-card">
+            <div class="icon-wrapper">
+                <svg viewBox="0 0 100 100" fill="none" stroke="#888890" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <!-- Giant GT Chassis-mounted wing -->
+                    <path d="M12 40 L88 40" stroke-width="3" />
+                    <path d="M30 40 L30 55 M70 40 L70 55" stroke-width="1.5" />
+                    <!-- Tail cluster section -->
+                    <path d="M26 52 L74 52 L78 64 L22 64 Z" />
+                    <!-- Center Exhaust Exit typical of 296 platform -->
+                    <rect x="46" y="56" width="8" height="3" rx="1.5" fill="#888890" />
+                    <!-- Extreme Widebody stance outfenders -->
+                    <path d="M22 64 C16 66, 16 75, 20 78 L26 78" stroke-width="3" />
+                    <path d="M78 64 C84 66, 84 75, 80 78 L74 78" stroke-width="3" />
+                </svg>
+            </div>
+            <div class="icon-label">Rear View</div>
+        </div>
+
+        <!-- 5. TOP DOWN AERO ICON -->
+        <div class="icon-card">
+            <div class="icon-wrapper">
+                <svg viewBox="0 0 100 100" fill="none" stroke="#888890" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <!-- Main tear-drop center cockpit body -->
+                    <path d="M34 20 C34 15, 66 15, 66 20 L62 82 L38 82 Z" />
+                    <!-- Rocket Bunny Widebody Side pods panels outriggers -->
+                    <path d="M34 32 L26 38 L26 50 L34 54" stroke-width="2.5" />
+                    <path d="M66 32 L74 38 L74 50 L66 54" stroke-width="2.5" />
+                    <!-- Rear wide hips overfenders -->
+                    <path d="M34 62 L24 66 L25 78 L38 80" stroke-width="3" />
+                    <path d="M66 62 L76 66 L75 78 L62 80" stroke-width="3" />
+                    <!-- Transparent windshield footprint panel -->
+                    <path d="M38 35 L42 26 L58 26 L62 35 Z" fill="rgba(255,255,255,0.08)" />
+                </svg>
+            </div>
+            <div class="icon-label">Top View</div>
+        </div>
+
+        <!-- 6. CONCAVE RIM MECHANICAL DETAIL -->
+        <div class="icon-card">
+            <div class="icon-wrapper">
+                <svg viewBox="0 0 100 100" fill="none" stroke="#888890" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <!-- Outer barrel lip -->
+                    <circle cx="50" cy="50" r="42" stroke-width="2.5" />
+                    <!-- Inner step lip creating the deep dish depth perception -->
+                    <circle cx="50" cy="50" r="34" stroke-width="1.5" fill="rgba(0,0,0,0.2)" />
+                    <!-- Drop center hub center bore -->
+                    <circle cx="50" cy="50" r="8" fill="#888890" />
+                    <!-- Angled Concave multi-spokes lines projecting down inward -->
+                    <line x1="50" y1="16" x2="50" y2="42" stroke-width="3" />
+                    <line x1="50" y1="84" x2="50" y2="58" stroke-width="3" />
+                    <line x1="16" y1="50" x2="42" y2="50" stroke-width="3" />
+                    <line x1="84" y1="50" x2="58" y2="50" stroke-width="3" />
+                    <!-- Intermediary twin layout spokes -->
+                    <line x1="26" y1="26" x2="44" y2="44" stroke-width="2" />
+                    <line x1="74" y1="26" x2="56" y2="44" stroke-width="2" />
+                    <line x1="26" y1="74" x2="44" y2="56" stroke-width="2" />
+                    <line x1="74" y1="74" x2="56" y2="56" stroke-width="2" />
+                </svg>
+            </div>
+            <div class="icon-label">Concave Wheel</div>
+        </div>
+
+    </div>
+
+</body>
+</html>
