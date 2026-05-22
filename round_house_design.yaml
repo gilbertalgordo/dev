@@ -1,0 +1,98 @@
+// Tornado-Resistant Circular House Design
+// Parameters
+radius = 6000;           // Radius in mm
+floor_height = 3000;     // Height per floor in mm
+wall_thickness = 400;    // Reinforced wall thickness (e.g., concrete)
+num_floors = 3;
+
+module circular_house() {
+    union() {
+        // Main Body (3 Floors)
+        difference() {
+            cylinder(h = num_floors * floor_height, r = radius, $fn=100);
+            
+            // Interior hollow space
+            translate([0,0,wall_thickness])
+                cylinder(h = (num_floors * floor_height), r = radius - wall_thickness, $fn=100);
+            
+            // Floor Separations (Internal slabs)
+            for(i = [1 : num_floors - 1]) {
+                translate([0,0, i * floor_height])
+                    cylinder(h = 200, r = radius - wall_thickness, $fn=100);
+            }
+        }
+
+        // Aerodynamic Dome Roof
+        translate([0, 0, num_floors * floor_height])
+            intersection() {
+                sphere(r = radius, $fn=100);
+                cylinder(h = radius, r = radius, $fn=100);
+            }
+    }
+}
+
+// Render the design
+color("lightgray") circular_house();
+
+// Add a central utility/stair core for structural stability
+color("darkgray") 
+    cylinder(h = num_floors * floor_height, r = 800, $fn=50);
+
+
+    // Advanced Tornado-Resistant Circular Dwelling
+// Structural Parameters
+$fn = 200; // High resolution rendering
+radius = 6100; // 40ft diameter in mm
+floor_height = 3050; // 10ft height in mm
+wall_thickness = 500; // Reinforced concrete thickness
+num_floors = 3;
+
+module structural_shell() {
+    difference() {
+        // Main Reinforced Structure
+        cylinder(h = num_floors * floor_height, r = radius);
+        
+        // Interior Living Space
+        translate([0,0,wall_thickness])
+            cylinder(h = num_floors * floor_height, r = radius - wall_thickness);
+        
+        // Integrated Storm-Shutter Slots
+        for(a = [0:60:359]) {
+            rotate([0,0,a])
+            translate([radius - wall_thickness, 0, floor_height * 1.5])
+                cube([wall_thickness * 2, 800, 1200], center=true);
+        }
+    }
+}
+
+module reinforced_core() {
+    // Central Utility/Spiral Stairwell Core
+    color("slategray")
+    cylinder(h = num_floors * floor_height, r = 1200);
+}
+
+// Render
+union() {
+    structural_shell();
+    reinforced_core();
+    
+    // Foundation Anchor
+    translate([0,0,-500])
+        cylinder(h = 500, r = radius + 1000);
+}
+
+
+def calculate_wind_load(velocity_mps, diameter_m, height_m):
+    air_density = 1.225
+    drag_coefficient = 0.5  # Cylinder constant
+    frontal_area = diameter_m * height_m
+    
+    # Force calculation: F = 0.5 * rho * v^2 * Cd * A
+    force_newtons = 0.5 * air_density * (velocity_mps**2) * drag_coefficient * frontal_area
+    
+    return force_newtons
+
+# Example calculation for a 40ft (12.2m) diameter, 35ft (10.7m) height structure
+# at 250 mph (approx. 111 m/s) - Category 5 Tornado winds
+force = calculate_wind_load(111, 12.2, 10.7)
+print(f"Calculated Wind Force: {force/1000:.2f} kN")
