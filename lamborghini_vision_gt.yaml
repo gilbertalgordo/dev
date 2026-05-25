@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lamborghini Vision GT Hybrid - 3D HUD Interface</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: 'Courier New', Courier, monospace;
+            color: #00ffcc;
+        }
+
+        /* Sci-Fi HUD Overlay */
+        #hud-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            box-sizing: border-box;
+            border: 2px solid rgba(0, 255, 204, 0.2);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .hud-header {
+            display: flex;
+            justify-content: space-between;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 10px;
+            border-left: 5px solid #ff3300;
+        }
+
+        .hud-title {
+            font-size: 20px;
+            font-weight: bold;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        .hud-stats {
+            text-align: right;
+            font-size: 14px;
+        }
+
+        .hud-footer {
+            display: flex;
+            justify-content: space-between;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 10px;
+            font-size: 12px;
+        }
+
+        .sys-status {
+            color: #ff3300;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+
+    <div id="hud-container">
+        <div class="hud-header">
+            <div class="hud-title">LAMBO V12 VISION GT // HYBRID SYSTEM</div>
+            <div class="hud-stats">
+                <div>ENGINE: 6.5L V12 + SUPER_CAPACITOR</div>
+                <div>MAX POWER: 819 CV / 602 kW</div>
+            </div>
+        </div>
+        <div class="hud-footer">
+            <div>CORE: ACTIVE // KAIZEN_OPTIMIZED</div>
+            <div class="sys-status">HYBRID DRIVE: ENGAGED</div>
+        </div>
+    </div>
+
+    <script>
+        // --- Scene Setup ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x050505);
+        scene.fog = new THREE.FogExp2(0x050505, 0.03);
+
+        // --- Camera Setup ---
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(5, 3, 8);
+
+        // --- Renderer Setup ---
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        container.appendChild(renderer.domElement);
+
+        // --- Controls ---
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxPolarAngle = Math.PI / 2 - 0.05; // Don't go below ground
+        controls.minDistance = 3;
+        controls.maxDistance = 15;
+
+        // --- Lighting ---
+        const ambientLight = new THREE.AmbientLight(0x222222);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0x00ffcc, 1);
+        directionalLight.position.set(5, 10, 7);
+        scene.add(directionalLight);
+
+        const accentLight = new THREE.PointLight(0xff3300, 2, 10);
+        accentLight.position.set(0, 2, -2);
+        scene.add(accentLight);
+
+        // --- Cyber Grid Floor ---
+        const gridHelper = new THREE.GridHelper(60, 60, 0xff3300, 0x222222);
+        gridHelper.position.y = -0.01;
+        scene.add(gridHelper);
+
+        // --- Procedural Lambo Vision GT Concept Car Group ---
+        const carGroup = new THREE.Group();
+
+        // Materials
+        const bodyMat = new THREE.MeshStandardMaterial({
+            color: 0x111111,
+            roughness: 0.1,
+            metalness: 0.9,
+            flatShading: true
+        });
+        const glassMat = new THREE.MeshStandardMaterial({
+            color: 0x00ffcc,
+            transparent: true,
+            opacity: 0.4,
+            roughness: 0.1
+        });
+        const wheelMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.5 });
+        const neonGreenMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc });
+        const neonRedMat = new THREE.MeshBasicMaterial({ color: 0xff3300 });
+
+        // Main Monocoque Cockpit / Body
+        const bodyGeo = new THREE.ConeGeometry(1.2, 4.5, 4);
+        bodyGeo.rotateX(Math.PI / 2);
+        bodyGeo.scale(1, 0.35, 1);
+        const carBody = new THREE.Mesh(bodyGeo, bodyMat);
+        carBody.position.y = 0.5;
+        carGroup.add(carBody);
+
+        // Jet-fighter Style Canopy Glass
+        const glassGeo = new THREE.ConeGeometry(0.6, 2, 4);
+        glassGeo.rotateX(Math.PI / 2);
+        glassGeo.scale(1, 0.4, 1);
+        const canopy = new THREE.Mesh(glassGeo, glassMat);
+        canopy.position.set(0, 0.75, 0.3);
+        carGroup.add(canopy);
+
+        // Front Splitter / Wings
+        const wingGeo = new THREE.BoxGeometry(2.4, 0.05, 0.8);
+        const frontWing = new THREE.Mesh(wingGeo, bodyMat);
+        frontWing.position.set(0, 0.25, 2);
+        carGroup.add(frontWing);
+
+        // Iconic Y-Shaped Front Signature Lights (Left and Right)
+        function createYLight(isLeft) {
+            const yLightGroup = new THREE.Group();
+            const thickness = 0.02;
+            const len = 0.4;
+            
+            const stem = new THREE.Mesh(new THREE.BoxGeometry(thickness, thickness, len), neonGreenMat);
+            stem.position.z = len/2;
+            yLightGroup.add(stem);
+
+            const branch1 = new THREE.Mesh(new THREE.BoxGeometry(thickness, thickness, len), neonGreenMat);
+            branch1.rotation.y = Math.PI / 4;
+            branch1.position.set(len/4, 0, len + len/4);
+            yLightGroup.add(branch1);
+
+            const branch2 = new THREE.Mesh(new THREE.BoxGeometry(thickness, thickness, len), neonGreenMat);
+            branch2.rotation.y = -Math.PI / 4;
+            branch2.position.set(-len/4, 0, len + len/4);
+            yLightGroup.add(branch2);
+
+            yLightGroup.position.set(isLeft ? 0.9 : -0.9, 0.26, 2.1);
+            yLightGroup.scale.set(0.7, 0.7, 0.7);
+            return yLightGroup;
+        }
+        carGroup.add(createYLight(true));
+        carGroup.add(createYLight(false));
+
+        // Rear Massive Aero Wing
+        const rearWingMain = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.05, 0.6), bodyMat);
+        rearWingMain.position.set(0, 0.9, -1.8);
+        
+        // Rear Y-shaped Tail Fin Lights
+        const rearLightL = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.4, 0.1), neonRedMat);
+        rearLightL.position.set(1.3, 0.8, -1.8);
+        rearLightL.rotation.z = -Math.PI / 6;
+        
+        const rearLightR = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.4, 0.1), neonRedMat);
+        rearLightR.position.set(-1.3, 0.8, -1.8);
+        rearLightR.rotation.z = Math.PI / 6;
+
+        carGroup.add(rearWingMain, rearLightL, rearLightR);
+
+        // --- Wheels & Separated Pods ---
+        const wheelGeo = new THREE.CylinderGeometry(0.45, 0.45, 0.35, 24);
+        wheelGeo.rotateZ(Math.PI / 2);
+
+        const wheelPositions = [
+            { x: 1.05, y: 0.45, z: 1.4 },  // Front Left
+            { x: -1.05, y: 0.45, z: 1.4 }, // Front Right
+            { x: 1.15, y: 0.45, z: -1.3 }, // Rear Left
+            { x: -1.15, y: 0.45, z: -1.3 } // Rear Right
+        ];
+
+        const wheels = [];
+        wheelPositions.forEach(pos => {
+            const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+            wheel.position.set(pos.x, pos.y, pos.z);
+            
+            // Rim Accent Ring
+            const rimGeo = new THREE.TorusGeometry(0.3, 0.02, 4, 16);
+            rimGeo.rotateY(Math.PI / 2);
+            const rim = new THREE.Mesh(rimGeo, neonGreenMat);
+            rim.position.set(pos.x > 0 ? 0.18 : -0.18, 0, 0);
+            wheel.add(rim);
+
+            carGroup.add(wheel);
+            wheels.push(wheel);
+        });
+
+        scene.add(carGroup);
+
+        // --- Particle Drive Trail Effect ---
+        const particleCount = 40;
+        const particleGeo = new THREE.BoxGeometry(0.04, 0.04, 0.2);
+        const particles = [];
+
+        for(let i=0; i<particleCount; i++) {
+            const p = new THREE.Mesh(particleGeo, Math.random() > 0.5 ? neonGreenMat : neonRedMat);
+            p.position.set(
+                (Math.random() - 0.5) * 1.5,
+                0.2 + Math.random() * 0.5,
+                -2 - Math.random() * 10
+            );
+            scene.add(p);
+            particles.push(p);
+        }
+
+        // --- Animation Loop ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const elapsedTime = clock.getElapsedTime();
+
+            // Rotate wheels to simulate forward movement
+            wheels.forEach(wheel => {
+                wheel.rotation.x += 0.15;
+            });
+
+            // Animate drive trail particles backward
+            particles.forEach(p => {
+                p.position.z -= 0.2;
+                if (p.position.z < -12) {
+                    p.position.z = -2;
+                    p.position.x = (Math.random() - 0.5) * 1.5;
+                }
+            });
+
+            // Gentle idling chassis float vibration
+            carGroup.position.y = Math.sin(elapsedTime * 4) * 0.02;
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // --- Responsive Window Resizing ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lamborghini Vision GT - Advanced Simulation Framework</title>
+    <style>
+        :root {
+            --neon-green: #00ffcc;
+            --neon-orange: #ff4500;
+            --hud-bg: rgba(5, 12, 10, 0.85);
+        }
+        body {
+            margin: 0; padding: 0; overflow: hidden;
+            background-color: #020203;
+            font-family: 'Segoe UI', Monaco, monospace;
+            color: var(--neon-green);
+            user-select: none;
+        }
+        #canvas-container { width: 100vw; height: 100vh; position: absolute; z-index: 1; }
+
+        /* ADVANCED HUD ARCHITECTURE */
+        .hud-layer {
+            position: absolute; width: 100%; height: 100%;
+            z-index: 2; pointer-events: none;
+            box-sizing: border-box; padding: 25px;
+            display: grid;
+            grid-template-rows: auto 1fr auto;
+            grid-template-columns: 320px 1fr 320px;
+            grid-template-areas: 
+                "header header header"
+                "left   center right"
+                "footer footer footer";
+        }
+
+        .hud-panel {
+            background: var(--hud-bg);
+            border: 1px solid rgba(0, 255, 204, 0.25);
+            border-left: 4px solid var(--neon-orange);
+            padding: 15px; border-radius: 2px;
+            backdrop-filter: blur(8px);
+            box-shadow: 0 0 20px rgba(0,0,0,0.8);
+            pointer-events: auto;
+        }
+
+        .hud-header {
+            grid-area: header; display: flex; justify-content: space-between; align-items: center;
+            border-bottom: 2px solid var(--neon-green); padding-bottom: 10px; margin-bottom: 15px;
+        }
+        .hud-title { font-size: 22px; font-weight: 900; letter-spacing: 4px; color: #fff; }
+        
+        .hud-left { grid-area: left; display: flex; flex-direction: column; gap: 15px; align-self: start; }
+        .hud-right { grid-area: right; display: flex; flex-direction: column; gap: 15px; align-self: start; }
+        
+        .hud-footer {
+            grid-area: footer; display: flex; justify-content: space-between;
+            align-items: center; font-size: 11px; border-top: 1px solid rgba(0,255,204,0.2);
+            padding-top: 10px; margin-top: 15px;
+        }
+
+        .telemetry-row { display: flex; justify-content: space-between; margin: 8px 0; font-size: 13px; }
+        .telemetry-val { color: #fff; font-weight: bold; }
+        
+        .bar-container { background: #111; height: 6px; border-radius: 3px; overflow: hidden; margin-top: 4px; }
+        .bar-fill { height: 100%; background: var(--neon-green); width: 0%; transition: width 0.1s linear; }
+        .bar-fill.alert { background: var(--neon-orange); }
+
+        .control-hint {
+            background: rgba(0,0,0,0.5); padding: 4px 8px; border: 1px solid rgba(255,255,255,0.1);
+            color: #aaa; border-radius: 4px; font-size: 11px;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+
+    <div class="hud-layer">
+        <!-- Header -->
+        <div class="hud-panel hud-header">
+            <div class="hud-title">LAMBO V12 VIT // HYBRID OS</div>
+            <div class="control-hint">DRAG MOUSE TO ORBIT ARCHITECTURE</div>
+        </div>
+
+        <!-- Left Diagnostic Panel -->
+        <div class="hud-left">
+            <div class="hud-panel">
+                <h3 style="margin:0 0 10px 0; font-size:14px; color:var(--neon-orange)">POWERTRAIN TELEMETRY</h3>
+                <div class="telemetry-row"><span>V12 THERMAL</span><span id="txt-v12-temp" class="telemetry-val">0°C</span></div>
+                <div class="bar-container"><div id="bar-v12" class="bar-fill"></div></div>
+                
+                <div class="telemetry-row"><span>SUPER_CAPACITOR</span><span id="txt-cap-charge" class="telemetry-val">0%</span></div>
+                <div class="bar-container"><div id="bar-cap" class="bar-fill"></div></div>
+
+                <div class="telemetry-row"><span>MGU FREQUENCY</span><span id="txt-mgu" class="telemetry-val">0.0 Hz</span></div>
+            </div>
+        </div>
+
+        <!-- Right Aero Panel -->
+        <div class="hud-right">
+            <div class="hud-panel">
+                <h3 style="margin:0 0 10px 0; font-size:14px; color:var(--neon-green)">ACTIVE AERODYNAMICS</h3>
+                <div class="telemetry-row"><span>REAR WING ANGLE</span><span id="txt-wing-deg" class="telemetry-val">0°</span></div>
+                <div class="telemetry-row"><span>LATERAL FORCE</span><span id="txt-gforce" class="telemetry-val">0.00 G</span></div>
+                <div class="telemetry-row"><span>DOWNFORCE</span><span id="txt-downforce" class="telemetry-val">0 N</span></div>
+                <div class="bar-container"><div id="bar-df" class="bar-fill"></div></div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="hud-panel hud-footer">
+            <div>FRAMEWORK VER: 4.8.2-PRO</div>
+            <div style="color:#fff;" id="txt-time">SYSTEM TIME: 2026-05-25</div>
+            <div>STATUS: ONLINE</div>
+        </div>
+    </div>
+
+    <!-- CUSTOM GLSL SHADERS -->
+    <script>
+        // Custom Car Paint Shader Material configuration
+        const CarPaintShader = {
+            uniforms: {
+                time: { value: 0.0 },
+                baseColor: { value: new THREE.Color(0x16231a) },
+                glanceColor: { value: new THREE.Color(0x3a5f43) },
+                glowColor: { value: new THREE.Color(0x00ffcc) }
+            },
+            vertexShader: `
+                varying vec3 vNormal;
+                varying vec3 vViewPosition;
+                void main() {
+                    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+                    vNormal = normalize(normalMatrix * normal);
+                    vViewPosition = -mvPosition.xyz;
+                    gl_Position = projectionMatrix * mvPosition;
+                }
+            `,
+            fragmentShader: `
+                uniform vec3 baseColor;
+                uniform vec3 glanceColor;
+                uniform vec3 glowColor;
+                uniform float time;
+                varying vec3 vNormal;
+                varying vec3 vViewPosition;
+                void main() {
+                    vec3 normal = normalize(vNormal);
+                    vec3 viewDir = normalize(vViewPosition);
+                    
+                    // Fresnel edge effect equation
+                    float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), 3.0);
+                    vec3 finalColor = mix(baseColor, glanceColor, fresnel);
+                    
+                    // Subtle digital sweep grid lines integrated into material
+                    float sweep = sin(vViewPosition.z * 4.0 + time * 2.0) * 0.5 + 0.5;
+                    if(sweep > 0.98) {
+                        finalColor += glowColor * 0.4;
+                    }
+                    
+                    gl_FragColor = vec4(finalColor, 1.0);
+                }
+            `
+        };
+    </script>
+
+    <!-- CORE SIMULATOR CORE SCRIPT -->
+    <script>
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x020204);
+        scene.fog = new THREE.FogExp2(0x020204, 0.025);
+
+        const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(6, 3.5, 9);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.04;
+        controls.maxPolarAngle = Math.PI / 2 - 0.02; // Restrict camera below horizon ground
+        controls.minDistance = 4;
+        controls.maxDistance = 20;
+
+        // --- Lights Setup ---
+        const ambLight = new THREE.AmbientLight(0x0d1116, 1.5);
+        scene.add(ambLight);
+
+        const dirLight1 = new THREE.DirectionalLight(0x00ffcc, 1.2);
+        dirLight1.position.set(5, 12, 6);
+        scene.add(dirLight1);
+
+        const dirLight2 = new THREE.DirectionalLight(0xff4500, 0.6);
+        dirLight2.position.set(-6, 8, -5);
+        scene.add(dirLight2);
+
+        // --- Ground Matrix Floor ---
+        const gridHelper = new THREE.GridHelper(80, 80, 0x00ffcc, 0x091414);
+        gridHelper.position.y = 0;
+        scene.add(gridHelper);
+
+        // --- Custom Shader Compilation ---
+        const customPaintMat = new THREE.ShaderMaterial({
+            uniforms: THREE.UniformsUtils.clone(CarPaintShader.uniforms),
+            vertexShader: CarPaintShader.vertexShader,
+            fragmentShader: CarPaintShader.fragmentShader
+        });
+        
+        const neonGreenMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc });
+        const neonOrangeMat = new THREE.MeshBasicMaterial({ color: 0xff4500 });
+        const internalMat = new THREE.MeshStandardMaterial({ color: 0x08080a, roughness: 0.6, metalness: 0.8 });
+        const wheelMat = new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 0.4, metalness: 0.9 });
+
+        // --- Vehicle Architectural Root Node ---
+        const carRoot = new THREE.Group();
+        const chassisNode = new THREE.Group();
+        carRoot.add(chassisNode);
+
+        // Procedural Generation: Sharp Monocoque Core Spine via Shapes
+        const spineShape = new THREE.Shape();
+        spineShape.moveTo(0, 0.2);
+        spineShape.lineTo(2.2, 0.1);
+        spineShape.lineTo(2.0, -0.4);
+        spineShape.lineTo(-1.8, -0.3);
+        spineShape.lineTo(-2.2, 0.3);
+
+        const extrudeSettings = { depth: 0.8, bevelEnabled: true, bevelSegments: 3, steps: 1, bevelSize: 0.05, bevelThickness: 0.05 };
+        const spineGeo = new THREE.ExtrudeGeometry(spineShape, extrudeSettings);
+        spineGeo.center();
+        // Geometry rotation adjustments
+        spineGeo.rotateY(Math.PI / 2);
+        
+        const coreChassis = new THREE.Mesh(spineGeo, customPaintMat);
+        coreChassis.position.y = 0.55;
+        chassisNode.add(coreChassis);
+
+        // Split Pod Fenders (Front Left & Right pods separate from body)
+        const frontFenderGeo = new THREE.BoxGeometry(0.45, 0.5, 1.2);
+        const ffLeft = new THREE.Mesh(frontFenderGeo, customPaintMat);
+        ffLeft.position.set(1.1, 0.5, 1.4);
+        const ffRight = ffLeft.clone();
+        ffRight.position.x = -1.1;
+        chassisNode.add(ffLeft, ffRight);
+
+        // Jet-fighter canopy assembly
+        const canopyGeo = new THREE.ConeGeometry(0.5, 1.8, 4);
+        canopyGeo.rotateX(Math.PI / 2);
+        canopyGeo.scale(1.3, 0.4, 1.2);
+        const canopyMesh = new THREE.Mesh(canopyGeo, new THREE.MeshStandardMaterial({ color: 0x0a1515, roughness: 0.0, metalness: 1.0, transparent: true, opacity: 0.5 }));
+        canopyMesh.position.set(0, 0.85, 0.4);
+        chassisNode.add(canopyMesh);
+
+        // Active Aerodynamics: Rear Wing Node
+        const rearWingGroup = new THREE.Group();
+        rearWingGroup.position.set(0, 0.95, -1.8);
+        
+        const mainBlade = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.03, 0.5), customPaintMat);
+        rearWingGroup.add(mainBlade);
+
+        // Y-Shaped Signature Tail Fins Lights attached to Rear Wing assembly
+        const tailFinL = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.5, 0.2), neonOrangeMat);
+        tailFinL.position.set(1.3, 0.2, 0);
+        tailFinL.rotation.z = -Math.PI / 5;
+        const tailFinR = tailFinL.clone();
+        tailFinR.position.x = -1.3;
+        tailFinR.rotation.z = Math.PI / 5;
+        rearWingGroup.add(tailFinL, tailFinR);
+        chassisNode.add(rearWingGroup);
+
+        // Front Signature Y-Lights
+        function buildFrontYLight(isLeft) {
+            const yNode = new THREE.Group();
+            const bar1 = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.5), neonGreenMat);
+            bar1.position.z = 0.25;
+            yNode.add(bar1);
+            
+            const bar2 = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.3), neonGreenMat);
+            bar2.rotation.y = isLeft ? Math.PI / 4 : -Math.PI / 4;
+            bar2.position.set(isLeft ? 0.1 : -0.1, 0, 0.5);
+            yNode.add(bar2);
+
+            const bar3 = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.3), neonGreenMat);
+            bar3.rotation.y = isLeft ? -Math.PI / 4 : Math.PI / 4;
+            bar3.position.set(isLeft ? -0.1 : 0.1, 0, 0.5);
+            yNode.add(bar3);
+
+            yNode.position.set(isLeft ? 1.1 : -1.1, 0.35, 2.0);
+            return yNode;
+        }
+        chassisNode.add(buildFrontYLight(true), buildFrontYLight(false));
+
+        // --- Wheel & Hub Generators ---
+        const tireGeo = new THREE.CylinderGeometry(0.48, 0.48, 0.4, 32);
+        tireGeo.rotateZ(Math.PI / 2);
+
+        const wheelConfigs = [
+            { x: 1.15, y: 0.48, z: 1.4, isRear: false },
+            { x: -1.15, y: 0.48, z: 1.4, isRear: false },
+            { x: 1.25, y: 0.48, z: -1.3, isRear: true },
+            { x: -1.25, y: 0.48, z: -1.3, isRear: true }
+        ];
+
+        const wheels = [];
+        wheelConfigs.forEach(cfg => {
+            const wheelInstance = new THREE.Mesh(tireGeo, wheelMat);
+            wheelInstance.position.set(cfg.x, cfg.y, cfg.z);
+            
+            // Hexagonal Geometric Rim Insert
+            const rimGeo = new THREE.CylinderGeometry(0.32, 0.32, 0.42, 6);
+            rimGeo.rotateZ(Math.PI / 2);
+            const rimMesh = new THREE.Mesh(rimGeo, internalMat);
+            wheelInstance.add(rimMesh);
+
+            // Glowing Hub Accent ring
+            const hubHalo = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.015, 4, 24), neonGreenMat);
+            hubHalo.position.x = cfg.x > 0 ? 0.21 : -0.21;
+            hubHalo.rotation.y = Math.PI / 2;
+            wheelInstance.add(hubHalo);
+
+            carRoot.add(wheelInstance);
+            wheels.push({ mesh: wheelInstance, config: cfg });
+        });
+
+        scene.add(carRoot);
+
+        // --- Particles Stream Infrastructure ---
+        const streamCount = 60;
+        const streamGeo = new THREE.BufferGeometry();
+        const positions = new Float32Array(streamCount * 3);
+        const speeds = new Float32Array(streamCount);
+
+        for(let i=0; i<streamCount; i++) {
+            positions[i*3] = (Math.random() - 0.5) * 2.5;
+            positions[i*3+1] = 0.1 + Math.random() * 0.8;
+            positions[i*3+2] = -2 - Math.random() * 15;
+            speeds[i] = 0.15 + Math.random() * 0.25;
+        }
+        streamGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const streamMat = new THREE.PointsMaterial({ color: 0x00ffcc, size: 0.06, transparent: true, opacity: 0.7 });
+        const streamParticles = new THREE.Points(streamGeo, streamMat);
+        scene.add(streamParticles);
+
+        // --- Telemetry HUD Sync Loop Data ---
+        const ui = {
+            v12Temp: document.getElementById('txt-v12-temp'),
+            capCharge: document.getElementById('txt-cap-charge'),
+            mguFreq: document.getElementById('txt-mgu'),
+            wingDeg: document.getElementById('txt-wing-deg'),
+            gForce: document.getElementById('txt-gforce'),
+            downforce: document.getElementById('txt-downforce'),
+            barV12: document.getElementById('bar-v12'),
+            barCap: document.getElementById('bar-cap'),
+            barDf: document.getElementById('bar-df')
+        };
+
+        const clock = new THREE.Clock();
+
+        // --- Dynamic Physics Engine Simulation Run Loop ---
+        function runSimulation() {
+            requestAnimationFrame(runSimulation);
+            
+            const dt = clock.getDelta();
+            const time = clock.getElapsedTime();
+
+            // 1. Core Uniform Time Ingestion
+            customPaintMat.uniforms.time.value = time;
+
+            // 2. Mock Dynamic Kinematics & Physics Variables Generation
+            const speedFactor = 1.0 + Math.sin(time * 0.3) * 0.3; // Cycles acceleration spikes
+            const targetGForce = Math.sin(time * 1.2) * 1.4 * speedFactor;
+            const targetWingAngle = Math.max(5, (12 + Math.cos(time * 0.8) * 25) * speedFactor);
+            const calculatedDownforce = Math.floor(4500 + (targetWingAngle * 120) * speedFactor);
+
+            // 3. Chassis Kinetics (Roll & Pitch feedback based on calculated loads)
+            chassisNode.rotation.z = THREE.MathUtils.lerp(chassisNode.rotation.z, -targetGForce * 0.04, 0.1);
+            chassisNode.rotation.x = THREE.MathUtils.lerp(chassisNode.rotation.x, (Math.sin(time * 5) * 0.008) - (speedFactor * 0.015), 0.1);
+            chassisNode.position.y = Math.sin(time * 6) * 0.015; // Engine idle resonance frequency
+
+            // 4. Active Aero Actuation Engine Execution
+            rearWingGroup.rotation.x = THREE.MathUtils.lerp(rearWingGroup.rotation.x, THREE.MathUtils.degToRad(-targetWingAngle), 0.1);
+
+            // 5. Wheels Angular Rotation Physics Execution
+            wheels.forEach(w => {
+                w.mesh.rotation.x += 0.22 * speedFactor;
+                // Ackerman Steering angle projection matrix mimicking front turning
+                if(!w.config.isRear) {
+                    w.mesh.rotation.y = THREE.MathUtils.lerp(w.mesh.rotation.y, targetGForce * 0.18, 0.1);
+                }
+            });
+
+            // 6. Particle Stream System Transformations Update
+            const posArr = streamParticles.geometry.attributes.position.array;
+            for(let i=0; i<streamCount; i++) {
+                posArr[i*3+2] -= speeds[i] * (speedFactor * 1.8);
+                if(posArr[i*3+2] < -15) {
+                    posArr[i*3+2] = -1.5;
+                    posArr[i*3] = (Math.random() - 0.5) * 2.5;
+                    posArr[i*3+1] = 0.1 + Math.random() * 0.8;
+                }
+            }
+            streamParticles.geometry.attributes.position.needsUpdate = true;
+
+            // 7. Data Stream Push To Native HUD Elements
+            const currentTemp = Math.floor(92 + Math.sin(time * 2) * 4);
+            const currentCap = Math.floor(74 + Math.sin(time * 4) * 25);
+            
+            ui.v12Temp.innerText = `${currentTemp}°C`;
+            ui.barV12.style.width = `${(currentTemp / 130) * 100}%`;
+            if(currentTemp > 94) ui.barV12.classList.add('alert'); else ui.barV12.classList.remove('alert');
+
+            ui.capCharge.innerText = `${currentCap}%`;
+            ui.barCap.style.width = `${currentCap}%`;
+
+            ui.mguFreq.innerText = `${(450.5 + Math.abs(targetGForce) * 280).toFixed(1)} Hz`;
+            ui.wingDeg.innerText = `${Math.floor(targetWingAngle)}°`;
+            ui.gForce.innerText = `${targetGForce.toFixed(2)} G`;
+            ui.downforce.innerText = `${calculatedDownforce} N`;
+            ui.barDf.style.width = `${(calculatedDownforce / 8000) * 100}%`;
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // --- Window Adaptability Handler ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Initialize simulation execution runtime
+        runSimulation();
+    </script>
+</body>
+</html>
+
