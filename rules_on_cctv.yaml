@@ -1,0 +1,61 @@
+# CCTV Installation and Operational Rules
+
+## 1. Compliance & Legal Principles
+* **Purpose Limitation:** CCTV systems must only be installed for legitimate security purposes (e.g., crime prevention, safety of property).
+* **Proportionality:** Surveillance must be the least intrusive method to achieve the security goal. Avoid unnecessary monitoring.
+* **Privacy Rights:** Cameras shall not be directed into private areas where there is a reasonable expectation of privacy (e.g., bedrooms, bathrooms, changing rooms, neighboring private properties).
+
+## 2. Notification & Transparency
+* **Signage:** Prominently display clear, concise signs at all points of entry and in areas monitored by cameras. 
+* **Notice:** Signs must inform individuals that CCTV is in operation and indicate where they can find the full privacy policy.
+
+## 3. Technical & Operational Standards
+* **Data Integrity:** Ensure images are of sufficient quality to fulfill their purpose (e.g., facial identification in high-risk zones).
+* **Access Control:** 
+    * Restrict access to footage to authorized personnel only.
+    * Use strong, unique passwords for NVR/DVR systems and encrypt data transmission.
+* **Retention Policy:** Retain footage only for as long as necessary. Once the purpose is served, delete data securely.
+* **Maintenance:** Regularly inspect camera positioning to ensure they haven't shifted and verify that lenses are clean and recording correctly.
+
+## 4. Request for Access (Data Subject Access Rights)
+* **Verification:** Before releasing any footage, verify the identity of the requester.
+* **Grounds for Denial:** Requests may be denied if:
+    * The purpose is unlawful or frivolous.
+    * Disclosure infringes on the privacy rights of other individuals.
+    * The requested footage has already been deleted in line with the retention policy.
+* **Third-Party Requests:** Access by third parties (e.g., law enforcement) must be requested in writing and evaluated against the necessity of the disclosure.
+
+
+
+import cv2
+import numpy as np
+
+def apply_privacy_mask(frame, mask_coords):
+    """
+    Applies a mosaic blur to sensitive areas defined in mask_coords.
+    'mask_coords' should be a list of (x, y, w, h) rectangles.
+    """
+    for (x, y, w, h) in mask_coords:
+        roi = frame[y:y+h, x:x+w]
+        # Apply mosaic effect
+        roi = cv2.resize(roi, (w // 10, h // 10), interpolation=cv2.INTER_LINEAR)
+        roi = cv2.resize(roi, (w, h), interpolation=cv2.INTER_NEAREST)
+        frame[y:y+h, x:x+w] = roi
+    return frame
+
+# Example: Define restricted zones for a camera view
+restricted_zones = [(100, 150, 50, 50), (300, 200, 100, 100)]
+# Apply this function in your streaming loop
+
+
+
+#!/bin/bash
+# CCTV Retention Policy: Purge data older than 30 days
+RETENTION_DAYS=30
+STORAGE_PATH="/mnt/nvr_storage/recordings"
+
+# Find and securely delete files older than 30 days
+find "$STORAGE_PATH" -type f -name "*.mp4" -mtime +$RETENTION_DAYS -exec shred -u {} \;
+
+# Log the action for audit compliance
+echo "$(date): Automated purge completed. Files older than $RETENTION_DAYS days removed." >> /var/log/cctv_maintenance.log
