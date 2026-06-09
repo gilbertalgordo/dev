@@ -1,0 +1,83 @@
+import requests
+import time
+from datetime import datetime
+
+# CONFIGURATION
+GATEWAY_IP = "192.168.1.1"  # Replace with your terminal IP
+LOGIN_URL = f"http://{GATEWAY_IP}/TMI/v1/auth/login"
+REBOOT_URL = f"http://{GATEWAY_IP}/TMI/v1/gateway/reset"
+CREDENTIALS = {"username": "admin", "password": "yourpassword"}
+
+def daily_reset_trigger():
+    try:
+        # 1. Authenticate
+        session = requests.Session()
+        auth_response = session.post(LOGIN_URL, json=CREDENTIALS)
+        token = auth_response.json().get("token")
+        
+        # 2. Execute Reset
+        headers = {"Authorization": f"Bearer {token}"}
+        reset_response = session.post(REBOOT_URL, json={"set": "reboot"}, headers=headers)
+        
+        if reset_response.status_code == 200:
+            print(f"Reset successful at {datetime.now()}")
+        else:
+            print("Failed to reset")
+            
+    except Exception as e:
+        print(f"Error: {e}")
+
+# Simple loop to check time
+while True:
+    now = datetime.now()
+    # Trigger at 03:00 AM daily
+    if now.hour == 3 and now.minute == 0:
+        daily_reset_trigger()
+        time.sleep(61) # Prevent double trigger
+    time.sleep(30)
+
+
+
+import requests
+import schedule
+import time
+import logging
+
+# Configure logging for audit trails
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+
+# Replace with your hardware-specific endpoint
+MODEM_CONFIG = {
+    "api_url": "http://192.168.1.1/api/v1/system/reboot",
+    "auth": ("admin", "password_here"),
+    "timeout": 10
+}
+
+def trigger_modem_reset():
+    """
+    Sends a programmatic reset signal to the satellite modem.
+    """
+    try:
+        logging.info("Initiating scheduled daily connection reset...")
+        response = requests.post(
+            MODEM_CONFIG["api_url"],
+            auth=MODEM_CONFIG["auth"],
+            timeout=MODEM_CONFIG["timeout"]
+        )
+        
+        if response.status_code == 200:
+            logging.info("Reset command accepted by hardware.")
+        else:
+            logging.error(f"Hardware returned error: {response.status_code}")
+            
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Failed to communicate with modem: {e}")
+
+# Schedule the reset for 03:00 AM daily
+schedule.every().day.at("03:00").do(trigger_modem_reset)
+
+if __name__ == "__main__":
+    logging.info("Satellite Connection Manager initialized.")
+    while True:
+        schedule.run_pending()
+        time.sleep(60)
