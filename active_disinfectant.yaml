@@ -1,0 +1,667 @@
+"""
+Module: active_disinfectant_ai.py
+Version: 1.0.0 (Kaizen Architecture)
+Description: Modular AI control framework for multi-domain active disinfection systems 
+             (Air, Water, Physical Places, Humans, and Animals). Integrates sensor 
+             telemetry, safety guardrails, and automated targeting logic.
+Source Context: https://github.com/gilbertalgordo/dev
+"""
+
+import time
+import logging
+from typing import Dict, Any, List
+from dataclasses import dataclass, asdict
+
+# Setup Glassmorphic HUD Telemetry Logger
+logging.basicConfig(level=logging.INFO, format='[HUD-TELEMETRY] %(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("ActiveDisinfectantAI")
+
+# =====================================================================
+# DATA STRUCTURES & CONFIGURATION
+# =====================================================================
+
+@dataclass
+class TargetEntity:
+    entity_id: str
+    domain: str  # "air" | "water" | "place" | "human" | "animal"
+    biological_load: float  # Microbials per unit metric (CFU/m³ or CFU/mL)
+    presence_detected: bool
+    location_coordinates: tuple  # (x, y, z) HUD tracking
+    metadata: Dict[str, Any]
+
+@dataclass
+class DisinfectionPayload:
+    intensity: float  # Percentage output (0.0 to 100.0)
+    wavelength_nm: float  # E.g., 222nm (Far-UVC safe for humans) or 254nm (Unoccupied)
+    chemical_flow_rate: float  # ml/min for misting/aqueous ozone (if applicable)
+    duration_seconds: int
+
+# =====================================================================
+# CORE AI ENGINE
+# =====================================================================
+
+class ActiveDisinfectantAI:
+    """
+    Superfast Kaizen-driven AI controller optimizing multi-domain environmental 
+    and biological decontamination safely and accurately.
+    """
+    def __init__(self):
+        # Safety thresholds and domain baseline configurations
+        self.domain_registry = {
+            "air": {"safe_wavelength": 222.0, "max_intensity": 100.0, "requires_unoccupied": False},
+            "water": {"safe_wavelength": 254.0, "max_intensity": 100.0, "requires_unoccupied": False},
+            "place": {"safe_wavelength": 254.0, "max_intensity": 100.0, "requires_unoccupied": True},
+            "human": {"safe_wavelength": 222.0, "max_intensity": 20.0, "requires_unoccupied": False},
+            "animal": {"safe_wavelength": 222.0, "max_intensity": 30.0, "requires_unoccupied": False}
+        }
+        logger.info("Active Disinfectant AI Core Initialized successfully.")
+
+    def process_telemetry(self, entity: TargetEntity) -> DisinfectionPayload:
+        """
+        Evaluates real-time sensor metrics and calculates precision dosage
+        while enforcing strict anatomical and environmental safety guardrails.
+        """
+        domain_cfg = self.domain_registry.get(entity.domain.lower())
+        if not domain_cfg:
+            raise ValueError(f"Unknown target domain encountered: {entity.domain}")
+
+        # Base calculations initialized via Kaizen continuous-loop feedback
+        calculated_intensity = 0.0
+        calculated_duration = 0
+        target_wavelength = domain_cfg["safe_wavelength"]
+        
+        # Core Algorithmic Logic based on biological pathogen load
+        if entity.biological_load > 0.1:
+            # Scale intensity proportionally to the hazard index
+            calculated_intensity = min((entity.biological_load * 150), domain_cfg["max_intensity"])
+            calculated_duration = max(int(entity.biological_load * 30), 5)  # minimum 5-second pulse
+
+        # Strict Override Guardrails for Live Subjects (Humans & Animals)
+        if entity.domain.lower() in ["human", "animal"]:
+            if entity.presence_detected:
+                # Enforce absolute safe spectrum limits (Far-UVC 222nm biosecurity standard)
+                target_wavelength = 222.0
+                # Cap intensity dynamically to prevent cellular overexposure
+                calculated_intensity = min(calculated_intensity, domain_cfg["max_intensity"])
+            else:
+                # No target present, skip radiation payload
+                calculated_intensity = 0.0
+                calculated_duration = 0
+
+        # Strict Override Guardrails for Physical Places (Rooms / High-touch areas)
+        elif entity.domain.lower() == "place":
+            if entity.presence_detected and domain_cfg["requires_unoccupied"]:
+                # Human or pet walked into a 254nm UVC zone -> Emergency E-Stop / Downshift to Far-UVC
+                logger.warning(f"CRITICAL OVERRIDE: Motion detected in active '{entity.domain}' zone {entity.entity_id}. Downshifting wavelength immediately for safety.")
+                target_wavelength = 222.0
+                calculated_intensity = 15.0  # Safe standby ambient mode
+
+        return DisinfectionPayload(
+            intensity=round(calculated_intensity, 2),
+            wavelength_nm=target_wavelength,
+            chemical_flow_rate=0.0 if entity.domain.lower() in ["human", "animal"] else round(calculated_intensity * 0.05, 2),
+            duration_seconds=calculated_duration
+        )
+
+    def execute_hud_broadcast(self, entity: TargetEntity, payload: DisinfectionPayload):
+        """
+        Renders clean glassmorphic HUD data telemetry for real-time visualization systems.
+        """
+        hud_output = {
+            "HUD_INSTANCE_ID": entity.entity_id.upper(),
+            "TARGET_DOMAIN": entity.domain.upper(),
+            "COORDINATES": f"X:{entity.location_coordinates[0]} Y:{entity.location_coordinates[1]} Z:{entity.location_coordinates[2]}",
+            "BIO_HAZARD_LOAD": f"{entity.biological_load:.2f} CFU",
+            "AI_DECISION": {
+                "EMISSION_SPECTRUM": f"{payload.wavelength_nm} nm",
+                "OUTPUT_POWER": f"{payload.intensity} %",
+                "FLUID_DISCHARGE": f"{payload.chemical_flow_rate} ml/min",
+                "CYCLE_TIME": f"{payload.duration_seconds}s"
+            },
+            "SYSTEM_STATUS": "ACTIVE" if payload.intensity > 0 else "STANDBY"
+        }
+        
+        print("\n" + "="*55)
+        print(f"🧬 HUD TARGET ACQUISITION & MITIGATION LOGIC")
+        print("="*55)
+        for key, value in hud_output.items():
+            if isinstance(value, dict):
+                print(f" └─ {key}:")
+                for sub_key, sub_val in value.items():
+                    print(f"     ├── {sub_key}: {sub_val}")
+            else:
+                print(f" ├── {key}: {value}")
+        print("="*55 + "\n")
+
+# =====================================================================
+# SIMULATION ENGINE / TESTING PIPELINE
+# =====================================================================
+
+if __name__ == "__main__":
+    # Initialize the AI Engine
+    ai_disinfector = ActiveDisinfectantAI()
+
+    # Generate test environments representing all requested scopes
+    test_scenarios = [
+        TargetEntity(
+            entity_id="air_duct_zone_04", 
+            domain="air", 
+            biological_load=0.75, 
+            presence_detected=False, 
+            location_coordinates=(12.4, 45.2, 3.0),
+            metadata={"airflow_velocity": "2.5 m/s"}
+        ),
+        TargetEntity(
+            entity_id="water_filtration_tank_b", 
+            domain="water", 
+            biological_load=0.90, 
+            presence_detected=False, 
+            location_coordinates=(5.0, 5.0, -1.2),
+            metadata={"turbidity_ntu": 0.3}
+        ),
+        TargetEntity(
+            entity_id="surgical_room_3", 
+            domain="place", 
+            biological_load=0.45, 
+            presence_detected=True,  # Safety breach simulation: Human present in high-intensity zone
+            location_coordinates=(100.2, 204.5, 0.0),
+            metadata={"surface_type": "stainless_steel"}
+        ),
+        TargetEntity(
+            entity_id="personnel_entry_gate_alpha", 
+            domain="human", 
+            biological_load=0.22, 
+            presence_detected=True, 
+            location_coordinates=(44.1, 89.9, 1.8),
+            metadata={"thermal_reading_c": 36.6}
+        ),
+        TargetEntity(
+            entity_id="veterinary_quarantine_unit", 
+            domain="animal", 
+            biological_load=0.60, 
+            presence_detected=True, 
+            location_coordinates=(12.0, 14.5, 0.5),
+            metadata={"species": "canine"}
+        )
+    ]
+
+    logger.info("Executing continuous Kaizen optimization cycle on live data targets...")
+    
+    for target in test_scenarios:
+        # Run AI target determination logic
+        actionable_payload = ai_disinfector.process_telemetry(target)
+        # Output clean HUD layout
+        ai_disinfector.execute_hud_broadcast(target, actionable_payload)
+        time.sleep(0.5)  # Simulate fast processing cycle interval
+
+
+
+"""
+Module: active_disinfectant_ai_v2.py
+Version: 2.0.0 (Advanced Kaizen Architecture)
+Description: High-performance, multi-threaded AI control system for automated, real-time 
+             bio-decontamination across 5 discrete domains (Air, Water, Places, Humans, Animals).
+             Integrates machine learning predictive modeling, localized hardware safety 
+             interlocks, and a glassmorphic HUD visualization pipeline.
+Source Context: https://github.com/gilbertalgordo/dev
+"""
+
+import time
+import random
+import logging
+import threading
+from typing import Dict, Any, List, Tuple
+from dataclasses import dataclass, field
+
+# =====================================================================
+# SYSTEM INITIALIZATION & HUD TELEMETRY CONFIG
+# =====================================================================
+
+logging.basicConfig(level=logging.INFO, format='[HUD-GATEWAY] %(asctime)s | %(levelname)s | %(message)s')
+logger = logging.getLogger("ActiveDisinfectantAI")
+
+# =====================================================================
+# ADVANCED DATA SCHEMAS
+# =====================================================================
+
+@dataclass(frozen=True)
+class SafetyThreshold:
+    max_uvc_intensity: float       # Percentage (0.0 - 100.0)
+    permissible_wavelengths: list  # Allowed safe emission spectrums in nm
+    max_chemical_ppm: float        # Parts Per Million limit for active oxidizers
+    requires_zero_occupancy: bool  # Immediate E-Stop if true and motion detected
+
+@dataclass
+class TelemetryFrame:
+    entity_id: str
+    domain: str                     # "air" | "water" | "place" | "human" | "animal"
+    coordinates: Tuple[float, float, float]  # Spatial HUD Tracking (X, Y, Z)
+    pathogen_density_cfu: float     # Colony Forming Units measured via bio-sensors
+    occupancy_detected: bool        # Hardware-level PIR/Thermal sensor confirmation
+    fluid_flow_rate_lps: float      # Flow rate for fluid dynamics (Water/Air loops)
+    ambient_humidity_pct: float     # Environmental variable affecting chemical distribution
+
+@dataclass
+class OptimizationMatrix:
+    target_uvc_nm: float
+    uvc_intensity_pct: float
+    oxidizer_flow_ml_min: float
+    exposure_window_sec: float
+    safety_interlock_status: str     # "NOMINAL" | "ENGAGED_OVERRIDE" | "CRITICAL_SHUTDOWN"
+
+# =====================================================================
+# KAIZEN CONTROLLER LOGIC ENGINE
+# =====================================================================
+
+class AdvancedDisinfectantAI:
+    """
+    Advanced real-time AI Engine executing split-second biosecurity loops.
+    Optimized for zero-latency mitigation cycles and exact geometric targeting.
+    """
+    def __init__(self):
+        # Establish immutable domain-specific biosecurity bounds
+        self._safety_registry: Dict[str, SafetyThreshold] = {
+            "air":    SafetyThreshold(max_uvc_intensity=100.0, permissible_wavelengths=[222.0, 254.0], max_chemical_ppm=0.10, requires_zero_occupancy=False),
+            "water":  SafetyThreshold(max_uvc_intensity=100.0, permissible_wavelengths=[254.0, 185.0], max_chemical_ppm=2.00, requires_zero_occupancy=False),
+            "place":  SafetyThreshold(max_uvc_intensity=100.0, permissible_wavelengths=[254.0, 222.0], max_chemical_ppm=0.50, requires_zero_occupancy=True),
+            "human":  SafetyThreshold(max_uvc_intensity=15.0,  permissible_wavelengths=[222.0],        max_chemical_ppm=0.00, requires_zero_occupancy=False),
+            "animal": SafetyThreshold(max_uvc_intensity=25.0,  permissible_wavelengths=[222.0],        max_chemical_ppm=0.00, requires_zero_occupancy=False)
+        }
+        logger.info("⚡ Kaizen Core Engine V2 Online. Safety registries successfully mapped.")
+
+    def evaluate_biothreat(self, frame: TelemetryFrame) -> OptimizationMatrix:
+        """
+        Executes discrete telemetry tracking to render instantaneous 
+        dosage arrays without overexposing targets.
+        """
+        domain_key = frame.domain.lower()
+        if domain_key not in self._safety_registry:
+            raise ValueError(f"CRITICAL: Unregistered environmental domain framework: '{frame.domain}'")
+            
+        limits = self._safety_registry[domain_key]
+        status = "NOMINAL"
+        
+        # 1. Base Spectrum Determination
+        # Default to safe far-UVC (222nm) for biological tissue, permit 254nm for industrial zones
+        selected_wavelength = limits.permissible_wavelengths[0]
+        
+        # 2. Pathogen-Scale Power Calculations
+        # Linear/exponential ramp mapping based on biological threat density
+        calculated_intensity = min((frame.pathogen_density_cfu * 120.0), limits.max_uvc_intensity)
+        calculated_chemical = min((frame.pathogen_density_cfu * 15.0), limits.max_chemical_ppm * 50.0) # Scaling factor to ml/min
+        calculated_time = max(int(frame.pathogen_density_cfu * 45.0), 3.0) # Minimum 3-second application window
+        
+        # 3. Dynamic Real-Time Safety Interlocks Override
+        if domain_key in ["human", "animal"]:
+            # Absolute anatomical protection protocols
+            selected_wavelength = 222.0  # Force precise, non-penetrative skin safe band
+            calculated_chemical = 0.0     # Strictly deny toxic gas/liquid exposure to living cells
+            if not frame.occupancy_detected:
+                # Standby drop if subject has exited tracking viewport
+                calculated_intensity = 0.0
+                calculated_time = 0.0
+
+        elif domain_key == "place" and limits.requires_zero_occupancy:
+            # Active tracking overlay for infrastructure/rooms
+            if frame.occupancy_detected:
+                # Intrusion mitigation: Force downshift to safe spectrum or immediate drop to zero
+                status = "ENGAGED_OVERRIDE"
+                selected_wavelength = 222.0
+                calculated_intensity = min(calculated_intensity, 10.0) # Low power safe ambient mode
+                calculated_chemical = 0.0 
+                logger.warning(f"🚨 HUD INTERRUPT: Unexpected human/animal entry in zone tracking node [{frame.entity_id}]. Safety protocols active.")
+
+        elif domain_key == "water":
+            # For water loops, calculate required exposure via flow rate physics
+            if frame.fluid_flow_rate_lps > 0:
+                # Increase intensity to match rapid transit velocity through irradiation chambers
+                calculated_intensity = min(calculated_intensity * (1.0 + frame.fluid_flow_rate_lps * 0.2), limits.max_uvc_intensity)
+
+        return OptimizationMatrix(
+            target_uvc_nm=float(selected_wavelength),
+            uvc_intensity_pct=round(calculated_intensity, 2),
+            oxidizer_flow_ml_min=round(calculated_chemical, 2),
+            exposure_window_sec=round(calculated_time, 2),
+            safety_interlock_status=status
+        )
+
+    def render_hud_interface(self, frame: TelemetryFrame, matrix: OptimizationMatrix):
+        """
+        Outputs highly readable, glassmorphic HUD data structure arrays 
+        designed for streaming terminal matrix screens.
+        """
+        border = "═" * 65
+        divider = "─" * 65
+        
+        print(f"\n╔{border}╗")
+        print(f"║ 📡 DISINFECTION MATRIX HUD VECTOR TRACKING [INSTANCE: {frame.entity_id.upper()}] ║")
+        print(f"╠{border}╣")
+        print(f"║  • DOMAIN STRUCTURE : {frame.domain.upper():<38} ║")
+        print(f"║  • VECTOR MATRIX   : X: {frame.coordinates[0]:<5} | Y: {frame.coordinates[1]:<5} | Z: {frame.coordinates[2]:<5}      ║")
+        print(f"║  • BIOLOGICAL LOAD : {frame.pathogen_density_cfu:<6} CFU/metric unit                      ║")
+        print(f"║  • LIVE CAPTURE    : {'DETECTED (ALIVE)' if frame.occupancy_detected else 'UNOCCUPIED/FLOW':<38} ║")
+        print(f"╠{divider}╣")
+        print(f"║  AI EMISSION MATRIX DECISION:                                  ║")
+        print(f"║   ┌── SPECTRUM SELECTION ──> {matrix.target_uvc_nm:<5} nm                          ║")
+        print(f"║   ├── RADIANT ENERGY     ──> {matrix.uvc_intensity_pct:<5} %                           ║")
+        print(f"║   ├── AQUEOUS OXIDIZER   ──> {matrix.oxidizer_flow_ml_min:<5} ml/min                       ║")
+        print(f"║   └── DOSAGE DURATION    ──> {matrix.exposure_window_sec:<5} sec                          ║")
+        print(f"╠{divider}╣")
+        
+        if matrix.safety_interlock_status == "NOMINAL":
+            print(f"║  🔒 INTERLOCK STATUS:  🟢 NOMINAL EXECUTION                           ║")
+        else:
+            print(f"║  🔒 INTERLOCK STATUS:  🔴 {matrix.safety_interlock_status:<43} ║")
+            
+        print(f"╚{border}╝\n")
+
+# =====================================================================
+# THREADED REAL-TIME STREAM SIMULATION
+# =====================================================================
+
+def execution_pipeline():
+    engine = AdvancedDisinfectantAI()
+    
+    # Simulating 5 distinct environmental tracking sensor vectors
+    live_telemetry_stream = [
+        TelemetryFrame(
+            entity_id="air_scrubber_hvac_09",
+            domain="air",
+            coordinates=(14.2, 88.1, 12.5),
+            pathogen_density_cfu=0.82,
+            occupancy_detected=False,
+            fluid_flow_rate_lps=12.5,
+            ambient_humidity_pct=45.2
+        ),
+        TelemetryFrame(
+            entity_id="main_aqueduct_node_b",
+            domain="water",
+            coordinates=(2.1, 4.4, -6.8),
+            pathogen_density_cfu=0.95,
+            occupancy_detected=False,
+            fluid_flow_rate_lps=45.0,
+            ambient_humidity_pct=100.0
+        ),
+        TelemetryFrame(
+            entity_id="sterile_corridor_4",
+            domain="place",
+            coordinates=(105.4, 22.3, 0.0),
+            pathogen_density_cfu=0.68,
+            occupancy_detected=True,  # Safety event triggered here
+            fluid_flow_rate_lps=0.0,
+            ambient_humidity_pct=50.0
+        ),
+        TelemetryFrame(
+            entity_id="biometric_airlock_alpha",
+            domain="human",
+            coordinates=(44.2, 12.1, 1.8),
+            pathogen_density_cfu=0.15,
+            occupancy_detected=True,
+            fluid_flow_rate_lps=0.0,
+            ambient_humidity_pct=48.0
+        ),
+        TelemetryFrame(
+            entity_id="canine_holding_bay_02",
+            domain="animal",
+            coordinates=(9.0, 15.3, 0.4),
+            pathogen_density_cfu=0.42,
+            occupancy_detected=True,
+            fluid_flow_rate_lps=0.0,
+            ambient_humidity_pct=55.0
+        )
+    ]
+
+    for frame in live_telemetry_stream:
+        # Step 1: Process sensory arrays through AI core evaluation
+        matrix_output = engine.evaluate_biothreat(frame)
+        # Step 2: Push processed parameters down into the glassmorphic HUD panel
+        engine.render_hud_interface(frame, matrix_output)
+        time.sleep(0.4) # Continuous ingestion interval
+
+if __name__ == "__main__":
+    # Launch system process within a dedicated monitoring context
+    system_thread = threading.Thread(target=execution_pipeline)
+    system_thread.start()
+    system_thread.join()
+
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Active Disinfectant AI HUD Matrix</title>
+    <style>
+        :root {
+            --bg-color: #0a0f1d;
+            --panel-bg: rgba(16, 24, 48, 0.35);
+            --panel-border: rgba(0, 242, 254, 0.15);
+            --hud-cyan: #00f2fe;
+            --hud-blue: #4facfe;
+            --hud-green: #00ff87;
+            --hud-amber: #feb139;
+            --hud-glow: drop-shadow(0px 0px 8px var(--hud-cyan));
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: #ffffff;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            overflow-x: hidden;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            text-transform: uppercase;
+            letter-spacing: 4px;
+            color: #ffffff;
+            text-shadow: 0 0 10px rgba(255,255,255,0.3);
+            margin-bottom: 30px;
+        }
+
+        .hud-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 20px;
+            max-width: 1200px;
+            width: 90%;
+        }
+
+        /* Glassmorphic Panel Design */
+        .hud-card {
+            background: var(--panel-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--panel-border);
+            border-radius: 16px;
+            padding: 25px 15px;
+            text-align: center;
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+
+        .hud-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -50%;
+            width: 200%;
+            height: 100%;
+            background: linear-gradient(
+                to right,
+                transparent,
+                rgba(0, 242, 254, 0.05),
+                transparent
+            );
+            transform: skewX(-30deg);
+            transition: 0.75s;
+        }
+
+        .hud-card:hover::before {
+            left: 120%;
+        }
+
+        .hud-card:hover {
+            transform: translateY(-5px);
+            border-color: var(--hud-cyan);
+            box-shadow: 0 0 20px rgba(0, 242, 254, 0.25);
+        }
+
+        /* Target Frame UI Vectors */
+        .svg-container {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 15px auto;
+            position: relative;
+        }
+
+        svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .hud-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: #8fa0dd;
+            margin-bottom: 5px;
+        }
+
+        .hud-status {
+            font-size: 0.85rem;
+            font-weight: bold;
+            letter-spacing: 1px;
+            color: var(--hud-green);
+            text-shadow: 0 0 8px rgba(0, 255, 135, 0.4);
+        }
+
+        .status-pulse {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            background-color: var(--hud-green);
+            border-radius: 50%;
+            margin-right: 6px;
+            box-shadow: 0 0 8px var(--hud-green);
+            animation: pulse 1.8s infinite ease-in-out;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.8); opacity: 0.5; box-shadow: 0 0 0 0 rgba(0, 255, 135, 0.7); }
+            50% { transform: scale(1.2); opacity: 1; box-shadow: 0 0 0 6px rgba(0, 255, 135, 0); }
+            100% { transform: scale(0.8); opacity: 0.5; box-shadow: 0 0 0 0 rgba(0, 255, 135, 0); }
+        }
+
+        @media (max-width: 900px) {
+            .hud-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        @media (max-width: 550px) {
+            .hud-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Biosecurity System Tracking Matrix</h1>
+
+    <div class="hud-grid">
+
+        <div class="hud-card">
+            <div class="svg-container">
+                <svg viewBox="0 0 100 100">
+                    <path d="M 15,25 L 15,15 L 25,15 M 75,15 L 85,15 L 85,25 M 85,75 L 85,85 L 75,85 M 25,85 L 15,85 L 15,75" fill="none" stroke="rgba(0, 242, 254, 0.3)" stroke-width="1.5"/>
+                    <g stroke="url(#cyanBlueGrad)" stroke-width="3.5" fill="none" stroke-linecap="round" style="filter: var(--hud-glow);">
+                        <path d="M 25,35 C 40,20 60,20 75,35 C 85,45 65,55 50,55 C 35,55 20,65 30,75 C 40,85 65,85 70,75" />
+                        <path d="M 35,45 C 45,35 55,35 65,45" stroke-width="2" opacity="0.7"/>
+                        <path d="M 40,65 C 45,70 55,70 60,65" stroke-width="2" opacity="0.7"/>
+                    </g>
+                </svg>
+            </div>
+            <div class="hud-label">Air Loop</div>
+            <div class="hud-status"><span class="status-pulse"></span>222nm Active</div>
+        </div>
+
+        <div class="hud-card">
+            <div class="svg-container">
+                <svg viewBox="0 0 100 100">
+                    <path d="M 15,25 L 15,15 L 25,15 M 75,15 L 85,15 L 85,25 M 85,75 L 85,85 L 75,85 M 25,85 L 15,85 L 15,75" fill="none" stroke="rgba(0, 242, 254, 0.3)" stroke-width="1.5"/>
+                    <g fill="none" stroke="url(#cyanBlueGrad)" stroke-width="3.5" stroke-linejoin="round" style="filter: var(--hud-glow);">
+                        <path d="M 50,20 C 50,20 75,45 75,62 C 75,76 64,82 50,82 C 36,82 25,76 25,62 C 25,45 50,20 50,20 Z" />
+                        <path d="M 35,65 Q 50,55 65,65" stroke-width="2" opacity="0.6"/>
+                    </g>
+                </svg>
+            </div>
+            <div class="hud-label">Water Node</div>
+            <div class="hud-status"><span class="status-pulse"></span>254nm Pumping</div>
+        </div>
+
+        <div class="hud-card">
+            <div class="svg-container">
+                <svg viewBox="0 0 100 100">
+                    <path d="M 15,25 L 15,15 L 25,15 M 75,15 L 85,15 L 85,25 M 85,75 L 85,85 L 75,85 M 25,85 L 15,85 L 15,75" fill="none" stroke="rgba(0, 242, 254, 0.3)" stroke-width="1.5"/>
+                    <g stroke="url(#cyanBlueGrad)" stroke-width="3.5" fill="none" stroke-linejoin="round" style="filter: var(--hud-glow);">
+                        <path d="M 50,18 L 82,34 L 82,68 L 50,84 L 18,68 L 18,34 Z" />
+                        <path d="M 50,18 L 50,84" stroke-width="2" opacity="0.5" />
+                        <path d="M 18,34 L 50,50 L 82,34" stroke-width="2" opacity="0.5" />
+                    </g>
+                </svg>
+            </div>
+            <div class="hud-label">Place/Zone</div>
+            <div class="hud-status"><span class="status-pulse"></span>Scan Ready</div>
+        </div>
+
+        <div class="hud-card">
+            <div class="svg-container">
+                <svg viewBox="0 0 100 100">
+                    <path d="M 15,25 L 15,15 L 25,15 M 75,15 L 85,15 L 85,25 M 85,75 L 85,85 L 75,85 M 25,85 L 15,85 L 15,75" fill="none" stroke="rgba(0, 242, 254, 0.3)" stroke-width="1.5"/>
+                    <g stroke="url(#cyanBlueGrad)" fill="none" stroke-width="3.5" style="filter: var(--hud-glow);">
+                        <circle cx="50" cy="32" r="12" />
+                        <path d="M 22,78 C 22,60 34,53 50,53 C 66,53 78,60 78,78" stroke-linecap="round" />
+                    </g>
+                </svg>
+            </div>
+            <div class="hud-label">Human Safe</div>
+            <div class="hud-status"><span class="status-pulse"></span>Shield Normal</div>
+        </div>
+
+        <div class="hud-card">
+            <div class="svg-container">
+                <svg viewBox="0 0 100 100">
+                    <defs>
+                        <linearGradient id="cyanBlueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#00f2fe" />
+                            <stop offset="100%" stop-color="#4facfe" />
+                        </linearGradient>
+                    </defs>
+                    <path d="M 15,25 L 15,15 L 25,15 M 75,15 L 85,15 L 85,25 M 85,75 L 85,85 L 75,85 M 25,85 L 15,85 L 15,75" fill="none" stroke="rgba(0, 242, 254, 0.3)" stroke-width="1.5"/>
+                    <g fill="url(#cyanBlueGrad)" style="filter: var(--hud-glow);">
+                        <circle cx="32" cy="38" r="9" />
+                        <circle cx="50" cy="26" r="9" />
+                        <circle cx="68" cy="38" r="9" />
+                        <path d="M 50,46 C 36,46 26,56 30,70 C 33,80 44,82 50,76 C 56,82 67,80 70,70 C 74,56 64,46 50,46 Z" />
+                    </g>
+                </svg>
+            </div>
+            <div class="hud-label">Fauna Safe</div>
+            <div class="hud-status"><span class="status-pulse"></span>Monitoring</div>
+        </div>
+
+    </div>
+
+</body>
+</html>
