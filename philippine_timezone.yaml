@@ -1,0 +1,298 @@
+// Get current date and time in Philippine Time
+const phtTime = new Date().toLocaleString("en-US", {
+  timeZone: "Asia/Manila",
+  dateStyle: "full",
+  timeStyle: "long"
+});
+
+console.log("Philippine Standard Time:", phtTime);
+
+
+
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+# Fetch current time in Asia/Manila
+pht_zone = ZoneInfo("Asia/Manila")
+pht_now = datetime.now(pht_zone)
+
+print("Philippine Standard Time:", pht_now.strftime("%Y-%m-%d %H:%M:%S %Z"))
+
+
+
+<?php
+// Using DateTime objects
+$date = new DateTime("now", new DateTimeZone("Asia/Manila"));
+echo "Philippine Standard Time: " . $date->format('Y-m-d H:i:s A T');
+?>
+
+
+
+import java.time.ZonedDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+
+public class Main {
+    public static void main(String[] args) {
+        ZoneId phtZone = ZoneId.of("Asia/Manila");
+        ZonedDateTime phtNow = ZonedDateTime.now(phtZone);
+        
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z");
+        System.out.println("Philippine Standard Time: " + phtNow.format(formatter));
+    }
+}
+
+
+
+import { DateTime } from 'luxon';
+
+/**
+ * Converts a standard UTC timestamp or ISO string into a structured PHT object
+ * Handles edge cases like invalid inputs and complex formatting.
+ */
+export interface PHTTimeResponse {
+  isoString: string;
+  formattedLong: string;
+  isBusinessHours: boolean;
+  epochMillis: number;
+}
+
+export function getPhilippineTime(inputDate?: string | Date): PHTTimeResponse {
+  // 1. Parse or initialize time explicitly in the Asia/Manila zone
+  const dt = inputDate 
+    ? DateTime.fromISO(new Date(inputDate).toISOString()).setZone('Asia/Manila')
+    : DateTime.now().setZone('Asia/Manila');
+
+  if (!dt.isValid) {
+    throw new Error(`Invalid date provided: ${dt.invalidReason}`);
+  }
+
+  // 2. Business hours evaluation (PH business hours: Mon-Fri, 9 AM - 6 PM PST)
+  const isBusinessHours = dt.weekday >= 1 && dt.weekday <= 5 && dt.hour >= 9 && dt.hour < 18;
+
+  return {
+    isoString: dt.toISO() ?? '', // e.g., "2026-06-10T17:20:51.000+08:00"
+    formattedLong: dt.toFormat('FFFF'), // Full localized string
+    isBusinessHours,
+    epochMillis: dt.toMillis()
+  };
+}
+
+// Example Usage:
+console.log(JSON.stringify(getPhilippineTime(), null, 2));
+
+
+
+import ntplib
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+def get_exact_philippine_time():
+    """
+    Queries an NTP server to fetch highly precise time,
+    correcting for server clock drift, localized to Asia/Manila.
+    """
+    ntp_client = ntplib.NTPClient()
+    try:
+        # Querying pool.ntp.org (or specific PH servers like ntp.pagasa.dost.gov.ph if active)
+        response = ntp_client.request('pool.ntp.org', version=3)
+        
+        # Convert NTP tx_time (UTC timestamp) to explicit Manila Time Zone
+        pht_zone = ZoneInfo("Asia/Manila")
+        exact_pht = datetime.fromtimestamp(response.tx_time, tz=pht_zone)
+        
+        return {
+            "precise_pht": exact_pht.isoformat(),
+            "offset_seconds": response.offset,
+            "stratum": response.stratum
+        }
+    except Exception as e:
+        return {"error": f"NTP synchronization failed: {str(e)}"}
+
+# Example Usage:
+print(get_exact_philippine_time())
+
+
+
+-- 1. Ensure the session or system fallback configuration defaults properly (Optional)
+SET TIME ZONE 'Asia/Manila';
+
+-- 2. Create an advanced table utilizing proper timezone tracking
+CREATE TABLE user_logs (
+    id SERIAL PRIMARY KEY,
+    action_performed VARCHAR(255),
+    -- Stores internally in UTC but converts seamlessly to the application's timezone
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP 
+);
+
+-- 3. Querying data explicitly converting UTC storage to Philippine Standard Time
+SELECT 
+    id,
+    action_performed,
+    -- Forces evaluation context explicitly to Asia/Manila regardless of client connection config
+    created_at AT TIME ZONE 'Asia/Manila' AS philippine_standard_time
+FROM 
+    user_logs
+WHERE 
+    -- Querying by a dynamic range localized to the PH business day
+    created_at >= (CURRENT_DATE + TIME '00:00:00') AT TIME ZONE 'Asia/Manila';
+
+
+
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func main() {
+	// Load Location explicitly. Ensure zoneinfo is installed on the host OS.
+	loc, err := time.LoadLocation("Asia/Manila")
+	if err != nil {
+		fmt.Printf("Error loading location: %v\n", err)
+		return
+	}
+
+	// Fetch current time bound directly to the location context
+	phtNow := time.Now().In(loc)
+
+	// Custom format layout in Go uses the standard magic date: Mon Jan 2 15:04:05 MST 2006
+	fmt.Println("PHT Time:", phtNow.Format("2006-01-02 15:04:05 PM MST"))
+
+	// Advanced: Calculate midnight tomorrow in PHT for cache evictions/crons
+	tomorrowMidnight := time.Date(phtNow.Year(), phtNow.Month(), phtNow.Day()+1, 0, 0, 0, 0, loc)
+	durationUntilReset := tomorrowMidnight.Sub(phtNow)
+	
+	fmt.Printf("Time until PH Midnight: %v\n", durationUntilReset)
+}
+
+
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none">
+  <!-- Outer glowing background ring (Optional HUD styling) -->
+  <circle cx="32" cy="32" r="30" stroke="#00d2ff" stroke-width="1" opacity="0.2" />
+  
+  <!-- Main Clock Dial -->
+  <circle cx="32" cy="32" r="26" stroke="#1e293b" stroke-width="2" />
+  
+  <!-- Hour Markers (Tick marks for the 12, 3, 6, 9 positions) -->
+  <path d="M32 8v3M32 53v3M53 32h-3M11 32h3" stroke="#64748b" stroke-width="2" stroke-linecap="round"/>
+  
+  <!-- Mini Stylized Map Silhouette (representing the archipelago) -->
+  <path d="M30 20h2v3h-2zm3 5h2v4h-2zm-2 6h3v5h-3z" fill="#00d2ff" opacity="0.4" />
+
+  <!-- Clock Hands fixed to Philippine Standard Time (e.g., 8:00 PHT / UTC+8 reference) -->
+  <!-- Hour Hand -->
+  <path d="M32 32l-6 6" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round" />
+  <!-- Minute Hand -->
+  <path d="M32 32V16" stroke="#00d2ff" stroke-width="2" stroke-linecap="round" />
+  
+  <!-- Center Pin -->
+  <circle cx="32" cy="32" r="2" fill="#00d2ff" />
+  
+  <!-- Small PHT Text Indicator Badge -->
+  <rect x="23" y="42" width="18" height="8" rx="2" fill="#1e293b" />
+  <text x="32" y="48" font-family="system-ui, sans-serif" font-size="5" font-weight="bold" fill="#ffffff" text-anchor="middle">PHT</text>
+</svg>
+
+
+
+import React from 'react';
+
+interface TimeZoneIconProps {
+  size?: number;
+  isActive?: boolean;
+}
+
+export const PhilippineTimeZoneIcon: React.FC<TimeZoneIconProps> = ({ 
+  size = 48, 
+  isActive = true 
+}) => {
+  const accentColor = isActive ? "stroke-cyan-400" : "stroke-slate-400";
+  const textColor = isActive ? "fill-cyan-400" : "fill-slate-400";
+
+  return (
+    <div className="inline-flex flex-col items-center p-2 bg-slate-900 rounded-xl border border-slate-800 shadow-xl">
+      <svg 
+        width={size} 
+        height={size} 
+        viewBox="0 0 24 24" 
+        fill="none" 
+        xmlns="http://www.w3.org/2000/svg"
+        className="transition-all duration-300"
+      >
+        {/* Boundary ring */}
+        <circle cx="12" cy="12" r="10" className={`${accentColor} transition-colors`} strokeWidth="1.5" strokeDasharray="2 2" />
+        
+        {/* Inner Clock Face */}
+        <circle cx="12" cy="12" r="8" className="stroke-slate-700" strokeWidth="1" />
+        
+        {/* Hands pointing explicitly to +8 offset geometry (8 o'clock positioning) */}
+        {/* Hour Hand */}
+        <line x1="12" y1="12" x2="9" y2="15" className="stroke-slate-200" strokeWidth="1.5" strokeLinecap="round" />
+        {/* Minute Hand */}
+        <line x1="12" y1="12" x2="12" y2="6" className={`${accentColor}`} strokeWidth="1.5" strokeLinecap="round" />
+        
+        {/* Center pivot point */}
+        <circle cx="12" cy="12" r="1" className={`${textColor}`} />
+      </svg>
+      
+      {/* Sub-label for the HUD UI */}
+      <span className={`text-[10px] font-mono mt-1 font-bold ${isActive ? 'text-cyan-400' : 'text-slate-500'}`}>
+        UTC +8
+      </span>
+    </div>
+  );
+};
+
+export default PhilippineTimeZoneIcon;
+
+
+
+<div class="pht-status-container">
+  <span class="pht-pulse-dot"></span>
+  <span class="pht-text">Manila, PH (PHT)</span>
+</div>
+
+<style>
+.pht-status-container {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: monospace;
+  color: #e2e8f0;
+}
+
+.pht-pulse-dot {
+  width: 8px;
+  height: 8px;
+  background-color: #00d2ff; /* PHT active glow */
+  border-radius: 50%;
+  position: relative;
+}
+
+/* Creates the sonar ping warning/pulsing effect */
+.pht-pulse-dot::after {
+  content: '';
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  top: 0;
+  left: 0;
+  background-color: #00d2ff;
+  border-radius: 50%;
+  animation: phtPing 1.5s ease-in-out infinite;
+}
+
+@keyframes phtPing {
+  0% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(2.5);
+    opacity: 0;
+  }
+}
+</style>
