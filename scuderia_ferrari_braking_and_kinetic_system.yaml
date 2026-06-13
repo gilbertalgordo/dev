@@ -1,0 +1,75 @@
+class FerrariKERSController:
+    def __init__(self, max_braking_torque, kers_max_power):
+        self.max_braking_torque = max_braking_torque  # Nm
+        self.kers_max_power = kers_max_power          # Watts
+        self.battery_soc = 0.8                        # State of Charge (0.0 to 1.0)
+
+    def calculate_braking_split(self, pedal_pressure, velocity):
+        """
+        Calculates the optimal distribution between KERS recovery 
+        and friction braking.
+        """
+        # Determine total requested torque
+        total_requested_torque = pedal_pressure * self.max_braking_torque
+        
+        # Calculate maximum possible recuperation based on velocity and battery
+        # Recuperation is more efficient at higher velocities
+        kers_torque = min(total_requested_torque * 0.4, 
+                          (self.kers_max_power / velocity) if velocity > 0 else 0)
+        
+        # Adjust based on battery capacity
+        if self.battery_soc >= 0.95:
+            kers_torque = 0  # Battery full, rely on friction brakes
+            
+        friction_torque = total_requested_torque - kers_torque
+        
+        return {
+            "kers_torque_nm": round(kers_torque, 2),
+            "friction_torque_nm": round(friction_torque, 2),
+            "total_torque_nm": round(total_requested_torque, 2)
+        }
+
+# Example Usage
+ferrari_system = FerrariKERSController(max_braking_torque=2000, kers_max_power=120000)
+# Simulation: 70% pedal pressure at 50 m/s
+print(ferrari_system.calculate_braking_split(0.7, 50))
+
+
+
+import numpy as np
+
+class AdvancedFerrariBrakeController:
+    def __init__(self):
+        # Physical Constants
+        self.max_friction_torque = 2500  # Nm
+        self.max_regen_torque = 600      # Nm (MGU-K limit)
+        self.thermal_limit = 950         # Celsius
+        
+    def get_optimal_split(self, velocity, pedal_input, disc_temp, battery_soc):
+        """
+        MPC-lite approach to calculate brake split.
+        Inputs are normalized (0 to 1).
+        """
+        total_demand = pedal_input * (self.max_friction_torque + self.max_regen_torque)
+        
+        # Thermal Throttling: Reduce friction brake capability as heat approaches limit
+        thermal_factor = max(0, (self.thermal_limit - disc_temp) / self.thermal_limit)
+        
+        # Energy Efficiency: Prioritize MGU-K until Battery SoC is critical
+        regen_priority = 1.0 if battery_soc < 0.90 else 0.1
+        
+        # Optimization calculation
+        target_regen = min(total_demand * 0.3 * regen_priority, self.max_regen_torque)
+        target_friction = min(total_demand - target_regen, self.max_friction_torque * thermal_factor)
+        
+        return {
+            "friction_actuator_pressure": round(target_friction / self.max_friction_torque, 4),
+            "mgu_k_torque_request": round(target_regen, 2),
+            "system_efficiency_index": round(thermal_factor * regen_priority, 4)
+        }
+
+# Simulation for high-speed corner entry
+controller = AdvancedFerrariBrakeController()
+# State: 80 m/s, 90% pedal, 600C discs, 40% battery
+control_plan = controller.get_optimal_split(80, 0.9, 600, 0.4)
+print(f"System Response Plan: {control_plan}")
