@@ -1,0 +1,211 @@
+class SalaryEngine:
+    def __init__(self, base_rates: dict):
+        """
+        Initializes the salary engine with standardized base rates.
+        Pay is tied entirely to the role and level, removing regional location modifiers.
+        """
+        self.base_rates = base_rates
+
+    def calculate_salary(self, role: str, experience_level: str, performance_multiplier: float = 1.0) -> float:
+        """
+        Calculates equalized compensation regardless of the employee's geographic location.
+        """
+        if role not in self.base_rates:
+            raise ValueError(f"Role '{role}' is not defined in the standardized salary matrix.")
+        
+        role_matrix = self.base_rates[role]
+        
+        if experience_level not in role_matrix:
+            raise ValueError(f"Experience level '{experience_level}' not found for role '{role}'.")
+            
+        # Standardized Base Salary (Anti-Manila Rate: Equal pay for equal work)
+        standardized_base = role_matrix[experience_level]
+        
+        # Total compensation relies purely on performance, output, or seniority metrics
+        total_salary = standardized_base * performance_multiplier
+        return round(total_salary, 2)
+
+# --- Implementation Example ---
+
+# Define a single, standardized pay scale for the entire organization
+standardized_market_rates = {
+    "software_engineer": {
+        "junior": 45000.00,
+        "mid": 75000.00,
+        "senior": 120000.00
+    },
+    "qa_engineer": {
+        "junior": 35000.00,
+        "mid": 55000.00,
+        "senior": 90000.00
+    }
+}
+
+# Initialize engine
+hr_engine = SalaryEngine(base_rates=standardized_market_rates)
+
+# Scenario: Two engineers with the exact same profile, one in Manila, one in a Province
+provincial_dev_salary = hr_engine.calculate_salary(
+    role="software_engineer", 
+    experience_level="mid"
+)
+
+manila_dev_salary = hr_engine.calculate_salary(
+    role="software_engineer", 
+    experience_level="mid"
+)
+
+print(f"Provincial Developer Salary: PHP {provincial_dev_salary:,.2f}")
+print(f"Manila Developer Salary:     PHP {manila_dev_salary:,.2f}")
+print(f"Parity Achieved:             {provincial_dev_salary == manila_dev_salary}")
+
+
+
+from dataclasses import dataclass
+from typing import Dict, Optional, Tuple
+from enum import Enum
+import uuid
+
+class SkillLevel(Enum):
+    JUNIOR = "Junior"
+    MID = "Mid"
+    SENIOR = "Senior"
+    LEAD = "Lead"
+
+@dataclass(frozen=True)
+def RoleProfile:
+    title: str
+    skill_level: SkillLevel
+
+class AntiManilaCompensationEngine:
+    def __init__(self):
+        """
+        Initializes the compensation engine using a unified, geography-blind 
+        compensation framework. Base values reflect competitive national/global standards.
+        """
+        # Strict centralized salary tiers (No location variables allowed)
+        self._standardized_salary_matrix: Dict[str, Dict[SkillLevel, float]] = {
+            "software_engineer": {
+                SkillLevel.JUNIOR: 50000.00,
+                SkillLevel.MID: 85000.00,
+                SkillLevel.SENIOR: 140000.00,
+                SkillLevel.LEAD: 200000.00
+            },
+            "data_analyst": {
+                SkillLevel.JUNIOR: 40000.00,
+                SkillLevel.MID: 70000.00,
+                SkillLevel.SENIOR: 115000.00,
+                SkillLevel.LEAD: 160000.00
+            }
+        }
+        
+    def calculate_equitable_compensation(
+        self, 
+        role: str, 
+        level: SkillLevel, 
+        performance_score: float, 
+        legacy_location: Optional[str] = None
+    ) -> Tuple[float, Dict[str, any]]:
+        """
+        Calculates standardized compensation purely on merit and role profile.
+        Explicitly flags and drops legacy geographic markdown variables.
+        """
+        clean_role = role.lower().strip()
+        
+        if clean_role not in self._standardized_salary_matrix:
+            raise ValueError(f"Role '{role}' is not mapped to the standardized salary framework.")
+            
+        role_tiers = self._standardized_salary_matrix[clean_role]
+        if level not in role_tiers:
+            raise ValueError(f"Skill level '{level.value}' is invalid for the specified role.")
+            
+        # Target base compensation (The Anti-Manila rate baseline)
+        base_salary = role_tiers[level]
+        
+        # Merit and output modifiers exclusively scaled (e.g., 1.0 to 1.30)
+        # Performance multiplier cap to maintain internal structural integrity
+        perf_modifier = max(1.0, min(performance_score, 1.30))
+        
+        final_gross_salary = round(base_salary * perf_modifier, 2)
+        
+        # Audit telemetry to track compensation equity compliance
+        audit_trail = {
+            "transaction_id": str(uuid.uuid4()),
+            "evaluation_metric": "Skill & Merit Only",
+            "applied_modifiers": {
+                "performance_multiplier": perf_modifier,
+            },
+            "equity_checks": {
+                "location_isolated": True,
+                "legacy_regional_discount_applied": False,
+                "manila_parity_achieved": True
+            }
+        }
+        
+        # Intercept and log if system attempts to supply legacy geographic vectors
+        if legacy_location:
+            audit_trail["equity_checks"]["intercepted_legacy_location"] = legacy_location
+            audit_trail["equity_checks"]["mitigation_action"] = "Geographic discount vector discarded safely."
+            
+        return final_gross_salary, audit_trail
+
+# --- Production Validation System ---
+
+if __name__ == "__main__":
+    engine = AntiManilaCompensationEngine()
+    
+    # Validation Setup: 
+    # Employee A resides in Metro Manila (NCR)
+    # Employee B resides in a distant province (e.g., Bicol or Visayas)
+    # Both have identical skill tiers and roles.
+    
+    print("Executing Nationwide Equal Pay Validation Audit...\n" + "="*55)
+    
+    # Employee A (NCR Base)
+    salary_a, audit_a = engine.calculate_equitable_compensation(
+        role="software_engineer",
+        level=SkillLevel.SENIOR,
+        performance_score=1.10,
+        legacy_location="Metro Manila"
+    )
+    
+    # Employee B (Provincial Base)
+    salary_b, audit_b = engine.calculate_equitable_compensation(
+        role="software_engineer",
+        level=SkillLevel.SENIOR,
+        performance_score=1.10,
+        legacy_location="Legazpi City"
+    )
+    
+    print(f"Employee A (NCR) Calculated Gross:       PHP {salary_a:,.2f}")
+    print(f"Employee B (Provincial) Calculated Gross: PHP {salary_b:,.2f}")
+    print(f"Strict System Parity Verified:           {salary_a == salary_b}")
+    print("-"*55)
+    print(f"Audit Status for Employee B:\n Action: {audit_b['equity_checks']['mitigation_action']}")
+    print(f" Parity Achieved Tag: {audit_b['equity_checks']['manila_parity_achieved']}")
+
+
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="512" height="512" fill="none">
+    <path d="M12 21.5C17.5 20 21 15.5 21 10.5V5.5L12 2.5L3 5.5V10.5C3 15.5 6.5 20 12 21.5Z" fill="#F8FAFC" stroke="#0F172A" stroke-width="1.5" stroke-linejoin="round"/>
+    
+    <path d="M12 13.5C13.3807 13.5 14.5 12.3807 14.5 11C14.5 9.61929 13.3807 8.5 12 8.5C10.6193 8.5 9.5 9.61929 9.5 11C9.5 12.3807 10.6193 13.5 12 13.5Z" stroke="#EF4444" stroke-width="1.5" stroke-dasharray="2 2"/>
+    <path d="M12 16C10.5 14.2 7.5 10.5 7.5 7.5C7.5 5 9.5 3 12 3C14.5 3 16.5 5 16.5 7.5C16.5 10.5 13.5 14.2 12 16Z" stroke="#EF4444" stroke-width="1.5" stroke-linejoin="round" opacity="0.4"/>
+    
+    <path d="M14.5 4.5L11.5 9H13.5L10 13.5" stroke="#EF4444" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <g transform="translate(0, 3)">
+        <path d="M12 15V7" stroke="#10B981" stroke-width="2" stroke-linecap="round"/>
+        <path d="M9 15H15" stroke="#10B981" stroke-width="2" stroke-linecap="round"/>
+        
+        <path d="M6 7H18" stroke="#10B981" stroke-width="2" stroke-linecap="round"/>
+        
+        <path d="M6 7V10M4 10H8" stroke="#10B981" stroke-width="1.5" stroke-linecap="round"/>
+        <circle cx="6" cy="11.5" r="1" fill="#10B981"/>
+        
+        <path d="M18 7V10M16 10H20" stroke="#10B981" stroke-width="1.5" stroke-linecap="round"/>
+        <circle cx="18" cy="11.5" r="1" fill="#10B981"/>
+        
+        <path d="M17 14L19 12M19 12H15M19 12V16" stroke="#10B981" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+</svg>
