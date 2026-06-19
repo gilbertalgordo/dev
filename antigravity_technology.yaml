@@ -1,3 +1,109 @@
+# Python code to simulate a simple "antigravity" field as a visualization.
+# This is purely a simulation: no real-world antigravity instructions.
+# The model: particles under gravity (downward), plus configurable "antigravity zones"
+# that apply upward force with a Gaussian falloff. We'll animate with matplotlib.
+#
+# Run this cell to see an animation. You can modify parameters at the top.
+
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+
+# Simulation parameters
+n_particles = 120
+dt = 0.03
+steps = 800
+
+gravity = 9.81  # downward acceleration (m/s^2) in the simulation
+damping = 0.995  # tiny air resistance
+world_width = 10.0
+world_height = 6.0
+
+# Antigravity zones: list of dictionaries with 'x','y','strength','radius'
+# Strength is upward acceleration (positive), radius controls Gaussian spread
+antigravity_zones = [
+    {'x': 5.0, 'y': 2.0, 'strength': 30.0, 'radius': 1.2},
+    {'x': 2.0, 'y': 4.5, 'strength': 18.0, 'radius': 0.9},
+]
+
+# Initialize particles (positions and velocities)
+np.random.seed(1)
+positions = np.zeros((n_particles, 2))
+positions[:, 0] = np.random.uniform(0.5, world_width - 0.5, size=n_particles)
+positions[:, 1] = np.random.uniform(world_height*0.6, world_height - 0.1, size=n_particles)
+vel = np.zeros_like(positions)  # vx, vy
+
+# Particle masses (affect acceleration response; here mostly for variety)
+masses = np.random.uniform(0.8, 1.6, size=(n_particles, 1))
+
+def antigravity_acceleration(px, py):
+    """Compute upward acceleration (ay) due to all antigravity zones at point(s) px,py.
+    px, py can be arrays (vectorized). Returns ay (same shape)."""
+    ay = np.zeros_like(px)
+    for zone in antigravity_zones:
+        dx = px - zone['x']
+        dy = py - zone['y']
+        r2 = dx*dx + dy*dy
+        # Gaussian falloff based on radius
+        sigma = zone['radius']
+        factor = np.exp(-r2 / (2 * sigma * sigma))
+        # Apply upward acceleration scaled by factor
+        ay += zone['strength'] * factor
+    return ay
+
+# Set up matplotlib figure
+fig, ax = plt.subplots(figsize=(8, 5))
+ax.set_xlim(0, world_width)
+ax.set_ylim(0, world_height)
+ax.set_xlabel('x (m)')
+ax.set_ylabel('y (m)')
+ax.set_title('Antigravity field simulation (purely fictional)')
+
+scat = ax.scatter(positions[:, 0], positions[:, 1], s=30)
+
+# Draw antigravity zones as translucent circles
+for zone in antigravity_zones:
+    circle = plt.Circle((zone['x'], zone['y']), zone['radius']*1.6, color='C1', alpha=0.18)
+    ax.add_patch(circle)
+    ax.text(zone['x'], zone['y'], 'AG', ha='center', va='center', fontsize=9, alpha=0.7)
+
+def step(frame):
+    global positions, vel
+    px = positions[:, 0]
+    py = positions[:, 1]
+    # vertical acceleration: -gravity (downward) + antigravity upward accelerations
+    ay_ag = antigravity_acceleration(px, py)
+    ay = -gravity + ay_ag  # total ay per particle (m/s^2)
+    axx = np.zeros_like(px)  # no horizontal acceleration by default
+    # integrate velocities and positions (semi-implicit Euler)
+    vel[:, 0] += axx * dt
+    vel[:, 1] += ay * dt
+    vel *= damping
+    positions[:, 0] += vel[:, 0] * dt
+    positions[:, 1] += vel[:, 1] * dt
+
+    # boundary conditions: floor at y=0, walls at x=0 and x=world_width
+    # simple collisions with energy loss
+    floor_hits = positions[:, 1] <= 0.05
+    positions[floor_hits, 1] = 0.05
+    vel[floor_hits, 1] = -vel[floor_hits, 1] * 0.35  # bounce with loss
+    # left/right walls
+    left_hits = positions[:, 0] <= 0.05
+    right_hits = positions[:, 0] >= world_width - 0.05
+    positions[left_hits, 0] = 0.05
+    vel[left_hits, 0] = -vel[left_hits, 0] * 0.6
+    positions[right_hits, 0] = world_width - 0.05
+    vel[right_hits, 0] = -vel[right_hits, 0] * 0.6
+
+    scat.set_offsets(positions)
+    return scat,
+
+anim = FuncAnimation(fig, step, frames=steps, interval=30, blit=True)
+plt.show()
+
+
+
+
 I produced a safe, self-contained simulation that models an imaginary “antigravity” field — suitable for experimentation, visualization, and education, but not instructions for real-world hardware.
 
 What I provided
