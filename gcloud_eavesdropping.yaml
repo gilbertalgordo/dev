@@ -1,0 +1,76 @@
+# Export the current IAM policy
+gcloud projects get-iam-policy PROJECT_ID > policy.yaml
+
+# Edit policy.yaml to include:
+# auditConfigs:
+# - auditLogConfigs:
+#   - logType: DATA_READ
+#   - logType: DATA_WRITE
+#   service: allServices
+
+# Apply the updated policy
+gcloud projects set-iam-policy PROJECT_ID policy.yaml
+
+
+
+from google.cloud import logging_v2
+
+def detect_suspicious_billing_activity(project_id):
+    client = logging_v2.LoggingServiceV2Client()
+    
+    # Filter for Billing API calls and administrative changes
+    filter_str = (
+        f'resource.type="project" '
+        f'AND protoPayload.serviceName="cloudbilling.googleapis.com" '
+        f'AND severity >= "WARNING"'
+    )
+    
+    entries = client.list_log_entries(
+        project_ids=[project_id],
+        filter_=filter_str,
+        order_by="timestamp desc"
+    )
+    
+    print(f"Monitoring logs for {project_id}...")
+    for entry in entries:
+        print(f"Timestamp: {entry.timestamp} | User: {entry.protoPayload.authenticationInfo.principalEmail} | Method: {entry.protoPayload.methodName}")
+
+# Usage
+# detect_suspicious_billing_activity("your-project-id")
+
+
+
+import base64
+import json
+from google.cloud import iam_admin_v1
+
+def billing_sentinel(event, context):
+    """
+    Triggered by a message on a Cloud Pub/Sub topic.
+    Monitors Billing API calls for unauthorized principals.
+    """
+    pubsub_message = base64.b64decode(event['data']).decode('utf-8')
+    log_entry = json.loads(pubsub_message)
+    
+    # Extract identity and method
+    payload = log_entry.get('protoPayload', {})
+    principal = payload.get('authenticationInfo', {}).get('principalEmail')
+    method = payload.get('methodName')
+    
+    # Define your whitelist (e.g., your admin service account)
+    WHITELIST = ['admin-sa@your-project.iam.gserviceaccount.com']
+    
+    # Logic: If billing is accessed by non-whitelisted account, trigger alert/action
+    if principal and principal not in WHITELIST:
+        print(f"ALERT: Unauthorized Billing API access attempt by {principal} via {method}")
+        # Add your automated remediation logic here
+        # Example: disable_service_account(principal)
+        return {"status": "remediated", "principal": principal}
+
+    return {"status": "allowed"}
+
+
+
+resource.type="project"
+AND protoPayload.serviceName="cloudbilling.googleapis.com"
+AND protoPayload.methodName=("google.cloud.billing.v1.CloudBilling.UpdateBillingAccount" OR "google.cloud.billing.v1.CloudBilling.GetBillingAccount")
