@@ -1,0 +1,1123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Active White Night Owl AI - Tactical Map HUD</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        :root {
+            --bg-dark: #0a0c10;
+            --owl-white: #f0f4f8;
+            --owl-glow: #00d2ff;
+            --owl-accent: #7000ff;
+            --hud-panel: rgba(13, 17, 23, 0.85);
+            --hud-border: rgba(0, 210, 255, 0.3);
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--bg-dark);
+            font-family: 'Courier New', Courier, monospace;
+            overflow: hidden;
+            color: var(--owl-white);
+        }
+
+        /* Tactical HUD Container */
+        #hud-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+            background-color: #05070a;
+        }
+
+        /* Top AI Search Control Panel */
+        #ai-search-panel {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: var(--hud-panel);
+            border: 1px solid var(--hud-border);
+            box-shadow: 0 0 15px rgba(0, 210, 255, 0.2);
+            padding: 10px 15px;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            width: 320px;
+            backdrop-filter: blur(5px);
+        }
+
+        .input-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        #search-input {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid rgba(240, 244, 248, 0.4);
+            padding: 8px 10px;
+            color: var(--owl-white);
+            font-family: inherit;
+            border-radius: 4px;
+            outline: none;
+        }
+
+        #search-input:focus {
+            border-color: var(--owl-glow);
+            box-shadow: 0 0 5px var(--owl-glow);
+        }
+
+        /* Autocorrect / Suggestion Box */
+        #autocorrect-box {
+            position: absolute;
+            top: 105%;
+            left: 0;
+            width: 100%;
+            background: var(--hud-panel);
+            border: 1px solid var(--owl-glow);
+            border-radius: 4px;
+            display: none;
+            flex-direction: column;
+            max-height: 150px;
+            overflow-y: auto;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+        }
+
+        .suggestion-item {
+            padding: 8px 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.85rem;
+        }
+
+        .suggestion-item:hover {
+            background: var(--owl-accent);
+            color: #fff;
+        }
+
+        .ai-status {
+            font-size: 0.7rem;
+            color: var(--owl-glow);
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        /* Hover Overlay Component (Street View & Weather Combined Display) */
+        #hover-hud-overlay {
+            position: absolute;
+            bottom: 30px;
+            right: 30px;
+            z-index: 1000;
+            width: 280px;
+            background: var(--hud-panel);
+            border: 1px solid var(--hud-border);
+            border-radius: 6px;
+            padding: 15px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.8);
+            pointer-events: none; /* Let clicks pass through to map if needed */
+            display: none;
+            backdrop-filter: blur(8px);
+            transition: opacity 0.2s ease-in-out;
+        }
+
+        #hover-hud-overlay h3 {
+            margin: 0 0 8px 0;
+            font-size: 0.95rem;
+            color: var(--owl-glow);
+            border-bottom: 1px dashed rgba(0, 210, 255, 0.4);
+            padding-bottom: 4px;
+        }
+
+        /* Mimic Street View window aspect ratio */
+        .streetview-preview {
+            width: 100%;
+            height: 130px;
+            background: #151c24;
+            border: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 10px;
+            border-radius: 4px;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .streetview-preview img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0.75;
+        }
+
+        .streetview-tag {
+            position: absolute;
+            top: 5px;
+            left: 5px;
+            background: rgba(0, 0, 0, 0.7);
+            color: #ffb700;
+            font-size: 0.6rem;
+            padding: 2px 5px;
+            border-radius: 3px;
+            border: 1px solid #ffb700;
+        }
+
+        .weather-metrics {
+            font-size: 0.75rem;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+        }
+
+        .metric-box {
+            background: rgba(255,255,255,0.03);
+            padding: 4px 6px;
+            border-radius: 3px;
+            border-left: 2px solid var(--owl-glow);
+        }
+
+        .metric-val {
+            font-weight: bold;
+            color: #fff;
+        }
+
+        /* Custom Layer Control to fit theme */
+        .leaflet-control-layers {
+            background: var(--hud-panel) !important;
+            color: var(--owl-white) !important;
+            border: 1px solid var(--hud-border) !important;
+            font-family: inherit !important;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="hud-container">
+        <!-- AI Input Panel with Autocorrect functionality -->
+        <div id="ai-search-panel">
+            <div class="ai-status">
+                <span>SYSTEM: ACTIVE WHITE OWL AI</span>
+                <span style="color: #ff3366;">● ENGINE LIVE</span>
+            </div>
+            <div class="input-wrapper">
+                <input type="text" id="search-input" placeholder="Query destination..." autocomplete="off">
+                <div id="autocorrect-box"></div>
+            </div>
+        </div>
+
+        <!-- Map Workspace -->
+        <div id="map"></div>
+
+        <!-- Contextual Hover HUD (Street View / Micro Weather Metrics) -->
+        <div id="hover-hud-overlay">
+            <h3 id="hud-location-title">Tactical Node</h3>
+            <div class="streetview-preview" id="hud-sv-viewport">
+                <div class="streetview-tag">360° SV STREAM</div>
+                <img id="hud-sv-img" src="" alt="Street View Stream">
+            </div>
+            <div class="weather-metrics">
+                <div class="metric-box">TEMP: <span class="metric-val" id="hud-w-temp">--</span></div>
+                <div class="metric-box">WIND: <span class="metric-val" id="hud-w-wind">--</span></div>
+                <div class="metric-box">PRECIP: <span class="metric-val" id="hud-w-precip">--</span></div>
+                <div class="metric-box">BARO: <span class="metric-val" id="hud-w-baro">--</span></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet JS Core library -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // --- 1. Global Tactical Mock Database ---
+        const locationDatabase = [
+            { name: "Manila, Philippines", lat: 14.5995, lng: 120.9842, temp: "31°C", wind: "14 km/h", precip: "40%", baro: "1008 hPa", sv: "https://images.unsplash.com/photo-1540959733332-eab4deceeaf7?auto=format&fit=crop&w=400&q=80" },
+            { name: "Tokyo, Japan", lat: 35.6762, lng: 139.6503, temp: "22°C", wind: "18 km/h", precip: "10%", baro: "1012 hPa", sv: "https://images.unsplash.com/photo-1503899036084-c55cdd92da26?auto=format&fit=crop&w=400&q=80" },
+            { name: "New York, USA", lat: 40.7128, lng: -74.0060, temp: "19°C", wind: "22 km/h", precip: "0%", baro: "1015 hPa", sv: "https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?auto=format&fit=crop&w=400&q=80" },
+            { name: "London, UK", lat: 51.5074, lng: -0.1278, temp: "15°C", wind: "25 km/h", precip: "85%", baro: "998 hPa", sv: "https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?auto=format&fit=crop&w=400&q=80" },
+            { name: "Paris, France", lat: 48.8566, lng: 2.3522, temp: "17°C", wind: "12 km/h", precip: "20%", baro: "1011 hPa", sv: "https://images.unsplash.com/photo-1502602898657-3e91760cbb34?auto=format&fit=crop&w=400&q=80" },
+            { name: "San Pedro, Laguna", lat: 14.3505, lng: 121.0440, temp: "30°C", wind: "11 km/h", precip: "65%", baro: "1007 hPa", sv: "https://images.unsplash.com/photo-1583212292454-1fe6229603b7?auto=format&fit=crop&w=400&q=80" }
+        ];
+
+        // --- 2. Initialize Leaflet Map in Dark Matrix Aesthetics ---
+        const map = L.map('map', {
+            center: [14.5995, 120.9842],
+            zoom: 5,
+            zoomControl: false
+        });
+
+        // OpenStreetMap Dark Matter styling variant
+        const darkCartoDB = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '© OpenStreetMap contributors © CartoDB'
+        }).addTo(map);
+
+        // OpenWeatherMap Real-time Precipitation layer simulation overlay
+        const weatherOverlay = L.tileLayer('https://tile.openweathermap.org/map/precipitation_new/{z}/{x}/{y}.png?appid=d226a3a4b64b1979b4d06a4a1599e525', {
+            opacity: 0.5,
+            attribution: 'Weather data © OpenWeatherMap'
+        }).addTo(map);
+
+        // Move controls to lower left out of HUD display components
+        L.control.zoom({ position: 'bottomleft' }).addTo(map);
+
+        // --- 3. Dynamic Interactive Hover Nodes Creation ---
+        const markersGroup = L.layerGroup().addTo(map);
+
+        locationDatabase.forEach(loc => {
+            // Pulse style custom white/cyan icon configuration 
+            const customIcon = L.divIcon({
+                className: 'custom-hawk-eye',
+                html: `<div style="
+                    width: 12px; 
+                    height: 12px; 
+                    background: #fff; 
+                    border: 2px solid var(--owl-glow); 
+                    border-radius: 50%; 
+                    box-shadow: 0 0 8px var(--owl-glow);"></div>`,
+                iconSize: [12, 12],
+                iconAnchor: [6, 6]
+            });
+
+            const marker = L.marker([loc.lat, loc.lng], { icon: customIcon }).addTo(markersGroup);
+
+            // Trigger HUD Panel on Mouse Enter 
+            marker.on('mouseover', function(e) {
+                document.getElementById('hud-location-title').innerText = loc.name;
+                document.getElementById('hud-sv-img').src = loc.sv;
+                document.getElementById('hud-w-temp').innerText = loc.temp;
+                document.getElementById('hud-w-wind').innerText = loc.wind;
+                document.getElementById('hud-w-precip').innerText = loc.precip;
+                document.getElementById('hud-w-baro').innerText = loc.baro;
+
+                const panel = document.getElementById('hover-hud-overlay');
+                panel.style.display = 'block';
+                panel.style.opacity = '1';
+            });
+
+            // Fade/Hide HUD element when leaving marker focus bounding box
+            marker.on('mouseout', function() {
+                const panel = document.getElementById('hover-hud-overlay');
+                panel.style.opacity = '0';
+                setTimeout(() => { if(panel.style.opacity === '0') panel.style.display = 'none'; }, 200);
+            });
+
+            marker.on('click', function() {
+                map.setView([loc.lat, loc.lng], 11, { animate: true });
+            });
+        });
+
+        // --- 4. Intelligent Input Parser / Fuzzy Match Autocorrect System ---
+        const searchInput = document.getElementById('search-input');
+        const autocorrectBox = document.getElementById('autocorrect-box');
+
+        // Basic Levenshtein distance calculations for AI auto-correction
+        function getLevenshteinDistance(str1, str2) {
+            const track = Array(str2.length + 1).fill(null).map(() => Array(str1.length + 1).fill(null));
+            for (let i = 0; i <= str1.length; i += 1) track[0][i] = i;
+            for (let j = 0; j <= str2.length; j += 1) track[j][0] = j;
+            for (let j = 1; j <= str2.length; j += 1) {
+                for (let i = 1; i <= str1.length; i += 1) {
+                    const indicator = str1[i - 1] === str2[j - 1] ? 0 : 1;
+                    track[j][i] = Math.min(
+                        track[j][0 - 1][i] + 1, // deletion
+                        track[j][i - 1] + 1, // insertion
+                        track[j - 1][i - 1] + indicator // substitution
+                    );
+                }
+            }
+            return track[str2.length][str1.length];
+        }
+
+        searchInput.addEventListener('input', function() {
+            const query = this.value.trim().toLowerCase();
+            autocorrectBox.innerHTML = '';
+            
+            if (!query) {
+                autocorrectBox.style.display = 'none';
+                return;
+            }
+
+            // Filter data entries via partial string match or distance proximity
+            const matches = locationDatabase.filter(loc => {
+                const target = loc.name.toLowerCase();
+                const distance = getLevenshteinDistance(query, target.substring(0, query.length));
+                return target.includes(query) || distance <= 2;
+            });
+
+            if (matches.length > 0) {
+                autocorrectBox.style.display = 'flex';
+                matches.forEach(match => {
+                    const item = document.createElement('div');
+                    item.className = 'suggestion-item';
+                    item.innerText = match.name;
+                    item.addEventListener('click', () => {
+                        searchInput.value = match.name;
+                        autocorrectBox.style.display = 'none';
+                        // Fly matrix window directly to point
+                        map.flyTo([match.lat, match.lng], 10, { duration: 1.5 });
+                    });
+                    autocorrectBox.appendChild(item);
+                });
+            } else {
+                autocorrectBox.style.display = 'none';
+            }
+        });
+
+        // Dismiss element if container pointer leaves focal context area
+        document.addEventListener('click', function(e) {
+            if (!document.getElementById('ai-search-panel').contains(e.target)) {
+                autocorrectBox.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Active White Night Owl AI - Advanced HUD Command</title>
+    <!-- Open Source Leaflet Mapping Framework -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        :root {
+            --bg-matrix: #06080c;
+            --owl-white: #f5f8fc;
+            --owl-glow: #00e5ff;
+            --owl-dim-glow: rgba(0, 229, 255, 0.2);
+            --owl-accent: #651fff;
+            --hud-glass: rgba(10, 14, 22, 0.85);
+            --hud-border: rgba(0, 240, 255, 0.25);
+            --hud-font: 'Consolas', 'Courier New', monospace;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--bg-matrix);
+            font-family: var(--hud-font);
+            overflow: hidden;
+            color: var(--owl-white);
+        }
+
+        #hud-workspace {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+
+        #map-viewport {
+            width: 100%;
+            height: 100%;
+            background-color: #030508;
+        }
+
+        /* --- Global Glassmorphic HUD Overlays --- */
+        .glass-panel {
+            background: var(--hud-glass);
+            border: 1px solid var(--hud-border);
+            box-shadow: 0 0 20px rgba(0, 229, 255, 0.15);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-radius: 4px;
+            position: absolute;
+            z-index: 1000;
+            transition: all 0.3s cubic-bezier(0.19, 1, 0.22, 1);
+        }
+
+        /* Top Centered Autocorrect Search Control */
+        #search-terminal {
+            top: 25px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 420px;
+            padding: 12px 16px;
+        }
+
+        .terminal-header {
+            font-size: 0.75rem;
+            letter-spacing: 2px;
+            color: var(--owl-glow);
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+
+        .terminal-header span::before {
+            content: "● ";
+            color: #ff1744;
+            animation: pulse-beacon 1.5s infinite;
+        }
+
+        .input-container {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        #ai-input {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            border: 1px solid rgba(0, 229, 255, 0.3);
+            padding: 10px 14px;
+            color: var(--owl-white);
+            font-family: var(--hud-font);
+            font-size: 0.9rem;
+            border-radius: 3px;
+            outline: none;
+            transition: border 0.3s;
+        }
+
+        #ai-input:focus {
+            border-color: var(--owl-glow);
+            box-shadow: 0 0 8px var(--owl-dim-glow);
+        }
+
+        /* Predictive AI Autocorrect Interface */
+        #autocorrect-dropdown {
+            position: absolute;
+            top: 105%;
+            left: 0;
+            width: 100%;
+            background: rgba(8, 12, 18, 0.95);
+            border: 1px solid var(--owl-glow);
+            border-radius: 3px;
+            display: none;
+            flex-direction: column;
+            max-height: 220px;
+            overflow-y: auto;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.8);
+        }
+
+        .autocorr-item {
+            padding: 10px 14px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .autocorr-item:hover {
+            background: var(--owl-accent);
+            color: #fff;
+        }
+
+        .autocorr-correction {
+            color: var(--owl-glow);
+            font-size: 0.75rem;
+            font-style: italic;
+        }
+
+        /* Floating Street View & Weather HUD Element */
+        #hover-node-hud {
+            bottom: 30px;
+            right: 30px;
+            width: 320px;
+            padding: 16px;
+            pointer-events: none;
+            opacity: 0;
+            transform: translateY(10px);
+            display: none;
+        }
+
+        #hover-node-hud.active {
+            display: block;
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .hud-title {
+            margin: 0 0 10px 0;
+            font-size: 1rem;
+            color: #fff;
+            text-transform: uppercase;
+            border-bottom: 1px solid var(--hud-border);
+            padding-bottom: 6px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        /* Immersive Synthetic Street View Module */
+        .streetview-window {
+            width: 100%;
+            height: 160px;
+            background: #0d1117;
+            border: 1px solid rgba(255,255,255,0.1);
+            position: relative;
+            overflow: hidden;
+            border-radius: 3px;
+            margin-bottom: 12px;
+        }
+
+        .streetview-window img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0.8;
+            filter: contrast(1.1) brightness(0.9);
+        }
+
+        .hud-tag {
+            position: absolute;
+            background: rgba(0,0,0,0.75);
+            border: 1px solid var(--owl-glow);
+            font-size: 0.6rem;
+            padding: 2px 6px;
+            border-radius: 2px;
+            color: var(--owl-glow);
+        }
+
+        .tag-tl { top: 6px; left: 6px; }
+        .tag-tr { top: 6px; right: 6px; color: #ffb700; border-color: #ffb700; }
+
+        /* Integrated Telemetry Matrix Grid */
+        .weather-matrix-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            font-size: 0.78rem;
+        }
+
+        .matrix-cell {
+            background: rgba(255,255,255,0.02);
+            padding: 6px 8px;
+            border-radius: 2px;
+            border-left: 2px solid var(--owl-glow);
+        }
+
+        .matrix-label {
+            color: rgba(245, 248, 252, 0.5);
+            display: block;
+            margin-bottom: 2px;
+            font-size: 0.65rem;
+        }
+
+        .matrix-value {
+            font-weight: bold;
+            color: #fff;
+        }
+
+        /* --- Custom UI Layer Component Leaflet Adjustments --- */
+        .leaflet-control-attribution {
+            background: rgba(0,0,0,0.5) !important;
+            color: rgba(255,255,255,0.3) !important;
+            font-family: var(--hud-font);
+        }
+
+        @keyframes pulse-beacon {
+            0% { opacity: 0.3; }
+            50% { opacity: 1; }
+            100% { opacity: 0.3; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="hud-workspace">
+        <!-- Interactive AI Control Center -->
+        <div id="search-terminal" class="glass-panel">
+            <div class="terminal-header">
+                <span>SYSTEM CORE: WHITE OWL V4</span>
+                <div id="ai-status-msg">AWAITING CORRECTION...</div>
+            </div>
+            <div class="input-container">
+                <input type="text" id="ai-input" placeholder="Type localized node coordinates/names..." autocomplete="off">
+                <div id="autocorrect-dropdown"></div>
+            </div>
+        </div>
+
+        <!-- Base Geo-spatial Engine mapping workspace -->
+        <div id="map-viewport"></div>
+
+        <!-- Telemetry Hover Interface Panel -->
+        <div id="hover-node-hud" class="glass-panel">
+            <h3 class="hud-title" id="hud-target-name">Target Node</h3>
+            <div class="streetview-window">
+                <div class="hud-tag tag-tl">STREET_VIEW_FEED // INTERACTIVE</div>
+                <div class="hud-tag tag-tr" id="hud-sv-bearing">HD CAM 01</div>
+                <img id="hud-sv-render" src="" alt="Live Telemetry View">
+            </div>
+            <div class="weather-matrix-grid">
+                <div class="matrix-cell"><span class="matrix-label">THERMAL</span><span class="matrix-value" id="val-temp">--</span></div>
+                <div class="matrix-cell"><span class="matrix-label">VELOCITY</span><span class="matrix-value" id="val-wind">--</span></div>
+                <div class="matrix-cell"><span class="matrix-label">BAROMETRIC</span><span class="matrix-value" id="val-baro">--</span></div>
+                <div class="matrix-cell"><span class="matrix-label">RADAR PRECIP</span><span class="matrix-value" id="val-precip">--</span></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet Infrastructure Engine dependencies -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // --- Geospatial Database Initialization ---
+        const mapDatabase = [
+            { id: "MNL", name: "Manila, Philippines", alias: ["manila", "manilla", "mnl", "maynila"], lat: 14.5995, lng: 120.9842, temp: "31°C", wind: "14 km/h NE", baro: "1009 hPa", precip: "45%", img: "https://images.unsplash.com/photo-1540959733332-eab4deceeaf7?auto=format&fit=crop&w=500&q=80" },
+            { id: "SND", name: "San Pedro, Laguna", alias: ["san pedro", "sanpedro", "laguna", "spl"], lat: 14.3505, lng: 121.0440, temp: "30°C", wind: "11 km/h E", baro: "1008 hPa", precip: "60%", img: "https://images.unsplash.com/photo-1583212292454-1fe6229603b7?auto=format&fit=crop&w=500&q=80" },
+            { id: "TYO", name: "Tokyo, Japan", alias: ["tokyo", "tokio", "tokyoo", "tyo"], lat: 35.6762, lng: 139.6503, temp: "21°C", wind: "19 km/h N", baro: "1013 hPa", precip: "0%", img: "https://images.unsplash.com/photo-1540959733332-eab4deceeaf7?auto=format&fit=crop&w=500&q=80" },
+            { id: "NYC", name: "New York, USA", alias: ["new york", "ny", "nyc", "newyork", "manhattan"], lat: 40.7128, lng: -74.0060, temp: "18°C", wind: "24 km/h W", baro: "1016 hPa", precip: "5%", img: "https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?auto=format&fit=crop&w=500&q=80" },
+            { id: "LDN", name: "London, United Kingdom", alias: ["london", "lundun", "ldn", "lon"], lat: 51.5074, lng: -0.1278, temp: "14°C", wind: "28 km/h SW", baro: "996 hPa", precip: "90%", img: "https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?auto=format&fit=crop&w=500&q=80" }
+        ];
+
+        // --- Leaflet Canvas Map Instantiation ---
+        const map = L.map('map-viewport', {
+            center: [14.5995, 120.9842],
+            zoom: 6,
+            zoomControl: false
+        });
+
+        // Night Owl Matrix Base Vector Tile Layer
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '© OpenStreetMap | White Owl AI System'
+        }).addTo(map);
+
+        // Advanced Live Meteorological Tile Layer Overlay
+        const weatherRadarLayer = L.tileLayer('https://tile.openweathermap.org/map/precipitation_new/{z}/{x}/{y}.png?appid=d226a3a4b64b1979b4d06a4a1599e525', {
+            opacity: 0.45,
+            zIndex: 200
+        }).addTo(map);
+
+        const nodesLayer = L.layerGroup().addTo(map);
+
+        // --- Generate Map Dynamic HUD Markers ---
+        mapDatabase.forEach(node => {
+            const owlIcon = L.divIcon({
+                className: 'hud-marker-pulse',
+                html: `<div style="position: relative; width: 14px; height: 14px;">
+                        <div style="position: absolute; width: 14px; height: 14px; background: #fff; border: 2px solid var(--owl-glow); border-radius: 50%; z-index: 2;"></div>
+                        <div style="position: absolute; width: 30px; height: 30px; background: var(--owl-dim-glow); border-radius: 50%; top: -8px; left: -8px; animation: pulse-beacon 2s infinite; z-index: 1;"></div>
+                       </div>`,
+                iconSize: [14, 14],
+                iconAnchor: [7, 7]
+            });
+
+            const marker = L.marker([node.lat, node.lng], { icon: owlIcon }).addTo(nodesLayer);
+
+            // Street View & Weather Interface Display Trigger
+            marker.on('mouseover', (e) => activeNodeTelemetry(node));
+            marker.on('mouseout', deactivateNodeTelemetry);
+            marker.on('click', () => {
+                map.flyTo([node.lat, node.lng], 12, { duration: 2 });
+            });
+        });
+
+        // --- HUD Panel Telemetry Controllers ---
+        const hudPanel = document.getElementById('hover-node-hud');
+        
+        function activeNodeTelemetry(node) {
+            document.getElementById('hud-target-name').innerText = node.name;
+            document.getElementById('hud-sv-render').src = node.img;
+            document.getElementById('val-temp').innerText = node.temp;
+            document.getElementById('val-wind').innerText = node.wind;
+            document.getElementById('val-baro').innerText = node.baro;
+            document.getElementById('val-precip').innerText = node.precip;
+            
+            // Randomize heading bearing stream metadata output 
+            document.getElementById('hud-sv-bearing').innerText = `CAM BEARING: ${Math.floor(Math.random() * 360)}° N`;
+
+            hudPanel.style.display = 'block';
+            setTimeout(() => hudPanel.classList.add('active'), 10);
+        }
+
+        function deactivateNodeTelemetry() {
+            hudPanel.classList.remove('active');
+            setTimeout(() => {
+                if(!hudPanel.classList.contains('active')) hudPanel.style.display = 'none';
+            }, 300);
+        }
+
+        // --- Intelligently Integrated Autocorrect String Logic ---
+        const inputField = document.getElementById('ai-input');
+        const dropdown = document.getElementById('autocorrect-dropdown');
+        const statusMsg = document.getElementById('ai-status-msg');
+
+        // Advanced Levenshtein String Proximity Parser
+        function computeStringDistance(s1, s2) {
+            const costs = [];
+            for (let i = 0; i <= s1.length; i++) {
+                let lastValue = i;
+                for (let j = 0; j <= s2.length; j++) {
+                    if (i == 0) costs[j] = j;
+                    else {
+                        if (j > 0) {
+                            let newValue = costs[j - 1];
+                            if (s1.charAt(i - 1) != s2.charAt(j - 1))
+                                newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
+                            costs[j - 1] = lastValue;
+                            lastValue = newValue;
+                        }
+                    }
+                }
+                if (i > 0) costs[s2.length] = lastValue;
+            }
+            return costs[s2.length];
+        }
+
+        inputField.addEventListener('input', function() {
+            const rawQuery = this.value.trim().toLowerCase();
+            dropdown.innerHTML = '';
+
+            if (!rawQuery) {
+                dropdown.style.display = 'none';
+                statusMsg.innerText = "AWAITING INTERACTIVE INPUT...";
+                return;
+            }
+
+            let predictionMatches = [];
+
+            mapDatabase.forEach(node => {
+                // Evaluate matching queries across aliases and core properties
+                let highMatchChance = false;
+                let lowestDistance = 999;
+
+                node.alias.forEach(alias => {
+                    if (alias.includes(rawQuery)) highMatchChance = true;
+                    let dist = computeStringDistance(rawQuery, alias.substring(0, rawQuery.length));
+                    if (dist < lowestDistance) lowestDistance = dist;
+                });
+
+                if (highMatchChance || lowestDistance <= 2) {
+                    predictionMatches.push({ node: node, distance: lowestDistance });
+                }
+            });
+
+            // Sort matched array by operational algorithmic distance
+            predictionMatches.sort((a, b) => a.distance - b.distance);
+
+            if (predictionMatches.length > 0) {
+                dropdown.style.display = 'flex';
+                statusMsg.innerText = "AUTOCORRECT ANALYSIS LIVE";
+
+                predictionMatches.forEach(match => {
+                    const row = document.createElement('div');
+                    row.className = 'autocorr-item';
+                    
+                    // Show auto-corrected text tag if there is typographical variation
+                    const isExact = match.node.name.toLowerCase().includes(rawQuery);
+                    const autoCorrectTag = isExact ? "" : `<span class="autocorr-correction">↳ AI Autocorrect</span>`;
+                    
+                    row.innerHTML = `<span>${match.node.name}</span> ${autoCorrectTag}`;
+                    
+                    row.addEventListener('click', () => {
+                        inputField.value = match.node.name;
+                        dropdown.style.display = 'none';
+                        statusMsg.innerText = "NODE SYNCHRONIZED";
+                        
+                        // Center layout framework coordinates dynamically
+                        map.flyTo([match.node.lat, match.node.lng], 13, {
+                            animate: true,
+                            duration: 2.5
+                        });
+                        activeNodeTelemetry(match.node);
+                    });
+                    dropdown.appendChild(row);
+                });
+            } else {
+                dropdown.style.display = 'none';
+                statusMsg.innerText = "NO MATCH FOUND";
+            }
+        });
+
+        // Hide UI contextual list window elements when clicking outside panels
+        document.addEventListener('click', function(e) {
+            if (!document.getElementById('search-terminal').contains(e.target)) {
+                dropdown.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Active White Night Owl AI - Icon Telemetry HUD</title>
+    <style>
+        :root {
+            --bg-matrix: #05070a;
+            --owl-white: #ffffff;
+            --owl-cyan: #00e5ff;
+            --owl-accent: #651fff;
+            --hud-glass: rgba(10, 14, 22, 0.75);
+            --hud-border: rgba(0, 229, 255, 0.3);
+            --font-main: 'Courier New', Courier, monospace;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--bg-matrix);
+            background-image: 
+                linear-gradient(rgba(0, 229, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 229, 255, 0.03) 1px, transparent 1px);
+            background-size: 20px 20px;
+            font-family: var(--font-main);
+            color: var(--owl-white);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        /* Developer Authentication Header */
+        .auth-header {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            font-size: 0.75rem;
+            color: var(--owl-cyan);
+            border-left: 3px solid var(--owl-accent);
+            padding-left: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .auth-header span { color: #ff3366; }
+
+        /* HUD Icon Dashboard Container */
+        .icon-dashboard {
+            display: flex;
+            gap: 40px;
+            padding: 40px;
+            background: var(--hud-glass);
+            border: 1px solid var(--hud-border);
+            border-radius: 8px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 0 30px rgba(0, 229, 255, 0.1);
+        }
+
+        /* Individual Icon Container & Hover Logic */
+        .icon-module {
+            position: relative;
+            width: 100px;
+            height: 100px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            background: linear-gradient(135deg, rgba(255,255,255,0.05), transparent);
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.19, 1, 0.22, 1); /* Kaizen Superfast Curve */
+        }
+
+        .icon-module:hover {
+            border-color: var(--owl-cyan);
+            box-shadow: 0 0 20px rgba(0, 229, 255, 0.4), inset 0 0 15px rgba(0, 229, 255, 0.2);
+            transform: translateY(-5px);
+        }
+
+        /* SVG Base Styling */
+        .icon-svg {
+            width: 60%;
+            height: 60%;
+            fill: none;
+            stroke: var(--owl-white);
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            transition: stroke 0.3s ease;
+        }
+
+        .icon-module:hover .icon-svg {
+            stroke: var(--owl-cyan);
+            filter: drop-shadow(0 0 5px var(--owl-cyan));
+        }
+
+        /* Hovering Context Tooltip (Street View & Weather Simulator) */
+        .hover-tooltip {
+            position: absolute;
+            bottom: 120%;
+            left: 50%;
+            transform: translateX(-50%) translateY(10px);
+            width: 220px;
+            background: rgba(5, 8, 12, 0.95);
+            border: 1px solid var(--owl-cyan);
+            border-radius: 6px;
+            padding: 10px;
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.2s ease-out;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.8);
+            z-index: 100;
+        }
+
+        .icon-module:hover .hover-tooltip {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        .tooltip-title {
+            font-size: 0.8rem;
+            color: var(--owl-cyan);
+            border-bottom: 1px dashed rgba(0,229,255,0.4);
+            margin-bottom: 6px;
+            padding-bottom: 4px;
+            text-transform: uppercase;
+            font-weight: bold;
+        }
+
+        /* Simulated SV/Weather Image Box inside Tooltip */
+        .tooltip-preview {
+            width: 100%;
+            height: 90px;
+            background: #111;
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 4px;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .tooltip-preview img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0.7;
+        }
+
+        .data-readout {
+            font-size: 0.65rem;
+            margin-top: 6px;
+            color: #aaa;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4px;
+        }
+        
+        .data-readout span { color: var(--owl-white); }
+    </style>
+</head>
+<body>
+
+    <!-- Executive Authentication Footer / Header -->
+    <div class="auth-header">
+        SYS.AUTH: <span>ACTIVE</span><br>
+        DEVELOPER: <b>GILBERT ALGORDO (CERTIFIED CEO)</b><br>
+        GITHUB_NODE: g.dev/gilbert_algordo<br>
+        PROTOCOL: SUPERFAST KAIZEN LOGIC
+    </div>
+
+    <div class="icon-dashboard">
+
+        <!-- ICON 1: White Night Owl AI Core -->
+        <div class="icon-module">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+                <!-- Abstract Owl Head / AI Circuit -->
+                <path d="M12 2C7 2 3 6 3 11V18C3 19.1 3.9 20 5 20H19C20.1 20 21 19.1 21 18V11C21 6 17 2 12 2Z"></path>
+                <!-- Owl Eyes -->
+                <circle cx="8" cy="11" r="2"></circle>
+                <circle cx="16" cy="11" r="2"></circle>
+                <!-- Beak / Data node -->
+                <path d="M12 14L10 17H14L12 14Z"></path>
+                <path d="M12 2V5"></path>
+            </svg>
+            <div class="hover-tooltip">
+                <div class="tooltip-title">AI CORE // DIANA ENGINE</div>
+                <div class="data-readout" style="grid-template-columns: 1fr;">
+                    <div>STATUS: <span>ACTIVE</span></div>
+                    <div>SYNC: <span>SUPERFAST KAIZEN</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ICON 2: Place Autocorrect Matrix -->
+        <div class="icon-module">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+                <!-- Map Pin -->
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                <!-- Text Cursor / Autocorrect Symbol inside -->
+                <path d="M12 7v6"></path>
+                <path d="M9 13h6"></path>
+                <!-- Correction Sparkles -->
+                <path d="M19 4l1-1 1 1-1 1-1-1z"></path>
+                <path d="M4 6l1-1 1 1-1 1-1-1z"></path>
+            </svg>
+            <div class="hover-tooltip">
+                <div class="tooltip-title">AUTOCORRECT MATRIX</div>
+                <div class="data-readout" style="grid-template-columns: 1fr;">
+                    <div>ALGO: <span>FUZZY_MATCH_V4</span></div>
+                    <div>LATENCY: <span>4ms</span></div>
+                    <div style="color:var(--owl-cyan);">↳ PREDICTIVE FIX APPLIED</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ICON 3: Street View Hover Lens -->
+        <div class="icon-module">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+                <!-- 360 Lens/Eye -->
+                <path d="M2 12C2 12 5 5 12 5C19 5 22 12 22 12C22 12 19 19 12 19C5 19 2 12 2 12Z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+                <!-- 360 rotation arrows -->
+                <path d="M22 12A10 10 0 0 1 12 22"></path>
+                <path d="M20 18l2 4 4-2"></path>
+            </svg>
+            <div class="hover-tooltip" style="width: 250px;">
+                <div class="tooltip-title">STREET VIEW TELEMETRY</div>
+                <div class="tooltip-preview">
+                    <img src="https://images.unsplash.com/photo-1540959733332-eab4deceeaf7?auto=format&fit=crop&w=400&q=80" alt="Street View Stream">
+                </div>
+                <div class="data-readout">
+                    <div>CAM: <span>360° HD</span></div>
+                    <div>AZIMUTH: <span>145° SE</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ICON 4: Weather Radar Map -->
+        <div class="icon-module">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+                <!-- Cloud -->
+                <path d="M17.5 19C19.9853 19 22 16.9853 22 14.5C22 12.1332 20.1783 10.192 17.8687 10.0157C17.3824 6.61906 14.4751 4 11 4C7.13401 4 4 7.13401 4 11C4 11.2334 4.01142 11.4642 4.03362 11.6908C2.31682 12.3556 1 14.0205 1 16C1 18.2091 2.79086 20 5 20H17.5"></path>
+                <!-- Radar Sweep Arcs -->
+                <path d="M8 14C8 14 10 16 12 16C14 16 16 14 16 14" stroke-dasharray="2 2"></path>
+                <path d="M6 17C6 17 9 20 12 20C15 20 18 17 18 17" stroke-dasharray="2 2"></path>
+            </svg>
+            <div class="hover-tooltip" style="width: 250px;">
+                <div class="tooltip-title">RADAR / WEATHER MAP</div>
+                <div class="tooltip-preview">
+                    <!-- Simulated weather radar map image -->
+                    <img src="https://images.unsplash.com/photo-1516912481808-3406841bd33c?auto=format&fit=crop&w=400&q=80" alt="Weather Radar" style="filter: hue-rotate(180deg) brightness(0.8) contrast(1.5);">
+                </div>
+                <div class="data-readout">
+                    <div>TEMP: <span>31°C</span></div>
+                    <div>PRECIP: <span>45%</span></div>
+                    <div>BARO: <span>1009 hPa</span></div>
+                    <div>WIND: <span>14 km/h</span></div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</body>
+</html>
