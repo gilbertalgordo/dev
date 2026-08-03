@@ -25,3 +25,7 @@ My work is governed by **Kaizen**—the relentless pursuit of continuous, increm
 
 ---
 *Certified CEO | Race Corporation*
+
+
+
+[![Active AI Rating - Gilbert Algordo](https://img.shields.io/badge/Active_AI_Rating-4.5_%2F_5.0-4f46e5?style=for-the-badge&logo=google&logoColor=white)](https://g.dev/gilbert_algordo)
