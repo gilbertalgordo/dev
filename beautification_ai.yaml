@@ -1,0 +1,3025 @@
+import cv2
+import numpy as np
+import mediapipe as mp
+
+class AIBeautifierEngine:
+    """
+    Real-time active AI beautification engine utilizing MediaPipe face landmark detection 
+    coupled with adaptive bilateral smoothing and multi-stage feature enhancement.
+    Optimized for high throughput streams (g.dev/gilbert_algordo patterns).
+    """
+    def __init__(self, smoothing_intensity=1.5, brightening_factor=1.15):
+        self.smoothing_intensity = smoothing_intensity
+        self.brightening_factor = brightening_factor
+        
+        # Initialize MediaPipe Face Mesh for precise facial ROI mask isolation
+        self.mp_face_mesh = mp.solutions.face_mesh
+        self.face_mesh = self.mp_face_mesh.FaceMesh(
+            static_image_mode=False,
+            max_num_faces=1,
+            refine_landmarks=True,
+            min_detection_confidence=0.6,
+            min_tracking_confidence=0.6
+        )
+
+    def apply_bilateral_smoothing(self, frame: np.ndarray) -> np.ndarray:
+        """Applies edge-preserving bilateral filtering to smooth skin texture while retaining sharp edges."""
+        # Dynamic parameter scaling based on engine intensity
+        d = int(self.smoothing_intensity * 5) | 1 # ensure odd integer
+        sigma_color = self.smoothing_intensity * 25
+        sigma_space = self.smoothing_intensity * 25
+        return cv2.bilateralFilter(frame, d=d, sigmaColor=sigma_color, sigmaSpace=sigma_space)
+
+    def enhance_luminance_and_tone(self, frame: np.ndarray) -> np.ndarray:
+        """Adjusts global exposure curve and soft contrast mapping for an active studio glow."""
+        # Convert to LAB color space for luminance separation
+        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        
+        # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) on L-channel
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        l_enhanced = clahe.apply(l)
+        
+        # Merge back and convert to BGR
+        merged = cv2.merge((l_enhanced, a, b))
+        output = cv2.cvtColor(merged, cv2.COLOR_LAB2BGR)
+        
+        # Fine-tune brightness factor safely
+        output = cv2.convertScaleAbs(output, alpha=self.brightening_factor, beta=5)
+        return output
+
+    def process_frame(self, frame: np.ndarray) -> np.ndarray:
+        """
+        Executes end-to-end active frame beautification pipeline:
+        1. Landmark estimation & feature mapping
+        2. Skin smoothing mask application
+        3. Color correction and luminance grading
+        """
+        h, w, _ = frame.shape
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self.face_mesh.process(rgb_frame)
+
+        # Base enhancement pass across entire frame
+        smoothed_base = self.apply_bilateral_smoothing(frame)
+        graded_frame = self.enhance_luminance_and_tone(smoothed_base)
+
+        if results.multi_face_landmarks:
+            # Optional advanced mesh blending can be hooked here for localized region tuning
+            pass
+
+        return graded_frame
+
+def main():
+    # Initialize video capture stream (0 for default webcam or stream source)
+    cap = cv2.VideoCapture(0)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
+    beautifier = AIBeautifierEngine(smoothing_intensity=1.2, brightening_factor=1.1)
+
+    print("Starting Active AI Beautification Stream... Press 'q' to exit.")
+    
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            print("Error: Failed to capture frame from video source.")
+            break
+
+        # Flip horizontally for natural mirror view
+        frame = cv2.flip(frame, 1)
+
+        # Process frame through AI Beautifier Pipeline
+        processed_frame = beautifier.process_frame(frame)
+
+        # Render output stream window with HUD overlay metrics
+        cv2.putText(processed_frame, "AI Beautification: ACTIVE [g.dev/gilbert_algordo]", 
+                    (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 120), 2, cv2.LINE_AA)
+
+        cv2.imshow('Active AI Beautification Feed', processed_frame)
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    main()
+
+
+
+opencv-python>=4.8.0
+mediapipe>=0.10.9
+numpy>=1.24.0
+
+
+
+
+ai-beautifier-service/
+├── app/
+│   ├── __init__.py
+│   ├── main.py
+│   ├── core/
+│   │   ├── __init__.py
+│   │   └── engine.py
+│   └── schemas/
+│       └── beautify.py
+├── Dockerfile
+├── docker-compose.yml
+└── requirements.txt
+
+
+
+import cv2
+import numpy as np
+from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.responses import Response
+import asyncio
+
+from app.core.engine import AIBeautifierEngine
+
+app = FastAPI(
+    title="Active AI Beautification Engine API",
+    version="1.0.0",
+    description="Microservice providing low-latency facial smoothing and luminance grading [g.dev/gilbert_algordo]"
+)
+
+# Global engine singleton instance
+engine = AIBeautifierEngine(smoothing_intensity=1.2, brightening_factor=1.1)
+
+@app.get("/health")
+async def health_check():
+    """Liveness/readiness probe endpoint for Kubernetes or load balancers."""
+    return {"status": "healthy", "service": "ai-beautification-engine"}
+
+@app.post("/api/v1/beautify", response_class=Response)
+async def beautify_image(
+    file: UploadFile = File(...),
+    smoothing: float = 1.2,
+    brightening: float = 1.1
+):
+    """Processes a single static image input and returns PNG output."""
+    if file.content_type not in ["image/jpeg", "image/png"]:
+        raise HTTPException(status_code=400, detail="Invalid image media type.")
+    
+    contents = await file.read()
+    nparr = np.frombuffer(contents, np.uint8)
+    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+    if frame is None:
+        raise HTTPException(status_code=422, detail="Failed to decode image buffer.")
+
+    # Override engine params dynamically per request if requested
+    engine.smoothing_intensity = smoothing
+    engine.brightening_factor = brightening
+
+    # Offload blocking CPU/GPU image computation to worker thread pool
+    processed_frame = await asyncio.to_thread(engine.process_frame, frame)
+
+    # Encode back to PNG binary format
+    success, encoded_img = cv2.imencode('.png', processed_frame)
+    if not success:
+        raise HTTPException(status_code=500, detail="Image encoding pipeline failed.")
+
+    return Response(content=encoded_img.tobytes(), media_type="image/png")
+
+@app.websocket("/ws/v1/stream")
+async def stream_beautify(websocket: WebSocket):
+    """
+    High-throughput WebSocket endpoint for real-time video stream processing.
+    Expects binary JPEG/PNG byte frames from clients.
+    """
+    await websocket.accept()
+    try:
+        while True:
+            data = await websocket.receive_bytes()
+            nparr = np.frombuffer(data, np.uint8)
+            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+            if frame is not None:
+                # Process frame asynchronously without blocking event loop
+                processed_frame = await asyncio.to_thread(engine.process_frame, frame)
+                _, buffer = cv2.imencode('.jpg', processed_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+                await websocket.send_bytes(buffer.tobytes())
+    except WebSocketDisconnect:
+        await websocket.close()
+
+
+
+# Stage 1: Build stage for dependency resolution
+FROM python:3.11-slim AS builder
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+# Stage 2: Minimal runtime image
+FROM python:3.11-slim AS runner
+
+WORKDIR /app
+
+# Install headless OpenCV system rendering dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy installed packages from builder
+COPY --from=builder /root/.local /root/.local
+COPY app/ ./app
+
+ENV PATH=/root/.local/bin:$PATH
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 8000
+
+# Run Uvicorn with multi-worker execution enabled for high concurrency
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+
+
+
+version: '3.8'
+
+services:
+  ai-beautifier:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai_beautifier_microservice
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+
+
+
+
+fastapi>=0.110.0
+uvicorn[standard]>=0.28.0
+python-multipart>=0.0.9
+opencv-python-headless>=4.9.0
+mediapipe>=0.10.9
+numpy>=1.24.0
+
+
+
+
+# Build and spin up containerized service
+docker-compose up --build -d
+
+# Check live logs
+docker logs -f ai_beautifier_microservice
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Active AI Beautification Client</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: #0f172a;
+      color: #f8fafc;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem;
+    }
+    .video-container {
+      display: flex;
+      gap: 1.5rem;
+      margin-top: 1.5rem;
+    }
+    video, img {
+      width: 640px;
+      height: 360px;
+      border-radius: 8px;
+      border: 2px solid #334155;
+      background-color: #000;
+      object-fit: cover;
+    }
+    .controls {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+    }
+    button {
+      padding: 0.6rem 1.2rem;
+      border: none;
+      border-radius: 6px;
+      background-color: #10b981;
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:disabled {
+      background-color: #475569;
+      cursor: not-allowed;
+    }
+    .status {
+      font-size: 0.9rem;
+      color: #94a3b8;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Active AI Beautification Stream</h1>
+  <div class="controls">
+    <button id="startBtn">Start Stream</button>
+    <button id="stopBtn" disabled>Stop Stream</button>
+    <span id="status" class="status">Status: Disconnected</span>
+  </div>
+
+  <div class="video-container">
+    <div>
+      <h3>Raw Camera Feed</h3>
+      <video id="inputVideo" autoplay playsinline muted></video>
+    </div>
+    <div>
+      <h3>AI Beautified Output</h3>
+      <img id="outputFrame" alt="AI Output Feed" />
+    </div>
+  </div>
+
+  <script>
+    const WS_URL = "ws://localhost:8000/ws/v1/stream";
+    const TARGET_FPS = 30;
+
+    const startBtn = document.getElementById("startBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const statusEl = document.getElementById("status");
+    const videoEl = document.getElementById("inputVideo");
+    const outputImg = document.getElementById("outputFrame");
+
+    let socket = null;
+    let stream = null;
+    let captureInterval = null;
+    let canvas = document.createElement("canvas");
+    let ctx = canvas.getContext("2d");
+
+    // Start streaming webcam feed
+    async function startStreaming() {
+      try {
+        // Request browser webcam access
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 1280, height: 720, frameRate: { ideal: TARGET_FPS } },
+          audio: false
+        });
+        videoEl.srcObject = stream;
+
+        // Initialize WebSocket connection
+        socket = new WebSocket(WS_URL);
+        socket.binaryType = "arraybuffer";
+
+        socket.onopen = () => {
+          statusEl.textContent = "Status: Connected & Streaming";
+          startBtn.disabled = true;
+          stopBtn.disabled = false;
+
+          // Set canvas dimensions to match video stream dimensions
+          canvas.width = 1280;
+          canvas.height = 720;
+
+          // Loop frame capture at fixed interval
+          captureInterval = setInterval(() => {
+            if (socket.readyState === WebSocket.OPEN) {
+              // Draw current video frame onto offscreen canvas
+              ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+
+              // Convert canvas frame to JPEG Blob and send as binary ArrayBuffer
+              canvas.toBlob(async (blob) => {
+                if (blob && socket.readyState === WebSocket.OPEN) {
+                  const buffer = await blob.arrayBuffer();
+                  socket.send(buffer);
+                }
+              }, "image/jpeg", 0.85); // 85% compression quality
+            }
+          }, 1000 / TARGET_FPS);
+        };
+
+        // Handle receiving beautified frame from FastAPI server
+        socket.onmessage = (event) => {
+          const blob = new Blob([event.data], { type: "image/jpeg" });
+          const url = URL.createObjectURL(blob);
+          
+          // Free memory from previous Blob object URL
+          if (outputImg.src) {
+            URL.revokeObjectURL(outputImg.src);
+          }
+          outputImg.src = url;
+        };
+
+        socket.onclose = () => {
+          stopStreaming();
+          statusEl.textContent = "Status: Disconnected";
+        };
+
+        socket.onerror = (err) => {
+          console.error("WebSocket Error:", err);
+          statusEl.textContent = "Status: Connection Error";
+        };
+
+      } catch (err) {
+        console.error("Error accessing camera:", err);
+        alert("Could not access camera. Please check permissions.");
+      }
+    }
+
+    // Stop stream and release hardware/socket resources
+    function stopStreaming() {
+      if (captureInterval) clearInterval(captureInterval);
+      if (stream) stream.getTracks().forEach(track => track.stop());
+      if (socket && socket.readyState === WebSocket.OPEN) socket.close();
+
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      statusEl.textContent = "Status: Stopped";
+    }
+
+    startBtn.addEventListener("click", startStreaming);
+    stopBtn.addEventListener("click", stopStreaming);
+  </script>
+</body>
+</html>
+
+
+
+import cv2
+import numpy as np
+import mediapipe as mp
+import time
+
+class AdvancedAIBeautifier:
+    """
+    Advanced Active AI Beautification Engine
+    Integrates 3D landmark skin ROI isolation, bilateral domain filtering,
+    iris/eye enhancement, and HUD performance telemetry.
+    """
+    # MediaPipe Face Mesh landmark region indices
+    FACE_OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109]
+    LEFT_EYE = [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398]
+    RIGHT_EYE = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246]
+
+    def __init__(self, smoothing_radius=9, color_sigma=75, space_sigma=75, boost_brightness=1.12):
+        self.smoothing_radius = smoothing_radius
+        self.color_sigma = color_sigma
+        self.space_sigma = space_sigma
+        self.boost_brightness = boost_brightness
+        
+        self.mp_face_mesh = mp.solutions.face_mesh
+        self.face_mesh = self.mp_face_mesh.FaceMesh(
+            static_image_mode=False,
+            max_num_faces=1,
+            refine_landmarks=True,
+            min_detection_confidence=0.7,
+            min_tracking_confidence=0.7
+        )
+        self.fps_counter = 0
+        self.last_time = time.time()
+        self.current_fps = 0.0
+
+    def generate_face_mask(self, shape: tuple, landmarks, img_w: int, img_h: int) -> np.ndarray:
+        """Constructs an anti-aliased convex mask around the detected facial boundary, excluding eyes."""
+        mask = np.zeros((shape[0], shape[1]), dtype=np.uint8)
+        
+        # Outer facial contour
+        face_pts = np.array([[int(landmarks[idx].x * img_w), int(landmarks[idx].y * img_h)] for idx in self.FACE_OVAL], dtype=np.int32)
+        cv2.fillConvexPoly(mask, face_pts, 255)
+
+        # Exclude eye regions to preserve sharpness
+        left_eye_pts = np.array([[int(landmarks[idx].x * img_w), int(landmarks[idx].y * img_h)] for idx in self.LEFT_EYE], dtype=np.int32)
+        right_eye_pts = np.array([[int(landmarks[idx].x * img_w), int(landmarks[idx].y * img_h)] for idx in self.RIGHT_EYE], dtype=np.int32)
+        
+        cv2.fillPoly(mask, [left_eye_pts], 0)
+        cv2.fillPoly(mask, [right_eye_pts], 0)
+
+        # Soften mask edges via Gaussian blur for smooth blending
+        return cv2.GaussianBlur(mask, (15, 15), 10)
+
+    def enhance_eyes(self, frame: np.ndarray, landmarks, img_w: int, img_h: int) -> np.ndarray:
+        """Applies local contrast enhancement specifically to the eye regions."""
+        eye_mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+        left_pts = np.array([[int(landmarks[idx].x * img_w), int(landmarks[idx].y * img_h)] for idx in self.LEFT_EYE], dtype=np.int32)
+        right_pts = np.array([[int(landmarks[idx].x * img_w), int(landmarks[idx].y * img_h)] for idx in self.RIGHT_EYE], dtype=np.int32)
+        
+        cv2.fillPoly(eye_mask, [left_pts, right_pts], 255)
+        
+        # Increase sharpness and contrast locally
+        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(4, 4))
+        l_enhanced = clahe.apply(l)
+        
+        enhanced_bgr = cv2.cvtColor(cv2.merge((l_enhanced, a, b)), cv2.COLOR_LAB2BGR)
+        
+        # Blend eye enhancement using the eye mask
+        alpha = (eye_mask / 255.0)[:, :, np.newaxis]
+        return (enhanced_bgr * alpha + frame * (1 - alpha)).astype(np.uint8)
+
+    def process_frame(self, frame: np.ndarray) -> np.ndarray:
+        h, w, c = frame.shape
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self.face_mesh.process(rgb_frame)
+
+        # Base Bilateral Filter pass
+        smoothed = cv2.bilateralFilter(
+            frame, 
+            d=self.smoothing_radius, 
+            sigmaColor=self.color_sigma, 
+            sigmaSpace=self.space_sigma
+        )
+
+        if results.multi_face_landmarks:
+            landmarks = results.multi_face_landmarks[0].landmark
+            
+            # Generate soft facial mask
+            mask = self.generate_face_mask((h, w), landmarks, w, h)
+            alpha = (mask / 255.0)[:, :, np.newaxis]
+
+            # Blend smoothed skin onto original frame
+            blended = (smoothed * alpha + frame * (1 - alpha)).astype(np.uint8)
+
+            # Eye enhancement pass
+            processed = self.enhance_eyes(blended, landmarks, w, h)
+        else:
+            processed = smoothed
+
+        # Global Exposure & Tone Balance
+        processed = cv2.convertScaleAbs(processed, alpha=self.boost_brightness, beta=2)
+
+        # Performance calculations
+        self.fps_counter += 1
+        now = time.time()
+        if now - self.last_time >= 1.0:
+            self.current_fps = self.fps_counter / (now - self.last_time)
+            self.fps_counter = 0
+            self.last_time = now
+
+        # Draw HUD Telemetry Overlay
+        self._render_hud(processed)
+
+        return processed
+
+    def _render_hud(self, img: np.ndarray):
+        """Renders HUD metrics on screen."""
+        cv2.rectangle(img, (15, 15), (420, 75), (15, 23, 42), -1)
+        cv2.rectangle(img, (15, 15), (420, 75), (0, 255, 150), 1)
+        
+        cv2.putText(img, "ACTIVE AI BEAUTIFICATION ENGINE", (25, 35), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 150), 1, cv2.LINE_AA)
+        cv2.putText(img, f"FPS: {self.current_fps:.1f} | g.dev/gilbert_algordo", (25, 60), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (220, 220, 220), 1, cv2.LINE_AA)
+
+if __name__ == "__main__":
+    cap = cv2.VideoCapture(0)
+    beautifier = AdvancedAIBeautifier()
+
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+        
+        output = beautifier.process_frame(cv2.flip(frame, 1))
+        cv2.imshow("Advanced AI Beautifier", output)
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+
+
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import cv2
+import numpy as np
+import mediapipe as mp
+import time
+
+class CUDABeautifierEngine(nn.Module):
+    """
+    High-Performance GPU AI Beautification Engine.
+    Executes Bilateral Filtering, Face Masking, and Tone Grading directly on CUDA tensors.
+    Designed to work alongside TensorRT/MediaPipe pipelines.
+    """
+    def __init__(self, device: str = "cuda"):
+        super().__init__()
+        self.device = torch.device(device if torch.cuda.is_available() else "cpu")
+        print(f"Executing AI Pipeline on Device: {self.device}")
+
+        # MediaPipe Face Mesh initialization for ROI landmarks
+        self.mp_face_mesh = mp.solutions.face_mesh
+        self.face_mesh = self.mp_face_mesh.FaceMesh(
+            static_image_mode=False,
+            max_num_faces=1,
+            refine_landmarks=True,
+            min_detection_confidence=0.7,
+            min_tracking_confidence=0.7
+        )
+
+        # Facial indices for masking
+        self.FACE_OVAL = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109]
+        self.LEFT_EYE = [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398]
+        self.RIGHT_EYE = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246]
+
+    def gpu_bilateral_filter(self, tensor: torch.Tensor, ksize: int = 9, sigma_color: float = 0.1, sigma_space: float = 1.5) -> torch.Tensor:
+        """
+        Fast GPU approximation of Bilateral Filter using vectorized spatial and color distance kernels.
+        Input: Tensor shape (B, C, H, W) normalized [0, 1] on CUDA device.
+        """
+        pad = ksize // 2
+        padded = F.pad(tensor, (pad, pad, pad, pad), mode='reflect')
+        
+        # Unfold spatial neighborhood: (B, C, H, W, ksize*ksize)
+        patches = padded.unfold(2, ksize, 1).unfold(3, ksize, 1)
+        patches = patches.contiguous().view(tensor.size(0), tensor.size(1), tensor.size(2), tensor.size(3), -1)
+
+        # Compute spatial weights
+        coords = torch.arange(-pad, pad + 1, device=self.device, dtype=torch.float32)
+        grid_y, grid_x = torch.meshgrid(coords, coords, indexing='ij')
+        spatial_dist = grid_x**2 + grid_y**2
+        spatial_weights = torch.exp(-spatial_dist / (2 * sigma_space**2)).view(1, 1, 1, 1, -1)
+
+        # Compute range (color) weights against center pixel
+        center_pixel = tensor.unsqueeze(-1)
+        color_dist = torch.sum((patches - center_pixel) ** 2, dim=1, keepdim=True)
+        color_weights = torch.exp(-color_dist / (2 * sigma_color**2))
+
+        # Combined weights normalization
+        total_weights = spatial_weights * color_weights
+        weights_sum = total_weights.sum(dim=-1, keepdim=True)
+        
+        filtered = torch.sum(patches * total_weights, dim=-1) / (weights_sum + 1e-6)
+        return filtered
+
+    def gpu_tone_grading(self, tensor: torch.Tensor, brightness: float = 1.08, contrast: float = 1.12) -> torch.Tensor:
+        """Vectorized GPU exposure curve and soft contrast adjustment."""
+        # Mean luminance contrast adjustment around midtones (0.5)
+        graded = (tensor - 0.5) * contrast + 0.5 + (brightness - 1.0)
+        return torch.clamp(graded, 0.0, 1.0)
+
+    @torch.inference_mode()
+    def forward(self, frame_bgr: np.ndarray) -> np.ndarray:
+        h, w, c = frame_bgr.shape
+
+        # Step 1: Upload CPU Frame to GPU Tensor (NCHW, Float32, [0, 1])
+        rgb_input = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        tensor_gpu = torch.from_numpy(rgb_input).to(self.device).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+
+        # Step 2: Parallel MediaPipe Landmark Extraction
+        results = self.face_mesh.process(rgb_input)
+
+        # Step 3: Run GPU Bilateral Smoothing Kernel
+        smoothed_gpu = self.gpu_bilateral_filter(tensor_gpu, ksize=7, sigma_color=0.08, sigma_space=2.0)
+
+        # Step 4: Generate Face ROI Soft Mask on GPU
+        if results.multi_face_landmarks:
+            landmarks = results.multi_face_landmarks[0].landmark
+            
+            # Construct CPU Polygon Mask
+            mask_cpu = np.zeros((h, w), dtype=np.float32)
+            face_pts = np.array([[int(landmarks[idx].x * w), int(landmarks[idx].y * h)] for idx in self.FACE_OVAL], dtype=np.int32)
+            cv2.fillConvexPoly(mask_cpu, face_pts, 1.0)
+
+            # Subtract eye regions
+            left_eye_pts = np.array([[int(landmarks[idx].x * w), int(landmarks[idx].y * h)] for idx in self.LEFT_EYE], dtype=np.int32)
+            right_eye_pts = np.array([[int(landmarks[idx].x * w), int(landmarks[idx].y * h)] for idx in self.RIGHT_EYE], dtype=np.int32)
+            cv2.fillPoly(mask_cpu, [left_eye_pts, right_eye_pts], 0.0)
+
+            # Upload Mask to GPU and smooth with Gaussian blur tensor
+            mask_gpu = torch.from_numpy(mask_cpu).to(self.device).unsqueeze(0).unsqueeze(0)
+            mask_gpu = F.avg_pool2d(mask_gpu, kernel_size=15, stride=1, padding=7) # Fast GPU soft feathering
+
+            # Blend smoothed skin with original image via GPU alpha composite
+            blended_gpu = smoothed_gpu * mask_gpu + tensor_gpu * (1.0 - mask_gpu)
+        else:
+            blended_gpu = smoothed_gpu
+
+        # Step 5: GPU Tone Grading
+        final_gpu = self.gpu_tone_grading(blended_gpu, brightness=1.05, contrast=1.1)
+
+        # Step 6: Convert CUDA Tensor back to BGR numpy array for display
+        output_rgb = (final_gpu.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255.0).clip(0, 255).astype(np.uint8)
+        return cv2.cvtColor(output_rgb, cv2.COLOR_RGB2BGR)
+
+if __name__ == "__main__":
+    cap = cv2.VideoCapture(0)
+    engine = CUDABeautifierEngine(device="cuda")
+
+    prev_time = time.time()
+
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        frame = cv2.flip(frame, 1)
+        processed_frame = engine(frame)
+
+        # FPS Calculation
+        curr_time = time.time()
+        fps = 1.0 / (curr_time - prev_time + 1e-6)
+        prev_time = curr_time
+
+        cv2.putText(processed_frame, f"CUDA Accelerated FPS: {fps:.1f}", (20, 40), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 120), 2)
+        
+        cv2.imshow("PyTorch CUDA AI Beautifier", processed_frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+
+
+
+
+import torch
+
+def export_to_onnx(model, save_path="beautifier_gpu.onnx"):
+    """Exports PyTorch GPU Beautification module to ONNX for TensorRT compilation."""
+    model.eval()
+    dummy_input = torch.randn(1, 3, 720, 1280, device="cuda")
+    
+    torch.onnx.export(
+        model,
+        dummy_input,
+        save_path,
+        export_params=True,
+        opset_version=17,
+        do_constant_folding=True,
+        input_names=['input_frame'],
+        output_names=['beautified_frame'],
+        dynamic_axes={'input_frame': {0: 'batch'}, 'beautified_frame': {0: 'batch'}}
+    )
+    print(f"Exported ONNX model to {save_path}")
+
+# Run compilation command on target machine with NVIDIA TensorRT CLI:
+# trtexec --onnx=beautifier_gpu.onnx --saveEngine=beautifier_gpu.engine --fp16
+
+
+
+import tensorrt as trt
+import numpy as np
+import cv2
+import time
+from cuda import cuda, cudart
+
+class TensorRTRunner:
+    """
+    High-throughput execution wrapper for compiled TensorRT engines.
+    Manages pinned host memory buffers, CUDA stream allocation, and async execution.
+    """
+    def __init__(self, engine_path: str):
+        self.logger = trt.Logger(trt.Logger.WARNING)
+        self.runtime = trt.Runtime(self.logger)
+        
+        # 1. Deserialize the compiled TensorRT plan/engine
+        print(f"Loading TensorRT Engine from: {engine_path}")
+        with open(engine_path, "rb") as f:
+            self.engine = self.runtime.deserialize_cuda_engine(f.read())
+            
+        if self.engine is None:
+            raise RuntimeError("Failed to deserialize TensorRT engine file.")
+
+        self.context = self.engine.create_execution_context()
+        
+        # 2. Create CUDA stream for asynchronous execution
+        err, self.stream = cudart.cudaStreamCreate()
+        if err != cudart.cudaError_t.cudaSuccess:
+            raise RuntimeError(f"CUDA stream creation failed: {err}")
+
+        # 3. Allocate Host and Device buffers
+        self.inputs = []
+        self.outputs = []
+        self.allocations = []
+        
+        self._allocate_buffers()
+
+    def _allocate_buffers(self):
+        """Allocates pinned host memory and CUDA device memory for input and output tensors."""
+        num_io_tensors = self.engine.num_io_tensors if hasattr(self.engine, "num_io_tensors") else self.engine.num_bindings
+        
+        for i in range(num_io_tensors):
+            tensor_name = self.engine.get_tensor_name(i) if hasattr(self.engine, "get_tensor_name") else self.engine.get_binding_name(i)
+            tensor_shape = self.engine.get_tensor_shape(tensor_name) if hasattr(self.engine, "get_tensor_shape") else self.engine.get_binding_shape(i)
+            tensor_dtype = self.engine.get_tensor_dtype(tensor_name) if hasattr(self.engine, "get_tensor_dtype") else self.engine.get_binding_dtype(i)
+            
+            # Convert TensorRT DataType to numpy dtype
+            np_dtype = trt.nptype(tensor_dtype)
+            size = trt.volume(tensor_shape) * np_dtype.itemsize
+            
+            # Allocate pinned host memory and CUDA device buffer
+            _, host_mem = cudart.cudaMallocHost(size)
+            _, device_mem = cudart.cudaMalloc(size)
+            
+            binding_info = {
+                "name": tensor_name,
+                "shape": tensor_shape,
+                "dtype": np_dtype,
+                "size": size,
+                "host": np.frombuffer(host_mem, dtype=np_dtype).reshape(tensor_shape),
+                "device": int(device_mem)
+            }
+            
+            self.allocations.append(int(device_mem))
+            
+            # Set tensor address for execution context (TensorRT 8.5+ API)
+            if hasattr(self.context, "set_tensor_address"):
+                self.context.set_tensor_address(tensor_name, int(device_mem))
+                
+            is_input = self.engine.get_tensor_mode(tensor_name) == trt.TensorIOMode.INPUT if hasattr(self.engine, "get_tensor_mode") else self.engine.binding_is_input(i)
+            
+            if is_input:
+                self.inputs.append(binding_info)
+            else:
+                self.outputs.append(binding_info)
+
+    def infer(self, frame: np.ndarray) -> np.ndarray:
+        """
+        Executes asynchronous inference pass on incoming BGR frame:
+        H2D Copy -> TensorRT Async Execution -> D2H Copy -> Stream Synchronize
+        """
+        # Preprocessing: BGR -> RGB Float32 (NCHW)
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        input_data = np.expand_dims(rgb_frame.transpose(2, 0, 1), axis=0).astype(np.float32) / 255.0
+
+        # Copy input data into pinned host buffer
+        np.copyto(self.inputs[0]["host"], input_data)
+
+        # 1. Host to Device Async Copy
+        cudart.cudaMemcpyAsync(
+            self.inputs[0]["device"],
+            self.inputs[0]["host"].ctypes.data,
+            self.inputs[0]["size"],
+            cudart.cudaMemcpyKind.cudaMemcpyHostToDevice,
+            self.stream
+        )
+
+        # 2. Execute TensorRT Inference Async
+        if hasattr(self.context, "execute_async_v3"):
+            self.context.execute_async_v3(stream_handle=self.stream)
+        else:
+            self.context.execute_async_v2(bindings=self.allocations, stream_handle=self.stream)
+
+        # 3. Device to Host Async Copy
+        cudart.cudaMemcpyAsync(
+            self.outputs[0]["host"].ctypes.data,
+            self.outputs[0]["device"],
+            self.outputs[0]["size"],
+            cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost,
+            self.stream
+        )
+
+        # 4. Synchronize stream for completion
+        cudart.cudaStreamSynchronize(self.stream)
+
+        # Postprocessing: NCHW float32 -> BGR uint8
+        output_tensor = self.outputs[0]["host"][0] # Shape: (C, H, W)
+        output_rgb = (output_tensor.transpose(1, 2, 0) * 255.0).clip(0, 255).astype(np.uint8)
+        return cv2.cvtColor(output_rgb, cv2.COLOR_RGB2BGR)
+
+    def __del__(self):
+        """Free CUDA resources upon object cleanup."""
+        if hasattr(self, "stream"):
+            cudart.cudaStreamDestroy(self.stream)
+        for dev_ptr in self.allocations:
+            cudart.cudaFree(dev_ptr)
+
+if __name__ == "__main__":
+    # Path to compiled TensorRT plan
+    ENGINE_PATH = "beautifier_gpu.engine"
+
+    try:
+        runner = TensorRTRunner(ENGINE_PATH)
+        cap = cv2.VideoCapture(0)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
+        prev_time = time.time()
+
+        print("Executing TensorRT Beautifier Stream... Press 'q' to exit.")
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            # Execute TRT Inference Pass
+            output_frame = runner.infer(cv2.flip(frame, 1))
+
+            # Calculate FPS
+            curr_time = time.time()
+            fps = 1.0 / (curr_time - prev_time + 1e-6)
+            prev_time = curr_time
+
+            cv2.putText(output_frame, f"TensorRT Engine FPS: {fps:.1f}", (20, 40), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 120), 2)
+
+            cv2.imshow("TensorRT AI Beautifier", output_frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+        cap.release()
+        cv2.destroyAllWindows()
+
+    except Exception as e:
+        print(f"Error during execution: {e}")
+
+
+
+
+tensorrt>=8.6.0
+cuda-python>=12.0.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+
+
+
+[ Camera 1 RTSP ] ──► nvurisrcbin ──┐
+[ Camera 2 RTSP ] ──► nvurisrcbin ──┼─► [ nvstreammux ] ──► [ nvinfer ] ──► [ nvmultiostreamtiler ] ──► [ nvvideoconvert ] ──► [ nvdsosd ] ──► [ nveglglessink ]
+[ Camera N RTSP ] ──► nvurisrcbin ──┘  (GPU Batching)      (TensorRT)       (Grid Visualizer)         (NVMM Format)       (HUD Draw)       (Display / Stream)
+
+
+
+
+[property]
+gpu-id=0
+net-scale-factor=0.00392156862745098039 # 1/255.0 normalization
+model-engine-file=beautifier_gpu.engine
+labelfile-path=labels.txt
+
+# Model shape settings
+batch-size=4
+network-mode=1 # 0=FP32, 1=INT8, 2=FP16
+process-mode=1 # 1=Primary GIE
+model-color-format=0 # 0=RGB, 1=BGR
+
+# Tensor I/O Binding Names (match your PyTorch export names)
+offsets=0;0;0
+infer-dims=3;720;1280
+input-tensor-name=input_frame
+output-tensor-name=beautified_frame
+
+# Network Type: 100 for custom processing/segmentation/beautification
+network-type=100
+interval=0
+
+
+
+import sys
+import gi
+gi.require_version('Gst', '1.0')
+from gi.repository import Gst, GLib
+
+def create_element(factory_name, element_name):
+    element = Gst.ElementFactory.make(factory_name, element_name)
+    if not element:
+        sys.stderr.write(f" Error: Failed to create element '{element_name}' ({factory_name})\n")
+        sys.exit(1)
+    return element
+
+def main(stream_uris):
+    Gst.init(None)
+    pipeline = Gst.Pipeline.new("ds-multi-camera-pipeline")
+    num_sources = len(stream_uris)
+
+    # 1. Create Core Pipeline Elements
+    streammux = create_element("nvstreammux", "stream-muxer")
+    pgie = create_element("nvinfer", "primary-nvinfer-engine")
+    tiler = create_element("nvmultiostreamtiler", "nv-tiler")
+    converter = create_element("nvvideoconvert", "nv-converter")
+    osd = create_element("nvdsosd", "nv-osd")
+    sink = create_element("nveglglessink", "nv-egl-sink")
+
+    # Configure Stream Multiplexer (NVMM Batching)
+    streammux.set_property('width', 1280)
+    streammux.set_property('height', 720)
+    streammux.set_property('batch-size', num_sources)
+    streammux.set_property('batched-push-timeout', 40000)
+
+    # Configure TensorRT Inference Plugin
+    pgie.set_property('config-file-path', 'config_infer.txt')
+
+    # Configure Multi-Stream Grid Visualizer
+    tiler.set_property('rows', 2)
+    tiler.set_property('columns', 2)
+    tiler.set_property('width', 1920)
+    tiler.set_property('height', 1080)
+
+    pipeline.add(streammux)
+    pipeline.add(pgie)
+    pipeline.add(tiler)
+    pipeline.add(converter)
+    pipeline.add(osd)
+    pipeline.add(sink)
+
+    # 2. Dynamically attach camera sources (RTSP/File) via nvurisrcbin
+    for i, uri in enumerate(stream_uris):
+        source_bin = create_element("nvurisrcbin", f"src-bin-{i}")
+        source_bin.set_property("uri", uri)
+        pipeline.add(source_bin)
+
+        # Link source pad to streammux sink pad
+        sinkpad = streammux.get_request_pad(f"sink_{i}")
+        
+        def cb_pad_added(pad_added_elem, pad, target_sinkpad):
+            caps = pad.get_current_caps()
+            if caps and caps.get_structure(0).get_name().startswith("video"):
+                pad.link(target_sinkpad)
+
+        source_bin.connect("pad-added", cb_pad_added, sinkpad)
+
+    # 3. Link rest of DeepStream pipeline elements
+    streammux.link(pgie)
+    pgie.link(tiler)
+    tiler.link(converter)
+    converter.link(osd)
+    osd.link(sink)
+
+    # 4. Start Event Loop & Pipeline Execution
+    loop = GLib.MainLoop()
+    bus = pipeline.get_bus()
+    bus.add_signal_watch()
+
+    def on_bus_message(bus, message):
+        t = message.type
+        if t == Gst.MessageType.EOS:
+            print("End-of-stream reached.")
+            loop.quit()
+        elif t == Gst.MessageType.ERROR:
+            err, debug = message.parse_error()
+            print(f"Pipeline Error: {err}, {debug}")
+            loop.quit()
+        return True
+
+    bus.connect("message", on_bus_message)
+    pipeline.set_state(Gst.State.PLAYING)
+    print(f"DeepStream Pipeline Running across {num_sources} Streams...")
+
+    try:
+        loop.run()
+    except Exception:
+        pass
+    finally:
+        pipeline.set_state(Gst.State.NULL)
+
+if __name__ == "__main__":
+    # Multi-camera stream endpoints (RTSP/Files)
+    CAMERAS = [
+        "rtsp://192.168.1.101:554/stream1",
+        "rtsp://192.168.1.102:554/stream1",
+        "file:///absolute/path/to/test_video.mp4"
+    ]
+    main(CAMERAS)
+
+
+
+
+gst-launch-1.0 \
+  nvurisrcbin uri=rtsp://192.168.1.101:554/stream1 ! mux.sink_0 \
+  nvurisrcbin uri=rtsp://192.168.1.102:554/stream1 ! mux.sink_1 \
+  nvstreammux name=mux width=1280 height=720 batch-size=2 ! \
+  nvinfer config-file-path=config_infer.txt ! \
+  nvmultiostreamtiler rows=1 columns=2 width=1920 height=1080 ! \
+  nvvideoconvert ! nvdsosd ! nveglglessink
+
+
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import onnx
+import onnxruntime as ort
+import numpy as np
+
+class PyTorchBeautifierGraph(nn.Module):
+    """
+    Fully-traceable PyTorch Graph combining Bilateral Filtering,
+    Soft Boundary Mask Blending, and Exposure Tone Mapping.
+    """
+    def __init__(self, ksize: int = 7, sigma_color: float = 0.08, sigma_space: float = 2.0):
+        super().__init__()
+        self.ksize = ksize
+        self.pad = ksize // 2
+        self.sigma_color = sigma_color
+        self.sigma_space = sigma_space
+
+        # Precompute spatial distance kernel weights on initialization
+        coords = torch.arange(-self.pad, self.pad + 1, dtype=torch.float32)
+        grid_y, grid_x = torch.meshgrid(coords, coords, indexing='ij')
+        spatial_dist = grid_x**2 + grid_y**2
+        spatial_weights = torch.exp(-spatial_dist / (2 * self.sigma_space**2))
+        self.register_buffer("spatial_weights", spatial_weights.view(1, 1, 1, 1, -1))
+
+    def forward(self, input_frame: torch.Tensor, mask_roi: torch.Tensor) -> torch.Tensor:
+        """
+        Inputs:
+            input_frame: (B, 3, H, W) normalized [0, 1] RGB image tensor
+            mask_roi:    (B, 1, H, W) normalized [0, 1] soft face boundary mask
+        Outputs:
+            output_frame: (B, 3, H, W) beautified image tensor
+        """
+        # 1. Bilateral Smoothing Pass
+        padded = F.pad(input_frame, (self.pad, self.pad, self.pad, self.pad), mode='reflect')
+        
+        # Unfold patches: (B, C, H, W, ksize*ksize)
+        patches = padded.unfold(2, self.ksize, 1).unfold(3, self.ksize, 1)
+        patches = patches.contiguous().view(
+            input_frame.size(0), input_frame.size(1), input_frame.size(2), input_frame.size(3), -1
+        )
+
+        # Compute range (color distance) weights against center pixel
+        center_pixel = input_frame.unsqueeze(-1)
+        color_dist = torch.sum((patches - center_pixel) ** 2, dim=1, keepdim=True)
+        color_weights = torch.exp(-color_dist / (2 * self.sigma_color**2))
+
+        # Combined weight normalization
+        total_weights = self.spatial_weights * color_weights
+        weights_sum = total_weights.sum(dim=-1, keepdim=True)
+        smoothed = torch.sum(patches * total_weights, dim=-1) / (weights_sum + 1e-6)
+
+        # 2. Feathered ROI Blending Pass
+        feathered_mask = F.avg_pool2d(mask_roi, kernel_size=15, stride=1, padding=7)
+        blended = smoothed * feathered_mask + input_frame * (1.0 - feathered_mask)
+
+        # 3. Tone Mapping & Exposure Boost Curve
+        graded = (blended - 0.5) * 1.12 + 0.5 + 0.05
+        output_frame = torch.clamp(graded, 0.0, 1.0)
+
+        return output_frame
+
+
+def export_pipeline_to_onnx(output_path: str = "beautifier_engine.onnx"):
+    model = PyTorchBeautifierGraph()
+    model.eval()
+
+    # Dummy inputs for tracing graph
+    dummy_frame = torch.randn(1, 3, 720, 1280, dtype=torch.float32)
+    dummy_mask = torch.randn(1, 1, 720, 1280, dtype=torch.float32)
+
+    # Dynamic axes configuration for backend servers (variable resolutions & batch sizes)
+    dynamic_axes = {
+        'input_frame': {0: 'batch_size', 2: 'height', 3: 'width'},
+        'mask_roi': {0: 'batch_size', 2: 'height', 3: 'width'},
+        'output_frame': {0: 'batch_size', 2: 'height', 3: 'width'}
+    }
+
+    print("Exporting model graph to ONNX...")
+    torch.onnx.export(
+        model,
+        (dummy_frame, dummy_mask),
+        output_path,
+        export_params=True,
+        opset_version=17,
+        do_constant_folding=True,
+        input_names=['input_frame', 'mask_roi'],
+        output_names=['output_frame'],
+        dynamic_axes=dynamic_axes
+    )
+
+    # Verify exported ONNX model integrity
+    onnx_model = onnx.load(output_path)
+    onnx.checker.check_model(onnx_model)
+    print(f"ONNX Model successfully exported and verified: {output_path}")
+
+if __name__ == "__main__":
+    export_pipeline_to_onnx()
+
+
+
+import onnxruntime as ort
+import numpy as np
+import cv2
+import time
+
+class ONNXRuntimeBeautifierServer:
+    """
+    Production ONNX Runtime Engine configured for high-throughput backend servers.
+    Supports CUDA, TensorRT, and OpenVINO hardware acceleration providers.
+    """
+    def __init__(self, model_path: str = "beautifier_engine.onnx"):
+        # Configure High-Performance ORT Session Options
+        self.opts = ort.SessionOptions()
+        self.opts.execution_mode = ort.ExecutionMode.ORT_PARALLEL
+        self.opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        self.opts.enable_cpu_mem_arena = True
+        self.opts.intra_op_num_threads = 4
+
+        # Hardware Execution Provider Cascade
+        providers = [
+            ('TensorrtExecutionProvider', {
+                'device_id': 0,
+                'trt_fp16_enable': True,
+                'trt_engine_cache_enable': True,
+                'trt_engine_cache_path': './trt_cache'
+            }),
+            ('CUDAExecutionProvider', {
+                'device_id': 0,
+                'arena_extend_strategy': 'kNextPowerOfTwo',
+                'cudnn_conv_algo_search': 'EXHAUSTIVE',
+                'do_copy_in_default_stream': True
+            }),
+            'CPUExecutionProvider'
+        ]
+
+        print(f"Initializing ONNX Runtime Session for: {model_path}")
+        self.session = ort.InferenceSession(model_path, self.opts, providers=providers)
+        
+        # Query input/output metadata
+        self.input_names = [inp.name for inp in self.session.get_inputs()]
+        self.output_names = [out.name for out in self.session.get_outputs()]
+        
+        print(f"Active Execution Providers: {self.session.get_providers()}")
+
+    def process_frame_batch(self, frame_bgr: np.ndarray, mask_gray: np.ndarray) -> np.ndarray:
+        """
+        Executes ONNX Runtime inference pass across incoming numpy arrays.
+        """
+        h, w, _ = frame_bgr.shape
+
+        # 1. Preprocessing: BGR uint8 -> RGB Float32 NCHW [0, 1]
+        rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        tensor_frame = np.expand_dims(rgb.transpose(2, 0, 1), axis=0).astype(np.float32) / 255.0
+        
+        tensor_mask = np.expand_dims(mask_gray, axis=(0, 1)).astype(np.float32) / 255.0
+
+        # 2. Bind Inputs & Execute Inference
+        inputs = {
+            self.input_names[0]: tensor_frame,
+            self.input_names[1]: tensor_mask
+        }
+
+        outputs = self.session.run(self.output_names, inputs)
+
+        # 3. Postprocessing: NCHW Float32 -> BGR uint8 [0, 255]
+        output_tensor = outputs[0][0] # First item in batch
+        output_rgb = (output_tensor.transpose(1, 2, 0) * 255.0).clip(0, 255).astype(np.uint8)
+        
+        return cv2.cvtColor(output_rgb, cv2.COLOR_RGB2BGR)
+
+if __name__ == "__main__":
+    # Test ONNX Runtime Server Session
+    server = ONNXRuntimeBeautifierServer("beautifier_engine.onnx")
+
+    # Generate test frame and facial mask
+    dummy_frame = np.full((720, 1280, 3), 120, dtype=np.uint8)
+    dummy_mask = np.full((720, 1280), 255, dtype=np.uint8)
+
+    # Warmup pass
+    _ = server.process_frame_batch(dummy_frame, dummy_mask)
+
+    # Benchmark Latency
+    start_time = time.time()
+    iterations = 100
+    for _ in range(iterations):
+        _ = server.process_frame_batch(dummy_frame, dummy_mask)
+    
+    avg_latency = ((time.time() - start_time) / iterations) * 1000
+    fps = 1000.0 / avg_latency
+
+    print(f"ONNX Runtime Execution Speed: {avg_latency:.2f} ms/frame ({fps:.1f} FPS)")
+
+
+
+torch>=2.1.0
+onnx>=1.15.0
+onnxruntime-gpu>=1.17.0
+opencv-python-headless>=4.8.0
+numpy>=1.24.0
+
+
+
+
+model_repository/
+└── beautifier/
+    ├── 1/
+    │   └── model.onnx
+    └── config.pbtxt
+
+
+
+name: "beautifier"
+backend: "onnxruntime"
+max_batch_size: 16
+
+input [
+  {
+    name: "input_image"
+    data_type: TYPE_FP32
+    dims: [ 3, -1, -1 ]  # CHW format; dynamic height and width (-1)
+  }
+]
+
+output [
+  {
+    name: "output_image"
+    data_type: TYPE_FP32
+    dims: [ 3, -1, -1 ]
+  }
+]
+
+# Enable Dynamic Batching
+dynamic_batching {
+  preferred_batch_size: [ 4, 8, 16 ]
+  max_queue_delay_microseconds: 5000  # Max delay (5ms) to wait for batch assembly
+}
+
+# Optional: Run on GPU via TensorRT Execution Provider for high performance
+optimization {
+  execution_accelerators {
+    gpu_execution_accelerator : [ {
+      name : "tensorrt"
+    }]
+  }
+}
+
+instance_group [
+  {
+    count: 1
+    kind: KIND_GPU
+  }
+]
+
+
+
+docker run --gpus all --rm \
+  -p 8000:8000 -p 8001:8001 -p 8002:8002 \
+  -v $(pwd)/model_repository:/models \
+  nvcr.io/nvidia/tritonserver:24.01-py3 \
+  tritonserver --model-repository=/models
+
+
+
+
+
+import numpy as np
+import tritonclient.http as httpclient
+
+# Initialize client
+client = httpclient.InferenceServerClient(url="localhost:8000")
+
+# Prepare dummy batch (e.g., RGB 512x512 normalized FP32 images)
+dummy_image = np.random.randn(1, 3, 512, 512).astype(np.float32)
+
+inputs = [
+    httpclient.InferInput("input_image", dummy_image.shape, "FP32")
+]
+inputs[0].set_data_from_numpy(dummy_image)
+
+outputs = [
+    httpclient.InferRequestedOutput("output_image")
+]
+
+# Perform inference request
+response = client.infer(model_name="beautifier", inputs=inputs, outputs=outputs)
+beautified_output = response.as_numpy("output_image")
+
+print("Inference completed. Output shape:", beautified_output.shape)
+
+
+
+name: "beautifier"
+backend: "onnxruntime"
+max_batch_size: 16
+
+input [
+  {
+    name: "input_image"
+    data_type: TYPE_FP32
+    dims: [ 3, -1, -1 ]
+  }
+]
+
+output [
+  {
+    name: "output_image"
+    data_type: TYPE_FP32
+    dims: [ 3, -1, -1 ]
+  }
+]
+
+dynamic_batching {
+  preferred_batch_size: [ 4, 8, 16 ]
+  max_queue_delay_microseconds: 5000
+}
+
+# Fine-tuning ONNX Runtime with TensorRT Execution Provider
+optimization {
+  execution_accelerators {
+    gpu_execution_accelerator : [ {
+      name : "tensorrt"
+      
+      # 1. Enable FP16 Precision
+      parameters {
+        key: "precision_mode"
+        value: "FP16"
+      }
+
+      # 2. Maximum Workspace Size (in bytes) for TRT Engine building (e.g., 4GB)
+      parameters {
+        key: "max_workspace_size"
+        value: "4294967296"
+      }
+
+      # 3. Persistent TRT Engine Caching on Disk (prevents rebuilding on container restart)
+      parameters {
+        key: "trt_engine_cache_enable"
+        value: "true"
+      }
+      parameters {
+        key: "trt_engine_cache_path"
+        value: "/models/beautifier/trt_cache"
+      }
+
+      # 4. Optional: Enable INT8 Calibration if model is quantized
+      # parameters {
+      #   key: "int8_calibration_table_name"
+      #   value: "int8_calib.table"
+      # }
+    }]
+  }
+}
+
+instance_group [
+  {
+    count: 1
+    kind: KIND_GPU
+  }
+]
+
+
+
+model_repository/
+├── preprocess/
+│   ├── 1/
+│   │   └── model.py
+│   └── config.pbtxt
+├── beautifier/
+│   ├── 1/
+│   │   └── model.onnx
+│   └── config.pbtxt
+├── postprocess/
+│   ├── 1/
+│   │   └── model.py
+│   └── config.pbtxt
+└── pipeline_ensemble/
+    ├── 1/
+    └── config.pbtxt
+
+
+
+
+import numpy as np
+import cv2
+import triton_python_backend_utils as pb_utils
+
+class TritonPythonModel:
+    def execute(self, requests):
+        responses = []
+        for request in requests:
+            # 1. Extract raw JPEG/PNG bytes (BYTES/TYPE_STRING)
+            raw_bytes_tensor = pb_utils.get_input_tensor_by_name(request, "RAW_IMAGE")
+            bytes_array = raw_bytes_tensor.as_numpy()
+
+            processed_images = []
+            for img_bytes in bytes_array:
+                # Decode image
+                img_data = np.frombuffer(img_bytes, dtype=np.uint8)
+                img = cv2.imdecode(img_data, cv2.IMREAD_COLOR)  # HWC, BGR
+                
+                # Resize to target dimension (512x512) and convert to RGB
+                img = cv2.resize(img, (512, 512))
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                
+                # Normalize [0, 1] and transpose to CHW format
+                img = (img.astype(np.float32) / 255.0).transpose(2, 0, 1)
+                processed_images.append(img)
+
+            # Package output tensor
+            output_tensor = pb_utils.Tensor(
+                "PREPROCESSED_IMAGE", np.array(processed_images, dtype=np.float32)
+            )
+            responses.append(pb_utils.InferenceResponse(output_tensors=[output_tensor]))
+
+        return responses
+
+
+
+name: "pipeline_ensemble"
+platform: "ensemble"
+max_batch_size: 16
+
+input [
+  {
+    name: "RAW_IMAGE_BYTES"
+    data_type: TYPE_STRING
+    dims: [ 1 ]  # Encoded image binary payload
+  }
+]
+
+output [
+  {
+    name: "FINAL_BEAUTIFIED_IMAGE"
+    data_type: TYPE_UINT8
+    dims: [ 512, 512, 3 ]
+  }
+]
+
+ensemble_scheduling {
+  step [
+    {
+      model_name: "preprocess"
+      model_version: -1
+      input_map { key: "RAW_IMAGE" value: "RAW_IMAGE_BYTES" }
+      output_map { key: "PREPROCESSED_IMAGE" value: "preprocessed_tensor" }
+    },
+    {
+      model_name: "beautifier"
+      model_version: -1
+      input_map { key: "input_image" value: "preprocessed_tensor" }
+      output_map { key: "output_image" value: "model_output_tensor" }
+    },
+    {
+      model_name: "postprocess"
+      model_version: -1
+      input_map { key: "MODEL_OUTPUT" value: "model_output_tensor" }
+      output_map { key: "BEAUTIFIED_IMAGE" value: "FINAL_BEAUTIFIED_IMAGE" }
+    }
+  ]
+}
+
+
+
+
+import numpy as np
+import cv2
+import triton_python_backend_utils as pb_utils
+
+class TritonPythonModel:
+    def execute(self, requests):
+        responses = []
+        for request in requests:
+            # 1. Preprocess directly in Python script
+            raw_bytes = pb_utils.get_input_tensor_by_name(request, "RAW_IMAGE").as_numpy()
+            img_data = np.frombuffer(raw_bytes[0], dtype=np.uint8)
+            img = cv2.imdecode(img_data, cv2.IMREAD_COLOR)
+            
+            img_rgb = cv2.cvtColor(cv2.resize(img, (512, 512)), cv2.COLOR_BGR2RGB)
+            preprocessed = (img_rgb.astype(np.float32) / 255.0).transpose(2, 0, 1)[None, ...]
+
+            # 2. Programmatically execute the core ONNX model using BLS
+            input_tensor = pb_utils.Tensor("input_image", preprocessed)
+            infer_request = pb_utils.InferenceRequest(
+                model_name="beautifier",
+                requested_output_names=["output_image"],
+                inputs=[input_tensor]
+            )
+            
+            # Execute synchronously (or use async_exec)
+            infer_response = infer_request.exec()
+            
+            if infer_response.has_error():
+                raise pb_utils.TritonModelException(infer_response.error().message())
+
+            # 3. Postprocess execution output
+            raw_output = pb_utils.get_output_tensor_by_name(infer_response, "output_image").as_numpy()
+            out_img = raw_output[0].transpose(1, 2, 0)  # Convert CHW -> HWC
+            out_img = (np.clip(out_img, 0, 1) * 255).astype(np.uint8)
+
+            final_output = pb_utils.Tensor("BEAUTIFIED_IMAGE", np.expand_dims(out_img, axis=0))
+            responses.append(pb_utils.InferenceResponse(output_tensors=[final_output]))
+
+        return responses
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Active AI Beautification Icons</title>
+  <style>
+    :root {
+      --bg-dark: #0f172a;
+      --card-bg: #1e293b;
+      --primary-neon: #10b981;
+      --accent-cyan: #06b6d4;
+      --accent-purple: #a855f7;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+    }
+
+    .icon-grid {
+      display: flex;
+      gap: 2rem;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-top: 1.5rem;
+    }
+
+    .icon-card {
+      background: var(--card-bg);
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 180px;
+      transition: transform 0.2s, border-color 0.2s;
+    }
+
+    .icon-card:hover {
+      transform: translateY(-4px);
+      border-color: var(--primary-neon);
+    }
+
+    .icon-card svg {
+      width: 64px;
+      height: 64px;
+    }
+
+    .icon-label {
+      margin-top: 1rem;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: #cbd5e1;
+      text-align: center;
+    }
+
+    /* Pulse animation for active AI status */
+    @keyframes pulseGlow {
+      0%, 100% { opacity: 0.4; transform: scale(1); }
+      50% { opacity: 0.9; transform: scale(1.08); }
+    }
+
+    .pulse {
+      animation: pulseGlow 2.5s infinite ease-in-out;
+      transform-origin: center;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>Active AI Beautification Icons</h2>
+  <div class="icon-grid">
+
+    <!-- Icon 1: Active AI Face Glow -->
+    <div class="icon-card">
+      <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="aiGlow" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#10b981" />
+            <stop offset="1" stop-color="#06b6d4" />
+          </linearGradient>
+        </defs>
+        <!-- Outer Glowing Ring -->
+        <circle cx="32" cy="32" r="28" stroke="url(#aiGlow)" stroke-width="2" class="pulse" opacity="0.6" />
+        <!-- Face Outline -->
+        <path d="M20 26C20 18 25.3726 12 32 12C38.6274 12 44 18 44 26C44 36 37 46 32 48C27 46 20 36 20 26Z" stroke="url(#aiGlow)" stroke-width="2.5" stroke-linecap="round" />
+        <!-- Eyes -->
+        <circle cx="27" cy="24" r="2" fill="#10b981" />
+        <circle cx="37" cy="24" r="2" fill="#10b981" />
+        <!-- Smile -->
+        <path d="M28 34C29.5 35.5 34.5 35.5 36 34" stroke="#06b6d4" stroke-width="2" stroke-linecap="round" />
+        <!-- AI Sparkle Dot -->
+        <circle cx="46" cy="14" r="3" fill="#a855f7" class="pulse" />
+      </svg>
+      <div class="icon-label">AI Face Glow</div>
+    </div>
+
+    <!-- Icon 2: 3D Facial Mesh Overlay -->
+    <div class="icon-card">
+      <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="meshGrad" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#06b6d4" />
+            <stop offset="1" stop-color="#a855f7" />
+          </linearGradient>
+        </defs>
+        <!-- Face Contour -->
+        <path d="M18 24C18 15 24.27 8 32 8C39.73 8 46 15 46 24C46 35 38 48 32 50C26 48 18 35 18 24Z" stroke="url(#meshGrad)" stroke-width="2" stroke-dasharray="3 3" />
+        <!-- Mesh Coordinates Triangles -->
+        <polygon points="32,8 25,22 39,22" fill="none" stroke="#06b6d4" stroke-width="1.2" />
+        <polygon points="25,22 32,32 39,22" fill="none" stroke="#a855f7" stroke-width="1.2" />
+        <polygon points="25,22 18,24 32,32" fill="none" stroke="#06b6d4" stroke-width="1.2" />
+        <polygon points="39,22 46,24 32,32" fill="none" stroke="#06b6d4" stroke-width="1.2" />
+        <polygon points="32,32 24,42 32,50" fill="none" stroke="#a855f7" stroke-width="1.2" />
+        <polygon points="32,32 40,42 32,50" fill="none" stroke="#a855f7" stroke-width="1.2" />
+      </svg>
+      <div class="icon-label">3D Mesh Tracking</div>
+    </div>
+
+    <!-- Icon 3: Magic Wand Sparkle -->
+    <div class="icon-card">
+      <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="wandGrad" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#a855f7" />
+            <stop offset="1" stop-color="#10b981" />
+          </linearGradient>
+        </defs>
+        <!-- Wand Stick -->
+        <path d="M14 50L38 26" stroke="url(#wandGrad)" stroke-width="4" stroke-linecap="round" />
+        <path d="M38 26L44 20" stroke="#f8fafc" stroke-width="4" stroke-linecap="round" />
+        <!-- Sparkle Star Large -->
+        <path d="M48 8C48 13 53 18 58 18C53 18 48 23 48 28C48 23 43 18 38 18C43 18 48 13 48 8Z" fill="#10b981" class="pulse" />
+        <!-- Sparkle Star Small -->
+        <path d="M22 12C22 14.5 24.5 17 27 17C24.5 17 22 19.5 22 22C22 19.5 19.5 17 17 17C19.5 17 22 14.5 22 12Z" fill="#a855f7" />
+      </svg>
+      <div class="icon-label">AI Wand Enhance</div>
+    </div>
+
+  </div>
+
+</body>
+</html>
+
+
+
+import React from 'react';
+
+interface IconProps extends React.SVGProps<SVGSVGElement> {
+  size?: number;
+  glowColorStart?: string;
+  glowColorEnd?: string;
+}
+
+export const AiFaceGlowIcon: React.FC<IconProps> = ({
+  size = 64,
+  glowColorStart = '#10b981',
+  glowColorEnd = '#06b6d4',
+  className = '',
+  ...props
+}) => {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 64 64"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      {...props}
+    >
+      <defs>
+        <linearGradient id="aiGlow" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+          <stop stopColor={glowColorStart} />
+          <stop offset="1" stopColor={glowColorEnd} />
+        </linearGradient>
+      </defs>
+      <circle
+        cx="32"
+        cy="32"
+        r="28"
+        stroke="url(#aiGlow)"
+        strokeWidth="2"
+        opacity="0.6"
+      />
+      <path
+        d="M20 26C20 18 25.3726 12 32 12C38.6274 12 44 18 44 26C44 36 37 46 32 48C27 46 20 36 20 26Z"
+        stroke="url(#aiGlow)"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+      />
+      <circle cx="27" cy="24" r="2" fill={glowColorStart} />
+      <circle cx="37" cy="24" r="2" fill={glowColorStart} />
+      <path
+        d="M28 34C29.5 35.5 34.5 35.5 36 34"
+        stroke={glowColorEnd}
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <circle cx="46" cy="14" r="3" fill="#a855f7" />
+    </svg>
+  );
+};
+
+
+
+import React from 'react';
+
+interface IconProps extends React.SVGProps<SVGSVGElement> {
+  size?: number;
+  primaryColor?: string;
+  secondaryColor?: string;
+}
+
+export const AiMeshTrackingIcon: React.FC<IconProps> = ({
+  size = 64,
+  primaryColor = '#06b6d4',
+  secondaryColor = '#a855f7',
+  className = '',
+  ...props
+}) => {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 64 64"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      {...props}
+    >
+      <defs>
+        <linearGradient id="meshGrad" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+          <stop stopColor={primaryColor} />
+          <stop offset="1" stopColor={secondaryColor} />
+        </linearGradient>
+      </defs>
+      <path
+        d="M18 24C18 15 24.27 8 32 8C39.73 8 46 15 46 24C46 35 38 48 32 50C26 48 18 35 18 24Z"
+        stroke="url(#meshGrad)"
+        strokeWidth="2"
+        strokeDasharray="3 3"
+      />
+      <polygon points="32,8 25,22 39,22" fill="none" stroke={primaryColor} strokeWidth="1.2" />
+      <polygon points="25,22 32,32 39,22" fill="none" stroke={secondaryColor} strokeWidth="1.2" />
+      <polygon points="25,22 18,24 32,32" fill="none" stroke={primaryColor} strokeWidth="1.2" />
+      <polygon points="39,22 46,24 32,32" fill="none" stroke={primaryColor} strokeWidth="1.2" />
+      <polygon points="32,32 24,42 32,50" fill="none" stroke={secondaryColor} strokeWidth="1.2" />
+      <polygon points="32,32 40,42 32,50" fill="none" stroke={secondaryColor} strokeWidth="1.2" />
+    </svg>
+  );
+};
+
+
+
+import React from 'react';
+
+interface IconProps extends React.SVGProps<SVGSVGElement> {
+  size?: number;
+  accentPurple?: string;
+  accentGreen?: string;
+}
+
+export const AiWandEnhanceIcon: React.FC<IconProps> = ({
+  size = 64,
+  accentPurple = '#a855f7',
+  accentGreen = '#10b981',
+  className = '',
+  ...props
+}) => {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 64 64"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      {...props}
+    >
+      <defs>
+        <linearGradient id="wandGrad" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+          <stop stopColor={accentPurple} />
+          <stop offset="1" stopColor={accentGreen} />
+        </linearGradient>
+      </defs>
+      <path d="M14 50L38 26" stroke="url(#wandGrad)" strokeWidth="4" strokeLinecap="round" />
+      <path d="M38 26L44 20" stroke="#f8fafc" strokeWidth="4" strokeLinecap="round" />
+      <path
+        d="M48 8C48 13 53 18 58 18C53 18 48 23 48 28C48 23 43 18 38 18C43 18 48 13 48 8Z"
+        fill={accentGreen}
+      />
+      <path
+        d="M22 12C22 14.5 24.5 17 27 17C24.5 17 22 19.5 22 22C22 19.5 19.5 17 17 17C19.5 17 22 14.5 22 12Z"
+        fill={accentPurple}
+      />
+    </svg>
+  );
+};
+
+
+
+import { AiFaceGlowIcon } from './AiFaceGlowIcon';
+import { AiMeshTrackingIcon } from './AiMeshTrackingIcon';
+import { AiWandEnhanceIcon } from './AiWandEnhanceIcon';
+
+export default function StatusPanel() {
+  return (
+    <div style={{ display: 'flex', gap: '1rem', background: '#0f172a', padding: '1rem' }}>
+      <AiFaceGlowIcon size={48} className="animate-pulse" />
+      <AiMeshTrackingIcon size={48} />
+      <AiWandEnhanceIcon size={48} />
+    </div>
+  );
+}
+
+
+
+// Component Exports
+export { AiFaceGlowIcon } from './AiFaceGlowIcon';
+export { AiMeshTrackingIcon } from './AiMeshTrackingIcon';
+export { AiWandEnhanceIcon } from './AiWandEnhanceIcon';
+
+// Type Exports
+export type { IconProps as AiFaceGlowIconProps } from './AiFaceGlowIcon';
+export type { IconProps as AiMeshTrackingIconProps } from './AiMeshTrackingIcon';
+export type { IconProps as AiWandEnhanceIconProps } from './AiWandEnhanceIcon';
+
+
+
+
+src/components/icons/ai-beautification/
+├── AiFaceGlowIcon.tsx
+├── AiMeshTrackingIcon.tsx
+├── AiWandEnhanceIcon.tsx
+└── index.ts
+
+
+
+
+// Named imports from the directory index
+import { 
+  AiFaceGlowIcon, 
+  AiMeshTrackingIcon, 
+  AiWandEnhanceIcon 
+} from './components/icons/ai-beautification';
+
+// Import all as a namespace
+import * as AiIcons from './components/icons/ai-beautification';
+
+// Usage with types
+import type { AiFaceGlowIconProps } from './components/icons/ai-beautification';
+
+
+
+ai-beautification-icons/
+├── src/
+│   ├── AiFaceGlowIcon.tsx
+│   ├── AiMeshTrackingIcon.tsx
+│   ├── AiWandEnhanceIcon.tsx
+│   └── index.ts
+├── package.json
+├── tsup.config.ts
+└── tsconfig.json
+
+
+
+npm install -D tsup typescript @types/react @types/react-dom
+npm install react react-dom --save-peer
+
+
+
+import { defineConfig } from 'tsup';
+
+export default defineConfig({
+  entry: ['src/index.ts'],
+  format: ['cjs', 'esm'],
+  dts: true,
+  clean: true,
+  external: ['react', 'react-dom'],
+  minify: true,
+  sourcemap: true,
+  treeshake: true,
+});
+
+
+
+{
+  "name": "@gilbertalgordo/ai-beautification-icons",
+  "version": "1.0.0",
+  "description": "React SVG icons for AI beautification and mesh tracking status indicators",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "react": ">=17.0.0",
+    "react-dom": ">=17.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0"
+  },
+  "keywords": [
+    "react",
+    "icons",
+    "ai",
+    "svg",
+    "beautification",
+    "tsup"
+  ],
+  "license": "MIT"
+}
+
+
+
+
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "declaration": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true
+  },
+  "include": ["src"]
+}
+
+
+
+npm run build
+
+
+
+npm publish --access public
+
+
+
+import React from 'react';
+
+export interface IconProps extends React.SVGProps<SVGSVGElement> {
+  size?: number;
+  glowColorStart?: string;
+  glowColorEnd?: string;
+}
+
+export const AiFaceGlowIcon: React.FC<IconProps> = ({
+  size = 64,
+  glowColorStart = '#10b981',
+  glowColorEnd = '#06b6d4',
+  className = '',
+  ...props
+}) => {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 64 64"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      // Default Tailwind animation + custom classes passed via props
+      className={`transition-all duration-300 ${className}`}
+      {...props}
+    >
+      <defs>
+        <linearGradient id="aiGlow" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+          <stop stopColor={glowColorStart} />
+          <stop offset="1" stopColor={glowColorEnd} />
+        </linearGradient>
+      </defs>
+      
+      {/* Pulse effect on the outer glow ring */}
+      <circle
+        cx="32"
+        cy="32"
+        r="28"
+        stroke="url(#aiGlow)"
+        strokeWidth="2"
+        className="animate-pulse opacity-60"
+      />
+      
+      {/* Face outline */}
+      <path
+        d="M20 26C20 18 25.3726 12 32 12C38.6274 12 44 18 44 26C44 36 37 46 32 48C27 46 20 36 20 26Z"
+        stroke="url(#aiGlow)"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+      />
+      <circle cx="27" cy="24" r="2" fill={glowColorStart} />
+      <circle cx="37" cy="24" r="2" fill={glowColorStart} />
+      <path
+        d="M28 34C29.5 35.5 34.5 35.5 36 34"
+        stroke={glowColorEnd}
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      
+      {/* Pulse effect on status dot */}
+      <circle 
+        cx="46" 
+        cy="14" 
+        r="3" 
+        fill="#a855f7" 
+        className="animate-ping origin-center" 
+      />
+      <circle 
+        cx="46" 
+        cy="14" 
+        r="3" 
+        fill="#a855f7" 
+      />
+    </svg>
+  );
+};
+
+
+
+import React from 'react';
+
+export interface IconProps extends React.SVGProps<SVGSVGElement> {
+  size?: number;
+  accentPurple?: string;
+  accentGreen?: string;
+}
+
+export const AiWandEnhanceIcon: React.FC<IconProps> = ({
+  size = 64,
+  accentPurple = '#a855f7',
+  accentGreen = '#10b981',
+  className = '',
+  ...props
+}) => {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 64 64"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={`overflow-visible ${className}`}
+      {...props}
+    >
+      <defs>
+        <linearGradient id="wandGrad" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+          <stop stopColor={accentPurple} />
+          <stop offset="1" stopColor={accentGreen} />
+        </linearGradient>
+      </defs>
+      
+      {/* Static Wand Stick */}
+      <path d="M14 50L38 26" stroke="url(#wandGrad)" strokeWidth="4" strokeLinecap="round" />
+      <path d="M38 26L44 20" stroke="#f8fafc" strokeWidth="4" strokeLinecap="round" />
+      
+      {/* Pulsing Large Sparkle */}
+      <path
+        d="M48 8C48 13 53 18 58 18C53 18 48 23 48 28C48 23 43 18 38 18C43 18 48 13 48 8Z"
+        fill={accentGreen}
+        className="animate-pulse origin-[48px_18px]"
+      />
+      
+      {/* Bouncing/Pulsing Small Sparkle */}
+      <path
+        d="M22 12C22 14.5 24.5 17 27 17C24.5 17 22 19.5 22 22C22 19.5 19.5 17 17 17C19.5 17 22 14.5 22 12Z"
+        fill={accentPurple}
+        className="animate-bounce origin-[22px_17px]"
+      />
+    </svg>
+  );
+};
+
+
+
+
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  theme: {
+    extend: {
+      animation: {
+        'spin-slow': 'spin 8s linear infinite',
+        'pulse-fast': 'pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        'glow-pulse': 'glow 2s ease-in-out infinite',
+      },
+      keyframes: {
+        glow: {
+          '0%, 100%': { opacity: '0.4', transform: 'scale(1)' },
+          '50%': { opacity: '1', transform: 'scale(1.05)' },
+        },
+      },
+    },
+  },
+  plugins: [],
+};
+
+
+
+import { AiFaceGlowIcon, AiWandEnhanceIcon } from './components/icons/ai-beautification';
+
+export default function StatusDashboard() {
+  return (
+    <div className="flex gap-6 p-8 bg-slate-900 rounded-xl">
+      {/* Slow continuous rotation on hover */}
+      <AiFaceGlowIcon 
+        size={56} 
+        className="hover:animate-spin-slow cursor-pointer text-emerald-400" 
+      />
+
+      {/* Pulse and scale up on active processing */}
+      <AiWandEnhanceIcon 
+        size={56} 
+        className="animate-pulse hover:scale-110 transition-transform duration-200" 
+      />
+    </div>
+  );
+}
+
+
+
+import type { Meta, StoryObj } from '@storybook/react';
+import { AiFaceGlowIcon } from './AiFaceGlowIcon';
+
+const meta = {
+  title: 'Icons/AI Beautification/AiFaceGlowIcon',
+  component: AiFaceGlowIcon,
+  parameters: {
+    layout: 'centered',
+    backgrounds: {
+      default: 'dark',
+      values: [{ name: 'dark', value: '#0f172a' }],
+    },
+  },
+  tags: ['autodocs'],
+  argTypes: {
+    size: {
+      control: { type: 'range', min: 24, max: 256, step: 8 },
+      description: 'Icon dimensions in pixels',
+    },
+    glowColorStart: {
+      control: 'color',
+      description: 'Starting gradient color for face glow',
+    },
+    glowColorEnd: {
+      control: 'color',
+      description: 'Ending gradient color for face glow',
+    },
+    className: {
+      control: 'text',
+      description: 'Tailwind CSS classes for animations or custom styling',
+    },
+  },
+  args: {
+    size: 64,
+    glowColorStart: '#10b981',
+    glowColorEnd: '#06b6d4',
+  },
+} satisfies Meta<typeof AiFaceGlowIcon>;
+
+export default meta;
+type Story = StoryObj<typeof meta>;
+
+// Default Default State
+export const Default: Story = {};
+
+// Active Animated State with Tailwind Pulse
+export const ActivePulsing: Story = {
+  args: {
+    className: 'animate-pulse text-emerald-400',
+  },
+};
+
+// Larger Custom Gradient Variant
+export const CustomGlowGradient: Story = {
+  args: {
+    size: 96,
+    glowColorStart: '#ec4899',
+    glowColorEnd: '#8b5cf6',
+  },
+};
+
+
+
+import type { Meta, StoryObj } from '@storybook/react';
+import { AiMeshTrackingIcon } from './AiMeshTrackingIcon';
+
+const meta = {
+  title: 'Icons/AI Beautification/AiMeshTrackingIcon',
+  component: AiMeshTrackingIcon,
+  parameters: {
+    layout: 'centered',
+    backgrounds: {
+      default: 'dark',
+      values: [{ name: 'dark', value: '#0f172a' }],
+    },
+  },
+  tags: ['autodocs'],
+  argTypes: {
+    size: {
+      control: { type: 'range', min: 24, max: 256, step: 8 },
+    },
+    primaryColor: {
+      control: 'color',
+    },
+    secondaryColor: {
+      control: 'color',
+    },
+    className: {
+      control: 'text',
+    },
+  },
+  args: {
+    size: 64,
+    primaryColor: '#06b6d4',
+    secondaryColor: '#a855f7',
+  },
+} satisfies Meta<typeof AiMeshTrackingIcon>;
+
+export default meta;
+type Story = StoryObj<typeof meta>;
+
+export const Default: Story = {};
+
+// Active Tracking State with Gentle Scaling
+export const ActiveTracking: Story = {
+  args: {
+    className: 'animate-bounce',
+  },
+};
+
+// High-Contrast Cyberpunk Palette
+export const CyberpunkMode: Story = {
+  args: {
+    size: 96,
+    primaryColor: '#facc15',
+    secondaryColor: '#f43f5e',
+  },
+};
+
+
+
+import type { Meta, StoryObj } from '@storybook/react';
+import { AiWandEnhanceIcon } from './AiWandEnhanceIcon';
+
+const meta = {
+  title: 'Icons/AI Beautification/AiWandEnhanceIcon',
+  component: AiWandEnhanceIcon,
+  parameters: {
+    layout: 'centered',
+    backgrounds: {
+      default: 'dark',
+      values: [{ name: 'dark', value: '#0f172a' }],
+    },
+  },
+  tags: ['autodocs'],
+  argTypes: {
+    size: {
+      control: { type: 'range', min: 24, max: 256, step: 8 },
+    },
+    accentPurple: {
+      control: 'color',
+    },
+    accentGreen: {
+      control: 'color',
+    },
+    className: {
+      control: 'text',
+    },
+  },
+  args: {
+    size: 64,
+    accentPurple: '#a855f7',
+    accentGreen: '#10b981',
+  },
+} satisfies Meta<typeof AiWandEnhanceIcon>;
+
+export default meta;
+type Story = StoryObj<typeof meta>;
+
+export const Default: Story = {};
+
+// Interactive Hover Magic Effect
+export const HoverEffect: Story = {
+  args: {
+    className: 'transition-transform duration-300 hover:scale-125 cursor-pointer',
+  },
+};
+
+// Large Preview State
+export const LargeDisplay: Story = {
+  args: {
+    size: 128,
+  },
+};
+
+
+
+import type { Meta, StoryObj } from '@storybook/react';
+import { AiFaceGlowIcon } from './AiFaceGlowIcon';
+
+const meta = {
+  title: 'Icons/AI Beautification/AiFaceGlowIcon',
+  component: AiFaceGlowIcon,
+  parameters: {
+    layout: 'centered',
+    backgrounds: {
+      default: 'dark',
+      values: [{ name: 'dark', value: '#0f172a' }],
+    },
+  },
+  tags: ['autodocs'],
+  argTypes: {
+    size: {
+      control: { type: 'range', min: 24, max: 256, step: 8 },
+      description: 'Icon size in pixels',
+    },
+    glowColorStart: { control: 'color' },
+    glowColorEnd: { control: 'color' },
+    // Select dropdown to easily switch Tailwind utilities inside Storybook Controls
+    className: {
+      control: 'select',
+      options: [
+        'none',
+        'animate-pulse',
+        'animate-spin',
+        'hover:scale-125 transition-transform duration-300',
+        'drop-shadow-[0_0_12px_rgba(16,185,129,0.8)]',
+        'opacity-50 hover:opacity-100 transition-opacity',
+      ],
+      mapping: {
+        none: '',
+      },
+      description: 'Tailwind CSS utility classes for animation and effects',
+    },
+  },
+  args: {
+    size: 64,
+    glowColorStart: '#10b981',
+    glowColorEnd: '#06b6d4',
+    className: 'none',
+  },
+} satisfies Meta<typeof AiFaceGlowIcon>;
+
+export default meta;
+type Story = StoryObj<typeof meta>;
+
+export const Default: Story = {};
+
+export const TailwindPulsing: Story = {
+  args: {
+    className: 'animate-pulse',
+  },
+};
+
+export const TailwindGlowDropShadow: Story = {
+  args: {
+    className: 'drop-shadow-[0_0_16px_rgba(16,185,129,0.9)]',
+  },
+};
+
+export const TailwindHoverZoom: Story = {
+  args: {
+    className: 'hover:scale-125 transition-transform duration-300 cursor-pointer',
+  },
+};
+
+
+
+import type { Meta, StoryObj } from '@storybook/react';
+import { AiMeshTrackingIcon } from './AiMeshTrackingIcon';
+
+const meta = {
+  title: 'Icons/AI Beautification/AiMeshTrackingIcon',
+  component: AiMeshTrackingIcon,
+  parameters: {
+    layout: 'centered',
+    backgrounds: {
+      default: 'dark',
+      values: [{ name: 'dark', value: '#0f172a' }],
+    },
+  },
+  tags: ['autodocs'],
+  argTypes: {
+    size: {
+      control: { type: 'range', min: 24, max: 256, step: 8 },
+    },
+    primaryColor: { control: 'color' },
+    secondaryColor: { control: 'color' },
+    className: {
+      control: 'select',
+      options: [
+        'none',
+        'animate-bounce',
+        'animate-pulse',
+        'hover:rotate-12 transition-transform duration-300',
+        'drop-shadow-[0_0_10px_rgba(168,85,247,0.7)]',
+      ],
+      mapping: {
+        none: '',
+      },
+      description: 'Tailwind animation or transform preset',
+    },
+  },
+  args: {
+    size: 64,
+    primaryColor: '#06b6d4',
+    secondaryColor: '#a855f7',
+    className: 'none',
+  },
+} satisfies Meta<typeof AiMeshTrackingIcon>;
+
+export default meta;
+type Story = StoryObj<typeof meta>;
+
+export const Default: Story = {};
+
+export const TailwindActiveBouncing: Story = {
+  args: {
+    className: 'animate-bounce',
+  },
+};
+
+export const TailwindCyberpunkGlow: Story = {
+  args: {
+    primaryColor: '#facc15',
+    secondaryColor: '#f43f5e',
+    className: 'drop-shadow-[0_0_12px_rgba(244,63,94,0.8)]',
+  },
+};
+
+export const TailwindHoverRotate: Story = {
+  args: {
+    className: 'hover:rotate-12 transition-transform duration-300 cursor-pointer',
+  },
+};
+
+
+
+import type { Meta, StoryObj } from '@storybook/react';
+import { AiWandEnhanceIcon } from './AiWandEnhanceIcon';
+
+const meta = {
+  title: 'Icons/AI Beautification/AiWandEnhanceIcon',
+  component: AiWandEnhanceIcon,
+  parameters: {
+    layout: 'centered',
+    backgrounds: {
+      default: 'dark',
+      values: [{ name: 'dark', value: '#0f172a' }],
+    },
+  },
+  tags: ['autodocs'],
+  argTypes: {
+    size: {
+      control: { type: 'range', min: 24, max: 256, step: 8 },
+    },
+    accentPurple: { control: 'color' },
+    accentGreen: { control: 'color' },
+    className: {
+      control: 'select',
+      options: [
+        'none',
+        'animate-pulse',
+        'hover:scale-110 active:scale-95 transition-transform duration-150',
+        'drop-shadow-[0_0_15px_rgba(168,85,247,0.8)]',
+      ],
+      mapping: {
+        none: '',
+      },
+      description: 'Tailwind animation or interaction preset',
+    },
+  },
+  args: {
+    size: 64,
+    accentPurple: '#a855f7',
+    accentGreen: '#10b981',
+    className: 'none',
+  },
+} satisfies Meta<typeof AiWandEnhanceIcon>;
+
+export default meta;
+type Story = StoryObj<typeof meta>;
+
+export const Default: Story = {};
+
+export const TailwindInteractiveClickable: Story = {
+  args: {
+    className: 'hover:scale-110 active:scale-95 transition-transform duration-150 cursor-pointer',
+  },
+};
+
+export const TailwindMagicalNeonDropShadow: Story = {
+  args: {
+    size: 80,
+    className: 'drop-shadow-[0_0_15px_rgba(168,85,247,0.9)] animate-pulse',
+  },
+};
+
+
+
+npm install -D @storybook/test
+
+
+
+import type { Meta, StoryObj } from '@storybook/react';
+import { expect, userEvent, within } from '@storybook/test';
+import { AiFaceGlowIcon } from './AiFaceGlowIcon';
+
+const meta = {
+  title: 'Icons/AI Beautification/AiFaceGlowIcon',
+  component: AiFaceGlowIcon,
+  parameters: {
+    layout: 'centered',
+    backgrounds: {
+      default: 'dark',
+      values: [{ name: 'dark', value: '#0f172a' }],
+    },
+  },
+  tags: ['autodocs'],
+  args: {
+    size: 64,
+    glowColorStart: '#10b981',
+    glowColorEnd: '#06b6d4',
+  },
+} satisfies Meta<typeof AiFaceGlowIcon>;
+
+export default meta;
+type Story = StoryObj<typeof meta>;
+
+export const HoverAndFocusTest: Story = {
+  args: {
+    tabIndex: 0,
+    className: 'hover:scale-125 focus:ring-2 focus:ring-emerald-400 transition-all duration-200 outline-none',
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const icon = canvas.getByRole('img', { hidden: true }); // SVG element access
+
+    // 1. Initial State Assertions
+    await expect(icon).toBeInTheDocument();
+
+    // 2. Test Hover Interaction
+    await userEvent.hover(icon);
+    await expect(icon).toHaveClass('hover:scale-125');
+
+    // 3. Test Unhover Interaction
+    await userEvent.unhover(icon);
+
+    // 4. Test Keyboard Focus Interaction
+    await userEvent.tab();
+    await expect(icon).toHaveFocus();
+
+    // 5. Test Keyboard Blur Interaction
+    await userEvent.tab();
+    await expect(icon).not.toHaveFocus();
+  },
+};
+
+
+
+import type { Meta, StoryObj } from '@storybook/react';
+import { expect, userEvent, within } from '@storybook/test';
+import { AiMeshTrackingIcon } from './AiMeshTrackingIcon';
+
+const meta = {
+  title: 'Icons/AI Beautification/AiMeshTrackingIcon',
+  component: AiMeshTrackingIcon,
+  parameters: {
+    layout: 'centered',
+    backgrounds: {
+      default: 'dark',
+      values: [{ name: 'dark', value: '#0f172a' }],
+    },
+  },
+  tags: ['autodocs'],
+  args: {
+    size: 64,
+    primaryColor: '#06b6d4',
+    secondaryColor: '#a855f7',
+  },
+} satisfies Meta<typeof AiMeshTrackingIcon>;
+
+export default meta;
+type Story = StoryObj<typeof meta>;
+
+export const InteractionTest: Story = {
+  args: {
+    tabIndex: 0,
+    className: 'hover:rotate-12 focus:scale-110 transition-transform duration-200 outline-none',
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const icon = canvas.getByRole('img', { hidden: true });
+
+    // Hover check
+    await userEvent.hover(icon);
+    await expect(icon).toHaveClass('hover:rotate-12');
+
+    // Focus check
+    await userEvent.tab();
+    await expect(icon).toHaveFocus();
+  },
+};
+
+
+
+import type { Meta, StoryObj } from '@storybook/react';
+import { expect, userEvent, within } from '@storybook/test';
+import { AiWandEnhanceIcon } from './AiWandEnhanceIcon';
+
+const meta = {
+  title: 'Icons/AI Beautification/AiWandEnhanceIcon',
+  component: AiWandEnhanceIcon,
+  parameters: {
+    layout: 'centered',
+    backgrounds: {
+      default: 'dark',
+      values: [{ name: 'dark', value: '#0f172a' }],
+    },
+  },
+  tags: ['autodocs'],
+  args: {
+    size: 64,
+    accentPurple: '#a855f7',
+    accentGreen: '#10b981',
+  },
+} satisfies Meta<typeof AiWandEnhanceIcon>;
+
+export default meta;
+type Story = StoryObj<typeof meta>;
+
+export const InteractiveClickAndHover: Story = {
+  args: {
+    tabIndex: 0,
+    className: 'hover:scale-110 active:scale-95 transition-transform duration-150 cursor-pointer outline-none',
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const icon = canvas.getByRole('img', { hidden: true });
+
+    // Hover
+    await userEvent.hover(icon);
+    await expect(icon).toHaveClass('hover:scale-110');
+
+    // Click simulation
+    await userEvent.click(icon);
+    await expect(icon).toHaveFocus();
+  },
+};
+
+
+
+npm install -D chromatic
+
+
+
+{
+  "scripts": {
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build",
+    "chromatic": "chromatic --project-token=$CHROMATIC_PROJECT_TOKEN"
+  }
+}
+
+
+
+# Set your token as an environment variable and publish
+CHROMATIC_PROJECT_TOKEN=your_project_token_here npm run chromatic
+
+
+
+name: "Chromatic Visual Regression"
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  chromatic:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Required by Chromatic for git history tracking
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Publish to Chromatic
+        uses: chromaui/action@v1
+        with:
+          projectToken: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+
+
+
+import isChromatic from 'chromatic/isChromatic';
+
+export const parameters = {
+  // Pause CSS animations or set deterministic media features when Chromatic is capturing
+  chromatic: {
+    pauseAnimationAtEnd: true,
+    delay: 300, // Allow 300ms for initial renders/fonts to stabilize
+  },
+};
+
+
+
+export const TailwindPulsing: Story = {
+  args: {
+    className: 'animate-pulse',
+  },
+  parameters: {
+    chromatic: {
+      // Takes screenshot after 1 second to capture mid-pulse state predictably
+      delay: 1000, 
+    },
+  },
+};
+
+
+
+npm install -D chromatic
+
+
+
+{
+  "scripts": {
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build",
+    "chromatic": "chromatic --project-token=$CHROMATIC_PROJECT_TOKEN"
+  }
+}
+
+
+
+# Set your token as an environment variable and publish
+CHROMATIC_PROJECT_TOKEN=your_project_token_here npm run chromatic
+
+
+
+name: "Chromatic Visual Regression"
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  chromatic:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Required by Chromatic for git history tracking
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Publish to Chromatic
+        uses: chromaui/action@v1
+        with:
+          projectToken: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+
+
+import isChromatic from 'chromatic/isChromatic';
+
+export const parameters = {
+  // Pause CSS animations or set deterministic media features when Chromatic is capturing
+  chromatic: {
+    pauseAnimationAtEnd: true,
+    delay: 300, // Allow 300ms for initial renders/fonts to stabilize
+  },
+};
+
+
+
+export const TailwindPulsing: Story = {
+  args: {
+    className: 'animate-pulse',
+  },
+  parameters: {
+    chromatic: {
+      // Takes screenshot after 1 second to capture mid-pulse state predictably
+      delay: 1000, 
+    },
+  },
+};
+
+
+
+
+import React, { useRef } from 'react';
+import { Canvas, useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
+
+function ActiveAiFaceMesh() {
+  const meshRef = useRef<THREE.Mesh>(null!);
+
+  useFrame(({ clock }) => {
+    // Pulse and rotate the tracking wireframe mesh
+    const time = clock.getElapsedTime();
+    if (meshRef.current) {
+      meshRef.current.rotation.y = Math.sin(time * 0.5) * 0.15;
+      (meshRef.current.material as THREE.MeshBasicMaterial).opacity = 0.6 + Math.sin(time * 3) * 0.2;
+    }
+  });
+
+  return (
+    <mesh ref={meshRef}>
+      <sphereGeometry args={[1.5, 32, 32]} />
+      <meshBasicMaterial wireframe color="#06b6d4" transparent opacity={0.7} />
+    </mesh>
+  );
+}
+
+export default function AiBeautificationCanvas() {
+  return (
+    <div className="w-full h-96 bg-slate-900 rounded-xl overflow-hidden relative">
+      <Canvas camera={{ position: [0, 0, 3.5] }}>
+        <ambientLight intensity={0.5} />
+        <ActiveAiFaceMesh />
+      </Canvas>
+      <div className="absolute top-4 left-4 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-3 py-1 rounded-full text-xs font-mono">
+        AI BEAUTIFICATION ACTIVE
+      </div>
+    </div>
+  );
+}
+
+
+
+import React from 'react';
+
+// 1. AI Face Mesh Tracking Icon
+export const AiFaceMeshIcon = ({ size = 48, color = "#06b6d4" }: { size?: number; color?: string }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 2a9 9 0 0 0-9 9c0 4.97 4.03 9 9 9s9-4.03 9-9a9 9 0 0 0-9-9z" opacity="0.3"/>
+    <polygon points="12 6 8 10 12 14 16 10" />
+    <polygon points="8 10 5 14 12 18 19 14 16 10" />
+    <circle cx="12" cy="6" r="1" fill={color} />
+    <circle cx="8" cy="10" r="1" fill={color} />
+    <circle cx="16" cy="10" r="1" fill={color} />
+    <circle cx="12" cy="14" r="1" fill={color} />
+  </svg>
+);
+
+// 2. AI Beautification Face Glow Icon
+export const AiFaceBeautifyIcon = ({ size = 48, color = "#10b981" }: { size?: number; color?: string }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round">
+    <path d="M12 3a7 7 0 0 0-7 7c0 3.87 3.13 7 7 7s7-3.13 7-7a7 7 0 0 0-7-7z"/>
+    <path d="M9 10h.01M15 10h.01"/>
+    <path d="M10 14a2 2 0 0 0 4 0"/>
+    <path d="M12 1v2M12 21v2M1 12h2M21 12h2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42"/>
+  </svg>
+);
+
+// 3. AI Magic Wand Enhancement Icon
+export const AiMagicEnhanceIcon = ({ size = 48, color = "#a855f7" }: { size?: number; color?: string }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round">
+    <path d="M15 4l5 5L7 22H2v-5L15 4z"/>
+    <path d="M18 2l1 2 2 1-2 1-1 2-1-2-2-1 2-1 1-2z" fill={color}/>
+    <path d="M6 4l.5 1 1 .5-1 .5-.5 1-.5-1-1-.5 1-.5.5-1z" fill={color}/>
+  </svg>
+);
